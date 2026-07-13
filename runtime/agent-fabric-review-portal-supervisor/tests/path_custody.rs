@@ -10,13 +10,15 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use agent_fabric_review_portal_supervisor::{
-    CustodyEntryKind, CustodyError, FileIdentity, inspect_custody_entry, remove_custody_entry,
-    validate_cleanup_basename,
+    CustodyEntry, CustodyEntryKind, CustodyError, CustodyRemovalPhase, CustodyRemovalRequest,
+    FileIdentity, advance_custody_removal as native_advance_custody_removal,
+    derive_custody_claim_basename, inspect_custody_entry, validate_cleanup_basename,
 };
 
 const CRASH_HELPER_ENV: &str = "AGENT_FABRIC_CUSTODY_CRASH_HELPER";
 const CRASH_SOURCE_ENV: &str = "AGENT_FABRIC_CUSTODY_CRASH_SOURCE";
 const CRASH_CLAIM_ENV: &str = "AGENT_FABRIC_CUSTODY_CRASH_CLAIM";
+const CRASH_PHASE_ENV: &str = "AGENT_FABRIC_CUSTODY_CRASH_PHASE";
 
 fn private_directory() -> std::path::PathBuf {
     static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
@@ -36,6 +38,28 @@ fn identity_of(directory: &std::path::Path) -> FileIdentity {
     }
 }
 
+fn advance_custody_removal(
+    directory: &std::path::Path,
+    directory_identity: FileIdentity,
+    claim_directory: &std::path::Path,
+    claim_directory_identity: FileIdentity,
+    basename: &str,
+    expected: agent_fabric_review_portal_supervisor::CustodyEntry,
+    phase: CustodyRemovalPhase,
+) -> Result<CustodyRemovalPhase, CustodyError> {
+    let claim_basename = derive_custody_claim_basename(basename, expected)?;
+    native_advance_custody_removal(CustodyRemovalRequest {
+        canonical_directory: directory,
+        expected_canonical_directory: directory_identity,
+        claim_directory,
+        expected_claim_directory: claim_directory_identity,
+        canonical_basename: basename,
+        persisted_claim_basename: &claim_basename,
+        expected_entry: expected,
+        persisted_phase: phase,
+    })
+}
+
 fn remove_with_private_claim(
     directory: &std::path::Path,
     directory_identity: FileIdentity,
@@ -44,16 +68,354 @@ fn remove_with_private_claim(
 ) -> Result<(), agent_fabric_review_portal_supervisor::CustodyError> {
     let claim_directory = private_directory();
     let claim_directory_identity = identity_of(&claim_directory);
-    let result = remove_custody_entry(
-        directory,
+    let result = (|| {
+        let claimed = advance_custody_removal(
+            directory,
+            directory_identity,
+            &claim_directory,
+            claim_directory_identity,
+            basename,
+            expected,
+            CustodyRemovalPhase::Canonical,
+        )?;
+        if claimed != CustodyRemovalPhase::Claimed {
+            return Err(CustodyError::PhasePresenceMismatch);
+        }
+        let removed = advance_custody_removal(
+            directory,
+            directory_identity,
+            &claim_directory,
+            claim_directory_identity,
+            basename,
+            expected,
+            claimed,
+        )?;
+        if removed != CustodyRemovalPhase::Removed {
+            return Err(CustodyError::PhasePresenceMismatch);
+        }
+        Ok(())
+    })();
+    fs::remove_dir_all(&claim_directory).expect("claim cleanup");
+    result
+}
+
+#[test]
+fn canonical_absence_is_not_inferred_as_a_completed_removal() {
+    let directory = private_directory();
+    let directory_identity = identity_of(&directory);
+    let claim_directory = private_directory();
+    let claim_directory_identity = identity_of(&claim_directory);
+    let capsule = directory.join("capsule");
+    let escaped = directory.join("provider-retained");
+    fs::write(&capsule, b"expected").expect("expected capsule");
+    let expected = inspect_custody_entry(&directory, directory_identity, "capsule")
+        .expect("inspect expected capsule");
+    fs::rename(&capsule, &escaped).expect("provider rename outside the canonical name");
+
+    let removal = advance_custody_removal(
+        &directory,
         directory_identity,
         &claim_directory,
         claim_directory_identity,
-        basename,
+        "capsule",
         expected,
+        CustodyRemovalPhase::Canonical,
     );
+
+    assert!(matches!(removal, Err(CustodyError::PhasePresenceMismatch)));
+    assert_eq!(
+        fs::read(&escaped).expect("retained expected inode"),
+        b"expected"
+    );
+    fs::remove_dir_all(&directory).expect("source cleanup");
     fs::remove_dir_all(&claim_directory).expect("claim cleanup");
-    result
+}
+
+#[test]
+fn canonical_phase_rejects_an_expected_inode_retained_by_hardlink() {
+    let directory = private_directory();
+    let directory_identity = identity_of(&directory);
+    let claim_directory = private_directory();
+    let claim_directory_identity = identity_of(&claim_directory);
+    let capsule = directory.join("capsule");
+    let retained = directory.join("provider-retained");
+    fs::write(&capsule, b"expected").expect("expected capsule");
+    let expected = inspect_custody_entry(&directory, directory_identity, "capsule")
+        .expect("inspect expected capsule before provider alias");
+    fs::hard_link(&capsule, &retained).expect("provider retains exact inode by hardlink");
+
+    let removal = advance_custody_removal(
+        &directory,
+        directory_identity,
+        &claim_directory,
+        claim_directory_identity,
+        "capsule",
+        expected,
+        CustodyRemovalPhase::Canonical,
+    );
+
+    assert!(matches!(removal, Err(CustodyError::EntryLinkCountMismatch)));
+    assert!(retained.exists());
+
+    let claim_basename =
+        derive_custody_claim_basename("capsule", expected).expect("derive claim basename");
+    let claim_path = claim_directory.join(claim_basename);
+    fs::rename(&capsule, &claim_path).expect("simulate crash after raced inode reached claim");
+    assert!(matches!(
+        advance_custody_removal(
+            &directory,
+            directory_identity,
+            &claim_directory,
+            claim_directory_identity,
+            "capsule",
+            expected,
+            CustodyRemovalPhase::Canonical,
+        ),
+        Err(CustodyError::EntryLinkCountMismatch)
+    ));
+    assert!(retained.exists());
+    assert!(claim_path.exists());
+    fs::remove_dir_all(&directory).expect("source cleanup");
+    fs::remove_dir_all(&claim_directory).expect("claim cleanup");
+}
+
+#[test]
+fn persisted_claim_basename_must_match_the_exact_v1_derivation() {
+    let vector = CustodyEntry {
+        identity: FileIdentity {
+            device: 1,
+            inode: 2,
+        },
+        kind: CustodyEntryKind::RegularFile,
+        digest: [0; 32],
+        link_count: 1,
+    };
+    assert_eq!(
+        derive_custody_claim_basename("capsule", vector).expect("derive v1 claim basename"),
+        ".agent-fabric-claim-538fcdb90d6426d9ae7d751b8a377045afb8e0f1f2f53638d73bbd921ae41000"
+    );
+
+    let directory = private_directory();
+    let directory_identity = identity_of(&directory);
+    let claim_directory = private_directory();
+    let claim_directory_identity = identity_of(&claim_directory);
+    let capsule = directory.join("capsule");
+    fs::write(&capsule, b"expected").expect("expected capsule");
+    let expected = inspect_custody_entry(&directory, directory_identity, "capsule")
+        .expect("inspect expected capsule");
+    assert!(matches!(
+        native_advance_custody_removal(CustodyRemovalRequest {
+            canonical_directory: &directory,
+            expected_canonical_directory: directory_identity,
+            claim_directory: &claim_directory,
+            expected_claim_directory: claim_directory_identity,
+            canonical_basename: "capsule",
+            persisted_claim_basename: "wrong-persisted-claim",
+            expected_entry: expected,
+            persisted_phase: CustodyRemovalPhase::Canonical,
+        }),
+        Err(CustodyError::ClaimBasenameMismatch)
+    ));
+    assert!(capsule.exists());
+    assert_eq!(
+        fs::read_dir(&claim_directory)
+            .expect("unchanged claim directory")
+            .count(),
+        0
+    );
+    fs::remove_dir_all(&directory).expect("source cleanup");
+    fs::remove_dir_all(&claim_directory).expect("claim cleanup");
+}
+
+#[test]
+fn canonical_recovers_an_exact_claim_but_rejects_both_names_present() {
+    let directory = private_directory();
+    let directory_identity = identity_of(&directory);
+    let claim_directory = private_directory();
+    let claim_directory_identity = identity_of(&claim_directory);
+    let capsule = directory.join("capsule");
+    fs::write(&capsule, b"expected").expect("expected capsule");
+    let expected = inspect_custody_entry(&directory, directory_identity, "capsule")
+        .expect("inspect expected capsule");
+
+    let claimed = advance_custody_removal(
+        &directory,
+        directory_identity,
+        &claim_directory,
+        claim_directory_identity,
+        "capsule",
+        expected,
+        CustodyRemovalPhase::Canonical,
+    )
+    .expect("canonical to claimed");
+    assert_eq!(claimed, CustodyRemovalPhase::Claimed);
+    let claim_path = fs::read_dir(&claim_directory)
+        .expect("claim directory")
+        .next()
+        .expect("one claim")
+        .expect("claim entry")
+        .path();
+    assert_eq!(
+        advance_custody_removal(
+            &directory,
+            directory_identity,
+            &claim_directory,
+            claim_directory_identity,
+            "capsule",
+            expected,
+            CustodyRemovalPhase::Canonical,
+        )
+        .expect("canonical crash-after-rename recovery"),
+        CustodyRemovalPhase::Claimed
+    );
+
+    fs::hard_link(&claim_path, &capsule).expect("provider recreates canonical hard link");
+    assert!(matches!(
+        advance_custody_removal(
+            &directory,
+            directory_identity,
+            &claim_directory,
+            claim_directory_identity,
+            "capsule",
+            expected,
+            CustodyRemovalPhase::Claimed,
+        ),
+        Err(CustodyError::EntryLinkCountMismatch)
+    ));
+    assert!(capsule.exists());
+    assert!(claim_path.exists());
+    fs::remove_dir_all(&directory).expect("source cleanup");
+    fs::remove_dir_all(&claim_directory).expect("claim cleanup");
+}
+
+#[test]
+fn removed_and_integrity_failure_phases_are_terminal_and_non_mutating() {
+    let directory = private_directory();
+    let directory_identity = identity_of(&directory);
+    let claim_directory = private_directory();
+    let claim_directory_identity = identity_of(&claim_directory);
+    let capsule = directory.join("capsule");
+    fs::write(&capsule, b"expected").expect("expected capsule");
+    let expected = inspect_custody_entry(&directory, directory_identity, "capsule")
+        .expect("inspect expected capsule");
+
+    let claimed = advance_custody_removal(
+        &directory,
+        directory_identity,
+        &claim_directory,
+        claim_directory_identity,
+        "capsule",
+        expected,
+        CustodyRemovalPhase::Canonical,
+    )
+    .expect("canonical to claimed");
+    assert_eq!(claimed, CustodyRemovalPhase::Claimed);
+    assert_eq!(
+        advance_custody_removal(
+            &directory,
+            directory_identity,
+            &claim_directory,
+            claim_directory_identity,
+            "capsule",
+            expected,
+            claimed,
+        )
+        .expect("claimed to removed"),
+        CustodyRemovalPhase::Removed
+    );
+    assert_eq!(
+        advance_custody_removal(
+            &directory,
+            directory_identity,
+            &claim_directory,
+            claim_directory_identity,
+            "capsule",
+            expected,
+            CustodyRemovalPhase::Removed,
+        )
+        .expect("removed is idempotent while both names remain absent"),
+        CustodyRemovalPhase::Removed
+    );
+
+    fs::write(&capsule, b"replacement").expect("replacement after removed");
+    assert!(matches!(
+        advance_custody_removal(
+            &directory,
+            directory_identity,
+            &claim_directory,
+            claim_directory_identity,
+            "capsule",
+            expected,
+            CustodyRemovalPhase::Removed,
+        ),
+        Err(CustodyError::PhasePresenceMismatch)
+    ));
+    assert!(matches!(
+        advance_custody_removal(
+            &directory,
+            directory_identity,
+            &claim_directory,
+            claim_directory_identity,
+            "capsule",
+            expected,
+            CustodyRemovalPhase::IntegrityFailure,
+        ),
+        Err(CustodyError::PersistedIntegrityFailure)
+    ));
+    assert_eq!(
+        fs::read(&capsule).expect("preserved replacement"),
+        b"replacement"
+    );
+    fs::remove_dir_all(&directory).expect("source cleanup");
+    fs::remove_dir_all(&claim_directory).expect("claim cleanup");
+}
+
+#[test]
+fn only_a_persisted_claimed_phase_can_confirm_an_already_absent_claim() {
+    let directory = private_directory();
+    let directory_identity = identity_of(&directory);
+    let claim_directory = private_directory();
+    let claim_directory_identity = identity_of(&claim_directory);
+    fs::write(directory.join("capsule"), b"expected").expect("expected capsule");
+    let expected = inspect_custody_entry(&directory, directory_identity, "capsule")
+        .expect("inspect expected capsule");
+
+    assert_eq!(
+        advance_custody_removal(
+            &directory,
+            directory_identity,
+            &claim_directory,
+            claim_directory_identity,
+            "capsule",
+            expected,
+            CustodyRemovalPhase::Canonical,
+        )
+        .expect("claim entry"),
+        CustodyRemovalPhase::Claimed
+    );
+    let claim_path = fs::read_dir(&claim_directory)
+        .expect("claim directory")
+        .next()
+        .expect("one claim")
+        .expect("claim entry")
+        .path();
+    fs::remove_file(claim_path).expect("simulate unlink committed before phase persistence");
+
+    assert_eq!(
+        advance_custody_removal(
+            &directory,
+            directory_identity,
+            &claim_directory,
+            claim_directory_identity,
+            "capsule",
+            expected,
+            CustodyRemovalPhase::Claimed,
+        )
+        .expect("durable claimed state confirms removal"),
+        CustodyRemovalPhase::Removed
+    );
+    fs::remove_dir_all(&directory).expect("source cleanup");
+    fs::remove_dir_all(&claim_directory).expect("claim cleanup");
 }
 
 #[test]
@@ -162,14 +524,29 @@ fn never_unlinks_a_concurrently_swapped_in_entry() {
                 let _ = libc_test::swap_paths(&capsule, &swap);
             }
         });
-        let removal = remove_custody_entry(
+        let removal = advance_custody_removal(
             &directory,
             directory_identity,
             &claim_directory,
             claim_directory_identity,
             "capsule",
             expected,
-        );
+            CustodyRemovalPhase::Canonical,
+        )
+        .and_then(|phase| {
+            if phase != CustodyRemovalPhase::Claimed {
+                return Err(CustodyError::PhasePresenceMismatch);
+            }
+            advance_custody_removal(
+                &directory,
+                directory_identity,
+                &claim_directory,
+                claim_directory_identity,
+                "capsule",
+                expected,
+                phase,
+            )
+        });
         stop.store(true, Ordering::Release);
         swapper.join().expect("swapper completion");
 
@@ -187,7 +564,7 @@ fn never_unlinks_a_concurrently_swapped_in_entry() {
             attacker_survived,
             "cleanup deleted swapped-in attacker inode {attacker_inode}; removal={removal:?}"
         );
-        if removal.is_ok() {
+        if matches!(removal, Ok(CustodyRemovalPhase::Removed)) {
             successful_claims += 1;
             let remaining_inode = fs::metadata(directory.join("swap"))
                 .expect("one stable remaining entry")
@@ -290,13 +667,14 @@ fn rejects_the_raced_source_directory_as_its_own_claim_namespace() {
         .expect("inspect expected capsule");
 
     assert!(matches!(
-        remove_custody_entry(
+        advance_custody_removal(
             &directory,
             directory_identity,
             &directory,
             directory_identity,
             "capsule",
             expected,
+            CustodyRemovalPhase::Canonical,
         ),
         Err(CustodyError::ClaimDirectoryNotDistinct)
     ));
@@ -305,12 +683,54 @@ fn rejects_the_raced_source_directory_as_its_own_claim_namespace() {
 }
 
 #[test]
-fn retry_recovers_a_claim_left_by_process_crash_after_rename() {
+fn rejects_a_cross_device_claim_layout_before_any_path_mutation() {
     let directory = private_directory();
     let directory_identity = identity_of(&directory);
     let claim_directory = private_directory();
     let claim_directory_identity = identity_of(&claim_directory);
     let capsule = directory.join("capsule");
+    fs::write(&capsule, b"expected").expect("expected capsule");
+    let expected = inspect_custody_entry(&directory, directory_identity, "capsule")
+        .expect("inspect expected capsule");
+    let claim_basename =
+        derive_custody_claim_basename("capsule", expected).expect("derive claim basename");
+    let forged_cross_device_identity = FileIdentity {
+        device: claim_directory_identity.device ^ 1,
+        inode: claim_directory_identity.inode,
+    };
+
+    assert!(matches!(
+        native_advance_custody_removal(CustodyRemovalRequest {
+            canonical_directory: &directory,
+            expected_canonical_directory: directory_identity,
+            claim_directory: &claim_directory,
+            expected_claim_directory: forged_cross_device_identity,
+            canonical_basename: "capsule",
+            persisted_claim_basename: &claim_basename,
+            expected_entry: expected,
+            persisted_phase: CustodyRemovalPhase::Canonical,
+        }),
+        Err(CustodyError::ClaimDirectoryCrossDevice)
+    ));
+    assert!(capsule.exists());
+    assert_eq!(
+        fs::read_dir(&claim_directory)
+            .expect("unchanged claim directory")
+            .count(),
+        0
+    );
+    fs::remove_dir_all(&directory).expect("source cleanup");
+    fs::remove_dir_all(&claim_directory).expect("claim cleanup");
+}
+
+#[test]
+fn retry_uses_the_claimed_phase_persisted_before_process_crash() {
+    let directory = private_directory();
+    let directory_identity = identity_of(&directory);
+    let claim_directory = private_directory();
+    let claim_directory_identity = identity_of(&claim_directory);
+    let capsule = directory.join("capsule");
+    let phase_marker = directory.join("persisted-phase");
     fs::write(&capsule, vec![b'c'; 8 * 1024 * 1024]).expect("crash capsule");
     let expected = inspect_custody_entry(&directory, directory_identity, "capsule")
         .expect("inspect crash capsule");
@@ -322,20 +742,21 @@ fn retry_recovers_a_claim_left_by_process_crash_after_rename() {
         .env(CRASH_HELPER_ENV, "1")
         .env(CRASH_SOURCE_ENV, &directory)
         .env(CRASH_CLAIM_ENV, &claim_directory)
+        .env(CRASH_PHASE_ENV, &phase_marker)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .expect("spawn custody crash helper");
     let deadline = Instant::now() + Duration::from_secs(5);
-    while capsule.exists() {
+    while !phase_marker.exists() {
         assert!(
             Instant::now() < deadline,
-            "helper never entered the claimed state"
+            "helper never persisted the claimed phase"
         );
         assert!(
             helper.try_wait().expect("helper status").is_none(),
-            "helper exited before the claimed-state crash point"
+            "helper exited before the persisted-claimed crash point"
         );
         thread::sleep(Duration::from_millis(1));
     }
@@ -347,32 +768,44 @@ fn retry_recovers_a_claim_left_by_process_crash_after_rename() {
         .find_map(|entry| entry.metadata().ok().map(|metadata| metadata.ino()));
     assert_eq!(claimed_inode, Some(expected.identity.inode));
 
-    let retry = remove_custody_entry(
+    assert_eq!(
+        fs::read(&phase_marker).expect("persisted phase marker"),
+        b"claimed"
+    );
+    let retry = advance_custody_removal(
         &directory,
         directory_identity,
         &claim_directory,
         claim_directory_identity,
         "capsule",
         expected,
+        CustodyRemovalPhase::Claimed,
     );
     let retry_removed = !capsule.exists()
         && fs::read_dir(&claim_directory)
             .expect("claim state after retry")
             .next()
             .is_none();
-    let removed_retry = remove_custody_entry(
+    let removed_retry = advance_custody_removal(
         &directory,
         directory_identity,
         &claim_directory,
         claim_directory_identity,
         "capsule",
         expected,
+        CustodyRemovalPhase::Removed,
     );
     fs::remove_dir_all(&directory).expect("source cleanup");
     fs::remove_dir_all(&claim_directory).expect("claim cleanup");
-    retry.expect("retry completes a crash-left claim");
+    assert_eq!(
+        retry.expect("retry completes a durably claimed entry"),
+        CustodyRemovalPhase::Removed
+    );
     assert!(retry_removed, "retry did not reach the removed state");
-    removed_retry.expect("removed-state retry is idempotent");
+    assert_eq!(
+        removed_retry.expect("removed-state retry is idempotent"),
+        CustodyRemovalPhase::Removed
+    );
 }
 
 #[test]
@@ -386,29 +819,28 @@ fn retry_recovers_a_claim_left_by_unlink_failure() {
     let expected = inspect_custody_entry(&directory, directory_identity, "capsule")
         .expect("inspect unlink capsule");
 
-    let fault_capsule = capsule.clone();
-    let fault_claim_directory = claim_directory.clone();
-    let fault = thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while fault_capsule.exists() {
-            assert!(
-                Instant::now() < deadline,
-                "cleanup never entered the claimed state"
-            );
-            thread::sleep(Duration::from_millis(1));
-        }
-        fs::set_permissions(&fault_claim_directory, fs::Permissions::from_mode(0o500))
-            .expect("deny claim unlink");
-    });
-    let first = remove_custody_entry(
+    let claimed = advance_custody_removal(
         &directory,
         directory_identity,
         &claim_directory,
         claim_directory_identity,
         "capsule",
         expected,
+        CustodyRemovalPhase::Canonical,
+    )
+    .expect("claim before durable phase persistence");
+    assert_eq!(claimed, CustodyRemovalPhase::Claimed);
+    fs::set_permissions(&claim_directory, fs::Permissions::from_mode(0o500))
+        .expect("deny claim unlink");
+    let first = advance_custody_removal(
+        &directory,
+        directory_identity,
+        &claim_directory,
+        claim_directory_identity,
+        "capsule",
+        expected,
+        claimed,
     );
-    fault.join().expect("unlink fault completion");
     fs::set_permissions(&claim_directory, fs::Permissions::from_mode(0o700))
         .expect("restore claim permissions");
     assert!(
@@ -427,32 +859,40 @@ fn retry_recovers_a_claim_left_by_unlink_failure() {
         "failed unlink did not preserve one retryable claim"
     );
 
-    let retry = remove_custody_entry(
+    let retry = advance_custody_removal(
         &directory,
         directory_identity,
         &claim_directory,
         claim_directory_identity,
         "capsule",
         expected,
+        CustodyRemovalPhase::Claimed,
     );
     let retry_removed = !capsule.exists()
         && fs::read_dir(&claim_directory)
             .expect("claim state after retry")
             .next()
             .is_none();
-    let removed_retry = remove_custody_entry(
+    let removed_retry = advance_custody_removal(
         &directory,
         directory_identity,
         &claim_directory,
         claim_directory_identity,
         "capsule",
         expected,
+        CustodyRemovalPhase::Removed,
     );
     fs::remove_dir_all(&directory).expect("source cleanup");
     fs::remove_dir_all(&claim_directory).expect("claim cleanup");
-    retry.expect("retry completes an unlink-failed claim");
+    assert_eq!(
+        retry.expect("retry completes an unlink-failed claim"),
+        CustodyRemovalPhase::Removed
+    );
     assert!(retry_removed, "retry did not reach the removed state");
-    removed_retry.expect("removed-state retry is idempotent");
+    assert_eq!(
+        removed_retry.expect("removed-state retry is idempotent"),
+        CustodyRemovalPhase::Removed
+    );
 }
 
 #[test]
@@ -464,18 +904,27 @@ fn custody_crash_after_claim_helper() {
         std::path::PathBuf::from(std::env::var_os(CRASH_SOURCE_ENV).expect("crash helper source"));
     let claim_directory =
         std::path::PathBuf::from(std::env::var_os(CRASH_CLAIM_ENV).expect("crash helper claim"));
+    let phase_marker =
+        std::path::PathBuf::from(std::env::var_os(CRASH_PHASE_ENV).expect("crash helper phase"));
     let directory_identity = identity_of(&directory);
     let claim_directory_identity = identity_of(&claim_directory);
     let expected = inspect_custody_entry(&directory, directory_identity, "capsule")
         .expect("inspect helper capsule");
-    let _ = remove_custody_entry(
+    let phase = advance_custody_removal(
         &directory,
         directory_identity,
         &claim_directory,
         claim_directory_identity,
         "capsule",
         expected,
-    );
+        CustodyRemovalPhase::Canonical,
+    )
+    .expect("helper claim transition");
+    assert_eq!(phase, CustodyRemovalPhase::Claimed);
+    fs::write(phase_marker, b"claimed").expect("persist claimed phase marker");
+    loop {
+        thread::park();
+    }
 }
 
 #[test]

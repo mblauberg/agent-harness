@@ -20,6 +20,7 @@ pub const MAX_LF_FRAME_BYTES: usize = 98_304;
 pub const CONTROL_FD: std::os::raw::c_int = 3;
 pub const TERMINATION_GRACE: Duration = Duration::from_millis(250);
 pub const REAP_DEADLINE: Duration = Duration::from_millis(250);
+pub const CUSTODY_CLAIM_NAME_CODEC: &str = "agent-fabric-custody-claim-v1";
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PortalConfig {
@@ -100,14 +101,27 @@ pub struct CustodyEntry {
     pub identity: FileIdentity,
     pub kind: CustodyEntryKind,
     pub digest: [u8; 32],
+    pub link_count: u64,
 }
 
-#[cfg(unix)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum CustodyRemovalState {
+pub enum CustodyRemovalPhase {
     Canonical,
     Claimed,
     Removed,
+    IntegrityFailure,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct CustodyRemovalRequest<'path> {
+    pub canonical_directory: &'path Path,
+    pub expected_canonical_directory: FileIdentity,
+    pub claim_directory: &'path Path,
+    pub expected_claim_directory: FileIdentity,
+    pub canonical_basename: &'path str,
+    pub persisted_claim_basename: &'path str,
+    pub expected_entry: CustodyEntry,
+    pub persisted_phase: CustodyRemovalPhase,
 }
 
 #[derive(Debug)]
@@ -116,8 +130,13 @@ pub enum CustodyError {
     DirectoryIdentityMismatch,
     DirectoryNotPrivate,
     ClaimDirectoryNotDistinct,
+    ClaimDirectoryCrossDevice,
+    ClaimBasenameMismatch,
+    PhasePresenceMismatch,
+    PersistedIntegrityFailure,
     EntryIdentityMismatch,
     EntryDigestMismatch,
+    EntryLinkCountMismatch,
     EntryTypeForbidden,
     Io(io::Error),
 }
@@ -222,8 +241,21 @@ impl fmt::Display for CustodyError {
             Self::ClaimDirectoryNotDistinct => {
                 formatter.write_str("custody claim directory is not a distinct trusted namespace")
             }
+            Self::ClaimDirectoryCrossDevice => formatter
+                .write_str("custody source and claim directories are on different filesystems"),
+            Self::ClaimBasenameMismatch => {
+                formatter.write_str("persisted custody claim basename does not match v1 derivation")
+            }
+            Self::PhasePresenceMismatch => formatter
+                .write_str("persisted custody phase does not match canonical/claim presence"),
+            Self::PersistedIntegrityFailure => {
+                formatter.write_str("custody removal is terminally integrity-failed")
+            }
             Self::EntryIdentityMismatch => formatter.write_str("custody entry identity changed"),
             Self::EntryDigestMismatch => formatter.write_str("custody entry digest changed"),
+            Self::EntryLinkCountMismatch => {
+                formatter.write_str("custody entry is not a singleton hard link")
+            }
             Self::EntryTypeForbidden => formatter.write_str("custody entry type is not removable"),
             Self::Io(error) => write!(formatter, "custody path inspection failed: {error}"),
         }
@@ -417,7 +449,8 @@ pub fn validate_cleanup_basename(name: &str) -> Result<(), CustodyError> {
 ///
 /// # Errors
 ///
-/// Returns [`CustodyError`] when the directory or entry identity, mode, owner, or type is unsafe.
+/// Returns [`CustodyError`] when the directory or entry identity, mode, owner, singleton link count,
+/// or type is unsafe.
 pub fn inspect_custody_entry(
     directory: &Path,
     expected_directory: FileIdentity,
@@ -429,33 +462,65 @@ pub fn inspect_custody_entry(
 }
 
 #[cfg(unix)]
-/// Idempotently moves one exact custody entry through a separately trusted claim directory and
-/// removes it only after revalidation there.
-///
-/// The caller must persist the claim-directory path and identity for crash recovery and keep that
-/// namespace outside the authority of every process able to mutate the canonical directory. The
-/// function rejects reuse of the canonical directory as the claim namespace.
+/// Derives the persisted v1 claim basename for one exact canonical entry.
 ///
 /// # Errors
 ///
-/// Returns [`CustodyError`] when any custody check fails or removal cannot complete.
-pub fn remove_custody_entry(
-    directory: &Path,
-    expected_directory: FileIdentity,
-    claim_directory: &Path,
-    expected_claim_directory: FileIdentity,
+/// Returns [`CustodyError::InvalidBasename`] when the canonical name is not one relative basename.
+pub fn derive_custody_claim_basename(
     basename: &str,
     expected_entry: CustodyEntry,
-) -> Result<(), CustodyError> {
+) -> Result<String, CustodyError> {
+    validate_cleanup_basename(basename)?;
+    let basename = custody_basename_c_string(basename)?;
+    custody_claim_basename(&basename, expected_entry)
+        .into_string()
+        .map_err(|_| CustodyError::InvalidBasename)
+}
+
+#[cfg(unix)]
+/// Advances one exact custody entry by at most one durable removal phase.
+///
+/// The caller must persist the claim-directory path and identity for crash recovery and keep that
+/// namespace outside the authority of every process able to mutate the canonical directory. It
+/// must also persist the exact v1 claim basename and each returned phase before calling again.
+/// `Canonical` atomically claims (or recovers an exact claim), fsyncs both directories and returns
+/// `Claimed`; `Claimed` removes (or confirms a completed removal), fsyncs the claim directory and
+/// returns `Removed`. `Removed` is idempotent only while both names remain absent. A
+/// presence/phase mismatch is an integrity failure, not inferred progress, and `IntegrityFailure`
+/// is terminal. The expected and every observed entry must have link count one, preventing a
+/// provider-retained hard-link alias from being misreported as removed.
+///
+/// # Errors
+///
+/// Returns [`CustodyError`] when any custody check fails, the persisted phase disagrees with path
+/// presence, the directories cannot support one atomic rename, or the requested transition cannot
+/// complete. After a phase/presence or post-claim verification failure, the caller must durably
+/// record `IntegrityFailure` rather than infer a later phase.
+pub fn advance_custody_removal(
+    request: CustodyRemovalRequest<'_>,
+) -> Result<CustodyRemovalPhase, CustodyError> {
     use std::os::fd::AsRawFd;
 
+    let CustodyRemovalRequest {
+        canonical_directory: directory,
+        expected_canonical_directory: expected_directory,
+        claim_directory,
+        expected_claim_directory,
+        canonical_basename: basename,
+        persisted_claim_basename,
+        expected_entry,
+        persisted_phase,
+    } = request;
     validate_cleanup_basename(basename)?;
-    let directory = open_private_custody_directory(directory, expected_directory)?;
-    let claim_directory =
-        open_private_custody_directory(claim_directory, expected_claim_directory)?;
+    validate_cleanup_basename(persisted_claim_basename)?;
     if expected_directory == expected_claim_directory {
         return Err(CustodyError::ClaimDirectoryNotDistinct);
     }
+    require_same_custody_filesystem(expected_directory, expected_claim_directory)?;
+    let directory = open_private_custody_directory(directory, expected_directory)?;
+    let claim_directory =
+        open_private_custody_directory(claim_directory, expected_claim_directory)?;
     let basename_c = custody_basename_c_string(basename)?;
     let claim_basename = custody_claim_basename(&basename_c, expected_entry);
     let basename = basename_c
@@ -464,57 +529,115 @@ pub fn remove_custody_entry(
     let claim_name = claim_basename
         .to_str()
         .map_err(|_| CustodyError::InvalidBasename)?;
-
-    match custody_removal_state(
-        &directory,
-        basename,
-        &claim_directory,
-        claim_name,
-        expected_entry,
-    )? {
-        CustodyRemovalState::Canonical => {
-            // The raced source namespace chooses which inode reaches this atomic transition.
-            // Validate again only after the entry reaches the separately trusted namespace.
-            unsafe_sys::rename_entry_no_replace_at(
-                directory.as_raw_fd(),
-                &basename_c,
-                claim_directory.as_raw_fd(),
-                &claim_basename,
-            )?;
-            let claimed_entry = inspect_custody_entry_at(&claim_directory, claim_name)?;
-            require_expected_custody_entry(claimed_entry, expected_entry)?;
-        }
-        CustodyRemovalState::Claimed => {}
-        CustodyRemovalState::Removed => return Ok(()),
+    if persisted_claim_basename != claim_name || persisted_claim_basename == basename {
+        return Err(CustodyError::ClaimBasenameMismatch);
     }
-    unsafe_sys::unlink_entry_at(claim_directory.as_raw_fd(), &claim_basename)?;
-    Ok(())
+
+    if persisted_phase == CustodyRemovalPhase::IntegrityFailure {
+        return Err(CustodyError::PersistedIntegrityFailure);
+    }
+
+    let presence = custody_removal_presence(&directory, basename, &claim_directory, claim_name)?;
+    match persisted_phase {
+        CustodyRemovalPhase::Canonical => {
+            match (presence.canonical, presence.claimed) {
+                (Some(canonical), None) => {
+                    require_expected_custody_entry(canonical, expected_entry)?;
+                    // The raced source namespace chooses which inode reaches this atomic
+                    // transition. Validate again only after it reaches the trusted namespace.
+                    unsafe_sys::rename_entry_no_replace_at(
+                        directory.as_raw_fd(),
+                        &basename_c,
+                        claim_directory.as_raw_fd(),
+                        &claim_basename,
+                    )?;
+                }
+                (None, Some(claimed_entry)) => {
+                    require_expected_custody_entry(claimed_entry, expected_entry)?;
+                }
+                _ => return Err(CustodyError::PhasePresenceMismatch),
+            }
+            let claimed_presence =
+                custody_removal_presence(&directory, basename, &claim_directory, claim_name)?;
+            let (None, Some(claimed_entry)) =
+                (claimed_presence.canonical, claimed_presence.claimed)
+            else {
+                return Err(CustodyError::PhasePresenceMismatch);
+            };
+            require_expected_custody_entry(claimed_entry, expected_entry)?;
+            directory.sync_all()?;
+            claim_directory.sync_all()?;
+            Ok(CustodyRemovalPhase::Claimed)
+        }
+        CustodyRemovalPhase::Claimed => match (presence.canonical, presence.claimed) {
+            (None, Some(claimed_entry)) => {
+                require_expected_custody_entry(claimed_entry, expected_entry)?;
+                unsafe_sys::unlink_entry_at(claim_directory.as_raw_fd(), &claim_basename)?;
+                let removed_presence =
+                    custody_removal_presence(&directory, basename, &claim_directory, claim_name)?;
+                if removed_presence.canonical.is_some() || removed_presence.claimed.is_some() {
+                    return Err(CustodyError::PhasePresenceMismatch);
+                }
+                claim_directory.sync_all()?;
+                Ok(CustodyRemovalPhase::Removed)
+            }
+            (None, None) => {
+                claim_directory.sync_all()?;
+                Ok(CustodyRemovalPhase::Removed)
+            }
+            _ => Err(CustodyError::PhasePresenceMismatch),
+        },
+        CustodyRemovalPhase::Removed => {
+            if presence.canonical.is_some() || presence.claimed.is_some() {
+                return Err(CustodyError::PhasePresenceMismatch);
+            }
+            Ok(CustodyRemovalPhase::Removed)
+        }
+        CustodyRemovalPhase::IntegrityFailure => unreachable!("handled before path inspection"),
+    }
 }
 
 #[cfg(unix)]
-fn custody_removal_state(
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct CustodyRemovalPresence {
+    canonical: Option<CustodyEntry>,
+    claimed: Option<CustodyEntry>,
+}
+
+#[cfg(unix)]
+fn custody_removal_presence(
     directory: &std::fs::File,
     basename: &str,
     claim_directory: &std::fs::File,
     claim_name: &str,
-    expected_entry: CustodyEntry,
-) -> Result<CustodyRemovalState, CustodyError> {
-    match inspect_custody_entry_at(claim_directory, claim_name) {
-        Ok(entry) => {
-            require_expected_custody_entry(entry, expected_entry)?;
-            return Ok(CustodyRemovalState::Claimed);
-        }
-        Err(error) if custody_entry_is_absent(&error) => {}
-        Err(error) => return Err(error),
-    }
+) -> Result<CustodyRemovalPresence, CustodyError> {
+    Ok(CustodyRemovalPresence {
+        canonical: inspect_optional_custody_entry(directory, basename)?,
+        claimed: inspect_optional_custody_entry(claim_directory, claim_name)?,
+    })
+}
+
+#[cfg(unix)]
+fn inspect_optional_custody_entry(
+    directory: &std::fs::File,
+    basename: &str,
+) -> Result<Option<CustodyEntry>, CustodyError> {
     match inspect_custody_entry_at(directory, basename) {
-        Ok(entry) => {
-            require_expected_custody_entry(entry, expected_entry)?;
-            Ok(CustodyRemovalState::Canonical)
-        }
-        Err(error) if custody_entry_is_absent(&error) => Ok(CustodyRemovalState::Removed),
+        Ok(entry) => Ok(Some(entry)),
+        Err(error) if custody_entry_is_absent(&error) => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+#[cfg(unix)]
+fn require_same_custody_filesystem(
+    directory: FileIdentity,
+    claim_directory: FileIdentity,
+) -> Result<(), CustodyError> {
+    if directory.device != claim_directory.device {
+        return Err(CustodyError::ClaimDirectoryCrossDevice);
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -533,6 +656,12 @@ fn require_expected_custody_entry(
     if actual.digest != expected.digest {
         return Err(CustodyError::EntryDigestMismatch);
     }
+    if actual.link_count != 1
+        || expected.link_count != 1
+        || actual.link_count != expected.link_count
+    {
+        return Err(CustodyError::EntryLinkCountMismatch);
+    }
     Ok(())
 }
 
@@ -544,7 +673,8 @@ fn custody_claim_basename(
     use std::fmt::Write as _;
 
     let mut claim_material = Vec::with_capacity(128);
-    claim_material.extend_from_slice(b"agent-fabric-custody-claim-v1\0");
+    claim_material.extend_from_slice(CUSTODY_CLAIM_NAME_CODEC.as_bytes());
+    claim_material.push(0);
     claim_material.extend_from_slice(basename.to_bytes());
     claim_material.extend_from_slice(&expected_entry.identity.device.to_be_bytes());
     claim_material.extend_from_slice(&expected_entry.identity.inode.to_be_bytes());
@@ -616,6 +746,9 @@ fn inspect_custody_entry_at(
     if status.user_id != unsafe_sys::effective_user_id() {
         return Err(CustodyError::DirectoryNotPrivate);
     }
+    if status.hard_links != 1 {
+        return Err(CustodyError::EntryLinkCountMismatch);
+    }
     let digest = match kind {
         CustodyEntryKind::Socket => socket_identity_digest(identity),
         CustodyEntryKind::RegularFile => {
@@ -626,6 +759,7 @@ fn inspect_custody_entry_at(
                 inode: metadata.ino(),
             }) != identity
                 || metadata.mode() & unsafe_sys::FILE_TYPE_MASK != unsafe_sys::REGULAR_FILE_TYPE
+                || metadata.nlink() != status.hard_links
             {
                 return Err(CustodyError::EntryIdentityMismatch);
             }
@@ -638,6 +772,7 @@ fn inspect_custody_entry_at(
                 || final_metadata.len() != metadata.len()
                 || final_metadata.mtime() != metadata.mtime()
                 || final_metadata.mtime_nsec() != metadata.mtime_nsec()
+                || final_metadata.nlink() != metadata.nlink()
             {
                 return Err(CustodyError::EntryIdentityMismatch);
             }
@@ -648,6 +783,7 @@ fn inspect_custody_entry_at(
         identity,
         kind,
         digest,
+        link_count: status.hard_links,
     })
 }
 
@@ -1719,6 +1855,7 @@ mod unsafe_sys {
         pub inode: u64,
         pub mode: u32,
         pub user_id: u32,
+        pub hard_links: u64,
     }
 
     unsafe extern "C" {
@@ -1820,6 +1957,7 @@ mod unsafe_sys {
             inode: status.inode,
             mode: u32::from(status.mode),
             user_id: status.user_id,
+            hard_links: u64::from(status.hard_links),
         })
     }
 
@@ -2322,6 +2460,78 @@ mod tests {
                 0xf2, 0x00, 0x15, 0xad,
             ]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custody_domains_and_both_claim_names_match_the_golden_vectors() {
+        let identity = FileIdentity {
+            device: 1,
+            inode: 2,
+        };
+        let socket_digest = socket_identity_digest(identity);
+        assert_eq!(
+            socket_digest,
+            [
+                0xce, 0xdc, 0x25, 0xa7, 0xce, 0xdc, 0xa4, 0xf4, 0x57, 0xde, 0xda, 0x03, 0x49, 0xcc,
+                0x04, 0x95, 0x01, 0x48, 0xdc, 0x6b, 0x7c, 0xa4, 0x2d, 0x05, 0x19, 0xbc, 0x42, 0xcb,
+                0x34, 0x47, 0x45, 0x39,
+            ]
+        );
+        assert_eq!(
+            derive_custody_claim_basename(
+                "portal.sock",
+                CustodyEntry {
+                    identity,
+                    kind: CustodyEntryKind::Socket,
+                    digest: socket_digest,
+                    link_count: 1,
+                },
+            )
+            .expect("socket claim vector"),
+            ".agent-fabric-claim-b5f0a24d6c67d3056a7bf3a515db57e7b02d3ecaf6e780073b004adba747cee6"
+        );
+
+        let capsule_digest = sha256_bytes(b"opaque capsule");
+        assert_eq!(
+            capsule_digest,
+            [
+                0x51, 0xd2, 0x99, 0xe9, 0x1b, 0x2c, 0x47, 0x83, 0x22, 0xac, 0x37, 0x7d, 0x05, 0xf3,
+                0xb4, 0x66, 0xeb, 0x62, 0xee, 0xd9, 0xe5, 0xa1, 0x96, 0x6d, 0x2d, 0x25, 0xc2, 0xd9,
+                0x9a, 0xad, 0x22, 0xc7,
+            ]
+        );
+        assert_eq!(
+            derive_custody_claim_basename(
+                "capsule",
+                CustodyEntry {
+                    identity,
+                    kind: CustodyEntryKind::RegularFile,
+                    digest: capsule_digest,
+                    link_count: 1,
+                },
+            )
+            .expect("capsule claim vector"),
+            ".agent-fabric-claim-33c9ccda17436d2eeff16182e2f8c84508d0db6a100deb0fc8d1260f72a867e5"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custody_claim_preflight_rejects_a_cross_device_transition() {
+        assert!(matches!(
+            require_same_custody_filesystem(
+                FileIdentity {
+                    device: 41,
+                    inode: 1,
+                },
+                FileIdentity {
+                    device: 42,
+                    inode: 2,
+                },
+            ),
+            Err(CustodyError::ClaimDirectoryCrossDevice)
+        ));
     }
 
     #[cfg(unix)]
