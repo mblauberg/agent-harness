@@ -57,7 +57,7 @@ bootstrap="Read and follow \`$ROOT/AGENTS.md\` and \`$ROOT/HARNESS.md\` before m
 
 if [[ ! -e "$instructions" && ! -L "$instructions" ]]; then
   {
-    echo "# Agent harness"
+    echo "# Provenant"
     echo
     echo "$bootstrap"
   } > "$instructions"

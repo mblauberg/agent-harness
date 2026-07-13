@@ -152,25 +152,30 @@ def test_retired_change_identity_is_absent_and_readme_diagram_has_human_gates():
     assert not (ROOT / "skills" / "change").exists()
     readme = (ROOT / "README.md").read_text()
     assert "$change" not in readme
-    assert "deliver · profile and typed RUN.json" in readme
+    # `deliver` is the kernel the whole lifecycle hangs off. Anchor on the claim,
+    # not on a node label: labels are editorial, the one-run-one-receipt contract
+    # is not.
+    assert "the kernel binding one run to one receipt" in readme
+    assert "[`deliver`](skills/deliver/SKILL.md)" in readme
     lifecycle = readme.split("## Lifecycle", 1)[1].split("## Core workflows", 1)[0]
     diagrams = re.findall(r"```mermaid\n(.*?)\n```", lifecycle, re.DOTALL)
     semantics = "\n".join(diagrams)
     assert len(diagrams) == 1
     assert all("accTitle:" in diagram and "accDescr:" in diagram for diagram in diagrams)
-    assert semantics.count("HUMAN ·") == 3
-    for stage in (
-        "session",
-        "scope",
-        "implement",
-        "deliver",
-        "verify",
-        "review",
-        "release",
-        "observe",
-        "retrospect",
-    ):
-        assert stage in semantics
+    # Mermaid quotes every drawn label (nodes and edges) and leaves accTitle and
+    # accDescr unquoted, so this is what a sighted reader actually sees.
+    drawn = "\n".join(re.findall(r'"([^"]*)"', semantics))
+    assert drawn.count("HUMAN ·") == 3
+    for stage in ("scope", "implement", "verify", "review", "release", "observe", "retrospect"):
+        assert stage in drawn, f"{stage} is not drawn in the lifecycle diagram"
+    # A blocking finding must visibly return the work to implement, otherwise the
+    # diagram shows review as advisory.
+    assert "blocking finding" in drawn
+    # `session` and `deliver` frame the loop without being stages in it, so they
+    # are owed to a screen reader rather than drawn as nodes.
+    description = re.search(r"accDescr:\s*(.+)", semantics).group(1)
+    for framing in ("session", "deliver"):
+        assert framing in description
 
 
 @pytest.mark.skipif(shutil.which("mmdc") is None, reason="optional local Mermaid CLI is absent")
@@ -215,6 +220,69 @@ def test_readme_catalogue_contains_every_portable_skill():
     assert listed == skills
     for name in skills:
         assert f"(skills/{name}/SKILL.md)" in catalogue
+
+
+def _catalogue_check(readme_text: str, tmp_path: Path) -> int:
+    """Run the real gate over a README, and return its exit status."""
+    readme = tmp_path / "README.md"
+    readme.write_text(readme_text)
+    return subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "render_skill_catalogue.py"), "--check", "--readme", str(readme)],
+        capture_output=True,
+        text=True,
+    ).returncode
+
+
+def test_readme_headline_skill_count_matches_the_skills_on_disk(tmp_path):
+    # Regression gate. The README claimed 34 skills while 33 shipped: the catalogue
+    # table was guarded, the headline integer was not.
+    assert _catalogue_check((ROOT / "README.md").read_text(), tmp_path) == 0
+
+
+@pytest.mark.parametrize(
+    ("name", "mutate"),
+    (
+        # The historical defect, verbatim: an unmanaged count beside the noun.
+        ("the original 34-vs-33 wording", lambda text: text.replace("<!--skills-->33<!--/skills--> Agent Skills", "34 reusable Agent Skills")),
+        ("a plain miscount", lambda text: text.replace("<!--skills-->33<!--/skills--> Agent Skills", "32 Agent Skills")),
+        # Whitespace must not smuggle a stale figure past the audit. Both of these render
+        # in Markdown as the same false headline as the case above.
+        ("a double space before the noun", lambda text: text.replace("<!--skills-->33<!--/skills--> Agent Skills", "34  Agent Skills")),
+        ("a line wrap before the noun", lambda text: text.replace("<!--skills-->33<!--/skills--> Agent Skills", "34\nAgent Skills")),
+        # Silence must not pass: a gate that only compares stated counts would go green
+        # on a README that states none, which is drift by deletion.
+        ("no count stated at all", lambda text: text.replace("<!--skills-->33<!--/skills--> Agent Skills", "Agent Skills").replace("<!--skills-->33<!--/skills-->-skill", "multi-skill")),
+        ("a skill listed twice", lambda text: text.replace("[`session`](skills/session/SKILL.md), ", "[`session`](skills/session/SKILL.md), [`session`](skills/session/SKILL.md), ", 1)),
+        ("a skill missing from the table", lambda text: text.replace("[`caveman`](skills/caveman/SKILL.md)", "")),
+        ("a skill in the table that is not on disk", lambda text: text.replace("[`caveman`](skills/caveman/SKILL.md)", "[`caveman`](skills/caveman/SKILL.md), [`ghost`](skills/ghost/SKILL.md)")),
+        ("a second catalogue block", lambda text: text + "\n<!-- skill-catalogue:start -->\n| Area | Skills |\n<!-- skill-catalogue:end -->\n"),
+    ),
+)
+def test_catalogue_gate_rejects_every_known_way_the_count_can_rot(name, mutate, tmp_path):
+    original = (ROOT / "README.md").read_text()
+    mutated = mutate(original)
+    assert mutated != original, f"the {name} mutation did not change the README, so it proves nothing"
+    assert _catalogue_check(mutated, tmp_path) != 0, f"the catalogue gate accepted {name}"
+
+
+def test_catalogue_gate_never_rewrites_a_number_it_does_not_own(tmp_path):
+    # The gate must not become the thing it guards against. An earlier pattern matched
+    # any digit near "skills", so it would have rewritten a truthful subset count
+    # ("5 writing skills") into the library total, writing a false claim of its own.
+    # The count is now marked, so an unowned number is refused, never silently changed.
+    readme = tmp_path / "README.md"
+    readme.write_text((ROOT / "README.md").read_text().replace(
+        "## Core workflows", "The catalogue includes 5 writing skills.\n\n## Core workflows", 1
+    ))
+    before = readme.read_text()
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "render_skill_catalogue.py"), "--readme", str(readme)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0, "an unowned skill count was accepted"
+    assert "5 writing skills" in readme.read_text(), "the generator rewrote a number it does not own"
+    assert readme.read_text() == before, "a failing run must not write"
 
 
 def test_openai_skill_sidecar_descriptions_fit_provider_contract():
@@ -263,7 +331,17 @@ def test_orchestrate_doctrine_checker_rejects_empty_or_malformed_contracts(
 
 def test_readme_is_concise_public_facing_and_free_of_process_commentary():
     readme = (ROOT / "README.md").read_text()
-    assert len(readme.split()) <= 1000
+    # The README is the front page: it earns a reader's next click, it is not the
+    # manual. The cap keeps new sections competing for space with old ones instead
+    # of accreting, and sends depth to docs/ARCHITECTURE.md.
+    #
+    # The cap needs real headroom or it stops being a sprawl guard and becomes a
+    # freeze: the previous 1000 sat 5 words above a 995-word README, so every edit,
+    # including correcting a false claim, had to pay for itself by deleting prose.
+    # That is how disclosures get traded away for adjectives. 1400 is set well above
+    # the current length on purpose. If a change needs more room than this, the README
+    # has stopped being a front page and the depth belongs in docs/.
+    assert len(readme.split()) <= 1400
     for retired_phrase in (
         "Experimental:",
         "made public for reuse",

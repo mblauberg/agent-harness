@@ -37,7 +37,7 @@ receipt; link safe relative artifacts and SHA-256 digests.
 3. Account for passes, failures, omissions, skips, exclusions, timeouts, invalid
    output and tool/provider errors. A retry appends; it never erases its parent.
 4. Aggregate from retained rows. Report raw numerators/denominators,
-   distributions and failure clusters, not only averages.
+   distributions and failure clusters, rather than averages alone.
 5. Blind independent graders to treatment identity. Record criterion evidence;
    send disagreements to a fresh adjudicator rather than majority vote.
 6. Compare with frozen thresholds and applicable arms. A post-hoc change creates
