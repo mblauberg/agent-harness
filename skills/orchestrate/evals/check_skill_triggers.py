@@ -108,13 +108,14 @@ def parse_topology_cases(path):
     if raw["schema_version"] != 1 or raw["target_skill"] != "orchestrate":
         raise ValueError("topology value case identity is invalid")
     cases = raw["cases"]
-    if not isinstance(cases, list) or len(cases) < 6:
-        raise ValueError("topology value cases require at least six cases")
+    if not isinstance(cases, list) or len(cases) < 8:
+        raise ValueError("topology value cases require at least eight cases")
 
     ids = set()
     prompts = set()
     outcomes = {"parallel": 0, "serial": 0}
     tags = set()
+    isolators = {"isolates-value-gate": 0, "isolates-structural-gate": 0}
     bool_factors = TOPOLOGY_FACTOR_KEYS - {
         "expected_information_gain",
         "coordination_shared_state_tool_density_cost",
@@ -150,18 +151,35 @@ def parse_topology_cases(path):
         cost = factors["coordination_shared_state_tool_density_cost"]
         if any(type(value) is not int or not 0 <= value <= 3 for value in (gain, cost)):
             raise ValueError("topology value factors must be integers from zero to three")
-        expected = "parallel" if all(factors[key] for key in bool_factors) and gain > cost else "serial"
+        structural_gate = all(factors[key] for key in bool_factors)
+        value_gate = gain > cost
+        expected = "parallel" if structural_gate and value_gate else "serial"
         if case["expected_topology"] != expected:
             raise ValueError(
                 f"{case_id} expected_topology violates the decomposition/value gate"
             )
         outcomes[expected] += 1
+        if "isolates-value-gate" in case["tags"]:
+            if not structural_gate or value_gate or expected != "serial":
+                raise ValueError("value-gate isolator does not isolate the value conjunct")
+            isolators["isolates-value-gate"] += 1
+        if "isolates-structural-gate" in case["tags"]:
+            if structural_gate or not value_gate or expected != "serial":
+                raise ValueError(
+                    "structural-gate isolator does not isolate the structural conjunct"
+                )
+            isolators["isolates-structural-gate"] += 1
 
     required_tags = {
         "decomposable", "bounded", "tightly-coupled", "shared-error",
-        "overlapping-writes", "tool-density",
+        "overlapping-writes", "tool-density", "isolates-value-gate",
+        "isolates-structural-gate",
     }
-    if outcomes["parallel"] < 2 or outcomes["serial"] < 4 or not required_tags <= tags:
+    if (
+        outcomes["parallel"] < 2 or outcomes["serial"] < 6
+        or not required_tags <= tags
+        or any(count != 1 for count in isolators.values())
+    ):
         raise ValueError("topology value cases lack required parallel/serial boundary coverage")
     return cases
 

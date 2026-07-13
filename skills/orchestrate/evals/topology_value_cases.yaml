@@ -23,6 +23,28 @@ cases:
       expected_information_gain: 3
       coordination_shared_state_tool_density_cost: 2
     expected_topology: parallel
+  - id: topology-serial-low-marginal-value
+    prompt: "Compare two independent, stable, tiny documentation lists with namespaced read-only returns that can each be checked, when setup and synthesis cost exceeds added coverage."
+    tags: [bounded, low-marginal-value, isolates-value-gate]
+    factors:
+      independent_information: true
+      stable_interfaces: true
+      non_overlapping_writes: true
+      independently_checkable_returns: true
+      expected_information_gain: 1
+      coordination_shared_state_tool_density_cost: 2
+    expected_topology: serial
+  - id: topology-serial-unstable-interface
+    prompt: "Investigate two independent high-value adapter questions with cited read-only returns while their shared interface remains unsettled."
+    tags: [unstable-interface, isolates-structural-gate]
+    factors:
+      independent_information: true
+      stable_interfaces: false
+      non_overlapping_writes: true
+      independently_checkable_returns: true
+      expected_information_gain: 3
+      coordination_shared_state_tool_density_cost: 1
+    expected_topology: serial
   - id: topology-serial-tightly-coupled
     prompt: "Repair one state-machine transition whose next edit depends on reproducing the preceding result."
     tags: [tightly-coupled]

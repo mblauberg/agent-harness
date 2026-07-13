@@ -83,7 +83,50 @@ def test_orchestrate_topology_cases_bind_parallelism_to_positive_value():
         "shared-error",
         "overlapping-writes",
         "tool-density",
+        "isolates-value-gate",
+        "isolates-structural-gate",
     } <= tags
+
+
+def test_orchestrate_topology_cases_kill_each_single_gate_mutant():
+    cases = yaml.safe_load(CASES.read_text())["cases"]
+    structural_keys = (
+        "independent_information",
+        "stable_interfaces",
+        "non_overlapping_writes",
+        "independently_checkable_returns",
+    )
+
+    def structural_only(case):
+        structural_gate = all(
+            case["factors"][key] for key in structural_keys
+        )
+        return "parallel" if structural_gate else "serial"
+
+    def value_only(case):
+        factors = case["factors"]
+        return "parallel" if (
+            factors["expected_information_gain"]
+            > factors["coordination_shared_state_tool_density_cost"]
+        ) else "serial"
+
+    structural_only_misses = [
+        case["id"] for case in cases
+        if structural_only(case) != case["expected_topology"]
+    ]
+    value_only_misses = [
+        case["id"] for case in cases
+        if value_only(case) != case["expected_topology"]
+    ]
+
+    value_isolator = next(
+        case for case in cases if "isolates-value-gate" in case["tags"]
+    )
+    structural_isolator = next(
+        case for case in cases if "isolates-structural-gate" in case["tags"]
+    )
+    assert structural_only_misses == [value_isolator["id"]]
+    assert value_only_misses == [structural_isolator["id"]]
 
 
 def test_orchestrate_static_checker_rejects_a_false_parallel_value_claim(tmp_path):
