@@ -1,10 +1,10 @@
 # Project Fabric Console terminal runtime
 
-Status: Implemented terminal-runtime decision; fallback not triggered
+Status: Selected terminal-runtime decision; integrated implementation requires contract repair
 
 Decision date: 11 July 2026
 
-Implementation evidence cut-off: 12 July 2026
+Implementation evidence cut-off: 13 July 2026
 
 Evidence snapshot: [July 2026 continuity and routing evidence](evidence-snapshots/agent-continuity-routing-2026-07.md)
 
@@ -17,9 +17,12 @@ renderer and bounded terminal input parser. Keep Rust with Ratatui/Crossterm as
 the objective fallback only if the mandatory terminal spike fails after one
 bounded repair. Do not add Go or C++ for the current Console.
 
-The TypeScript spike passed the required resize, input, hostile-text and
-terminal-restoration oracles, so the Rust fallback was not triggered. The
-remaining full Console/runtime/evaluation gates stay owned by Spec 05.
+The decision-time TypeScript spike passed the required resize, input,
+hostile-text and terminal-restoration oracles, so the Rust fallback was not
+triggered. That is not final implementation evidence: the 13 July consolidated
+presenter still exposes an interactive `strip` mode down to 12x3, contrary to
+Spec 05's exact 30x6 minimum. The remaining repair and full Console/runtime/
+evaluation gates stay owned by Spec 05.
 
 The 80x24 frame is the default/reference acceptance viewport, not a fixed
 terminal size. Runtime layout follows current dimensions. Exact compact and
@@ -62,6 +65,41 @@ Lazygit for contextual Git actions, K9s for operator projection with mouse off
 by default, GitUI for render/service separation and Zellij for explicit mode
 and selection consequences. They are design references, not dependencies or
 compatibility claims.
+
+## 13 July open-source refresh
+
+Current primary sources reinforce the existing decision:
+
+- [Ratatui](https://github.com/ratatui/ratatui) remains the strongest Rust
+  renderer fallback and uses Crossterm by default across Linux, macOS and
+  Windows.
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea) remains the strongest
+  Go greenfield alternative through its Elm-style event/update model.
+- [FTXUI](https://github.com/ArthurSonzogni/FTXUI) remains a capable C++20
+  functional DOM/component library, but its native-memory and packaging surface
+  adds risk without removing protocol-parity work.
+- [OpenCode](https://github.com/anomalyco/opencode) keeps core/server and TUI
+  boundaries distinct; its TUI is TypeScript/SolidJS over OpenTUI. This supports
+  the Console's public-client boundary but does not justify importing its Bun/
+  native stack.
+- [Goose](https://github.com/aaif-goose/goose) demonstrates a portable Rust
+  agent core with CLI/API and MCP/ACP integration. It supports retaining Rust
+  for narrow process/confinement custody rather than duplicating the whole
+  Console state model.
+- [mini-SWE-agent](https://github.com/SWE-agent/mini-swe-agent) is useful
+  counter-evidence against harness bloat: simple linear histories and isolated
+  shell actions can remain observable and testable.
+- [Aider](https://github.com/Aider-AI/aider) reinforces repository mapping plus
+  automatic lint/test repair as operator-visible evidence, while
+  [OpenHands](https://github.com/OpenHands/OpenHands) is the closer reference for
+  a composable agent SDK and event-oriented control plane.
+
+The reusable ideas are explicit client/server seams, stable session/event
+identity, observable verification, simple inspectable histories and narrow MCP
+extensions. Provenant's differentiator remains its one-chair authority,
+receipt/evidence custody, disjoint writer scopes and cross-family acceptance
+gates; importing another harness wholesale would duplicate rather than simplify
+those owners.
 
 ## Binding spike evidence
 
