@@ -443,13 +443,37 @@ describe("versioned Console usability evaluation", () => {
     )).toBe(true);
   });
 
+  it("exercises the exact invalid, inert, minimum, reference, and wide resize ladder", async () => {
+    const seen = new Set<string>();
+    const manifest = parseUsabilityManifest(await manifestValue());
+    await evaluateUsabilityManifest(manifest, {
+      ...dependencies,
+      render: (dataset, controller, ui, viewport) => {
+        seen.add(`${String(viewport.columns)}x${String(viewport.rows)}`);
+        return renderFabricConsoleFrame(dataset, controller, ui, viewport);
+      },
+    });
+
+    expect([...seen]).toEqual(expect.arrayContaining([
+      "0x0",
+      "29x5",
+      "30x6",
+      "80x24",
+      "120x32",
+    ]));
+  });
+
   it("fails dynamic resize safety when a non-inert frame has no enabled visible focus", async () => {
     const manifest = parseUsabilityManifest(await manifestValue());
     const report = await evaluateUsabilityManifest(manifest, {
       ...dependencies,
       render: (dataset, controller, ui, viewport) => {
         const frame = renderFabricConsoleFrame(dataset, controller, ui, viewport);
-        if (frame.columns !== 44 || frame.presentation.focusId === null) return frame;
+        if (
+          frame.columns !== 30 ||
+          frame.rows.length !== 6 ||
+          frame.presentation.focusId === null
+        ) return frame;
         const focused = frame.hitRegions.find(
           ({ enabled, id }) => enabled && id === frame.presentation.focusId,
         );

@@ -213,10 +213,13 @@ export class FabricConsoleRuntime {
   }
 
   repaint(): FabricConsoleFrame {
-    this.#frame = this.#reconcileFocus(this.#renderCurrentFrame());
+    const rendered = this.#renderCurrentFrame();
+    this.#frame = rendered.mode === "inert"
+      ? rendered
+      : this.#reconcileFocus(rendered);
     if (!this.#closed) {
       this.#draw(this.#frame);
-      this.#recordReviewCoverage(this.#frame);
+      if (this.#frame.mode !== "inert") this.#recordReviewCoverage(this.#frame);
     }
     return this.#frame;
   }
@@ -389,6 +392,11 @@ export class FabricConsoleRuntime {
     this.#viewport = viewport;
     this.#pointer = { pressed: null };
     let frame = this.#renderCurrentFrame();
+    if (frame.mode === "inert") {
+      this.#frame = frame;
+      this.#draw(this.#frame);
+      return this.#frame;
+    }
     if (this.#restorableResizeFocus !== null) {
       const restorable = this.#restorableResizeFocus;
       const originalVisible = frame.hitRegions.some(
@@ -423,7 +431,9 @@ export class FabricConsoleRuntime {
       };
       frame = this.#renderCurrentFrame();
     }
-    this.#frame = this.#reconcileFocus(frame);
+    this.#frame = this.#hasEnabledVisibleFocus(frame)
+      ? frame
+      : this.#reconcileFocus(frame);
     this.#draw(this.#frame);
     this.#recordReviewCoverage(this.#frame);
     return this.#frame;
@@ -453,7 +463,7 @@ export class FabricConsoleRuntime {
   }
 
   updateDataset(dataset: FabricConsoleDataset): FabricConsoleFrame {
-    if (this.#closed) return this.#frame;
+    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
     this.#controller.updateDataset(dataset);
     const confirmation = this.#ui.artifactConfirmation;
     const inspection = dataset.inspection;
@@ -475,7 +485,7 @@ export class FabricConsoleRuntime {
   setArtifactConfirmation(
     confirmation: ArtifactReviewConfirmation | null,
   ): FabricConsoleFrame {
-    if (this.#closed) return this.#frame;
+    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
     this.#ui = {
       ...this.#ui,
       artifactConfirmation: confirmation,
@@ -487,7 +497,7 @@ export class FabricConsoleRuntime {
   }
 
   setInputMode(mode: FabricConsoleUiState["inputMode"]): FabricConsoleFrame {
-    if (this.#closed) return this.#frame;
+    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
     if (this.#ui.inputMode === "browse" && mode !== "browse") {
       this.#rememberInputOpener();
     }
@@ -499,7 +509,7 @@ export class FabricConsoleRuntime {
   }
 
   beginGuidedWorkflow(draft: ConsoleGuidedWorkflowDraft): FabricConsoleFrame {
-    if (this.#closed) return this.#frame;
+    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
     this.#rememberInputOpener();
     this.#pendingReviewOpener = { focusId: this.#ui.focusId };
     this.#ui = {
@@ -515,7 +525,7 @@ export class FabricConsoleRuntime {
   }
 
   cancelGuidedWorkflow(): FabricConsoleFrame {
-    if (this.#closed) return this.#frame;
+    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
     const pendingOpener = this.#pendingReviewOpener;
     this.#pendingReviewOpener = null;
     this.#inputFocusSession = null;
@@ -534,7 +544,7 @@ export class FabricConsoleRuntime {
   setWorkflowReview(
     review: FabricConsoleUiState["workflowReview"],
   ): FabricConsoleFrame {
-    if (this.#closed) return this.#frame;
+    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
     const echoInput =
       review?.stage === "confirm" && review.confirmationMode === "echo";
     if (review === null) this.#pendingReviewOpener = null;
@@ -554,7 +564,7 @@ export class FabricConsoleRuntime {
   }
 
   setFocus(focusId: string | null): FabricConsoleFrame {
-    if (this.#closed) return this.#frame;
+    if (this.#closed || this.#frame.mode === "inert") return this.#frame;
     this.#restorableResizeFocus = null;
     this.#ui = { ...this.#ui, focusId };
     return this.repaint();
@@ -579,7 +589,11 @@ export class FabricConsoleRuntime {
     const frame = this.#frame;
     let actionTarget: CapturedActionTarget = { kind: "none" };
     let pointerIntents: readonly CapturedPointerIntent[] = [];
-    if (event.kind === "mouse" && this.#ui.mouseCapture) {
+    if (
+      frame.mode !== "inert" &&
+      event.kind === "mouse" &&
+      this.#ui.mouseCapture
+    ) {
       const reduced = this.#reducePointer(
         this.#pointer,
         event,
@@ -664,9 +678,22 @@ export class FabricConsoleRuntime {
 
   async #handleInput(input: CapturedInput): Promise<void> {
     const { event } = input;
-    this.#restorableResizeFocus = null;
     if (event.kind === "fatal") {
       await this.close("safety");
+      return;
+    }
+    if (event.kind === "key" && event.key === "ctrl-c") {
+      await this.close("safety");
+      return;
+    }
+    if (this.#frame.mode === "inert") {
+      if (
+        event.kind === "key" &&
+        event.key === "text" &&
+        event.text === "q"
+      ) {
+        await this.close("operator");
+      }
       return;
     }
     if (event.kind === "rejected") {
@@ -679,19 +706,7 @@ export class FabricConsoleRuntime {
       this.repaint();
       return;
     }
-    if (event.kind === "key" && event.key === "ctrl-c") {
-      await this.close("safety");
-      return;
-    }
-    if (
-      event.kind === "key" &&
-      event.key === "text" &&
-      event.text === "q" &&
-      this.#frame.mode === "inert"
-    ) {
-      await this.close("operator");
-      return;
-    }
+    this.#restorableResizeFocus = null;
     if (this.#ui.inputMode !== "browse" && event.kind === "mouse") {
       await this.#handleModalMouse(input);
       return;

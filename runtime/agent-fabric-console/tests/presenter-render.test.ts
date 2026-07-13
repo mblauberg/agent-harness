@@ -16,6 +16,7 @@ import {
   graphemes,
   renderFabricConsoleFrame,
   reduceFabricPointer,
+  responsiveModeFor,
   writeFixedCells,
   type FabricPointerState,
 } from "../src/index.js";
@@ -407,6 +408,163 @@ function controllableRunDataset(snapshotRevision = 11): FabricConsoleDataset {
   };
 }
 
+function closedProjectionDataset(): FabricConsoleDataset {
+  return {
+    ...richDataset(),
+    spec05: {
+      reviewRuns: [{
+        projectSessionId: sessionId,
+        coordinationRunId: "AFAB-004",
+        preparation: {
+          state: "unavailable",
+          reason: "preparation-id-not-projected",
+          code: null,
+        },
+        completion: {
+          state: "current",
+          value: {
+            schemaVersion: 1,
+            blockers: [],
+            targetGeneration: 4,
+            targetChair: null,
+            reviewedArtifactRef: "artifact-4",
+            publicationLineageDigest: digestA,
+            bundleDigest: digestB,
+            manifestRootDigest: digestA,
+            coverageDigest: digestB,
+            riskReadMapDigest: digestA,
+            mandatoryReadSetDigest: digestB,
+            profileDigest: digestA,
+            unavailableSlots: [],
+            slots: [{
+              slot: "native",
+              headGeneration: 2,
+              attemptGeneration: 1,
+              actionRef: { adapterId: "adapter-native", actionId: "action-native" },
+              evidenceId: "evidence-1",
+              terminalKind: "safe-answer",
+              verdict: "CLEAN",
+              resultDigest: digestA,
+              providerFailureCode: null,
+              providerFailureDigest: null,
+              routeReceiptDigest: digestB,
+              adapterId: "adapter-native",
+              endpointProvider: "openai",
+              providerFamily: "gpt",
+              model: "gpt-5.4",
+              routeObservationDigest: digestA,
+              actualRouteIdentityDigest: digestB,
+              readCoverageDigest: digestA,
+              reviewerFamilyRelation: "same-family-exempt",
+              currentCertificationBasis: null,
+              certifying: true,
+              openFindingSet: { findingSetDigest: digestA, findingCount: 0, pageDigests: [] },
+              blockers: [],
+            }],
+            finalReviewComplete: false,
+          },
+        },
+        evidence: {
+          state: "current",
+          value: [{
+            schemaVersion: 1,
+            record: {
+              evidenceId: "evidence-1",
+              targetGeneration: 4,
+              slot: "native",
+              actionRef: { adapterId: "adapter-native", actionId: "action-native" },
+              endpointProvider: "openai",
+              providerFamily: "gpt",
+              model: "gpt-5.4",
+              routeReceiptDigest: digestB,
+              routeObservationDigest: digestA,
+              actualRouteIdentityDigest: digestB,
+            },
+            currency: {
+              target: "current",
+              source: "current",
+              chair: "current",
+              profile: "current",
+              certifying: true,
+              blockerCodes: [],
+            },
+            annotation: null,
+          }],
+        },
+        recoveries: [],
+        providerRoute: {
+          state: "unavailable",
+          reason: "operator-route-projection-unavailable",
+          code: null,
+        },
+        capabilityFreshness: {
+          state: "unavailable",
+          reason: "operator-route-projection-unavailable",
+          code: null,
+        },
+      }],
+      topology: [{
+        taskId: "task-1",
+        coordinationRunId: "AFAB-004",
+        read: {
+          state: "current",
+          value: {
+            schemaVersion: 1,
+            currency: "stale",
+            pointer: { revision: 8 },
+            plan: {
+              waveId: "wave-7",
+              waveRevision: 3,
+              state: "started",
+              predecessor: null,
+              dependencies: [],
+              decomposability: { kind: "decomposable", evidenceRef: "evidence-topology" },
+              topology: { executionShape: "fabric-explicit", mode: "parallel", maximumConcurrentAgents: 3 },
+              chair: { agentId: "codex-chair", principalGeneration: 2, chairLeaseGeneration: 4 },
+              stageOwners: [{ stageId: "implementation", taskId: "task-1", ownerAgentId: "worker-1", writePartitionId: "partition-1" }],
+              writePartitions: [{ partitionId: "partition-1", ownerAgentId: "worker-1", mode: "exclusive-write", pathSetDigest: digestA, authorityRef: "authority-1" }],
+              contention: { mode: "disjoint-partitions", serializationOwnerAgentId: null, evidenceRef: "evidence-contention" },
+              budget: { providerTurns: 12, toolCalls: 40, wallClockSeconds: 900, maximumParallelAgents: 3 },
+              stopConditions: [{ conditionId: "stop-complete", kind: "objective-complete", predicateRef: "predicate-1" }],
+              authority: { authorityRevision: 5, authorityRef: "authority-1", authorityDigest: digestA },
+              policy: { policyRevision: 6, policyRef: "policy-1", policyDigest: digestB },
+              rationaleRef: "rationale-evidence-1",
+              planDigest: digestA,
+            },
+          },
+        },
+      }],
+      contextPressure: [{
+        agentId: "codex-chair",
+        coordinationRunId: "AFAB-004",
+        read: {
+          state: "current",
+          value: {
+            schemaVersion: 1,
+            currency: "current",
+            readAt: timestamp,
+            ageSeconds: 5,
+            pressure: {
+              pressure: "high",
+              source: "native-exact",
+              confidence: "exact",
+              windowTokens: 100_000,
+              usedTokens: 81_000,
+              remainingTokens: 19_000,
+              observedAt: timestamp,
+              expiresAt: "2026-07-11T12:05:00.000Z",
+              providerGeneration: 3,
+              contextRevision: 9,
+              revision: 4,
+              evidenceDigest: digestB,
+            },
+          },
+        },
+      }],
+    },
+  } as unknown as FabricConsoleDataset;
+}
+
 function runControllerState(): ConsoleControllerState {
   const state = controllerState();
   return {
@@ -537,6 +695,106 @@ describe("structured presenter and responsive Fabric renderer", () => {
       label: "Accepted scope",
       value: `${acceptedScopeRef.path}@${acceptedScopeRef.digest}`,
     });
+  });
+
+  it("wraps ordinary detail facts so long canonical identities remain revealable", () => {
+    const dataset = richDataset();
+    const projectRow = dataset.pages.project.rows[0];
+    if (projectRow?.summary?.kind !== "project") {
+      throw new Error("project fixture unavailable");
+    }
+    const longPath = `${"deep-segment/".repeat(18)}scope-tail.json` as never;
+    const projected: FabricConsoleDataset = {
+      ...dataset,
+      pages: {
+        ...dataset.pages,
+        project: {
+          ...dataset.pages.project,
+          rows: [{
+            ...projectRow,
+            summary: {
+              ...projectRow.summary,
+              acceptedScopeRef: { path: longPath, digest: digestB },
+            },
+          }],
+        },
+      },
+    };
+    const base = controllerState();
+    const state: ConsoleControllerState = {
+      ...base,
+      activeView: "project",
+      selectionByView: {
+        ...base.selectionByView,
+        project: { stableId: projectRow.stableId, revision: projectRow.revision },
+      },
+    };
+    const frame = renderFabricConsoleFrame(
+      projected,
+      state,
+      createFabricUiState({ focusId: `detail:project:${projectRow.stableId}` }),
+      { columns: 120, rows: 36 },
+    );
+
+    const revealed = frame.rows.join("").replaceAll(" ", "").replaceAll("|", "");
+    expect(revealed).toContain("scope-tail.json");
+    expect(revealed).toContain("b".repeat(32));
+  });
+
+  it("presents closed review, actual-route, topology, and context projections without legacy substitutes", () => {
+    const dataset = closedProjectionDataset();
+    const expectedByView = {
+      runs: [
+        ["Review preparation", "unavailable | preparation-id-not-projected"],
+        ["Review target generation", "4"],
+        ["Review completion", "INCOMPLETE"],
+        ["Review slot native", "CLEAN | certifying"],
+        ["Provider route", "unavailable | operator-route-projection-unavailable"],
+        ["Capability freshness", "unavailable | operator-route-projection-unavailable"],
+      ],
+      work: [
+        ["Topology currency", "STALE"],
+        ["Topology wave", "wave-7@r3 | started"],
+        ["Topology rationale", "rationale-evidence-1"],
+        ["Topology execution", "fabric-explicit | parallel | max 3"],
+      ],
+      agents: [
+        ["Context pressure", "HIGH | CURRENT | age 5s"],
+        ["Context source", "native-exact | exact"],
+        ["Context tokens", "window 100000 | used 81000 | remaining 19000"],
+      ],
+      evidence: [
+        ["Actual review route", "openai | gpt | gpt-5.4"],
+        ["Actual route proof", `proved | ${digestB}`],
+        ["Review currency", "target current | source current | chair current | profile current"],
+      ],
+    } as const;
+
+    for (const [view, expected] of Object.entries(expectedByView) as readonly [
+      "runs" | "work" | "agents" | "evidence",
+      readonly (readonly [string, string])[],
+    ][]) {
+      const base = controllerState();
+      const stableId = dataset.pages[view].rows[0]?.stableId;
+      if (stableId === undefined) throw new Error(`${view} fixture unavailable`);
+      const state: ConsoleControllerState = {
+        ...base,
+        activeView: view,
+        selectionByView: {
+          ...base.selectionByView,
+          [view]: { stableId, revision: revisionFromProtocol(7) },
+        },
+      };
+      const lines = presentFabricConsole(
+        dataset,
+        state,
+        createFabricUiState(),
+        { columns: 120, rows: 36 },
+      ).detail?.lines;
+      expect(lines).toEqual(expect.arrayContaining(
+        expected.map(([label, value]) => ({ label, value })),
+      ));
+    }
   });
 
   it("requires an exact explicit terminal-neutralisation confirmation before evidence actions", () => {
@@ -1412,6 +1670,39 @@ describe("structured presenter and responsive Fabric renderer", () => {
     expect(dataset.pages.work.rows).toHaveLength(1);
   });
 
+  it("keeps a projected conflict visible while the transport is degraded", () => {
+    const dataset = richDataset();
+    if (dataset.snapshot === null) throw new Error("snapshot fixture unavailable");
+    const conflicted: FabricConsoleDataset = {
+      ...dataset,
+      connection: { state: "degraded", reason: "transport-failure" },
+      snapshot: {
+        ...dataset.snapshot,
+        runs: {
+          freshness: "conflict",
+          source: "fabric",
+          revision: dataset.snapshot.snapshotRevision,
+          observedAt: timestamp,
+          candidates: [
+            dataset.snapshot.runs.freshness === "conflict"
+              ? dataset.snapshot.runs.candidates[0]
+              : dataset.snapshot.runs.freshness === "unavailable"
+                ? []
+                : dataset.snapshot.runs.value,
+            [],
+          ],
+        },
+      },
+    };
+
+    expect(presentFabricConsole(
+      conflicted,
+      controllerState(),
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    ).header.freshness).toBe("conflict");
+  });
+
   it("renders the responsive ladder at exact current terminal dimensions", () => {
     const dataset = richDataset();
     const state = controllerState();
@@ -1434,6 +1725,46 @@ describe("structured presenter and responsive Fabric renderer", () => {
       expect(frame.rows.every((line) => cellWidth(line) === columns)).toBe(true);
       expect(ui).toStrictEqual(before);
     }
+  });
+
+  it("enforces 30x6 as the exact interactive minimum without coercing invalid dimensions", () => {
+    const cases = [
+      [{ columns: 30, rows: 6 }, "strip"],
+      [{ columns: 29, rows: 6 }, "inert"],
+      [{ columns: 30, rows: 5 }, "inert"],
+      [{ columns: 29, rows: 5 }, "inert"],
+      [{ columns: 29, rows: 24 }, "inert"],
+      [{ columns: 80, rows: 5 }, "inert"],
+      [{ columns: 30.5, rows: 6 }, "inert"],
+      [{ columns: 30, rows: 6.5 }, "inert"],
+      [{ columns: Number.MAX_SAFE_INTEGER, rows: 6 }, "inert"],
+      [{ columns: 80, rows: 24 }, "reference"],
+      [{ columns: 140, rows: 36 }, "wide"],
+    ] as const;
+
+    for (const [viewport, mode] of cases) {
+      expect(responsiveModeFor(viewport)).toBe(mode);
+      expect(renderFabricConsoleFrame(
+        richDataset(),
+        controllerState(),
+        createFabricUiState(),
+        viewport,
+      ).mode).toBe(mode);
+    }
+  });
+
+  it("keeps one safe selected-item action reachable at the 30x6 minimum", () => {
+    const frame = renderFabricConsoleFrame(
+      controllableRunDataset(),
+      runControllerState(),
+      createFabricUiState({ focusId: "action:resume" }),
+      { columns: 30, rows: 6 },
+    );
+
+    expect(frame.mode).toBe("strip");
+    expect(frame.rows[4]).toContain("Resume");
+    expect(frame.hitRegions.find(({ id }) => id === "action:resume"))
+      .toMatchObject({ enabled: true, rect: { y1: 5, y2: 5 } });
   });
 
   it("allocates every mandatory 80x24 header field before clipping its value", () => {
@@ -1613,7 +1944,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
     expect(frame.rows[1]).toContain("Approve quarantine");
   });
 
-  it("preserves header, top attention, and detach affordance at minimum strip height", () => {
+  it("makes every height below six inert even when the detach label fits", () => {
     const frame = renderFabricConsoleFrame(
       richDataset(),
       controllerState(),
@@ -1621,13 +1952,10 @@ describe("structured presenter and responsive Fabric renderer", () => {
       { columns: 30, rows: 3 },
     );
 
-    expect(frame.mode).toBe("strip");
-    expect(frame.rows[0]).toContain("P:");
-    expect(frame.rows[1]).toContain("Approve quarantine");
-    expect(frame.rows[1]).not.toContain("Health:");
-    expect(frame.rows[2]).toContain("q detach");
-    expect(frame.hitRegions.find(({ id }) => id === "row:attention:attention:safety"))
-      .toMatchObject({ rect: { x1: 1, y1: 2, x2: 30, y2: 2 } });
+    expect(frame.mode).toBe("inert");
+    expect(frame.rows[0]).toContain("q detach");
+    expect(frame.rows.join("\n")).not.toContain("Approve quarantine");
+    expect(frame.hitRegions.map(({ id }) => id)).toStrictEqual(["detach"]);
   });
 
   it("uses narrow tall strip rows for identity, operating state, and selected work", () => {
@@ -1635,7 +1963,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
       richDataset(),
       controllerState(),
       createFabricUiState({ focusId: "row:attention:attention:safety" }),
-      { columns: 24, rows: 24 },
+      { columns: 30, rows: 24 },
     );
     const visible = frame.rows.join("\n");
 
@@ -1701,6 +2029,19 @@ describe("structured presenter and responsive Fabric renderer", () => {
       kind: "action",
       enabled: true,
     });
+  });
+
+  it("reports exact review coverage without inventing a percentage", () => {
+    const frame = renderFabricConsoleFrame(
+      richDataset(),
+      controllerState(review()),
+      createFabricUiState(),
+      { columns: 30, rows: 8 },
+    );
+    const visible = frame.rows.join("\n");
+
+    expect(visible).toMatch(/C\d+\/\d+/u);
+    expect(visible).not.toContain("%");
   });
 
   it("counts every workflow intent line before enabling review continuation", () => {

@@ -16,6 +16,7 @@ import type {
   Sha256Digest,
   Timestamp,
 } from "@local/agent-fabric-protocol";
+import { FABRIC_OPERATIONS } from "@local/agent-fabric-protocol";
 import {
   ConsoleProtocolAdapter,
   bindConsoleProtocolClient,
@@ -258,7 +259,7 @@ describe("public protocol adapter", () => {
             hasMore: true,
             snapshotRevision: request.snapshotRevision,
             readTransactionId: "attention-page-1",
-          } as OperatorViewPageResult;
+          } as unknown as OperatorViewPageResult;
         }
         return emptyPage(
           request.view,
@@ -293,6 +294,184 @@ describe("public protocol adapter", () => {
     expect(calls).toHaveLength(9);
     expect(calls).toContainEqual({ view: "attention", cursor: 1, revision: 1 });
     expect(calls.every(({ revision }) => revision === 1)).toBe(true);
+  });
+
+  it("loads exact closed review, topology, and context reads without substituting summary fields", async () => {
+    const completionRead = vi.fn(async () => ({
+      schemaVersion: 1,
+      code: "NOT_FOUND",
+      currentRevision: null,
+      evidenceDigest: null,
+    } as never));
+    const evidenceList = vi.fn(async () => ({
+      schemaVersion: 1,
+      entries: [],
+      nextCursor: null,
+    } as never));
+    const topologyRead = vi.fn(async () => ({
+      schemaVersion: 1,
+      currency: "unavailable",
+      plan: null,
+      pointer: null,
+    } as never));
+    const contextRead = vi.fn(async () => ({
+      schemaVersion: 1,
+      currency: "unavailable",
+      pressure: null,
+      readAt: observedAt,
+      ageSeconds: null,
+    } as never));
+    const port = fakePort({
+      reviewCompletionRead: completionRead,
+      reviewEvidenceList: evidenceList,
+      topologyWaveCurrentRead: topologyRead,
+      providerContextPressureRead: contextRead,
+      viewPage: vi.fn(async (request): Promise<OperatorViewPageResult> => {
+        const common = {
+          itemRevision: 7,
+          fact: {
+            freshness: "live" as const,
+            source: "fabric" as const,
+            revision: 7,
+            observedAt,
+          },
+        };
+        if (request.view === "runs") {
+          return {
+            status: "page",
+            view: "runs",
+            rows: [{
+              ...common,
+              itemId: "run-1",
+              fact: {
+                ...common.fact,
+                value: {
+                  summary: {
+                    kind: "run",
+                    projectSessionId: "session-1",
+                    phase: "implement",
+                    health: "healthy",
+                    nextMilestone: "review",
+                  },
+                  detailRef: {
+                    kind: "run",
+                    projectSessionId: "session-1",
+                    coordinationRunId: "run-1",
+                    expectedRevision: 7,
+                  },
+                  actionAvailability: { state: "read-only", reason: "state-ineligible" },
+                },
+              },
+            }],
+            nextCursor: 1,
+            hasMore: false,
+            snapshotRevision: request.snapshotRevision,
+            readTransactionId: "runs-closed",
+          } as unknown as OperatorViewPageResult;
+        }
+        if (request.view === "work") {
+          return {
+            status: "page",
+            view: "work",
+            rows: [{
+              ...common,
+              itemId: "task-1",
+              fact: {
+                ...common.fact,
+                value: {
+                  summary: { kind: "work", state: "active", checkState: "passing" },
+                  detailRef: { kind: "task", taskId: "task-1", expectedRevision: 7 },
+                  actionAvailability: { state: "read-only", reason: "state-ineligible" },
+                },
+              },
+            }],
+            nextCursor: 1,
+            hasMore: false,
+            snapshotRevision: request.snapshotRevision,
+            readTransactionId: "work-closed",
+          } as unknown as OperatorViewPageResult;
+        }
+        if (request.view === "agents") {
+          return {
+            status: "page",
+            view: "agents",
+            rows: [{
+              ...common,
+              itemId: "agent-1",
+              fact: {
+                ...common.fact,
+                value: {
+                  summary: { kind: "agent", role: "worker", lifecycle: "working", contextPressure: "unknown" },
+                  detailRef: { kind: "agent", agentId: "agent-1", expectedRevision: 7 },
+                  actionAvailability: { state: "read-only", reason: "state-ineligible" },
+                },
+              },
+            }],
+            nextCursor: 1,
+            hasMore: false,
+            snapshotRevision: request.snapshotRevision,
+            readTransactionId: "agents-closed",
+          } as unknown as OperatorViewPageResult;
+        }
+        return emptyPage(request.view, request.snapshotRevision);
+      }),
+    });
+    const adapter = new ConsoleProtocolAdapter({
+      binding: binding(port),
+      credential,
+      projectId,
+    });
+
+    const result = await adapter.open();
+
+    expect(result.spec05?.reviewRuns[0]).toMatchObject({
+      projectSessionId: "session-1",
+      coordinationRunId: "run-1",
+      preparation: {
+        state: "unavailable",
+        reason: "preparation-id-not-projected",
+      },
+      completion: { state: "unavailable", reason: "read-error", code: "NOT_FOUND" },
+      evidence: { state: "current", value: [] },
+      providerRoute: {
+        state: "unavailable",
+        reason: "operator-route-projection-unavailable",
+      },
+    });
+    expect(result.spec05?.topology[0]).toMatchObject({
+      taskId: "task-1",
+      coordinationRunId: "run-1",
+      read: { state: "current", value: { currency: "unavailable" } },
+    });
+    expect(result.spec05?.contextPressure[0]).toMatchObject({
+      agentId: "agent-1",
+      coordinationRunId: "run-1",
+      read: { state: "current", value: { currency: "unavailable" } },
+    });
+    expect(completionRead).toHaveBeenCalledWith({
+      schemaVersion: 1,
+      projectSessionId: "session-1",
+      coordinationRunId: "run-1",
+    });
+    expect(evidenceList).toHaveBeenCalledWith(expect.objectContaining({
+      targetGeneration: null,
+      slot: null,
+      cursor: null,
+    }));
+    expect(topologyRead).toHaveBeenCalledWith(expect.objectContaining({
+      coordinationRunId: "run-1",
+      taskId: "task-1",
+    }));
+    expect(contextRead).toHaveBeenCalledWith(expect.objectContaining({
+      coordinationRunId: "run-1",
+      agentId: "agent-1",
+    }));
+
+    await adapter.poll();
+    expect(completionRead).toHaveBeenCalledTimes(2);
+    expect(evidenceList).toHaveBeenCalledTimes(2);
+    expect(topologyRead).toHaveBeenCalledTimes(2);
+    expect(contextRead).toHaveBeenCalledTimes(2);
   });
 
   it("discards a mixed projection and resnapshots as one revision", async () => {
@@ -598,6 +777,11 @@ describe("public protocol adapter", () => {
     const messageRead = vi.fn();
     const repositoryRead = vi.fn();
     const artifactRead = vi.fn();
+    const reviewCompletionRead = vi.fn();
+    const reviewEvidenceList = vi.fn();
+    const routeRecoveryRead = vi.fn();
+    const contextPressureRead = vi.fn();
+    const topologyCurrentRead = vi.fn();
     const negotiated = {
       kind: "operator",
       features: [
@@ -610,6 +794,13 @@ describe("public protocol adapter", () => {
         "operator-repository-read.v1",
       ],
       projection: {},
+      operations: {
+        [FABRIC_OPERATIONS.reviewCompletionRead]: reviewCompletionRead,
+        [FABRIC_OPERATIONS.reviewEvidenceList]: reviewEvidenceList,
+        [FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead]: routeRecoveryRead,
+        [FABRIC_OPERATIONS.providerContextPressureRead]: contextPressureRead,
+        [FABRIC_OPERATIONS.topologyWaveCurrentRead]: topologyCurrentRead,
+      },
       console: {
         readOnly: true,
         gates: { read: vi.fn() },
@@ -627,6 +818,11 @@ describe("public protocol adapter", () => {
     expect(Reflect.get(bound.port, "readMessageBody")).toBe(messageRead);
     expect(Reflect.get(bound.port, "readRepository")).toBe(repositoryRead);
     expect(bound.port.readArtifactContent).toEqual(expect.any(Function));
+    expect(bound.port.reviewCompletionRead).toBe(reviewCompletionRead);
+    expect(bound.port.reviewEvidenceList).toBe(reviewEvidenceList);
+    expect(bound.port.providerRouteIntegrityRecoveryRead).toBe(routeRecoveryRead);
+    expect(bound.port.providerContextPressureRead).toBe(contextPressureRead);
+    expect(bound.port.topologyWaveCurrentRead).toBe(topologyCurrentRead);
 
     const withoutOptionalReads = bindConsoleProtocolClient({
       kind: "operator",
@@ -638,6 +834,7 @@ describe("public protocol adapter", () => {
         "artifact-content-read.v1",
       ],
       projection: {},
+      operations: {},
       console: {
         readOnly: true,
         gates: { read: vi.fn() },
@@ -650,6 +847,11 @@ describe("public protocol adapter", () => {
     expect(withoutOptionalReads.port.readMessageBody).toBeNull();
     expect(withoutOptionalReads.port.readRepository).toBeNull();
     expect(withoutOptionalReads.port.readArtifactContent).toEqual(expect.any(Function));
+    expect(withoutOptionalReads.port.reviewCompletionRead).toBeNull();
+    expect(withoutOptionalReads.port.reviewEvidenceList).toBeNull();
+    expect(withoutOptionalReads.port.providerRouteIntegrityRecoveryRead).toBeNull();
+    expect(withoutOptionalReads.port.providerContextPressureRead).toBeNull();
+    expect(withoutOptionalReads.port.topologyWaveCurrentRead).toBeNull();
   });
 
   it("fetches exact bounded artifact and diff content through the public read port", async () => {

@@ -1338,28 +1338,59 @@ async function observe(
     ({ enabled, id }) => enabled && id === splitterFocusId,
   );
   if (splitterAvailable) runtime.setFocus(splitterFocusId);
+  const inertUiBefore = structuredClone(runtime.ui);
+  const inertControllerBefore = structuredClone(controller.state);
   const resizeFrames = [
-    runtime.resize({ columns: 44, rows: 15 }),
+    runtime.resize({ columns: 0, rows: 0 }),
+    runtime.resize({ columns: 29, rows: 5 }),
+  ];
+  await runtime.handleInput({ kind: "key", key: "alt-8" });
+  await runtime.handleInput({ kind: "key", key: "page-down" });
+  await runtime.handleInput({ kind: "paste", text: "must remain inert" });
+  await runtime.handleInput({
+    kind: "mouse",
+    phase: "wheel",
+    button: "wheel-down",
+    x: 1,
+    y: 1,
+    modifiers: { shift: false, alt: false, ctrl: false },
+  });
+  keyboardEventCount += 2;
+  mouseEventCount += 1;
+  const inertStatePreserved =
+    JSON.stringify(runtime.ui) === JSON.stringify(inertUiBefore) &&
+    JSON.stringify(controller.state) === JSON.stringify(inertControllerBefore);
+  resizeFrames.push(
+    runtime.resize({ columns: 30, rows: 6 }),
     runtime.resize(manifest.referenceViewport),
     runtime.resize({ columns: 120, rows: 32 }),
-  ];
+  );
   resizeEventCount += resizeFrames.length;
   const dynamicResizeSafe =
-    resizeFrames[0]?.columns === 44 && resizeFrames[0].rows.length === 15 &&
-    resizeFrames[1]?.columns === manifest.referenceViewport.columns &&
-    resizeFrames[1].rows.length === manifest.referenceViewport.rows &&
-    resizeFrames[2]?.columns === 120 && resizeFrames[2].rows.length === 32 &&
-    resizeFrames.every((candidate) => candidate.mode !== "inert") &&
+    resizeFrames[0]?.columns === 0 && resizeFrames[0].rows.length === 0 &&
+    resizeFrames[0].mode === "inert" &&
+    resizeFrames[1]?.columns === 29 && resizeFrames[1].rows.length === 5 &&
+    resizeFrames[1].mode === "inert" &&
+    resizeFrames[2]?.columns === 30 && resizeFrames[2].rows.length === 6 &&
+    resizeFrames[2].mode === "strip" &&
+    resizeFrames[3]?.columns === manifest.referenceViewport.columns &&
+    resizeFrames[3].rows.length === manifest.referenceViewport.rows &&
+    resizeFrames[3].mode === "reference" &&
+    resizeFrames[4]?.columns === 120 && resizeFrames[4].rows.length === 32 &&
+    resizeFrames[4].mode === "wide" &&
     new Set(resizeFrames.map(({ geometryKey }) => geometryKey)).size ===
       resizeFrames.length &&
+    inertStatePreserved &&
     controller.state.activeView === "attention" &&
     (controller.state.selectionByView.attention?.stableId ?? null) === selectionBeforeResize &&
     runtime.ui.draft === preservedDraft &&
     splitterAvailable &&
-    resizeFrames[0]?.presentation.focusId !== splitterFocusId &&
+    resizeFrames[0]?.presentation.focusId === splitterFocusId &&
     resizeFrames[1]?.presentation.focusId === splitterFocusId &&
-    resizeFrames[2]?.presentation.focusId === splitterFocusId &&
-    resizeFrames.every((candidate) => frameHasEnabledVisibleFocus(candidate));
+    resizeFrames[2]?.presentation.focusId !== splitterFocusId &&
+    resizeFrames[3]?.presentation.focusId === splitterFocusId &&
+    resizeFrames[4]?.presentation.focusId === splitterFocusId &&
+    resizeFrames.slice(2).every((candidate) => frameHasEnabledVisibleFocus(candidate));
 
   await runtime.handleInput({ kind: "key", key: "alt-m" });
   keyboardEventCount += 1;
@@ -1417,7 +1448,9 @@ async function observe(
       await evidenceRuntime.handleInput({ kind: "key", key: "home" });
       keyboardEventCount += 2;
       const evidenceFrames = [
-        evidenceRuntime.resize({ columns: 60, rows: 18 }),
+        evidenceRuntime.resize({ columns: 0, rows: 0 }),
+        evidenceRuntime.resize({ columns: 29, rows: 5 }),
+        evidenceRuntime.resize({ columns: 30, rows: 6 }),
         evidenceRuntime.resize(manifest.referenceViewport),
         evidenceRuntime.resize({ columns: 120, rows: 32 }),
       ];

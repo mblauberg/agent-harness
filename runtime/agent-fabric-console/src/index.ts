@@ -331,15 +331,15 @@ function fabricDimensions(viewport: FabricViewport): Readonly<{
   if (
     columns === undefined ||
     rows === undefined ||
-    !Number.isFinite(columns) ||
-    !Number.isFinite(rows) ||
+    !Number.isSafeInteger(columns) ||
+    !Number.isSafeInteger(rows) ||
     columns < 0 ||
     rows < 0
   ) {
     return { columns: 0, rows: 0 };
   }
-  const width = Math.trunc(columns);
-  const height = Math.trunc(rows);
+  const width = columns;
+  const height = rows;
   if (
     width > MAX_FRAME_CELLS ||
     height > MAX_FRAME_CELLS ||
@@ -684,7 +684,7 @@ function renderFabricDetail(
       const window = presentSafeTextWindow(
         detailText,
         {
-          columns: Math.max(1, bounds.x2 - bounds.x1 + 1),
+          columns: Math.max(1, bounds.x2 - bounds.x1),
           rows: Math.max(1, height),
           offset: Math.max(
             0,
@@ -712,9 +712,17 @@ function renderFabricDetail(
         0,
         Math.trunc(ui.detailScrollOffsetByView[presentation.activeView] ?? 0),
       );
-      const repositoryLines = repositoryDetailLines(inspection.repository);
-      detailScrollMaximum = Math.max(0, repositoryLines.length - 1);
-      lines = repositoryLines.slice(offset, offset + height);
+      const window = presentSafeTextWindow(
+        repositoryDetailLines(inspection.repository).join("\n"),
+        {
+          columns: Math.max(1, bounds.x2 - bounds.x1),
+          rows: Math.max(1, height),
+          offset,
+        },
+        { sanitizeDisplayText, graphemes, cellWidth },
+      );
+      detailScrollMaximum = Math.max(0, window.totalLines - 1);
+      lines = window.lines;
     } else {
       lines = [
         `Repository: ${inspection.binding.itemId}`,
@@ -722,9 +730,23 @@ function renderFabricDetail(
       ];
     }
   } else {
-    lines = (presentation.detail?.lines ?? [
+    const detailText = (presentation.detail?.lines ?? [
       { label: "Detail", value: "Select an item to inspect canonical facts." },
-    ]).map((detail) => `${detail.label}: ${detail.value}`);
+    ]).map((detail) => `${detail.label}: ${detail.value}`).join("\n");
+    const window = presentSafeTextWindow(
+      detailText,
+      {
+        columns: Math.max(1, bounds.x2 - bounds.x1),
+        rows: Math.max(1, height),
+        offset: Math.max(
+          0,
+          Math.trunc(ui.detailScrollOffsetByView[presentation.activeView] ?? 0),
+        ),
+      },
+      { sanitizeDisplayText, graphemes, cellWidth },
+    );
+    detailScrollMaximum = Math.max(0, window.totalLines - 1);
+    lines = window.lines;
   }
   for (const [index, value] of lines.slice(0, height).entries()) {
     const y = bounds.y1 + index;
@@ -1061,13 +1083,10 @@ function reviewProgressLabel(
   coverage: FabricReviewCoverageObservation,
   compact = false,
 ): string {
-  const percent = coverage.requiredEnd <= 0
-    ? 100
-    : Math.min(100, Math.floor(coverage.coveredThrough * 100 / coverage.requiredEnd));
   const ready = coverage.coveredThrough >= coverage.requiredEnd;
   return compact
-    ? `R${String(percent)}% ${ready ? "READY" : "LOCK Home+PgDn"}`
-    : `REVIEW | Reviewed ${String(percent)}% | ${ready ? "Actions ready" : "LOCKED: Home + PgDn unlocks"} | End previews only`;
+    ? `C${String(coverage.coveredThrough)}/${String(coverage.requiredEnd)} ${ready ? "READY" : "LOCK PgDn"}`
+    : `REVIEW | Context read ${String(coverage.coveredThrough)}/${String(coverage.requiredEnd)} chars | ${ready ? "Actions ready" : "LOCKED: Home + PgDn unlocks"} | End previews only`;
 }
 
 function actionBindingFor(
@@ -1303,6 +1322,10 @@ function renderFabricStrip(
     return reviewState.coverage;
   }
 
+  const actionRow = !inputModal && presentation.actions.length > 0 && bodyEnd >= 2
+    ? bodyEnd
+    : null;
+  const contentEnd = actionRow === null ? bodyEnd : actionRow - 1;
   const selected = presentation.masterRows.find((row) => row.selected);
   const work = selected ?? presentation.topAttention ?? presentation.masterRows[0];
   const topAttention = presentation.topAttention?.stableId === work?.stableId
@@ -1321,7 +1344,7 @@ function renderFabricStrip(
   ];
   let nextRow = 1;
   const renderWork = (item: PresentedRow): void => {
-    if (nextRow > bodyEnd) return;
+    if (nextRow > contentEnd) return;
     const id = `row:${item.view}:${item.stableId}`;
     setFabricRow(
       rows,
@@ -1342,9 +1365,9 @@ function renderFabricStrip(
     nextRow += 1;
   };
 
-  if (bodyEnd >= 12) {
+  if (contentEnd >= 12) {
     for (const value of fullHeader) {
-      if (nextRow > bodyEnd) break;
+      if (nextRow > contentEnd) break;
       setFabricRow(rows, nextRow, columns, value);
       nextRow += 1;
     }
@@ -1359,7 +1382,7 @@ function renderFabricStrip(
     nextRow += 1;
     if (work !== undefined) renderWork(work);
     for (const value of fullHeader.slice(1)) {
-      if (nextRow > bodyEnd) break;
+      if (nextRow > contentEnd) break;
       setFabricRow(rows, nextRow, columns, value);
       nextRow += 1;
     }
@@ -1368,13 +1391,13 @@ function renderFabricStrip(
     renderWork(topAttention);
   }
   for (const detail of presentation.detail?.lines ?? []) {
-    if (nextRow > bodyEnd) break;
+    if (nextRow > contentEnd) break;
     setFabricRow(rows, nextRow, columns, `${detail.label}:${detail.value}`);
     nextRow += 1;
   }
   for (const item of presentation.masterRows) {
     if (
-      nextRow > bodyEnd ||
+      nextRow > contentEnd ||
       item.stableId === work?.stableId ||
       item.stableId === topAttention?.stableId
     ) {
@@ -1382,7 +1405,7 @@ function renderFabricStrip(
     }
     renderWork(item);
   }
-  if (nextRow <= bodyEnd) {
+  if (nextRow <= contentEnd) {
     setFabricRow(
       rows,
       nextRow,
@@ -1391,6 +1414,17 @@ function renderFabricStrip(
         (inputModal
           ? `${presentation.inputMode.toUpperCase()}:${String(Buffer.byteLength(presentation.draft))}B | Esc | Ctrl-C`
           : `View:${presentation.activeView} | ${presentation.connection}`),
+    );
+  }
+  if (actionRow !== null) {
+    renderFabricActions(
+      rows,
+      columns,
+      actionRow,
+      presentation,
+      dataset,
+      geometryKey,
+      hitRegions,
     );
   }
   renderFabricDetachRow(

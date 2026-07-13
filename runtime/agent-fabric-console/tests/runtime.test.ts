@@ -1200,7 +1200,7 @@ describe("Fabric Console runtime routing", () => {
     });
     runtime.setWorkflowReview(longBoundReview("Git"));
 
-    expect(runtime.frame.rows.join("\n")).toMatch(/Reviewed \d+%/u);
+    expect(runtime.frame.rows.join("\n")).toMatch(/Context read \d+\/\d+ chars/u);
     expect(runtime.frame.rows.join("\n")).toContain("Home + PgDn unlocks");
     await runtime.handleInput({ kind: "key", key: "end" });
     expect(runtime.frame.rows.join("\n")).toContain("End previews only");
@@ -1221,7 +1221,7 @@ describe("Fabric Console runtime routing", () => {
     });
     runtime.setWorkflowReview(longBoundReview("Git"));
 
-    expect(runtime.frame.rows.join("\n")).toMatch(/R\d+% LOCK Home\+PgDn/u);
+    expect(runtime.frame.rows.join("\n")).toMatch(/C\d+\/\d+ LOCK PgDn/u);
     await runtime.handleInput({ kind: "key", key: "end" });
     expect(runtime.frame.rows.join("\n")).toContain("End previews only");
     expect(runtime.frame.hitRegions.some(({ id }) => id === "review:continue"))
@@ -1457,7 +1457,7 @@ describe("Fabric Console runtime routing", () => {
         draft: "keep this draft",
         scrollOffsetByView: { attention: 4 },
         detailScrollOffsetByView: { attention: 7 },
-        focusId: "row:attention:attention:1",
+        focusId: "detail:attention:attention:1",
       }),
       draw: () => {},
       detach,
@@ -1485,10 +1485,7 @@ describe("Fabric Console runtime routing", () => {
       "inert",
       "reference",
     ]);
-    expect(runtime.ui).toStrictEqual({
-      ...beforeUi,
-      focusId: runtime.ui.focusId,
-    });
+    expect(runtime.ui).toStrictEqual(beforeUi);
     expectEnabledVisibleFocus(runtime);
     expect(controller.state).toStrictEqual(beforeController);
     expect(activate).not.toHaveBeenCalled();
@@ -1578,7 +1575,7 @@ describe("Fabric Console runtime routing", () => {
     },
   );
 
-  it("routes inert mouse detach through the local close path without Fabric mutation", async () => {
+  it("makes inert mouse detach geometry non-activating without Fabric or UI mutation", async () => {
     const controller = new FakeController();
     const beforeController = structuredClone(controller.state);
     const detach = vi.fn(async () => {});
@@ -1605,11 +1602,89 @@ describe("Fabric Console runtime routing", () => {
     await runtime.handleInput({ ...mouse, phase: "press" });
     await runtime.handleInput({ ...mouse, phase: "release" });
 
-    expect(detach).toHaveBeenCalledOnce();
-    expect(detach).toHaveBeenCalledWith({ reason: "operator" });
+    expect(detach).not.toHaveBeenCalled();
     expect(activate).not.toHaveBeenCalled();
     expect(controller.state).toStrictEqual(beforeController);
-    expect(runtime.closed).toBe(true);
+    expect(runtime.closed).toBe(false);
+  });
+
+  it("keeps every inert non-close input and public state setter mutation-free", async () => {
+    const controller = new FakeController();
+    const activate = vi.fn(async () => {});
+    const detach = vi.fn(async () => {});
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({
+        focusId: "input:editor",
+        inputMode: "editor",
+        draft: "preserve-draft",
+        mouseCapture: true,
+        scrollOffsetByView: { attention: 4 },
+        detailScrollOffsetByView: { attention: 7 },
+        reviewScrollOffset: 9,
+      }),
+      draw: () => {},
+      detach,
+      activate,
+      eventId: () => "inert-no-mutation",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    const beforeUi = structuredClone(runtime.ui);
+    const beforeController = structuredClone(controller.state);
+    const beforeDataset = controller.dataset;
+
+    expect(runtime.resize({ columns: 29, rows: 5 }).mode).toBe("inert");
+    expect(runtime.ui).toStrictEqual(beforeUi);
+
+    for (const event of [
+      { kind: "key", key: "text", text: "x" },
+      { kind: "key", key: "escape" },
+      { kind: "key", key: "backspace" },
+      { kind: "key", key: "enter" },
+      { kind: "key", key: "alt-m" },
+      { kind: "key", key: "alt-2" },
+      { kind: "key", key: "page-down" },
+      { kind: "key", key: "down" },
+      { kind: "key", key: "tab" },
+      { kind: "paste", text: "pasted" },
+      { kind: "rejected", reason: "malformed-sequence" },
+      {
+        kind: "mouse",
+        phase: "press",
+        button: "left",
+        x: 1,
+        y: 1,
+        modifiers: { shift: false, alt: false, ctrl: false },
+      },
+      {
+        kind: "mouse",
+        phase: "release",
+        button: "left",
+        x: 1,
+        y: 1,
+        modifiers: { shift: false, alt: false, ctrl: false },
+      },
+    ] as const) {
+      await runtime.handleInput(event);
+    }
+
+    runtime.setInputMode("browse");
+    runtime.setFocus("detach");
+    runtime.setWorkflowReview(shortWorkflowReview("review"));
+    runtime.updateDataset({ ...controller.dataset, loadedAtMs: controller.dataset.loadedAtMs + 1 });
+    runtime.repaint();
+
+    expect(runtime.ui).toStrictEqual(beforeUi);
+    expect(controller.state).toStrictEqual(beforeController);
+    expect(controller.dataset).toBe(beforeDataset);
+    expect(activate).not.toHaveBeenCalled();
+    expect(detach).not.toHaveBeenCalled();
+
+    runtime.resize({ columns: 80, rows: 24 });
+    expect(runtime.ui).toStrictEqual(beforeUi);
+    expect(controller.state).toStrictEqual(beforeController);
   });
 
   it.each(["editor", "guided", "palette"] as const)(
@@ -1772,7 +1847,7 @@ describe("Fabric Console runtime routing", () => {
 
     runtime.resize({ columns: 8, rows: 1 });
     expect(runtime.frame.mode).toBe("inert");
-    expect(runtime.ui.focusId).toBe("detach");
+    expect(runtime.ui.focusId).toBe("splitter:master-detail");
     runtime.resize({ columns: 80, rows: 24 });
     expect(runtime.ui.focusId).toBe("splitter:master-detail");
   });
@@ -1859,12 +1934,17 @@ describe("Fabric Console runtime routing", () => {
       { columns: 30, rows: 6, mode: "strip" },
       { columns: 8, rows: 1, mode: "inert" },
     ] as const) {
+      const focusBeforeResize = runtime.ui.focusId;
       runtime.resize(viewport);
       expect(runtime.frame.mode).toBe(viewport.mode);
-      expect(runtime.ui.focusId).not.toBe("splitter:master-detail");
-      expect(runtime.frame.hitRegions.some(
-        ({ enabled, id }) => enabled && id === runtime.ui.focusId,
-      )).toBe(true);
+      if (viewport.mode === "inert") {
+        expect(runtime.ui.focusId).toBe(focusBeforeResize);
+      } else {
+        expect(runtime.ui.focusId).not.toBe("splitter:master-detail");
+        expect(runtime.frame.hitRegions.some(
+          ({ enabled, id }) => enabled && id === runtime.ui.focusId,
+        )).toBe(true);
+      }
     }
 
     runtime.resize({ columns: 140, rows: 36 });
