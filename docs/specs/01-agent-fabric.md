@@ -1,14 +1,17 @@
 # Shared agent fabric
 
 Status: Current protocol, provider-task, review-snapshot, route-lineage, operator-projection and seat-generation extensions approved; implementation in progress; final human acceptance pending
-Version: 0.34
+Version: 0.35
 Date: 13 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.34 closes the deployed-route, discovery-surface, review-identity,
+Version 0.35 replaces the obsolete unroutable Cursor model label with the
+runtime-discovered current `cursor-grok-4.5-high` identifier. The exact
+four-slot profile, adapter allowlist and final route evidence use that one
+current name; no `grok-4.5-xhigh` compatibility alias remains. Version 0.34 closes the deployed-route, discovery-surface, review-identity,
 context-pressure and topology-wave wire contracts required by Spec 05. It makes
 capability refresh stable by content, gives certification an observed-identity
 oracle, and adds no automatic routing, topology or lifecycle authority. Version 0.33 folds the mature July 2026 continuity and route-evidence findings
@@ -4485,7 +4488,7 @@ Added requirements are:
 
 Acceptance additionally requires:
 
-- **AC-038:** current-baseline tests exercise only the v0.34 client/daemon
+- **AC-038:** current-baseline tests exercise only the v0.35 client/daemon
   schema set: unnegotiated base success, negotiated exact-extension success,
   negotiated-missing-field, unnegotiated-extra-field and malformed-summary
   frames for snapshot, Attention projection-page and view-page. There is no
@@ -6040,7 +6043,7 @@ write-capable profile as specified by Spec 03.
 | --- | --- | --- | --- |
 | native | primary-native; codex-app-server for OpenAI chair, claude-agent-sdk for Anthropic chair | exact activated native review route; family equals target chair | same-family-exempt |
 | other-primary | equal-primary; claude-agent-sdk for OpenAI chair, codex-app-server for Anthropic chair | exact activated equal primary distinct from target chair | distinct-family-proved |
-| cursor-grok | cursor; cursor-agent | family xai; exact activated model grok-4.5-xhigh | distinct-family-proved |
+| cursor-grok | cursor; cursor-agent | family xai; exact activated model cursor-grok-4.5-high | distinct-family-proved |
 | agy-gemini | agy; agy | family google; exact activated model Gemini 3.1 Pro (High) | distinct-family-proved |
 
 The target chair and eligible publisher must be OpenAI or Anthropic and have the

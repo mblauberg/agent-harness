@@ -53,7 +53,7 @@ function allowedModel(payload: Record<string, unknown>): boolean {
   if (typeof model !== "string" || model.length === 0) return false;
   if (selectedAdapter === "cursor-agent") {
     return (model.startsWith("composer-") && family === "cursor-composer") ||
-      (model.startsWith("grok-") && family === "xai");
+      (model.startsWith("cursor-grok-") && family === "xai");
   }
   return family === "open-weight";
 }

@@ -58,7 +58,7 @@
           "adapterClass": "cursor",
           "adapterId": "cursor-agent",
           "providerFamily": "xai",
-          "model": "grok-4.5-xhigh",
+          "model": "cursor-grok-4.5-high",
           "requiredActualEndpointProvider": "xai",
           "requestedEffort": null,
           "resolvedEffort": {
@@ -72,7 +72,7 @@
           "explorationReadOps": 48,
           "explorationReadBytes": 4194304,
           "routeAliases": [
-            "grok-4.5-xhigh"
+            "cursor-grok-4.5-high"
           ],
           "riskReadMapDigest": "sha256:c8a4e424157f52c9e09165017ae717fa02798e4edab80e6388fa101816ef004d"
         },
@@ -157,7 +157,7 @@
           "adapterClass": "cursor",
           "adapterId": "cursor-agent",
           "providerFamily": "xai",
-          "model": "grok-4.5-xhigh",
+          "model": "cursor-grok-4.5-high",
           "requiredActualEndpointProvider": "xai",
           "requestedEffort": null,
           "resolvedEffort": {
@@ -171,7 +171,7 @@
           "explorationReadOps": 48,
           "explorationReadBytes": 4194304,
           "routeAliases": [
-            "grok-4.5-xhigh"
+            "cursor-grok-4.5-high"
           ],
           "riskReadMapDigest": "sha256:c8a4e424157f52c9e09165017ae717fa02798e4edab80e6388fa101816ef004d"
         },
