@@ -4,7 +4,7 @@
 
 **A gated delivery lifecycle for coding agents. Scope, verify, review, accept.**
 
-Coding agents improvise. This agent harness is 33 Agent Skills that make Claude
+Coding agents improvise. This agent harness is <!--skills-->33<!--/skills--> Agent Skills that make Claude
 Code and Codex follow one lifecycle instead: agree the spec, build it, verify it,
 have the other model review anything substantial, then stop for you.
 
@@ -19,7 +19,7 @@ notice.
 ## What this is
 
 An Agent Skill is a folder with a `SKILL.md`. Only its one-line description sits
-in permanent context (the whole 33-skill catalogue is budgeted under 8,000
+in permanent context (the whole <!--skills-->33<!--/skills-->-skill catalogue is budgeted under 8,000
 characters); the body loads when the task matches. An operating system for agent
 work, not a prompt collection: one constitution ([`HARNESS.md`](HARNESS.md))
 governing both Claude Code and Codex.
@@ -178,9 +178,10 @@ Every delivery profile owes a deterministic gate *and* a judgement one: tests pl
 code review for software, source coverage plus source quality for research,
 recalculation plus interpretation for analysis, rendering plus audience fit for
 documents, and for agent products tests, permission checks, behavioural evals and
-red-teaming. [`config/delivery-profiles.json`](config/delivery-profiles.json) is
-the exhaustive list. Held-out cases replayed by `scripts/check-harness` cover the
-kernel.
+red-teaming. Those five are the built-ins in
+[`config/delivery-profiles.json`](config/delivery-profiles.json); a project may add
+its own, which must declare the same contract. Held-out cases replayed by
+`scripts/check-harness` cover the kernel.
 
 Boundaries that always hold: access and credentials never grant permission; no
 branch or worktree without a human request or an approved authority envelope; no

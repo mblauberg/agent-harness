@@ -22,13 +22,17 @@ NOT_A_SKILL = {"_shared"}
 AREA_ROW = re.compile(r"^\|\s*(?P<area>[^|]+?)\s*\|\s*(?P<skills>.+?)\s*\|\s*$")
 SKILL_LINK = re.compile(r"`(?P<name>[a-z0-9][a-z0-9-]*)`\]\(skills/(?P<dir>[a-z0-9][a-z0-9-]*)/SKILL\.md\)")
 FENCE = re.compile(r"^\s*(```|~~~)")
-# Any number a reader would take as "how many skills there are". The number and the
-# noun may be separated by adjectives: the drift this gate exists to stop ("34 reusable
-# Agent Skills") survived an adjacency-only pattern precisely because "reusable" sat in
-# the gap. The gap admits lowercase words only, so punctuation ends it and unrelated
-# numbers ("Python 3.11+ ... an Agent Skills client") cannot be captured across it.
-COUNT_CLAIM = re.compile(
-    r"\b(?P<count>\d+)(?P<gap>[- ](?:[a-z]+[- ]){0,3})(?P<noun>Agent Skills|skills|skill)\b"
+# The library total, and only the total, is written between these markers. They are HTML
+# comments, so a reader never sees them; this script owns what sits between them.
+COUNT_OPEN = "<!--skills-->"
+COUNT_CLOSE = "<!--/skills-->"
+COUNT_MARK = re.compile(re.escape(COUNT_OPEN) + r"\s*\d+\s*" + re.escape(COUNT_CLOSE))
+# Any digit a reader would take as a count of skills. The gap spans arbitrary whitespace,
+# so a line wrap or a double space between the number and the noun cannot smuggle a stale
+# figure past the audit, and it admits up to three lowercase adjectives, because the drift
+# this gate exists to stop ("34 reusable Agent Skills") hid behind exactly one of those.
+UNMARKED_COUNT = re.compile(
+    r"\b\d+[-\s]+(?:[a-z]+[-\s]+){0,3}(?:Agent Skills|skills|skill)\b"
 )
 
 
@@ -128,38 +132,74 @@ def render_block(assigned: list[tuple[str, list[str]]], count: int) -> str:
     return "\n".join(lines)
 
 
-def render_counts(text: str, count: int) -> tuple[str, int]:
-    """Rewrite every stated skill count in prose, and report how many were found.
-    Fenced blocks are sample output, so they are left alone."""
-    lines = text.splitlines(keepends=True)
+def unfenced(text: str) -> str:
+    """The prose, with fenced blocks blanked out. Fences are sample output and
+    transcripts, so a number inside one is not a claim about the library."""
+    kept = []
     fenced = False
-    claims = 0
-    for index, line in enumerate(lines):
+    for line in text.splitlines(keepends=True):
         if FENCE.match(line):
             fenced = not fenced
+            kept.append("\n")
             continue
-        if fenced:
-            continue
-        claims += len(COUNT_CLAIM.findall(line))
-        lines[index] = COUNT_CLAIM.sub(
-            lambda match: f"{count}{match.group('gap')}{match.group('noun')}", line
+        kept.append("\n" if fenced else line)
+    return "".join(kept)
+
+
+def render_counts(text: str, count: int) -> tuple[str, int]:
+    """Rewrite the marked total, and report how many marks were found.
+
+    Only the text inside the COUNT markers is rewritten. A regex cannot tell a total
+    ("33 Agent Skills") from a truthful subset ("5 writing skills"): both are a number,
+    an adjective and the noun. An earlier version guessed, and would have rewritten the
+    subset to 33, so the tool built to stop false claims would have written one. The
+    mark removes the guess. Anything numeric near "skill" that is NOT marked is rejected
+    by audit_unmarked_counts below, so a new claim cannot slip in unmarked either.
+    """
+    marks = 0
+
+    def substitute(match: re.Match[str]) -> str:
+        nonlocal marks
+        marks += 1
+        return f"{COUNT_OPEN}{count}{COUNT_CLOSE}"
+
+    return COUNT_MARK.sub(substitute, text), marks
+
+
+def audit_unmarked_counts(text: str) -> None:
+    """Refuse any skill count the generator does not own.
+
+    This is the half that makes the mark trustworthy. Without it, deleting the mark,
+    or adding a second unmarked count elsewhere, would leave the gate with nothing to
+    compare and it would pass by saying nothing: the original failure, restored.
+    """
+    prose = unfenced(COUNT_MARK.sub("", text))
+    stray = [match.group(0).strip() for match in UNMARKED_COUNT.finditer(prose)]
+    if stray:
+        listed = ", ".join(repr(item) for item in stray)
+        raise CatalogueError(
+            f"unmanaged skill count(s) in README: {listed}. "
+            f"The total must be written {COUNT_OPEN}33{COUNT_CLOSE} so this script owns it. "
+            "If the number is not the library total, phrase it without a digit."
         )
-    return "".join(lines), claims
 
 
 def render(text: str) -> tuple[str, int, int]:
     skills = installed_skills()
     head, block, tail = split_readme(text)
     assigned = assign(skills, parse_areas(block))
-    rendered_head, head_claims = render_counts(head, len(skills))
-    rendered_tail, tail_claims = render_counts(tail, len(skills))
-    # Fail closed. A README that states no count at all cannot drift, but it also
-    # cannot be checked: silence would make this gate pass by saying nothing, which
-    # is the failure mode it exists to prevent.
-    if head_claims + tail_claims == 0:
+    # Reject any count this script does not own, before rewriting the ones it does.
+    audit_unmarked_counts(head)
+    audit_unmarked_counts(tail)
+    rendered_head, head_marks = render_counts(head, len(skills))
+    rendered_tail, tail_marks = render_counts(tail, len(skills))
+    # Fail closed. A README that states no count cannot drift, but it cannot be checked
+    # either, and silence passing for correctness is the failure this gate exists to
+    # stop: the original bug was a claim nothing owned.
+    if head_marks + tail_marks == 0:
         raise CatalogueError(
-            "README states no skill count in prose, so the headline cannot be verified. "
-            "State the count (for example '33 Agent Skills') outside a fenced block."
+            "README states no skill count, so the headline cannot be verified. "
+            f"Write the total as {COUNT_OPEN}{len(skills)}{COUNT_CLOSE} in the prose."
         )
     rendered = rendered_head + render_block(assigned, len(skills)) + rendered_tail
     return rendered, len(skills), sum(1 for _, names in assigned if names)

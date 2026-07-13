@@ -242,13 +242,16 @@ def test_readme_headline_skill_count_matches_the_skills_on_disk(tmp_path):
 @pytest.mark.parametrize(
     ("name", "mutate"),
     (
-        # The historical defect, verbatim. An adjacency-only pattern misses it because
-        # "reusable" sits between the number and the noun, so this case is mandatory.
-        ("the original 34-vs-33 wording", lambda text: text.replace("33 Agent Skills", "34 reusable Agent Skills")),
-        ("a plain miscount", lambda text: text.replace("33 Agent Skills", "32 Agent Skills")),
+        # The historical defect, verbatim: an unmanaged count beside the noun.
+        ("the original 34-vs-33 wording", lambda text: text.replace("<!--skills-->33<!--/skills--> Agent Skills", "34 reusable Agent Skills")),
+        ("a plain miscount", lambda text: text.replace("<!--skills-->33<!--/skills--> Agent Skills", "32 Agent Skills")),
+        # Whitespace must not smuggle a stale figure past the audit. Both of these render
+        # in Markdown as the same false headline as the case above.
+        ("a double space before the noun", lambda text: text.replace("<!--skills-->33<!--/skills--> Agent Skills", "34  Agent Skills")),
+        ("a line wrap before the noun", lambda text: text.replace("<!--skills-->33<!--/skills--> Agent Skills", "34\nAgent Skills")),
         # Silence must not pass: a gate that only compares stated counts would go green
         # on a README that states none, which is drift by deletion.
-        ("no count stated at all", lambda text: text.replace("33 Agent Skills", "Agent Skills").replace("33-skill", "multi-skill").replace("All 33 skills", "All skills")),
+        ("no count stated at all", lambda text: text.replace("<!--skills-->33<!--/skills--> Agent Skills", "Agent Skills").replace("<!--skills-->33<!--/skills-->-skill", "multi-skill")),
         ("a skill listed twice", lambda text: text.replace("[`session`](skills/session/SKILL.md), ", "[`session`](skills/session/SKILL.md), [`session`](skills/session/SKILL.md), ", 1)),
         ("a skill missing from the table", lambda text: text.replace("[`caveman`](skills/caveman/SKILL.md)", "")),
         ("a skill in the table that is not on disk", lambda text: text.replace("[`caveman`](skills/caveman/SKILL.md)", "[`caveman`](skills/caveman/SKILL.md), [`ghost`](skills/ghost/SKILL.md)")),
@@ -260,6 +263,26 @@ def test_catalogue_gate_rejects_every_known_way_the_count_can_rot(name, mutate, 
     mutated = mutate(original)
     assert mutated != original, f"the {name} mutation did not change the README, so it proves nothing"
     assert _catalogue_check(mutated, tmp_path) != 0, f"the catalogue gate accepted {name}"
+
+
+def test_catalogue_gate_never_rewrites_a_number_it_does_not_own(tmp_path):
+    # The gate must not become the thing it guards against. An earlier pattern matched
+    # any digit near "skills", so it would have rewritten a truthful subset count
+    # ("5 writing skills") into the library total, writing a false claim of its own.
+    # The count is now marked, so an unowned number is refused, never silently changed.
+    readme = tmp_path / "README.md"
+    readme.write_text((ROOT / "README.md").read_text().replace(
+        "## Core workflows", "The catalogue includes 5 writing skills.\n\n## Core workflows", 1
+    ))
+    before = readme.read_text()
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "render_skill_catalogue.py"), "--readme", str(readme)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0, "an unowned skill count was accepted"
+    assert "5 writing skills" in readme.read_text(), "the generator rewrote a number it does not own"
+    assert readme.read_text() == before, "a failing run must not write"
 
 
 def test_openai_skill_sidecar_descriptions_fit_provider_contract():

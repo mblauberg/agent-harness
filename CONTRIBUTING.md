@@ -30,9 +30,11 @@ Tiers come from [`config/risk-policy.json`](config/risk-policy.json) and run
 `routine`, `substantial`, `crucial`, `terminal`. Seven factors set the tier, and a
 receipt must score every one of them: blast radius, reversibility, data
 sensitivity, migration, oracle quality, external effects and critical surface. The
-tier is the highest any single factor demands, so one regulated data set or one
-irreversible external effect lifts the whole change. The write scope names the
-paths your change may touch and the actions it must never take.
+tier is at least the highest any single factor demands, so one regulated data set
+or one irreversible external effect lifts the whole change. That is a floor, not a
+fixed value: going below it takes a recorded `risk_override` with a named human
+approver, a reason and evidence. The write scope names the paths your change may
+touch and the actions it must never take.
 
 The template also asks for an independent reviewer and model family. You are not
 expected to supply one: for `substantial` and above, a maintainer runs a reviewer
