@@ -61,6 +61,10 @@ const operatorActionOperationBundles: Readonly<Record<OperatorAction, readonly F
   git: operatorActionMutations,
   "git-authorise": operatorActionMutations,
   "git-custody-resolve": operatorActionMutations,
+  "agent-lifecycle-recovery-issue": [
+    ...operatorActionMutations,
+    FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate,
+  ],
   "external-effect": operatorActionMutations,
 });
 

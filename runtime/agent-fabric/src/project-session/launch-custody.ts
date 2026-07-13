@@ -7,7 +7,7 @@ import {
   parseLaunchResourcePlanV1,
   parseProjectSessionLaunchCurrentState,
   parseArtifactRef,
-  parseProviderActionRefV1,
+  parseLaunchProviderActionJournalRefV1,
   parseOperationResult,
   FABRIC_OPERATIONS,
   type AgentCustodyResult,
@@ -15,7 +15,7 @@ import {
   type ChairLiveHandoffIntent,
   type ProjectSessionLaunchCurrentState,
   type ProjectSessionLaunchIntent,
-  type ProviderActionRefV1,
+  type LaunchProviderActionJournalRefV1,
   type ArtifactRef,
   type Sha256Digest,
 } from "@local/agent-fabric-protocol";
@@ -4139,7 +4139,10 @@ export class LaunchCustodyService {
     });
   }
 
-  providerActionRefForCommand(operatorId: string, commandId: string): ProviderActionRefV1 {
+  launchProviderActionJournalRefForCommand(
+    operatorId: string,
+    commandId: string,
+  ): LaunchProviderActionJournalRefV1 {
     const value = row(this.#database.prepare(`
       SELECT c.project_session_id, c.custody_attempt_generation, c.coordination_run_id,
              c.provider_adapter_id, c.provider_action_id, c.provider_contract_digest,
@@ -4154,19 +4157,26 @@ export class LaunchCustodyService {
       schemaVersion: 1,
       projectSessionId: text(value, "project_session_id"),
       coordinationRunId: text(value, "coordination_run_id"),
-      providerAdapterId: text(value, "provider_adapter_id"),
-      providerActionId: text(value, "provider_action_id"),
+      actionRef: {
+        adapterId: text(value, "provider_adapter_id"),
+        actionId: text(value, "provider_action_id"),
+      },
       providerContractDigest: text(value, "provider_contract_digest"),
       custodyAttemptGeneration: integer(value, "custody_attempt_generation"),
       journalRevision: integer(value, "journal_revision"),
     };
     if (status === "prepared" || status === "dispatched" || status === "accepted") {
-      return parseProviderActionRefV1({ ...common, journalState: status, outcomeKind: null, outcomeDigest: null });
+      return parseLaunchProviderActionJournalRefV1({
+        ...common,
+        journalState: status,
+        outcomeKind: null,
+        outcomeDigest: null,
+      });
     }
     if (status === "ambiguous") {
       const result = value.result_json;
       if (typeof result !== "string") throw new Error("ambiguous launch action has no outcome");
-      return parseProviderActionRefV1({
+      return parseLaunchProviderActionJournalRefV1({
         ...common,
         journalState: "ambiguous",
         outcomeKind: "ambiguous",
@@ -4188,7 +4198,7 @@ export class LaunchCustodyService {
       } catch (error: unknown) {
         throw new Error("terminal launch outcome is invalid", { cause: error });
       }
-      return parseProviderActionRefV1({
+      return parseLaunchProviderActionJournalRefV1({
         ...common,
         journalState: "terminal",
         outcomeKind,

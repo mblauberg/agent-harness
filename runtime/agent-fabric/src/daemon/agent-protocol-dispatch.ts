@@ -8,13 +8,44 @@ import type { FabricClient } from "../core/client.js";
 import type { ProviderActionResult } from "../core/contracts.js";
 import { digest } from "../project-session/store-support.js";
 
-function publicProviderAction(action: ProviderActionResult): Omit<ProviderActionResult, "result"> & {
-  resultDigest?: `sha256:${string}`;
-} {
-  const { result, ...metadata } = action;
+function providerActionRequestIdentity(value: unknown): Readonly<{
+  adapterId: string;
+  actionId: string;
+}> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    typeof Reflect.get(value, "adapterId") !== "string" ||
+    typeof Reflect.get(value, "actionId") !== "string"
+  ) {
+    throw new TypeError("provider action request has no canonical action identity");
+  }
   return {
+    adapterId: Reflect.get(value, "adapterId") as string,
+    actionId: Reflect.get(value, "actionId") as string,
+  };
+}
+
+function publicNonReviewProviderAction(
+  action: ProviderActionResult,
+  input: Readonly<{ adapterId: string; actionId: string }>,
+  includeProviderAnswer: boolean,
+): Omit<ProviderActionResult, "actionId" | "result" | "providerAnswer"> & {
+  kind: "non-review";
+  actionRef: Readonly<{ adapterId: string; actionId: string }>;
+  resultDigest?: `sha256:${string}`;
+  providerAnswer?: string;
+} {
+  if (action.actionId !== input.actionId) {
+    throw new TypeError("provider action result belongs to another action");
+  }
+  const { actionId: _actionId, providerAnswer, result, ...metadata } = action;
+  return {
+    kind: "non-review",
+    actionRef: { adapterId: input.adapterId, actionId: input.actionId },
     ...metadata,
     ...(result === undefined ? {} : { resultDigest: digest(result) }),
+    ...(includeProviderAnswer && providerAnswer !== undefined ? { providerAnswer } : {}),
   };
 }
 
@@ -91,12 +122,39 @@ export async function dispatchAgentProtocol(
       return client.getAgentLifecycle(input as never);
     case FABRIC_OPERATIONS.reportProviderState:
       return client.reportProviderState(input as never);
-    case FABRIC_OPERATIONS.dispatchProviderAction:
-      return publicProviderAction(await client.dispatchProviderAction(input as never));
-    case FABRIC_OPERATIONS.reconcileProviderAction:
-      return publicProviderAction(await client.reconcileProviderAction(input as never));
-    case FABRIC_OPERATIONS.getProviderAction:
-      return publicProviderAction(await client.getProviderAction(input as never));
+    case FABRIC_OPERATIONS.dispatchProviderAction: {
+      const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.dispatchProviderAction];
+      if (request.certifyingReview !== null) {
+        throw new TypeError("certifying review dispatch requires the review evidence daemon owner");
+      }
+      return publicNonReviewProviderAction(
+        await client.dispatchProviderAction(request as never),
+        providerActionRequestIdentity(request),
+        request.operation === "spawn",
+      );
+    }
+    case FABRIC_OPERATIONS.reconcileProviderAction: {
+      const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.reconcileProviderAction];
+      if (request.expectedActionKind !== "non-review") {
+        throw new TypeError("certifying review reconcile requires the review evidence daemon owner");
+      }
+      return publicNonReviewProviderAction(
+        await client.reconcileProviderAction(request as never),
+        providerActionRequestIdentity(request),
+        true,
+      );
+    }
+    case FABRIC_OPERATIONS.getProviderAction: {
+      const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.getProviderAction];
+      if (request.expectedActionKind !== "non-review") {
+        throw new TypeError("certifying review read requires the review evidence daemon owner");
+      }
+      return publicNonReviewProviderAction(
+        await client.getProviderAction(request as never),
+        providerActionRequestIdentity(request),
+        true,
+      );
+    }
     case FABRIC_OPERATIONS.recordOperatorIntervention:
       return client.recordOperatorIntervention(input as never);
     case FABRIC_OPERATIONS.recordVisibilityFailure:
