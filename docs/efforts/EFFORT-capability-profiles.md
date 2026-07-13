@@ -30,8 +30,16 @@ spec-edit) leg, digest-bound to the ADRs and this map.
   P1 leads from
   [HANDOFF-2026-07-13-project-fabric-console.md](../handoffs/HANDOFF-2026-07-13-project-fabric-console.md);
   freeze Specs 01 v0.36/04 v1.31; spec-family split (≤1,000-line modules,
-  `check_spec_families.py` gate); draft and human-approve the write-profile
-  spec amendment (Specs 01/05 currently mandate read-only)
+  `check_spec_families.py` gate); draft and **council-resolve** the write-profile
+  spec amendment (Specs 01/05 currently mandate read-only; acceptance is now
+  LLM-resolved per the charter, no human stop)
+  - [x] Anchored amendment audit with a durable receipt
+    ([`docs/specs/amendment-audit-2026-07-13.md`](../specs/amendment-audit-2026-07-13.md));
+    8/9 leads substantiated (lead 4 chair-adjudicated, its plan-equality
+    sub-clause refuted), 10 missed defects found, 11 reproduced by fixtures
+  - [x] Complete repairs landed: MF04-1 (P0), MF04-2, lead 9, lead 2 FK-mismatch
+  - [ ] Structural repairs (leads 1,3,4,5,6,7,8; lead-2 evidence-carry;
+    MF04-3/4/5/6; MF01-1/3/4), freeze, spec-family split, write-profile amendment
 - [x] Lane B — foundations/build: root npm workspace + single lockfile
   (F-011; fixes `@local/agent-fabric-protocol` resolution and the red CI
   legs); compact protocol schema generation under the 5 MiB release gate;
