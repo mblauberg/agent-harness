@@ -317,9 +317,10 @@ fixtures described below.
   governing replay or fresh recovery handoff; insert, delete and crossed pairs
   are invalid.
 
-**Freeze gate:** Specs 01 v0.36 / 04 v1.31 are NOT frozen. Freeze (version-note
-+ status update) happens only after every substantiated P0–P2 above is repaired
-and the codex certifying review is green.
+**Freeze result:** Specs 01 v0.37 / 04 v1.32 are frozen design contracts. Every
+substantiated P0-P2 above is repaired; the complete spec-fixture suite and two
+independent cross-family certifying reviews are green. This freeze makes no
+runtime implementation or final human-acceptance claim.
 
 ## Baseline-contradiction parks (owner calls) — none yet
 

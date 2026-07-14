@@ -1,16 +1,20 @@
 # Agent fabric operational hardening
 
-Status: Draft v1.31 amendment under re-audit and repair; implementation and
-final human acceptance pending
-Version: 1.31
-Date: 13 July 2026
+Status: Frozen v1.32 design contract; implementation and final human acceptance
+pending
+Version: 1.32
+Date: 15 July 2026
 Risk: Crucial
 Chair: Codex
 Independent design peer: Claude Code
 
-Version 1.31 is a draft amendment pending a fresh anchored audit, repair and
-independent review
-of its externally authenticated lifecycle-receipt persistence. It owns the
+Version 1.32 freezes the independently reviewed structural repair set for
+externally authenticated lifecycle-receipt persistence, deployed-route custody
+and exact Console reads. It closes every substantiated P0-P2 in the anchored
+amendment audit, including route-scoped terminal journals and exact
+terminal/result/evidence discriminator custody, and adds no runtime
+implementation claim. Version 1.31 introduced the draft externally
+authenticated lifecycle-receipt persistence. It owns the
 daemon and persistence side of the final Console read
 surface. It adds indexed current-preparation and provider-route reads, binds
 every task/agent/evidence/activity projection to its exact project/session/run scope,

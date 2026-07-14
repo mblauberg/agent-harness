@@ -1,17 +1,20 @@
 # Shared agent fabric
 
-Status: Draft v0.36 amendment under re-audit and repair; implementation and
-final human acceptance pending
-Version: 0.36
-Date: 13 July 2026
+Status: Frozen v0.37 design contract; implementation and final human acceptance
+pending
+Version: 0.37
+Date: 15 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.36 is a draft amendment pending a fresh anchored audit, repair and
-independent review
-of its externally authenticated lifecycle-receipt design. It completes the
+Version 0.37 freezes the independently reviewed structural repair set for the
+externally authenticated lifecycle-receipt, deployed-route and Console-read
+contracts. It closes every substantiated P0-P2 in the anchored amendment audit,
+including exact terminal/result/evidence discriminator custody, and adds no
+runtime implementation claim. Version 0.36 introduced the draft externally
+authenticated lifecycle-receipt design. It completes the
 Console read surface without adding authority. It
 adds an exact current-preparation locator, pair-keyed provider-route read and
 watermark-stable route list, and makes task, agent and evidence operator rows
