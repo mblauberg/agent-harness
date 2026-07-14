@@ -126,7 +126,7 @@ const baseCodec = objectCodec({
     }),
   ]),
   expiresAt: timestamp,
-  budget: recordOf(integer(), { maximum: 128, keyCodec: budgetUnitKey }),
+  budget: recordOf(integer({ maximum: Number.MAX_SAFE_INTEGER }), { maximum: 128, keyCodec: budgetUnitKey }),
 }, {}, {
   example: {
     schemaVersion: 2,

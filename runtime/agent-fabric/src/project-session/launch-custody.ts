@@ -29,6 +29,7 @@ import {
   parseChairLaunchProviderResult,
   type ChairLaunchProviderResult,
 } from "../adapters/providers/types.js";
+import { readStoredAuthority } from "../authority/stored-authority.js";
 import { ProjectFabricCoreError, type AuthenticatedOperatorContext } from "./contracts.js";
 import { supersedeFinalAcceptanceGates } from "./acceptance-cycle.js";
 import { retireProjectSessionBridges } from "./bridge-retirement.js";
@@ -3306,16 +3307,13 @@ export class LaunchCustodyService {
       SELECT authority_id FROM agents WHERE run_id=? AND agent_id=?
     `).get(input.runId, input.actorAgentId), "agent custody actor");
     const authority = row(this.#database.prepare(`
-      SELECT parent_authority_id, authority_json FROM authorities
+      SELECT parent_authority_id, authority_json, authority_hash FROM authorities
        WHERE run_id=? AND authority_id=?
     `).get(input.runId, input.authorityId), "agent custody authority");
     if (authority.parent_authority_id !== actor.authority_id) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "actor cannot provision this agent authority");
     }
-    const authorityValue = parseAuthorityEnvelopeV2(
-      JSON.parse(text(authority, "authority_json")) as unknown,
-      "agent custody authority",
-    );
+    const authorityValue = readStoredAuthority(authority, "agent custody authority");
     const expiresAt = Date.parse(authorityValue.expiresAt);
     if (!Number.isFinite(expiresAt) || expiresAt <= this.#clock()) {
       throw new ProjectFabricCoreError("CAPABILITY_EXPIRED", "agent custody authority is expired");

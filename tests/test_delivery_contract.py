@@ -160,6 +160,47 @@ def test_delivery_authority_budget_accepts_canonical_128_key_boundary():
     assert len(mapped["budget"]) == 128
 
 
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda authority: authority.update(workspace_roots=[f"root-{index}" for index in range(65)]), "workspace_roots"),
+        (lambda authority: authority.update(allowed_source_paths=[f"src-{index}" for index in range(257)]), "allowed_source_paths"),
+        (lambda authority: authority.update(allowed_artifact_paths=[f"artifact-{index}" for index in range(257)]), "allowed_artifact_paths"),
+        (lambda authority: authority.update(denied_paths=[f"denied-{index}" for index in range(257)]), "denied_paths"),
+        (lambda authority: authority.update(prohibited_actions=[f"action-{index}" for index in range(257)]), "prohibited_actions"),
+        (lambda authority: authority.update(secret_refs=[f"secret-{index}" for index in range(257)]), "secret_refs"),
+        (lambda authority: authority.update(deployment_targets=[f"target-{index}" for index in range(257)]), "deployment_targets"),
+        (lambda authority: authority.update(irreversible_action_ids=[f"action-{index}" for index in range(257)]), "irreversible_action_ids"),
+        (lambda authority: authority["network"].update(allowed_hosts=[f"host-{index}.test" for index in range(257)]), "allowed_hosts"),
+        (lambda authority: authority.update(allowed_source_paths=["input\0escape"]), "allowed_source_paths"),
+        (lambda authority: authority.update(allowed_source_paths=["x" * 4097]), "allowed_source_paths"),
+        (lambda authority: authority.update(expires_at="2026-07-20T00:00Z"), "expires_at"),
+        (lambda authority: authority.update(expires_at="2026-02-30T00:00:00Z"), "expires_at"),
+        (lambda authority: authority.update(workspace_roots=["workspace"], allowed_source_paths=["outside"]), "allowed_source_paths"),
+        (
+            lambda authority: authority.update(
+                workspace_roots=["workspace"],
+                allowed_source_paths=["workspace/input"],
+                allowed_artifact_paths=["outside"],
+            ),
+            "allowed_artifact_paths",
+        ),
+    ],
+)
+def test_delivery_authority_mapper_rejects_the_canonical_codec_negative_boundaries(mutate, message):
+    module = load(AUTHORITY_MAPPER_PATH, f"authority_mapping_parity_{message}")
+    delivery = json.loads((AUTHORITY_FIXTURE_ROOT / "delivery-authority.json").read_text())
+    mutate(delivery)
+    valid_operations = {*delivery["allowed_fabric_operations"], *delivery["denied_fabric_operations"]}
+
+    with pytest.raises(module.AuthorityMappingError, match=message):
+        module.map_delivery_authority(
+            delivery,
+            valid_operations=valid_operations,
+            valid_cost_pattern=COST_PATTERN,
+        )
+
+
 def test_complete_delivery_delegation_inherits_approval_and_must_narrow_every_dimension():
     module = load(AUTHORITY_MAPPER_PATH, "authority_mapping_delegation")
     delivery = json.loads((AUTHORITY_FIXTURE_ROOT / "delivery-authority.json").read_text())

@@ -16,6 +16,9 @@ class AuthorityMappingError(ValueError):
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _HOST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$")
+_RFC3339 = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$"
+)
 _PROVIDER_TOKEN_BUDGET = re.compile(
     r"^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
 )
@@ -30,6 +33,8 @@ _GENERIC_BUDGET_UNITS = {
 }
 _MAX_SAFE_INTEGER = 2**53 - 1
 _MAX_BUDGET_UNITS = 128
+_MAX_ARRAY_ITEMS = 256
+_MAX_PATH_BYTES = 4096
 
 _SCOPE_FIELDS = {
     "schema_version",
@@ -84,9 +89,11 @@ def _token(value: Any, field: str) -> str:
 def _path(value: Any, field: str) -> str:
     _fail(not isinstance(value, str) or not value, f"{field} must be a relative path")
     _fail(
-        value.startswith("/")
+        len(value.encode("utf-8")) > _MAX_PATH_BYTES
+        or value.startswith("/")
         or re.match(r"^[A-Za-z]:", value) is not None
         or "\\" in value
+        or "\0" in value
         or any(character in value for character in "*?[]{}"),
         f"{field} must be a canonical relative path",
     )
@@ -103,10 +110,12 @@ def _strings(
     item_parser,
     *,
     minimum: int = 0,
+    maximum: int = _MAX_ARRAY_ITEMS,
 ) -> list[str]:
     _fail(not isinstance(value, list), f"{field} must be a list")
     parsed = [item_parser(item, f"{field}[{index}]") for index, item in enumerate(value)]
     _fail(len(parsed) < minimum, f"{field} must contain at least {minimum} item(s)")
+    _fail(len(parsed) > maximum, f"{field} must contain at most {maximum} item(s)")
     _fail(len(set(parsed)) != len(parsed), f"{field} must contain unique values")
     return sorted(parsed)
 
@@ -118,12 +127,19 @@ def _operations(value: Any, field: str, valid_operations: Collection[str]) -> li
     return operations
 
 
+def _timestamp_value(value: str) -> datetime:
+    return datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+
+
 def _timestamp(value: Any, field: str) -> str:
-    _fail(not isinstance(value, str) or not value.endswith("Z"), f"{field} must be an ISO UTC timestamp")
+    _fail(
+        not isinstance(value, str) or _RFC3339.fullmatch(value) is None,
+        f"{field} must be a strict RFC3339 timestamp",
+    )
     try:
-        datetime.fromisoformat(value[:-1] + "+00:00")
+        _timestamp_value(value)
     except ValueError as exc:
-        raise AuthorityMappingError(f"{field} must be an ISO UTC timestamp") from exc
+        raise AuthorityMappingError(f"{field} must be a strict RFC3339 timestamp") from exc
     return value
 
 
@@ -169,9 +185,20 @@ def _map_scope(
     field: str,
 ) -> dict[str, Any]:
     _fail(scope.get("schema_version") != 2, f"{field}.schema_version must be 2")
-    workspace_roots = _strings(scope.get("workspace_roots"), f"{field}.workspace_roots", _path, minimum=1)
+    workspace_roots = _strings(
+        scope.get("workspace_roots"), f"{field}.workspace_roots", _path,
+        minimum=1, maximum=64,
+    )
     source_paths = _strings(scope.get("allowed_source_paths"), f"{field}.allowed_source_paths", _path)
     artifact_paths = _strings(scope.get("allowed_artifact_paths"), f"{field}.allowed_artifact_paths", _path)
+    _fail(
+        not _allowed_paths_contained(source_paths, workspace_roots),
+        f"{field}.allowed_source_paths must be contained by {field}.workspace_roots",
+    )
+    _fail(
+        not _allowed_paths_contained(artifact_paths, workspace_roots),
+        f"{field}.allowed_artifact_paths must be contained by {field}.workspace_roots",
+    )
     actions = _operations(scope.get("allowed_fabric_operations"), f"{field}.allowed_fabric_operations", valid_operations)
     denied_paths = _strings(scope.get("denied_paths"), f"{field}.denied_paths", _path)
     denied_actions = _operations(scope.get("denied_fabric_operations"), f"{field}.denied_fabric_operations", valid_operations)
@@ -352,7 +379,7 @@ def authority_contained(child: dict[str, Any], parent: dict[str, Any]) -> bool:
         and _union_contained(child["deployment"], parent["deployment"], "allowed", "targets")
         and _union_contained(child["irreversibleActions"], parent["irreversibleActions"], "allowed", "actionIds")
         and network_ok
-        and datetime.fromisoformat(child["expiresAt"][:-1] + "+00:00") <= datetime.fromisoformat(parent["expiresAt"][:-1] + "+00:00")
+        and _timestamp_value(child["expiresAt"]) <= _timestamp_value(parent["expiresAt"])
         and set(child["budget"]) <= set(parent["budget"])
         and all(child["budget"][key] <= parent["budget"][key] for key in child["budget"])
     )

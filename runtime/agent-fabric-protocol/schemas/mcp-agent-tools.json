@@ -1237,7 +1237,8 @@
                 },
                 "additionalProperties": {
                   "type": "integer",
-                  "minimum": 0
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 }
               }
             }
@@ -1456,7 +1457,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:ea58efecc8c2f351a5dbbcd88f252eecadde27e69511ac377c934d3e0a306679",
+      "inputCodecDigest": "sha256:9f78258bcfa3ad5f9de05e29454adf6a204dda233bb5c24a95208960682751e3",
       "outputCodecDigest": "sha256:ec3940ecbfa767c13e69c430da0e31ef5ba2f3ad21d731b5d0e1af01e2a7e063"
     },
     {
@@ -28126,7 +28127,8 @@
             },
             "additionalProperties": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "generated_29": {
@@ -28519,7 +28521,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:6433dd5fa72f175363502cd0888e199b7b189633f044772a00e37b22613fde1a",
+      "inputCodecDigest": "sha256:8c40298a7967858296a13024ead1e30586063a1f54894849e222a710980503fb",
       "outputCodecDigest": "sha256:49d61e0c6cc64daa7f79c3bbec4c8d008953ce85acd83d765cdd121029772674"
     },
     {
@@ -30904,23 +30906,23 @@
             ],
             "properties": {
               "commandId": {
-                "$ref": "#/$defs/generated_31"
+                "$ref": "#/$defs/generated_32"
               },
               "agentId": {
-                "$ref": "#/$defs/generated_31"
+                "$ref": "#/$defs/generated_32"
               },
               "projectSessionId": {
-                "$ref": "#/$defs/generated_31"
+                "$ref": "#/$defs/generated_32"
               },
               "coordinationRunId": {
-                "$ref": "#/$defs/generated_31"
+                "$ref": "#/$defs/generated_32"
               },
               "principalGeneration": {
                 "type": "integer",
                 "minimum": 1
               },
               "chairLeaseId": {
-                "$ref": "#/$defs/generated_31"
+                "$ref": "#/$defs/generated_32"
               },
               "chairLeaseGeneration": {
                 "type": "integer",
@@ -30945,10 +30947,10 @@
             "minimum": 1
           },
           "workstreamId": {
-            "$ref": "#/$defs/generated_31"
+            "$ref": "#/$defs/generated_32"
           },
           "deliveryRunId": {
-            "$ref": "#/$defs/generated_31"
+            "$ref": "#/$defs/generated_32"
           },
           "launchPacketRef": {
             "type": "object",
@@ -30959,7 +30961,7 @@
             ],
             "properties": {
               "path": {
-                "$ref": "#/$defs/generated_34"
+                "$ref": "#/$defs/generated_35"
               },
               "digest": {
                 "type": "string",
@@ -30980,7 +30982,7 @@
             ],
             "properties": {
               "teamId": {
-                "$ref": "#/$defs/generated_31"
+                "$ref": "#/$defs/generated_32"
               },
               "leader": {
                 "$ref": "#/$defs/generated_17"
@@ -30995,7 +30997,7 @@
                 ],
                 "properties": {
                   "taskId": {
-                    "$ref": "#/$defs/generated_31"
+                    "$ref": "#/$defs/generated_32"
                   },
                   "objective": {
                     "type": "string",
@@ -31032,12 +31034,12 @@
                   ],
                   "properties": {
                     "groupId": {
-                      "$ref": "#/$defs/generated_31"
+                      "$ref": "#/$defs/generated_32"
                     },
                     "memberAgentIds": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/$defs/generated_31"
+                        "$ref": "#/$defs/generated_32"
                       },
                       "minItems": 2,
                       "maxItems": 64,
@@ -31049,7 +31051,7 @@
                 "maxItems": 64
               },
               "reservedBudget": {
-                "$ref": "#/$defs/generated_28"
+                "$ref": "#/$defs/generated_29"
               }
             }
           },
@@ -31064,13 +31066,13 @@
             ],
             "properties": {
               "runScopeId": {
-                "$ref": "#/$defs/generated_31"
+                "$ref": "#/$defs/generated_32"
               },
               "teamScopeId": {
-                "$ref": "#/$defs/generated_31"
+                "$ref": "#/$defs/generated_32"
               },
               "teamLimits": {
-                "$ref": "#/$defs/generated_28"
+                "$ref": "#/$defs/generated_29"
               },
               "agentScopes": {
                 "type": "array",
@@ -31084,13 +31086,13 @@
                   ],
                   "properties": {
                     "agentId": {
-                      "$ref": "#/$defs/generated_31"
+                      "$ref": "#/$defs/generated_32"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_31"
+                      "$ref": "#/$defs/generated_32"
                     },
                     "limits": {
-                      "$ref": "#/$defs/generated_28"
+                      "$ref": "#/$defs/generated_29"
                     }
                   }
                 },
@@ -31107,7 +31109,7 @@
                 "const": "."
               },
               {
-                "$ref": "#/$defs/generated_34"
+                "$ref": "#/$defs/generated_35"
               }
             ]
           },
@@ -31167,10 +31169,10 @@
           "generated_7": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_30"
+                "$ref": "#/$defs/generated_31"
               },
               {
-                "$ref": "#/$defs/generated_35"
+                "$ref": "#/$defs/generated_36"
               },
               {
                 "type": "string",
@@ -31199,7 +31201,7 @@
           "generated_10": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_29"
+              "$ref": "#/$defs/generated_30"
             },
             "minItems": 0,
             "maxItems": 256,
@@ -31222,7 +31224,7 @@
           "generated_12": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_32"
+              "$ref": "#/$defs/generated_33"
             },
             "minItems": 1,
             "maxItems": 256,
@@ -31231,7 +31233,7 @@
           "generated_13": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_33"
+              "$ref": "#/$defs/generated_34"
             },
             "minItems": 0,
             "maxItems": 256,
@@ -31240,7 +31242,7 @@
           "generated_14": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_33"
+              "$ref": "#/$defs/generated_34"
             },
             "minItems": 1,
             "maxItems": 256,
@@ -31283,7 +31285,7 @@
             ],
             "properties": {
               "agentId": {
-                "$ref": "#/$defs/generated_31"
+                "$ref": "#/$defs/generated_32"
               },
               "authority": {
                 "$ref": "#/$defs/generated_25"
@@ -31344,10 +31346,10 @@
             ],
             "properties": {
               "approvedBy": {
-                "$ref": "#/$defs/generated_33"
+                "$ref": "#/$defs/generated_34"
               },
               "evidenceId": {
-                "$ref": "#/$defs/generated_33"
+                "$ref": "#/$defs/generated_34"
               },
               "evidenceDigest": {
                 "type": "string",
@@ -31505,10 +31507,23 @@
             },
             "additionalProperties": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "generated_29": {
+            "type": "object",
+            "minProperties": 0,
+            "maxProperties": 128,
+            "propertyNames": {
+              "$ref": "#/$defs/generated_7"
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "generated_30": {
             "type": "string",
             "enum": [
               "fabric.v1.authority.delegate",
@@ -31627,7 +31642,7 @@
               "fabric.v1.topology-wave.list"
             ]
           },
-          "generated_30": {
+          "generated_31": {
             "type": "string",
             "enum": [
               "turns",
@@ -31639,7 +31654,7 @@
               "wall_clock_milliseconds"
             ]
           },
-          "generated_31": {
+          "generated_32": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
@@ -31647,7 +31662,7 @@
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           },
-          "generated_32": {
+          "generated_33": {
             "type": "string",
             "minLength": 1,
             "maxLength": 253,
@@ -31655,7 +31670,7 @@
             "x-maxUtf8Bytes": 253,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$"
           },
-          "generated_33": {
+          "generated_34": {
             "type": "string",
             "minLength": 1,
             "maxLength": 256,
@@ -31663,13 +31678,13 @@
             "x-maxUtf8Bytes": 256,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
           },
-          "generated_34": {
+          "generated_35": {
             "type": "string",
             "minLength": 1,
             "maxLength": 4096,
             "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
           },
-          "generated_35": {
+          "generated_36": {
             "type": "string",
             "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
           }
@@ -31753,7 +31768,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:173ae1becb0baa452377597483d7f46f84ad82bd3d9b1212961940780fe3867c",
+      "inputCodecDigest": "sha256:55705668d424502f6e01c05a3352a7d0bd47c524c08dcdcba1f450ec8e3c6843",
       "outputCodecDigest": "sha256:28ebc4507c2708d941fe3fd28d08acd56e5b50788be87fc484bb9bbfd63ec60a"
     },
     {

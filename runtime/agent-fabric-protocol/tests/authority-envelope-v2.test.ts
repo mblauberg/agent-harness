@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -53,6 +54,18 @@ describe("AuthorityEnvelopeV2", () => {
     expect(AUTHORITY_ENVELOPE_V2_CODEC.parse(input, "authority")).toEqual(input);
   });
 
+  it("keeps the generated budget schema at the codec safe-integer boundary", () => {
+    const validate = new Ajv2020({ strict: false, allErrors: true })
+      .compile(AUTHORITY_ENVELOPE_V2_CODEC.schema);
+    const maximum = authority({ budget: { turns: Number.MAX_SAFE_INTEGER } });
+    const overflow = authority({ budget: { turns: Number.MAX_SAFE_INTEGER + 1 } });
+
+    expect(validate(maximum)).toBe(true);
+    expect(() => AUTHORITY_ENVELOPE_V2_CODEC.parse(maximum, "authority")).not.toThrow();
+    expect(validate(overflow)).toBe(false);
+    expect(() => AUTHORITY_ENVELOPE_V2_CODEC.parse(overflow, "authority")).toThrow(/safe integer|at most/u);
+  });
+
   it("rejects unversioned, incomplete, and extended inputs", () => {
     const valid = authority() as unknown as Record<string, unknown>;
     for (const field of [
@@ -86,6 +99,46 @@ describe("AuthorityEnvelopeV2", () => {
     for (const candidate of invalid) {
       expect(() => AUTHORITY_ENVELOPE_V2_CODEC.parse(candidate, "authority")).toThrow();
     }
+  });
+
+  it.each([
+    ["workspaceRoots maximum", authority({
+      workspaceRoots: Array.from({ length: 65 }, (_, index) => `root-${String(index)}`),
+      sourcePaths: [],
+      artifactPaths: [],
+    })],
+    ["sourcePaths maximum", authority({ sourcePaths: Array.from({ length: 257 }, (_, index) => `src-${String(index)}`) })],
+    ["artifactPaths maximum", authority({ artifactPaths: Array.from({ length: 257 }, (_, index) => `artifact-${String(index)}`) })],
+    ["deniedPaths maximum", authority({ deniedPaths: Array.from({ length: 257 }, (_, index) => `denied-${String(index)}`) })],
+    ["prohibitedActions maximum", authority({ prohibitedActions: Array.from({ length: 257 }, (_, index) => `action-${String(index)}`) })],
+    ["secret reference maximum", authority({
+      secrets: {
+        access: "use-without-disclosure",
+        references: Array.from({ length: 257 }, (_, index) => `secret-${String(index)}`),
+      },
+    })],
+    ["deployment target maximum", authority({
+      deployment: { allowed: true, targets: Array.from({ length: 257 }, (_, index) => `target-${String(index)}`) },
+    })],
+    ["irreversible action maximum", authority({
+      irreversibleActions: {
+        allowed: true,
+        actionIds: Array.from({ length: 257 }, (_, index) => `action-${String(index)}`),
+      },
+    })],
+    ["network host maximum", authority({
+      network: {
+        toolEgress: "allowlist",
+        allowedHosts: Array.from({ length: 257 }, (_, index) => `host-${String(index)}.test`),
+      },
+    })],
+    ["NUL path", authority({ sourcePaths: ["input\0escape"] })],
+    ["path byte maximum", authority({ sourcePaths: ["x".repeat(4_097)] })],
+    ["timestamp requires seconds", authority({ expiresAt: "2026-07-20T00:00Z" })],
+    ["timestamp calendar validity", authority({ expiresAt: "2026-02-30T00:00:00Z" })],
+  ] satisfies ReadonlyArray<readonly [string, AuthorityEnvelopeV2]>)
+  ("rejects the cross-language mapper negative boundary: %s", (_label, candidate) => {
+    expect(() => AUTHORITY_ENVELOPE_V2_CODEC.parse(candidate, "authority")).toThrow();
   });
 
   it.each([

@@ -12,6 +12,7 @@ import { resolve } from "node:path";
 
 import type Database from "better-sqlite3";
 
+import { readStoredAuthority } from "../authority/stored-authority.js";
 import { FabricError } from "../errors.js";
 import { pathWithin, resolveRunArtifactRoot } from "./run-root.js";
 
@@ -316,24 +317,22 @@ export class ArtifactRegistry {
 
   #assertAgentPathAuthority(runId: string, agentId: string, source: string): void {
     const row = this.#database.prepare(`
-      SELECT authority.authority_json, run.workspace_root
+      SELECT authority.authority_json, authority.authority_hash, run.workspace_root
         FROM agents agent JOIN authorities authority ON authority.authority_id=agent.authority_id
         JOIN runs run ON run.run_id=agent.run_id
        WHERE agent.run_id=? AND agent.agent_id=?
-    `).get(runId, agentId) as { authority_json?: unknown } | undefined;
-    if (typeof row?.authority_json !== "string" || typeof (row as Record<string, unknown>).workspace_root !== "string") {
+    `).get(runId, agentId) as { authority_json?: unknown; authority_hash?: unknown; workspace_root?: unknown } | undefined;
+    if (row === undefined || typeof row.workspace_root !== "string") {
       throw new FabricError("CAPABILITY_FORBIDDEN", "agent artifact authority is unavailable");
     }
-    let paths: unknown;
+    let paths: readonly string[];
     try {
-      paths = Reflect.get(JSON.parse(row.authority_json) as object, "artifactPaths");
+      paths = readStoredAuthority(row, "agent artifact authority").artifactPaths;
     } catch (error: unknown) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "agent artifact authority is invalid", { cause: error });
     }
-    const workspaceRoot = (row as Record<string, unknown>).workspace_root as string;
-    if (!Array.isArray(paths) || !paths.some((path) =>
-      typeof path === "string" && pathWithin(resolve(workspaceRoot, path), source)
-    )) {
+    const workspaceRoot = row.workspace_root;
+    if (!paths.some((path) => pathWithin(resolve(workspaceRoot, path), source))) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "artifact source is outside the agent path authority");
     }
   }

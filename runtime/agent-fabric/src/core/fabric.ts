@@ -31,6 +31,7 @@ import {
   type AgentProvisionProviderResult,
 } from "../adapters/providers/types.js";
 import { compileProviderPayload } from "../authority/authority-compiler.js";
+import { readStoredAuthority } from "../authority/stored-authority.js";
 
 import type {
   AuthorityInput,
@@ -564,13 +565,8 @@ function isNumberRecord(value: unknown): value is Record<string, number> {
   return isRow(value) && Object.values(value).every((item) => typeof item === "number");
 }
 
-function parseAuthority(serialised: string): StoredAuthority {
-  const value: unknown = JSON.parse(serialised);
-  try {
-    return parseAuthorityEnvelopeV2(value, "stored authority");
-  } catch (cause: unknown) {
-    throw new Error("stored authority is invalid", { cause });
-  }
+function parseAuthority(record: Row): StoredAuthority {
+  return readStoredAuthority(record);
 }
 
 function authorityContained(child: StoredAuthority, parent: StoredAuthority): boolean {
@@ -2281,7 +2277,7 @@ export class Fabric {
         .sort((left, right) => left.seat.localeCompare(right.seat))
         .map((binding) => {
           const agent = rowOrNotFound(this.#database.prepare(`
-            SELECT agent.lifecycle, authority.authority_json,
+            SELECT agent.lifecycle, authority.authority_json, authority.authority_hash,
                    MAX(capability.principal_generation) AS principal_generation
               FROM agents agent
               JOIN authorities authority ON authority.authority_id=agent.authority_id
@@ -2289,7 +2285,7 @@ export class Fabric {
                 ON capability.run_id=agent.run_id AND capability.agent_id=agent.agent_id
              WHERE agent.run_id=? AND agent.agent_id=?
                AND capability.revoked_at IS NULL AND capability.expires_at>?
-             GROUP BY agent.lifecycle, authority.authority_json
+             GROUP BY agent.lifecycle, authority.authority_json, authority.authority_hash
           `).get(input.runId, binding.agentId, this.#clock()), `current MCP agent ${binding.agentId}`);
           if (agent.lifecycle === "archived" || agent.lifecycle === "suspended") {
             throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", `MCP agent ${binding.agentId} is not active`);
@@ -2298,7 +2294,7 @@ export class Fabric {
           if (principalGeneration !== binding.expectedPrincipalGeneration) {
             throw new FabricError("STALE_PRINCIPAL_GENERATION", `MCP agent ${binding.agentId} principal generation changed`);
           }
-          const authority = parseAuthority(stringField(agent, "authority_json"));
+          const authority = parseAuthority(agent);
           if (Date.parse(authority.expiresAt) < expiresAt) {
             throw new FabricError("AUTHORITY_WIDENING", `MCP credential for ${binding.agentId} outlives its authority`);
           }
@@ -2439,7 +2435,7 @@ export class Fabric {
   verifyProtocolCredential(token: string): VerifiedProtocolCredential {
     const authenticated = this.#database.prepare(`
       SELECT c.run_id, c.agent_id, c.principal_generation, c.expires_at, c.revoked_at,
-             a.authority_json, r.project_session_id,
+             a.authority_json, a.authority_hash, r.project_session_id,
              member.generation AS mcp_seat_generation,
              active.generation AS active_mcp_seat_generation
         FROM capabilities c
@@ -2467,7 +2463,7 @@ export class Fabric {
       throw new FabricError("AUTHENTICATION_FAILED", "protocol credential is expired or revoked");
     }
     assertActiveMcpSeatGeneration(authenticated);
-    const authority = parseAuthority(stringField(authenticated, "authority_json"));
+    const authority = parseAuthority(authenticated);
     const denied = new Set(authority.deniedActions);
     return {
       principal: {
@@ -3085,7 +3081,7 @@ export class Fabric {
   assertCapability(runId: string, agentId: string, tokenHash: string, requiredOperation: FabricOperation, allowSuspended = false): void {
     const row = this.#database
       .prepare(`
-        SELECT c.expires_at,c.revoked_at,a.authority_json,g.lifecycle,
+        SELECT c.expires_at,c.revoked_at,a.authority_json,a.authority_hash,g.lifecycle,
                member.generation AS mcp_seat_generation,
                active.generation AS active_mcp_seat_generation
           FROM capabilities c
@@ -3104,7 +3100,7 @@ export class Fabric {
       throw new FabricError("AUTHENTICATION_FAILED", "capability is expired, revoked or unknown");
     }
     assertActiveMcpSeatGeneration(row);
-    const authority = parseAuthority(stringField(row, "authority_json"));
+    const authority = parseAuthority(row);
     if (authority.deniedActions.includes(requiredOperation) || !authority.actions.includes(requiredOperation)) {
       throw new FabricError("CAPABILITY_FORBIDDEN", `authority does not permit ${requiredOperation}`);
     }
@@ -3177,7 +3173,7 @@ export class Fabric {
       assertRunAcceptingWork(this.#database, runId);
       const parentRow = rowOrNotFound(
         this.#database
-          .prepare("SELECT authority_json FROM authorities WHERE authority_id = ? AND run_id = ?")
+          .prepare("SELECT authority_json, authority_hash FROM authorities WHERE authority_id = ? AND run_id = ?")
           .get(input.parentAuthorityId, runId),
         "parent authority",
       );
@@ -3188,7 +3184,7 @@ export class Fabric {
       if (stringField(actorRow, "authority_id") !== input.parentAuthorityId) {
         throw new FabricError("CAPABILITY_FORBIDDEN", "actor does not hold the parent authority");
       }
-      const parent = parseAuthority(stringField(parentRow, "authority_json"));
+      const parent = parseAuthority(parentRow);
       const child = normaliseAuthority(input.authority, this.#workspaceRootForRun(runId));
       if (!authorityContained(child, parent)) {
         throw new FabricError("AUTHORITY_WIDENING", "child authority exceeds its parent");
@@ -3235,7 +3231,7 @@ export class Fabric {
     assertRunAcceptingWork(this.#database, runId);
     const authorityRow = rowOrNotFound(
       this.#database
-        .prepare("SELECT authority_json, parent_authority_id FROM authorities WHERE authority_id = ? AND run_id = ?")
+        .prepare("SELECT authority_json, authority_hash, parent_authority_id FROM authorities WHERE authority_id = ? AND run_id = ?")
         .get(input.authorityId, runId),
       "authority",
     );
@@ -3246,7 +3242,7 @@ export class Fabric {
     if (authorityRow.parent_authority_id !== stringField(actorRow, "authority_id")) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "actor cannot register an agent for this authority");
     }
-    const authority = parseAuthority(stringField(authorityRow, "authority_json"));
+    const authority = parseAuthority(authorityRow);
     const existing = this.#database.prepare(`
       SELECT g.parent_agent_id, g.authority_id, g.provider_session_ref, c.principal_generation, c.revoked_at, b.adapter_id
         FROM agents g LEFT JOIN capabilities c ON c.run_id = g.run_id AND c.agent_id = g.agent_id
@@ -4337,7 +4333,7 @@ export class Fabric {
       () => {
         this.#assertChair(runId, actorAgentId);
         const current = rowOrNotFound(this.#database.prepare(`
-          SELECT c.principal_generation, a.authority_json
+          SELECT c.principal_generation, a.authority_json, a.authority_hash
             FROM capabilities c JOIN agents g ON g.run_id = c.run_id AND g.agent_id = c.agent_id
             JOIN authorities a ON a.authority_id = g.authority_id
            WHERE c.run_id = ? AND c.agent_id = ? AND c.revoked_at IS NULL
@@ -4347,7 +4343,7 @@ export class Fabric {
         if (generation !== input.expectedPrincipalGeneration) throw new FabricError("STALE_PRINCIPAL_GENERATION", "principal generation changed");
         const nextGeneration = generation + 1;
         const token = capabilityToken(this.#capabilityKey, runId, input.agentId, nextGeneration);
-        const authority = parseAuthority(stringField(current, "authority_json"));
+        const authority = parseAuthority(current);
         this.#database.prepare("UPDATE capabilities SET revoked_at = ? WHERE run_id = ? AND agent_id = ? AND revoked_at IS NULL").run(this.#clock(), runId, input.agentId);
         this.#database.prepare("INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at) VALUES (?, ?, ?, ?, ?)").run(sha256(token), runId, input.agentId, nextGeneration, Date.parse(authority.expiresAt));
         this.#event(runId, "capability-rotated", actorAgentId, { agentId: input.agentId, priorGeneration: generation, principalGeneration: nextGeneration });
@@ -4367,12 +4363,12 @@ export class Fabric {
     const actor = rowOrNotFound(
       this.#database
         .prepare(
-          "SELECT a.authority_json FROM agents g JOIN authorities a ON a.authority_id = g.authority_id WHERE g.run_id = ? AND g.agent_id = ?",
+          "SELECT a.authority_json, a.authority_hash FROM agents g JOIN authorities a ON a.authority_id = g.authority_id WHERE g.run_id = ? AND g.agent_id = ?",
         )
         .get(runId, actorAgentId),
       "agent authority",
     );
-    const authority = parseAuthority(stringField(actor, "authority_json"));
+    const authority = parseAuthority(actor);
     if (
       scopes.some(
         (scope) =>
@@ -6912,10 +6908,10 @@ export class Fabric {
     validateCurrent = true,
   ): Record<string, unknown> {
     const row = rowOrNotFound(
-      this.#database.prepare("SELECT authority_json FROM authorities WHERE run_id = ? AND authority_id = ?").get(runId, authorityId),
+      this.#database.prepare("SELECT authority_json, authority_hash FROM authorities WHERE run_id = ? AND authority_id = ?").get(runId, authorityId),
       "provider authority",
     );
-    const authority = parseAuthority(stringField(row, "authority_json"));
+    const authority = parseAuthority(row);
     return compileProviderPayload({
       authority,
       workspaceRoot: () => this.#workspaceRootForRun(runId),

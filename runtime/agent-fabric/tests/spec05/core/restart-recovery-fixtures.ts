@@ -2,6 +2,8 @@ import Database from "better-sqlite3";
 
 import { applyMigrations } from "../../../src/core/migrations.ts";
 import type { AuthenticatedAgentContext } from "../../../src/project-session/contracts.ts";
+import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 
 export function openSpec05Database(filename = ":memory:"): Database.Database {
   const database = new Database(filename);
@@ -45,10 +47,20 @@ export function seedSpec05Run(database: Database.Database): void {
       'active', 1, 1, 'chair:run_01:1', 'authority-run', 'budget-run', 1, 1
     )
   `).run();
+  const authorityJson = canonicalJson({
+    ...TEST_AUTHORITY_V2_FIELDS,
+    workspaceRoots: ["."],
+    sourcePaths: ["."],
+    artifactPaths: [".agent-run/run_01"],
+    actions: [],
+    disclosure: { level: "scoped", scopes: ["local"] },
+    expiresAt: "2099-01-01T00:00:00.000Z",
+    budget: {},
+  });
   database.prepare(`
     INSERT INTO authorities(authority_id, run_id, authority_json, authority_hash, created_at)
-    VALUES ('authority_01', 'run_01', ?, 'authority-hash', 1)
-  `).run(JSON.stringify({ artifactPaths: [".agent-run/run_01"] }));
+    VALUES ('authority_01', 'run_01', ?, ?, 1)
+  `).run(authorityJson, sha256(authorityJson));
   for (const [agentId, providerRef] of [
     ["chair_01", "provider-chair"],
     ["worker_01", "provider-worker"],

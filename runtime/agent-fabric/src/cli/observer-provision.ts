@@ -2,8 +2,8 @@ import Database from "better-sqlite3";
 import { constants } from "node:fs";
 import { chmod, lstat, open, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { parseAuthorityEnvelopeV2 } from "@local/agent-fabric-protocol";
 
+import { readStoredAuthority } from "../authority/stored-authority.js";
 import { connectFabricDaemon } from "../daemon/client.js";
 import { FABRIC_OPERATIONS } from "../domain/operations.js";
 import type { AuthorityInput } from "../domain/types.js";
@@ -102,16 +102,20 @@ export async function provisionObserverCredential(input: { project: string; path
   let parentAuthority: AuthorityInput;
   try {
     const row = database.prepare(`
-      SELECT agent.authority_id, authority.authority_json
+      SELECT agent.authority_id, authority.authority_json, authority.authority_hash
         FROM agents agent
         JOIN authorities authority ON authority.run_id=agent.run_id AND authority.authority_id=agent.authority_id
        WHERE agent.run_id=? AND agent.agent_id=?
-    `).get(chair.runId, chair.agentId) as { authority_id?: unknown; authority_json?: unknown } | undefined;
-    if (typeof row?.authority_id !== "string" || typeof row.authority_json !== "string") {
+    `).get(chair.runId, chair.agentId) as {
+      authority_id?: unknown;
+      authority_json?: unknown;
+      authority_hash?: unknown;
+    } | undefined;
+    if (row === undefined || typeof row.authority_id !== "string") {
       throw new Error("chair authority is unavailable");
     }
     parentAuthorityId = row.authority_id;
-    parentAuthority = parseAuthorityEnvelopeV2(JSON.parse(row.authority_json), "chair authority");
+    parentAuthority = readStoredAuthority(row, "chair authority");
   } finally {
     database.close();
   }
