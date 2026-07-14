@@ -172,7 +172,7 @@ normative spec text and its executable fixtures only.
 ## Executable-fixture evidence (defects reproduced)
 
 Two deterministic stdlib-`sqlite3` harnesses under
-`.agent-run/CAPA-001/fixtures/` transcribe the cited DDL verbatim
+[`tests/spec_fixtures/`](../../tests/spec_fixtures/) transcribe the cited DDL verbatim
 (`PRAGMA foreign_keys=ON`) and reproduce each substantiated defect; both exit 0
 on `python3` 3.14.3:
 
@@ -187,8 +187,9 @@ on `python3` 3.14.3:
   mismatch, P0); MF04-2 ACCEPTED; MF04-3 ACCEPTED.
 
 Eleven of the substantiated defects are thus reproducible from the spec text
-alone. Lead 9 is prose (no fixture). MF04-4/5/6 and MF01-1/3/4 fixtures not yet
-built.
+alone. Lead 9 is prose (no fixture). MF01-1 and MF01-4 now have focused
+spec-structure assertions; the remaining repaired findings have the executable
+fixtures described below.
 
 ## Repair status (CAPA-001, as of commit c4eaa32)
 
@@ -204,40 +205,122 @@ built.
   added to `lifecycle_rotation_custody_revisions` so the retirement-plan FK has a
   valid parent key (was uninsertable: foreign key mismatch). Safe: `source_ref_digest`
   is already globally UNIQUE, so this adds the exact FK index without a new data
-  constraint. **Evidence-carry columns through plan → effect → result remain
-  (deeper part of lead 2).**
+  constraint. The full evidence-chain closure is recorded in the current-branch
+  Lead 2 item below.
 
-**Pending structural repair (needed before freeze; codex-certified):** these
-close only with multi-part DDL changes, not one-line additions, so they are
-deliberately not half-applied —
-- Lead 1 — new authenticated `fresh-origin` receipt subject/batch + zero-receipt
-  scope-discovery hydration rule (protocol addition).
-- Lead 2 (remaining) — evidence-carry columns (admission / transition-proof /
-  mutation-plan / finalized-terminal-evidence / retirement-evidence) bound
-  through plan → effect → result. (FK-mismatch part done above.)
-- Lead 3 — retarget the reservation FK to the same-prepare planned effect; bind
-  the materialized revision only post-apply.
-- Lead 4 — carry `transition_kind` into the apply; non-null sentinels so the
-  fresh-arm composite FK cannot be null-skipped (do NOT add plan equality).
-- Lead 5 — kind↔owner CHECK + intent→effect identity FKs + declared
-  membership/anti-extra.
-- Lead 6 — arm-specific post-state completeness trigger/marker on the apply.
-- Lead 7 — systemic head parity: restructure scope/loss/custody heads to
-  canonical pointers or non-null sentinels so the fuller FKs cannot be
-  null-vacuous; give `review_slot_heads` a real FK; publish
-  `provider_review_evidence` DDL (unifies with MF01-2).
-- Lead 8 — source single-flight (needs a derived-state column or trigger, since
-  the issues table has no state column) + reciprocal revocation/handoff guards.
-- MF04-3 (partial) — discriminator CHECK for triple nullability + adapter/kind on
-  the FK; MF04-4 (context-pressure vs rotation); MF04-5 (§9.23/§9.24 admission
-  order); MF04-6 (dispatch/observation route-admission binding).
-- MF01-1 (§32.21/§32.22 requirement IDs; new IDs start FR-077/NFR-034/AC-056);
-  MF01-3 (`adapter_capability_snapshots.source` CHECK); MF01-4 (generic-route
-  recovery owner cross-reference).
+**Complete in the current issue-17 branch:**
+- Lead 1 — every fresh-created custody now has an authenticated `fresh-origin`
+  subject/effect before apply: pure reuse/open-loss uses a one-intent
+  `fresh-origin` batch and terminal-fresh uses ordinal two of its custody batch.
+  The fresh apply now equality-binds the batch completion, receipt set and
+  verified checkpoint, while every fresh-origin effect null-safely binds its
+  exact handoff source tuple. Scope admission has one immutable pre-authority
+  outbox,
+  an immutable idempotent local resolution that requires the exact authenticated
+  zero-receipt checkpoint/head and a complete pinned namespace checkpoint whose
+  cardinality, contiguous ordinals, ordered-set digest, attestation and exact
+  zero/null members are verified before immutable resolution finalization.
+  Hydration compares every stored namespace-checkpoint column and the complete
+  member set. The restored eight-case council oracle covers the seven legal
+  batch arms, 377 near-valid negatives, two-scope append response loss and every
+  `5 + N` local finalization boundary for both one- and two-member namespace
+  snapshots; exact-prose tests bind those repairs to the
+  normative Spec 01/04 text.
+- Lead 2 — the five non-null retirement evidence digests (finalized terminal
+  evidence, admission, transition proof, mutation plan and retirement evidence)
+  equality-copy through subject/plan/effect/result candidate keys and foreign
+  keys. Every component of those composite keys is non-null, the finalized
+  terminal evidence also binds the exact finalized custody revision, and the
+  distinct effect codec hashes all five evidence digests. The extracted normative
+  DDL oracle rejects 65/65 null-component mutations in addition to all 12 crossed
+  evidence cases. The earlier eight-column retirement-plan FK repair remains
+  intact.
+- Lead 3 — the reservation carries a non-null decision-loss effect key without
+  referencing the not-yet-materialized after revision; its same-prepare batch
+  binds the exact after tuple to the linked effect, and the review binding
+  equality-copies that tuple and defers its apply FK.
+- Lead 4 — apply equality-copies the batch transition/apply arm and uses non-null
+  handoff/loss sentinels, so no nullable composite FK can collapse
+  terminal-fresh to terminal or cross a fresh loss arm. Terminal-fresh keeps its
+  terminal mutation plan distinct from the fresh-creation plan.
+- Lead 5 — intent owner/kind now equality-binds the exact same-batch typed
+  effect; exact generated trigger DDL
+  (`lifecycle_completion_effect_set_exact` plus the three typed closure guards)
+  proves declared membership/cardinality and fences every effect table against
+  extras. Public fixtures extract and execute those definitions.
+- Lead 6 — exact `lifecycle_apply_post_state_complete` generated trigger DDL
+  requires the arm-specific materialized revision/head, review binding,
+  retirement result and/or fresh commit before accepting the immutable apply
+  marker; child-to-apply FKs are deferred and the public fixture executes every
+  incomplete arm family.
+- Lead 7 / MF01-2 — scope heads are now canonical non-null checkpoint pointers;
+  generation-loss and custody heads carry only non-null exact revision-key
+  state; and head-local discriminator parity closes terminal crossings. The
+  immutable review-evidence relation publishes every receipt-record identity,
+  binds result, route, observation, proved actual-route identity, reservation,
+  prior evidence and all finding-set roots, while `review_slot_heads` has a
+  real generation/evidence foreign key. Result and evidence parents also bind
+  the exact terminal/result discriminator, so a no-effect terminal cannot
+  become certifying answer evidence. Executable fixtures reject null-vacuous
+  heads, fabricated/crossed evidence, crossed terminal kinds and skipped
+  generations.
+- Lead 8 — `agent_lifecycle_recovery_source_heads` now owns the immutable
+  current-issue pointer, monotonic reissue and current-head handoff FK; exact
+  issue/handoff/revocation triggers close both race orders and all three
+  `INSERT OR REPLACE` collision paths under the required `BEGIN IMMEDIATE`
+  writer rule. Issue claim is plain insert-if-absent plus guarded update, not an
+  upsert. The public ten-case fixture extracts and executes the normative table
+  and all fourteen trigger definitions.
+- MF01-3 — capability snapshot persistence now closes `source`, derives the
+  stored capability kind from `snapshot_json`, and enforces exact
+  unavailable/available parity. The executable oracle covers every legal
+  source/kind pair, crossed pairs, unknown values, missing kind and attempted
+  generated-column forgery; it also executes the extracted normative DDL.
+- MF04-3 — activation effective configurations carry no parent, while smoke
+  and action configurations require a complete activation parent. The
+  candidate/self-foreign key equality-copies adapter, activation subject kind,
+  configuration identity/revision/digest, adapter contract and executable
+  identity. Executable fixtures reject null/partial parents and adapter, kind,
+  digest, contract and executable-identity crossings.
+- MF04-5 — route admission is now parent-first under the immediate foreign
+  keys: the pre-router finding-capacity row retains its null attempt, admission
+  attaches its positive attempt, all remaining authority/budget parents and
+  the provider action are inserted, and the route is inserted last. The
+  route keeps the stable reservation identity while an insert guard requires
+  the parent to be attached, so terminal settlement remains legal. The
+  candidate resolver receipt remains output only; no admitted-compilation
+  persistence row was invented.
+- MF04-6 — `provider_action_routes` now publishes the exact pair/admission and
+  full immutable-admission candidate keys. Dispatch foreign-keys the complete
+  admitted body/configuration/permission/surface tuple while allowing only a
+  same-body snapshot-instance refresh, and observation foreign-keys the exact
+  action-pair/admission digest. Executable fixtures reject every crossed child
+  component and finish with an empty `foreign_key_check`.
+- MF04-4 — adapter rotation now compare-deletes the exact current pressure row
+  inside the same `BEGIN IMMEDIATE` adoption transaction before changing the
+  adapter identity. Narrow guards reject adapter-identity updates or binding
+  deletion while pressure remains but do not block same-adapter telemetry or
+  binding-revision advances. Crash/crossing fixtures prove rollback and exact
+  deletion without pressure history, re-keying or synthetic observations.
+- MF01-1 — §32.21 and §32.22 now publish fresh, unique requirement and
+  acceptance anchors FR-077–FR-095, NFR-034–NFR-042 and AC-056–AC-070. The
+  focused spec fixture verifies each anchor occurs exactly once and in its
+  owning section.
+- MF01-4 — §32.22 names `GenericProviderRouteRecoveryService` as the sole owner
+  of otherwise-generic task-bound answer-bearing actions with missing or
+  integrity-failed routes, while preserving the dedicated certifying,
+  lifecycle and launch owners. This is an ownership cross-reference only; it
+  adds no recovery runtime or framework.
+- Newly found provider-action mutation-plan omission —
+  `lifecycleMutationPlanV1` now includes one update-only `provider-action`
+  member. Its key binds the exact daemon-global adapter/action pair from the
+  governing replay or fresh recovery handoff; insert, delete and crossed pairs
+  are invalid.
 
-**Freeze gate:** Specs 01 v0.36 / 04 v1.31 are NOT frozen. Freeze (version-note
-+ status update) happens only after every substantiated P0–P2 above is repaired
-and the codex certifying review is green.
+**Freeze result:** Specs 01 v0.37 / 04 v1.32 are frozen design contracts. Every
+substantiated P0-P2 above is repaired; the complete spec-fixture suite and two
+independent cross-family certifying reviews are green. This freeze makes no
+runtime implementation or final human-acceptance claim.
 
 ## Baseline-contradiction parks (owner calls) — none yet
 

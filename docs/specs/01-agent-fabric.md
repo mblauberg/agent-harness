@@ -1,17 +1,20 @@
 # Shared agent fabric
 
-Status: Draft v0.36 amendment under re-audit and repair; implementation and
-final human acceptance pending
-Version: 0.36
-Date: 13 July 2026
+Status: Frozen v0.37 design contract; implementation and final human acceptance
+pending
+Version: 0.37
+Date: 15 July 2026
 Chair for this design stage: Codex
 Decision owner: This specification; no separate ADR is maintained
 Human approval: Accepted by direct instruction on 10 July 2026
 Approval effect: The same instruction authorised implementation of Stages 1–5
 
-Version 0.36 is a draft amendment pending a fresh anchored audit, repair and
-independent review
-of its externally authenticated lifecycle-receipt design. It completes the
+Version 0.37 freezes the independently reviewed structural repair set for the
+externally authenticated lifecycle-receipt, deployed-route and Console-read
+contracts. It closes every substantiated P0-P2 in the anchored amendment audit,
+including exact terminal/result/evidence discriminator custody, and adds no
+runtime implementation claim. Version 0.36 introduced the draft externally
+authenticated lifecycle-receipt design. It completes the
 Console read surface without adding authority. It
 adds an exact current-preparation locator, pair-keyed provider-route read and
 watermark-stable route list, and makes task, agent and evidence operator rows
@@ -484,6 +487,9 @@ generation-loss-only scope with no custody, receives a mandatory
 and append head live outside `LifecycleDomainSnapshotV1`. It exposes exactly:
 
 ~~~text
+admitScope(exactScopeAdmissionRequest) -> authenticatedScopeAdmissionResolution
+readScopeAdmission(projectId, projectSessionId, runId, authorityId)
+  -> authenticatedScopeAdmissionResolution | null
 appendReceipt(intentDigest, exactSubject) -> authenticatedReceipt
 readReceipt(kind, projectSessionId, runId, agentId, ownerRefDigest, ownerRevision)
   -> { exactSubject, authenticatedReceipt } | null
@@ -499,7 +505,10 @@ verifyScopeCheckpoint(authenticatedScopeCheckpoint) -> boolean
 verifyNamespaceCheckpoint(authenticatedNamespaceCheckpoint) -> boolean
 ~~~
 
-Append is idempotent for the exact subject. Reusing the same
+Scope admission and append are idempotent for exact bytes. Scope admission
+atomically creates the external scope, its authenticated zero-receipt
+checkpoint and a project-namespace member before returning. Reusing the same
+project/session/run/authority key with changed scope bytes conflicts. Reusing the same
 kind/project-session/run/agent/owner-ref/revision key with changed subject bytes
 conflicts;
 authority records cannot be updated or deleted. `ownerRefDigest=LD("receipt-
@@ -510,7 +519,7 @@ plan digest. Revision is canonical decimal.
 Receipt sequence is positive, contiguous and
 append-only within one authority/project-session/run scope.
 
-The four exact closed subjects and their exact source union are:
+The five exact closed subjects and their exact source union are:
 
 ~~~yaml
 lifecycleCustodyTerminalReceiptSubjectV1:
@@ -572,8 +581,33 @@ lifecycleCustodyRecoveryRetirementReceiptSubjectV1:
   finalizedDisposition: no-effect | superseded | quarantined
   finalizedTerminalEvidenceDigest: exact-digest
   terminalProofKind: confirmed-abandon
+  transitionProofDigest: exact-digest
+  mutationPlanDigest: exact-digest
   retirementEvidenceDigest: exact-digest
   transitionReplayDigest: exact-digest
+
+lifecycleFreshOriginReceiptSubjectV1:
+  schemaVersion: 1
+  kind: fresh-origin
+  projectSessionId: exact-project-session
+  runId: exact-run
+  agentId: exact-agent
+  ownerRef:
+    kind: custody
+    custodyRef: exact-new-revision-one-custody-ref-v1
+    sourceRefDigest: exact-new-custody-source-ref-digest
+  sourceMode: terminalize-nonfinal-custody | reuse-final-custody | open-generation-loss
+  recoverySource: exact-lifecycle-recovery-source-ref-v1
+  sourceJournalDigest: exact-handoff-source-journal-digest
+  admissionDigest: exact-fresh-recovery-admission-digest
+  freshHandoffDigest: exact-handoff-digest
+  freshApplyPlanDigest: exact-handoff-plan-digest
+  affectedGenerationLossBeforeRef: exact-before-ref | null
+  affectedGenerationLossBeforeJournalDigest: exact-before-journal | null
+  affectedGenerationLossAfterRef: exact-after-ref | null
+  affectedGenerationLossAfterSemanticDigest: exact-after-semantic | null
+  freshOriginEffectDigest: exact-fresh-origin-effect-digest
+  transitionReplayDigest: exact-same-batch-replay-digest
 
 lifecycleReviewDecisionReceiptSubjectV1:
   schemaVersion: 1
@@ -634,6 +668,16 @@ appends another custody revision: the subject equality-copies that exact custody
 ref, source and journal, while its replay covers the destructive archival,
 lease, delivery, obligation, membership, barrier, grant and freeze writes.
 Adopted or already-abandoned custody cannot select this path.
+
+Every fresh-created custody is authenticated by exactly one `fresh-origin`
+subject before its apply. For `reuse-final-custody` and `open-generation-loss`
+it is ordinal one of a one-intent `fresh-origin` batch. For
+`terminalize-nonfinal-custody` it is ordinal two, after the old custody terminal
+subject, of a two-intent custody-terminal batch. Its owner is the planned new
+custody revision one; its handoff, source, admission, plan, affected-loss arm,
+effect and replay equality-copy the same immutable handoff and batch. A terminal
+fresh batch cannot also select review adoption: the seven legal batch arms are
+closed and never require a third intent.
 
 `reviewDecisionDigest=LD("review-adoption-decision",decision)` for the final
 closed arm defined below. `recoverySourceDecisionDigest=LD("recovery-source-
@@ -739,6 +783,9 @@ The lifecycle digest registry is exact:
 | fresh handoff reservation | `fresh-handoff` |
 | fresh commit | `fresh-commit` |
 | lifecycle domain snapshot | `lifecycle-domain-snapshot` |
+| admitted lifecycle scope | `admitted-scope` |
+| scope-admission outbox ID | `scope-admission-outbox` |
+| scope-admission resolution | `scope-admission-resolution` |
 
 The accepted request codecs used by `lifecycleAdmissionV1` are exact:
 
@@ -846,13 +893,44 @@ and the final record can only equality-copy its admission digest after apply.
 Every scope page carries one byte-identical checkpoint:
 
 ~~~yaml
-lifecycleAdmittedRunScopeV1:
+lifecycleScopeAdmissionRequestV1:
   schemaVersion: 1
+  admissionRequestId: exact-digest-derived-id
   projectId: exact-project
   projectSessionId: exact-project-session
   runId: exact-run
   authorityId: exact-authority
   admissionDigest: exact-first-lifecycle-admission
+  admittedAt: exact-timestamp
+  scopeDigest: exact-admitted-scope-digest
+
+lifecycleScopeAdmissionResolutionV1:
+  schemaVersion: 1
+  admissionRequestId: exact-request
+  scopeDigest: exact-request-scope-digest
+  initialScopeCheckpoint: exact-authenticated-zero-receipt-checkpoint
+  namespaceCheckpointDigest: exact-authenticated-namespace-checkpoint
+  namespaceMember:
+    projectSessionId: exact-project-session
+    runId: exact-run
+    authorityId: exact-authority
+    scopeCheckpointDigest: exact-initial-checkpoint
+    receiptCountDec: "0"
+    headReceiptDigest: null
+  verifiedAt: exact-timestamp
+  resolutionDigest: exact-digest
+
+lifecycleAdmittedRunScopeV1:
+  schemaVersion: 1
+  admissionRequestId: exact-request
+  projectId: exact-project
+  projectSessionId: exact-project-session
+  runId: exact-run
+  authorityId: exact-authority
+  admissionDigest: exact-first-lifecycle-admission
+  scopeDigest: exact-request-scope-digest
+  initialScopeCheckpointDigest: exact-resolution-checkpoint
+  admissionResolutionDigest: exact-resolution-digest
   admittedAt: exact-timestamp
 
 lifecycleReceiptScopeCheckpointV1:
@@ -877,6 +955,29 @@ lifecycleReceiptNamespaceCheckpointV1:
   attestation: nonempty-opaque
 ~~~
 
+`scopeDigest=LD("admitted-scope",requestBody)` over the request fields from
+schema version through `admittedAt`; `admissionRequestId=LD("scope-admission-
+outbox",{schemaVersion:1,scopeDigest})`. `resolutionDigest=LD("scope-admission-
+resolution",body)` over every displayed resolution member except itself. Before
+any local lifecycle identity, issue, handoff, batch or apply write, one immutable
+outbox row is the only permitted local write. A recovery worker point-reads the
+external admission, calls `admitScope` only on authoritative absence and
+point-reads again after return, throw or timeout. It verifies the resolution and
+zero checkpoint, then pins the returned namespace checkpoint and pages its
+complete ordered member set under the bounds below. Before writing locally it
+verifies the checkpoint attestation, exact member count, contiguous ordinals,
+sort order and `orderedScopeHeadSetDigest`, including the exact zero-receipt
+member for the admitted scope. The local finalization transaction contains
+exactly `5 + N` writes for a namespace checkpoint with `N` complete ordered
+members: the admitted scope, authenticated zero-receipt scope checkpoint and
+head, verified namespace checkpoint, all `N` exact namespace members and the
+immutable resolution. Existing admitted scopes and checkpoints provide the
+parents for prior namespace members. These local rows retain the verified
+evidence; they do not repeat
+the separate external authority operation. Exact replay returns the existing
+rows; changed bytes conflict. The outbox is retained immutable, so no response-
+loss or local crash can erase the obligation to finish admission.
+
 Count and head sequence are equal; both zero exactly with null head and an empty
 record set. `orderedRecordSetDigest=LD("scope-record-set",records)` for the
 complete authority-sequence-ordered array of exactly
@@ -893,8 +994,8 @@ Hydration rejects gap, duplicate/reorder/head drift and more than 65,536 receipt
 per run, and calls `verifyScopeCheckpoint`. A point lookup alone is never
 completeness evidence.
 
-The namespace checkpoint covers all authority scopes in the project that have
-ever received a lifecycle receipt. Its ordered members are exactly
+The namespace checkpoint covers every externally admitted authority scope in
+the project, including a scope with zero lifecycle receipts. Its ordered members are exactly
 `[projectSessionId,runId,authorityId,scopeCheckpointDigest,receiptCountDec,
 headReceiptDigest]`, strictly sorted by project-session ID then run ID.
 `orderedScopeHeadSetDigest=LD("namespace-scope-head-set",members)` and
@@ -907,7 +1008,13 @@ Every namespace member is resolved through
 `readScopeCheckpointAt(scopeCheckpointDigest)` and must exact-match that
 separately verified historical checkpoint even when the live scope head
 advances. Missing, extra, crossed or unverifiable scope membership is
-`SNAPSHOT_INVALID`.
+`SNAPSHOT_INVALID`. For a zero-receipt member, hydration verifies the empty
+checkpoint and requires the exact local admission outbox/resolution/scope tuple;
+it never infers the scope from local custody rows.
+Hydration compares every stored namespace-checkpoint column -- project,
+authority, count, ordered-set digest, canonical checkpoint JSON, checkpoint
+digest and attestation -- and the complete ordinal member set with the verified
+external snapshot. Comparing digest identifiers alone is insufficient.
 
 External append is driven by a durable local outbox, never by already-mutated
 lifecycle state. One immutable batch and all its immutable intents are persisted
@@ -925,6 +1032,7 @@ lifecycleRecoveryRetirementPlanV1:
   finalizedCustodySourceRefDigest: exact-source-ref-digest
   finalizedCustodyJournalDigest: exact-journal-digest
   finalizedDisposition: no-effect | superseded | quarantined
+  finalizedTerminalEvidenceDigest: exact-digest
   admissionDigest: exact-confirmed-abandon-admission
   transitionProof: exact-confirmed-abandon-proof
   transitionProofDigest: exact-digest
@@ -942,9 +1050,9 @@ lifecycleIntegrityReceiptBatchV1:
   runId: exact-run
   agentId: exact-agent
   plannedApplyId: exact-transition-transaction-id
-  transitionKind: custody-terminal | generation-loss-terminal | custody-recovery-retirement
-  primaryOwnerBeforeRef: exact-custody-or-generation-loss-or-retirement-plan-ref
-  primaryOwnerAfterRef: exact-terminal-revision-or-same-retirement-plan-ref
+  transitionKind: custody-terminal | generation-loss-terminal | custody-recovery-retirement | fresh-origin
+  primaryOwnerBeforeRef: exact-custody-or-generation-loss-or-retirement-plan-or-fresh-handoff-ref
+  primaryOwnerAfterRef: exact-terminal-revision-or-same-retirement-plan-or-new-custody-ref
   primaryOwnerBeforeJournalDigest: exact-current-journal-digest
   primaryOwnerAfterSemanticDigest: exact-planned-semantic-digest
   effectsSetDigest: exact-primary-plus-linked-effect-set-digest
@@ -952,11 +1060,12 @@ lifecycleIntegrityReceiptBatchV1:
   transitionReplayDigest: exact-digest
   orderedSubjectSetDigest: exact-digest
   receiptIntentCountDec: "1" | "2"
+  secondaryIntentKind: none | fresh-origin | review-adoption-decision
   reviewReservationRef: exact-review-reservation-ref | null
   freshHandoffRef: exact-fresh-handoff-ref | null
   intents:
     - ordinalDec: "1" | "2"
-      kind: custody-terminal | generation-loss-terminal | custody-recovery-retirement | review-adoption-decision
+      kind: custody-terminal | generation-loss-terminal | custody-recovery-retirement | fresh-origin | review-adoption-decision
       subject: exact-closed-subject-above
       subjectDigest: exact-digest
       intentDigest: exact-digest
@@ -975,8 +1084,9 @@ lifecycleReceiptBatchCompletionV1:
   receiptIntentCountDec: "1" | "2"
   ordinalOne: {intentDigest: exact-intent, subjectDigest: exact-subject, authorityReceiptDigest: exact-receipt}
   ordinalTwo: {intentDigest: exact-intent, subjectDigest: exact-subject, authorityReceiptDigest: exact-receipt} | null
-  primaryEffect: {kind: custody | generation-loss | recovery-retirement, effectDigest: exact-effect}
+  primaryEffect: {kind: custody | generation-loss | recovery-retirement | fresh-origin, effectDigest: exact-effect}
   linkedLossEffectDigest: exact-effect | null
+  secondaryEffect: {kind: fresh-origin, effectDigest: exact-effect} | null
   orderedAuthorityReceiptSetDigest: exact-digest
   completionDigest: exact-digest
 
@@ -1027,14 +1137,14 @@ lifecycleTransitionApplyV1:
       applyDigest: exact-digest
     - schemaVersion: 1
       applyKind: fresh
-      applyId: exact-handoff-planned-apply-id
-      receiptBatchId: null
-      batchCompletionDigest: null
-      transitionReplayDigest: null
-      orderedAuthorityReceiptSetDigest: null
-      verifiedScopeCheckpointDigest: null
-      primaryOwnerAfterRef: null
-      freshHandoffRef: exact-handoff-ref
+      applyId: exact-fresh-origin-batch-planned-apply-id
+      receiptBatchId: exact-fresh-origin-batch
+      batchCompletionDigest: exact-batch-completion
+      transitionReplayDigest: exact-batch-replay
+      orderedAuthorityReceiptSetDigest: exact-digest
+      verifiedScopeCheckpointDigest: exact-scope-checkpoint
+      primaryOwnerAfterRef: exact-batch-new-custody-ref
+      freshHandoffRef: exact-batch-handoff-ref
       freshSourceMode: reuse-final-custody | open-generation-loss
       freshApplyPlanDigest: exact-handoff-plan
       newCustodyRef: exact-created-revision-one-custody
@@ -1047,33 +1157,59 @@ lifecycleTransitionApplyV1:
 `retirementPlanDigest=LD("recovery-retirement-plan",body)` over every displayed
 plan member except the digest. Its plan, proof and evidence are byte-identical to
 the retirement subject/replay/batch; a changed archival write cannot reuse the
-same plan or authority receipt.
+same plan or authority receipt. The subject, plan, effect and result equality-copy
+the exact `finalizedTerminalEvidenceDigest`, `admissionDigest`,
+`transitionProofDigest`, `mutationPlanDigest` and `retirementEvidenceDigest`
+tuple; the finalized terminal evidence also equality-binds the exact finalized
+custody revision.
 
 The transition replay is exactly `lifecycleTransitionReplayV1`:
 
 ~~~yaml
-schemaVersion: 1
-transactionId: exact-stable-transaction
-projectSessionId: exact-project-session
-runId: exact-run
-agentId: exact-agent
-transitionKind: custody-terminal | generation-loss-terminal | custody-recovery-retirement
-primaryOwnerBeforeRef: exact-ref
-primaryOwnerAfterRef: exact-same-identity/revision-plus-one-or-same-retirement-plan-ref
-primaryOwnerBeforeJournalDigest: exact-current-journal-digest
-primaryOwnerAfterSemanticDigest: exact-planned-semantic-digest
-effectsSetDigest: exact-batch-effect-set
-admissionDigest: exact-digest
-providerActionRef: exact-provider-action-ref | null
-recoverySource: exact-lifecycle-recovery-source-ref-v1
-terminalDisposition: adopted | no-effect | superseded | quarantined | abandoned | recovery-retired
-terminalEvidenceDigest: exact-digest
-transitionProof: exact-proof-arm
-transitionProofDigest: exact-digest
-mutationPlan: exact-lifecycle-mutation-plan-v1
-mutationPlanDigest: exact-digest
-reviewReservationDigest: exact-digest | null
-freshHandoffDigest: exact-digest | null
+lifecycleTransitionReplayV1:
+  oneOf:
+    - schemaVersion: 1
+      transactionId: exact-stable-transaction
+      projectSessionId: exact-project-session
+      runId: exact-run
+      agentId: exact-agent
+      transitionKind: custody-terminal | generation-loss-terminal | custody-recovery-retirement
+      primaryOwnerBeforeRef: exact-ref
+      primaryOwnerAfterRef: exact-same-identity/revision-plus-one-or-same-retirement-plan-ref
+      primaryOwnerBeforeJournalDigest: exact-current-journal-digest
+      primaryOwnerAfterSemanticDigest: exact-planned-semantic-digest
+      effectsSetDigest: exact-batch-effect-set
+      admissionDigest: exact-digest
+      providerActionRef: exact-provider-action-ref | null
+      recoverySource: exact-lifecycle-recovery-source-ref-v1
+      terminalDisposition: adopted | no-effect | superseded | quarantined | abandoned | recovery-retired
+      terminalEvidenceDigest: exact-digest
+      transitionProof: exact-proof-arm
+      transitionProofDigest: exact-digest
+      mutationPlan: exact-lifecycle-mutation-plan-v1
+      mutationPlanDigest: exact-digest
+      reviewReservationDigest: exact-digest | null
+      freshHandoffDigest: exact-digest | null
+    - schemaVersion: 1
+      transactionId: exact-handoff-planned-apply-id
+      projectSessionId: exact-project-session
+      runId: exact-run
+      agentId: exact-agent
+      transitionKind: fresh-origin
+      primaryOwnerBeforeRef: exact-fresh-handoff-ref
+      primaryOwnerAfterRef: exact-new-revision-one-custody-ref
+      primaryOwnerBeforeJournalDigest: exact-source-journal-digest
+      primaryOwnerAfterSemanticDigest: exact-new-custody-semantic-digest
+      effectsSetDigest: exact-fresh-origin-effect-set-digest
+      admissionDigest: exact-fresh-recovery-admission-digest
+      recoverySource: exact-lifecycle-recovery-source-ref-v1
+      sourceMode: reuse-final-custody | open-generation-loss
+      freshHandoffDigest: exact-handoff-digest
+      freshApplyPlanDigest: exact-handoff-plan-digest
+      affectedGenerationLossBeforeRef: exact-before-ref | null
+      affectedGenerationLossBeforeJournalDigest: exact-before-journal | null
+      affectedGenerationLossAfterRef: exact-after-ref | null
+      affectedGenerationLossAfterSemanticDigest: exact-after-semantic | null
 ~~~
 
 `lifecycleMutationPlanV1` (the `mutationPlan` member above and every
@@ -1089,44 +1225,80 @@ only in immutable effect/apply rows after authority. The closed relation enum is
 `agent-state`, `provider-session`, `provider-lineage`, `principal-capability`,
 `agent-bridge`, `chair-bridge`, `turn-lease`, `write-lease`, `delivery`,
 `task-owner`, `result-obligation`, `membership`, `barrier`, `freeze-owner`,
+`provider-action`,
 `custody-revision`, `custody-head`, `generation-loss-revision`, `generation-loss-
 head`, `review-cut`, `review-binding`, `review-binding-pointer`, `recovery-
 issue`, `fresh-preparation`, `fresh-handoff`, `fresh-commit`, `recovery-
 retirement`, and `audit`. `writeSetDigest=LD("mutation-plan",
 {schemaVersion:1,writes})`; `mutationPlanDigest` equality-copies it, and
 `freshApplyPlanDigest` equality-copies it when this codec is the handoff plan.
+The `provider-action` member is update-only. Its `keyDigest` binds the exact
+daemon-global `ProviderActionRefV1` pair `{adapterId,actionId}`: a normal
+`mutationPlan` equality-copies the replay's non-null `providerActionRef`, while
+a `freshApplyPlan` equality-copies its enclosing
+`freshRecoveryHandoffV1.replacementActionRef`. The applicable pair must exist;
+insert, delete or any different pair is invalid.
 Every row
 changed by adoption, no-effect, supersession, quarantine or abandonment,
 including archival delivery/task/barrier effects and a linked generation loss,
 must occur exactly once. No unplanned lifecycle-affecting write may share the
 apply transaction.
 
-Each receipt effect is exactly `{schemaVersion:1,effectKind,role,ownerBeforeRef,
-beforeJournalDigest,ownerAfterRef,afterSemanticDigest}` and has
-`effectDigest=LD("lifecycle-effect",body)`. `effectKind` is `owner-transition` or
-`recovery-retirement`. The latter has the same immutable retirement-plan ref in
-both owner positions, the finalized custody journal as `beforeJournalDigest` and
-the unchanged plan digest as `afterSemanticDigest`; its mutation plan contains
-all archival effects. The effect set contains the primary effect first and at
-most one linked generation-loss effect second;
+An owner-transition receipt effect is exactly
+`{schemaVersion:1,effectKind,role,ownerBeforeRef,beforeJournalDigest,
+ownerAfterRef,afterSemanticDigest}`. A fresh-origin effect is exactly
+`{schemaVersion:1,effectKind:"fresh-origin",role,sourceMode,recoverySource,
+sourceJournalDigest,freshHandoffDigest,admissionDigest,freshApplyPlanDigest,
+newCustodyRef,newCustodySemanticDigest,newCustodySourceRefDigest,
+affectedGenerationLossBeforeRef,affectedGenerationLossBeforeJournalDigest,
+affectedGenerationLossAfterRef,affectedGenerationLossAfterSemanticDigest}`.
+Each has `effectDigest=LD("lifecycle-effect",body)`.
+
+A recovery-retirement effect uses this distinct closed arm:
+
+~~~yaml
+lifecycleRecoveryRetirementEffectV1:
+  schemaVersion: 1
+  effectKind: recovery-retirement
+  role: primary
+  ownerBeforeRef: exact-immutable-retirement-plan-ref-v1
+  beforeJournalDigest: exact-finalized-custody-journal-digest
+  ownerAfterRef: exact-same-immutable-retirement-plan-ref-v1
+  afterSemanticDigest: exact-retirement-plan-digest
+  finalizedTerminalEvidenceDigest: exact-digest
+  admissionDigest: exact-digest
+  transitionProofDigest: exact-digest
+  mutationPlanDigest: exact-digest
+  retirementEvidenceDigest: exact-digest
+  effectDigest: exact-digest
+~~~
+
+Its mutation plan contains all archival effects.
+`effectDigest=LD("lifecycle-effect",body)` over every displayed effect member
+except `effectDigest`; crossing any of the five evidence digests is invalid.
+The effect set contains the primary effect first and at
+most one linked effect second;
 `effectsSetDigest=LD("effect-set",members)`. A custody batch has exactly one
 primary custody effect; a standalone loss batch exactly one primary loss effect;
-a recovery-retirement batch exactly one primary retirement effect; only a
-custody batch may add the linked loss. The effect set equality-copies the
+a recovery-retirement batch exactly one primary retirement effect; a pure
+fresh-origin batch exactly one primary fresh-origin effect; and a terminal-fresh
+custody batch has its primary custody effect followed by one secondary
+fresh-origin effect. A custody batch may also carry its one declared linked loss;
+no other batch may. The effect set equality-copies the
 corresponding mutation-plan semantic writes.
 
 `transitionProofDigest=LD("transition-proof",transitionProof)` and
 `transitionReplayDigest=LD("transition-replay",transitionReplay)`. Ordered
 subject members are exactly `{ordinalDec,kind,ownerRefDigest,ownerRevisionDec,
 subjectDigest}`, and `orderedSubjectSetDigest=LD("receipt-subject-set",members)`.
-Ordinal one is the primary custody terminal, standalone generation-loss terminal
-or recovery retirement.
-Ordinal two exists exactly for adopted true-chair custody and is its review
-decision. A linked generation-loss effect is in ordinal one's mutation plan,
+Ordinal one is the primary custody terminal, standalone generation-loss terminal,
+recovery retirement or pure fresh origin. Ordinal two exists exactly for either
+adopted true-chair custody and is its review decision, or terminal-fresh custody
+and is its fresh-origin subject. These arms are mutually exclusive. A linked generation-loss effect is in ordinal one's mutation plan,
 not another subject. `batchId=LD("receipt-batch-id",body)` where body contains
 exactly schema version, scope/agent, planned apply ID, transition kind, both
 primary refs, before-journal/after-semantic/effect-set digests, transition replay digest, ordered
-subject-set digest, count,
+subject-set digest, count, secondary intent kind,
 review reservation ref and fresh handoff ref. Each
 `intentDigest=LD("receipt-intent",{schemaVersion:1,batchId,ordinalDec,kind,
 subjectDigest,transitionReplayDigest})`.
@@ -1137,21 +1309,22 @@ intentDigest,authorityId,authoritySequenceDec,receiptDigest,subjectDigest}`.
 `completionDigest=LD("batch-completion",body)` over every displayed completion
 member except itself. Completion exists only after every declared intent and its
 exact verified authority receipt exist. Count one requires null ordinal two;
-count two requires both ordinals. Primary-effect kind must match transition kind;
-only custody-terminal may name one linked loss. Authorization and terminal apply
-both equality-copy the same completion and ordered receipt-set digests, so neither
+count two requires both ordinals. Primary-effect kind must match transition kind.
+Custody terminal may name one linked loss and, in its terminal-fresh arm, one
+secondary fresh-origin effect; no other batch may. Authorization and every apply
+equality-copy the same completion and ordered receipt-set digests, so none
 can exist for a childless, partial or crossed batch.
 `authorizationDigest=LD("batch-authorization",body)` over every displayed
 authorization member except itself.
 `applyDigest=LD("transition-apply",body)` where body is every displayed selected
 `lifecycleTransitionApplyV1` member except `applyDigest`. The terminal arm has no
-fresh values, the terminal-fresh arm equality-copies the batch's handoff and the
-fresh arm has no receipt-derived values. `localWriteSetDigest` covers every row
+fresh values, while terminal-fresh and fresh equality-copy their authenticated
+batch handoff and fresh-origin effect. `localWriteSetDigest` covers every row
 written by the one transaction, including journal wrappers and the apply marker,
 but is a digest of sorted relation/key/operation identities rather than row
-contents; it therefore cannot introduce a digest cycle. Only after a terminal or
-terminal-fresh apply is externally authorized does the transaction construct the
-terminal journal wrapper.
+contents; it therefore cannot introduce a digest cycle. Only after its terminal,
+terminal-fresh or fresh batch is externally authorized does the transaction
+construct journal wrappers and materialize the planned fresh custody.
 
 `LD("custody-journal",wrapper)` or `LD("generation-loss-journal",wrapper)`
 hashes exactly `{schemaVersion,ownerRef,priorJournalDigest,semanticDigest,
@@ -1397,10 +1570,12 @@ resealed evidence is `SNAPSHOT_INVALID`; an admitted lifecycle scope without its
 authority fails closed.
 
 `LifecycleDomainSnapshotV1` is the exact closed root
-`{schemaVersion,projectId,domainRevision,admittedRunScopes,custodyIdentities,
+`{schemaVersion,projectId,domainRevision,scopeAdmissionOutbox,
+scopeAdmissionResolutions,admittedRunScopes,custodyIdentities,
 custodyRevisions,custodyHeads,generationLossIdentities,generationLossRevisions,
 generationLossHeads,receiptBatches,receiptIntents,authorityReceipts,
 custodyReceiptEffects,generationLossReceiptEffects,recoveryRetirementEffects,
+freshOriginReceiptEffects,
 batchCompletions,scopeCheckpoints,scopeHeads,namespaceCheckpoints,namespaceMembers,
 namespaceHeads,batchAuthorizations,transitionApplies,reviewReservations,
 reviewAuthorityBindings,
@@ -1501,13 +1676,17 @@ apply finalizes the old custody as superseded, appends its journal, creates the
 new custody at revision one, inserts the commit and derives issue consumption.
 Append failure creates none of those effects. `freshApplyId` and
 `freshApplyDigest` identify the same `terminal-fresh` apply for
-`terminalize-nonfinal-custody` and the same `fresh` apply for both other modes;
-`sourceTerminalReceiptApplyDigest` equals `freshApplyDigest` exactly in the
+`terminalize-nonfinal-custody` and the same `fresh` apply for both other modes.
+All three apply arms are receipt-backed: terminalize uses ordinal-two
+`fresh-origin` in its custody-terminal batch; reuse-final and open-loss use a
+one-intent `fresh-origin` batch. `sourceTerminalReceiptApplyDigest` equals
+`freshApplyDigest` exactly in the
 terminal-fresh arm and is null otherwise. `reuse-final-custody` requires the
 exact terminal journal and creates the new custody/commit directly from the same
 handoff. `open-generation-loss` requires the exact open loss journal and one
 transaction creates the new custody/commit and moves the loss to recovery-in-
-progress; it is nonterminal and has no terminal receipt batch.
+progress; it is nonterminal and has no custody-terminal batch, but its
+fresh-origin batch authenticates the new custody and loss advance before apply.
 For `open-generation-loss`, `generationLossAfterRef` is nonnull, is the source
 loss revision plus one and equality-copies across handoff, fresh apply, new loss
 journal and commit; that journal selects the origin-fresh apply arm. A
@@ -9403,6 +9582,73 @@ chain/authority fencing; fresh rotation versus same-history recovery;
 independent child custody;
 and content-free telemetry.
 
+Added requirements are:
+
+- **FR-077:** Each activated adapter shall publish one current immutable closed
+  capability snapshot whose source and available/unavailable arm agree.
+- **FR-078:** Capability bodies, snapshot instances and references shall use the
+  exact digest preimages and equality bindings defined above.
+- **FR-079:** Every answer-bearing provider action shall bind one immutable route
+  admission; each dispatch shall append its exact attempt row and terminal
+  evidence may append at most one observation.
+- **FR-080:** Actual review-route identity shall come only from the exact
+  admission/observation pair and shall preserve unavailable and observed-null as
+  distinct states.
+- **FR-081:** Route admission and launch shall bind the daemon-rendered discovery
+  surface manifest, its registered artifact and every displayed component
+  digest.
+- **FR-082:** Every provider dispatch shall revalidate the current capability
+  body, effective configuration, permission profile and discovery surface;
+  incompatible drift shall end the zero-effect action and require a new pair.
+- **FR-083:** Provider-action reads, receipts and operator Evidence shall reuse
+  the one closed route shape and the daemon-global provider action pair.
+- **FR-084:** Context pressure shall use the one exact, expiring,
+  non-authoritative projection and shall remain incapable of reserving spend or
+  triggering lifecycle action.
+- **FR-085:** Policy-required rotation shall create a fresh provider context and
+  inject only the daemon-validated lifecycle checkpoint; same-history resume
+  shall remain recovery-only.
+- **FR-086:** Coordination topology shall use one append-only, revisioned wave
+  plan and one CAS current pointer under the existing chair, authority and
+  policy records.
+- **FR-087:** Topology current/list reads shall expose the closed plan and
+  pointer shapes and derive stale currency without rewriting plan state.
+- **FR-088:** Operational telemetry shall use only the privacy-minimised span
+  shape and shall remain non-authoritative.
+- **NFR-034:** Capability, route, topology, pressure and telemetry records shall
+  be closed, canonically ordered and deterministically digestible.
+- **NFR-035:** Unknown capability and context values shall remain explicitly
+  unknown, never be widened to unlimited, false or inferred support.
+- **NFR-036:** Capability evidence shall not create an autonomous route learner,
+  pressure controller, compaction threshold or ambiguous-effect redispatch.
+- **NFR-037:** Topology planning shall not mint authority, expand write scope,
+  replace the chair or choose agents automatically.
+- **NFR-038:** Generic telemetry shall contain no prompt, answer, tool payload,
+  artifact bytes, private message, capability or absolute path.
+
+Acceptance additionally requires:
+
+- **AC-056:** Capability fixtures cover closed codecs, source/arm parity, exact
+  digest preimages, immutable refresh, expiry and unknown-enum rejection.
+- **AC-057:** Route fixtures cover immutable admission, contiguous dispatch,
+  one observation, actual-route proof/mismatch, honest unavailable values and
+  zero-effect drift before provider I/O.
+- **AC-058:** Discovery fixtures reproduce exact registered manifest bytes and
+  reject crossed host, version, profile, mode, permission, registry or launch
+  bindings.
+- **AC-059:** Context-pressure fixtures cover every source/confidence arm,
+  token arithmetic, exact observation joins, expiry, stale reads and the
+  absence of percentage or lifecycle authority.
+- **AC-060:** Topology append fixtures cover exact replay, changed replay,
+  contiguous predecessors, CAS conflicts and authority/policy/dependency
+  fencing.
+- **AC-061:** Topology read fixtures cover current, stale and unavailable arms,
+  intact historical predecessors, stable ordering and immutable plans.
+- **AC-062:** Lifecycle fixtures distinguish fresh rotation from same-history
+  recovery and prove independent child custody.
+- **AC-063:** Telemetry fixtures prove the closed codec and absence of content,
+  secrets and authority-bearing fields.
+
 ### 32.22 Exact Console read identity completion
 
 The Console must not guess a preparation identifier, infer a provider route
@@ -9590,7 +9836,13 @@ action pair and task run. An exact action pair with null route ordinal is not a
 route-list member and returns `NOT_FOUND`; its legitimate lack of route/
 recovery is not corruption. The present arm additionally equality-binds the
 provider-action route; missing/integrity-failed instead binds the exact live
-route-recovery evidence for that pair and task/run. List enumerates every
+route-recovery evidence for that pair and task/run.
+`GenericProviderRouteRecoveryService` is the sole owner for an otherwise-generic
+task-bound answer-bearing action whose route is missing or integrity-failed; it
+supplies that exact live evidence but gains no dispatch, reroute or certifying
+authority. Section 32.19.8's `ProviderRouteIntegrityRecoveryService` remains the
+sole owner for every certifying action, while lifecycle and launch custody
+remain with their existing dedicated owners. List enumerates every
 admitted task-bound answer-bearing action, including recovery-owned missing/
 integrity-failed states. Each page scans at most 256 consecutive unfiltered
 members strictly after the cursor's last-scanned tuple and at or below the
@@ -9729,3 +9981,52 @@ Initialize fixtures reject a missing feature, any one missing preissued/
 intersected operation and a narrowed frame limit; the positive arm contains all
 three operations, and a wrong-reason negative proves initialize never expands
 the credential.
+
+Added requirements are:
+
+- **FR-089:** The Console read-identity feature shall negotiate exactly the
+  current-preparation, provider-route read and provider-route list operations as
+  one all-or-nothing operator-read surface.
+- **FR-090:** Current-preparation lookup shall use exact project/session/run
+  scope and return only the greatest durably allocated preparation generation
+  or the closed unavailable arm.
+- **FR-091:** Provider-route read shall use the daemon-global adapter/action pair
+  and return the existing full `providerRouteV1` only in the present arm.
+- **FR-092:** Missing and integrity-failed generic routes shall expose only exact
+  live recovery evidence owned by `GenericProviderRouteRecoveryService`.
+- **FR-093:** Provider-route list shall classify contiguous immutable ordinals
+  through a fixed watermark and authenticated progress cursor before applying
+  nullable filters.
+- **FR-094:** Work, Agents and Activity items, references and details shall carry
+  exact project/session/run identity and use it in ordering and lookup.
+- **FR-095:** Evidence items, references and details shall carry one closed
+  project, session or run scope and use that scope in identity and lookup.
+- **NFR-039:** Console reads shall fail closed on missing feature, operation,
+  authority, scope or integrity and shall never guess identity or grant mutation.
+- **NFR-040:** Route pages shall return at most eight matches, scan at most 256
+  consecutive members per page and fit the negotiated 1 MiB frame by construction.
+- **NFR-041:** Route-list cursors shall bind operation, authority scope, filters,
+  watermark and progress while each returned row remains truthful at its page's
+  `readAt`.
+- **NFR-042:** No Console decoder, fallback join or pagination order shall use a
+  local task, agent, event, message or evidence identifier as global identity.
+
+Acceptance additionally requires:
+
+- **AC-064:** Initialize fixtures reject a missing feature, each missing
+  operation and a narrowed frame limit without expanding the credential.
+- **AC-065:** Current-preparation fixtures cover absent, active and terminal
+  generations plus crossed scope, high-water and stored-row integrity failures.
+- **AC-066:** Provider-route read fixtures cover exact pairs, present/stale
+  routes and generic versus certifying missing/integrity recovery ownership.
+- **AC-067:** Route-list fixtures cover stable multi-page watermarks, ordinal
+  gaps, filtered corruption, cursor/filter substitution, empty progress pages
+  and zero watermark.
+- **AC-068:** Work, Agents and Activity fixtures reuse local identifiers across
+  runs and prove summaries, details, message reads and pagination stay in the
+  exact tuple.
+- **AC-069:** Evidence fixtures cover all three scope arms and reject crossed
+  detail scope while retaining project/session evidence.
+- **AC-070:** Boundary fixtures prove stable maximal identifiers, maximal
+  request/cursor frames, eight maximal routes below 1 MiB and bounded selective
+  traversal.
