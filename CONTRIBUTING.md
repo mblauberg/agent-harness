@@ -46,8 +46,9 @@ npm ci
 npm run check
 ```
 
-Paste exact commands and results into the pull request. Name any skipped gate;
-do not imply it passed.
+Paste exact commands and results into the pull request. `scripts/check-harness`
+may not be skipped. Name any unavailable additional runtime, evaluation or load
+check; do not imply it passed.
 
 ## Change a skill
 
