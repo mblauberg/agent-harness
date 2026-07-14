@@ -35,7 +35,8 @@ Run the repository gate from the checkout root:
 scripts/check-harness
 ```
 
-It runs policy checks, trigger fixtures, shell parsing, public-release and
+This gate must pass before you open a pull request. It runs policy checks,
+trigger fixtures, shell parsing, public-release and
 static-security scans, and the Python tests. If you change `runtime/`, also run
 the root Node.js checks and any evaluation or load command exposed by the
 affected workspace:
