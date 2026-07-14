@@ -208,6 +208,11 @@ def streamed_content_findings(payload: bytes, chunk_size: int) -> frozenset[str]
     return scanner.finish()
 
 
+def feed_consumer_in_chunks(consumer, payload: bytes, chunk_size: int) -> None:
+    for position in range(0, len(payload), chunk_size):
+        consumer.feed(memoryview(payload)[position:position + chunk_size])
+
+
 def raw_tree_entry(name: bytes, object_id_size: int = 20) -> bytes:
     return b"100644 " + name + b"\0" + b"\0" * object_id_size
 
@@ -722,7 +727,9 @@ def test_metadata_consumers_bound_duplicate_required_header_summaries():
         tag.finish()
     assert tag.counts[b"object"] == 10000
     assert len(tag.values[b"object"]) == 1
-    assert accounting.max_tag_summary_bytes <= len(object_id) + len("commit")
+    assert accounting.max_tag_summary_bytes <= (
+        len(object_id) + len("commit") + len("release@example.test")
+    )
 
 
 @pytest.mark.parametrize("separator", [b"\r\n", b"\r"])
@@ -739,7 +746,11 @@ def test_streamed_tag_parser_preserves_splitlines_and_oid_case(separator):
 
     tag.feed(memoryview(separator.join(lines) + b"\n\nmessage\n"))
 
-    assert tag.finish() == (object_id, "commit")
+    parsed = tag.finish()
+    assert parsed.target == object_id
+    assert parsed.declared_type == "commit"
+    assert parsed.tagger_email == "release@example.test"
+    assert parsed.message_findings == frozenset()
 
 
 def test_streamed_tag_parser_keeps_non_crlf_bytes_inside_values():
@@ -754,7 +765,96 @@ def test_streamed_tag_parser_keeps_non_crlf_bytes_inside_values():
 
     tag.feed(memoryview(raw))
 
-    assert tag.finish() == (object_id, "commit")
+    parsed = tag.finish()
+    assert parsed.target == object_id
+    assert parsed.declared_type == "commit"
+    assert parsed.tagger_email == "release@example.test"
+    assert parsed.message_findings == frozenset()
+
+
+@pytest.mark.parametrize("chunk_size", [1, 7, 17])
+def test_streamed_tag_parser_rejects_oversized_tagger_email_before_retention(
+    chunk_size,
+):
+    object_id = "a" * 40
+    accounting = release_check.EvidenceMemoryAccounting()
+    tag = release_check._TagObjectConsumer(object_id, accounting)
+    email_limit = release_check.MAX_IDENTITY_EMAIL_BYTES
+    oversized_email = (
+        b"a" * (email_limit + 1 - len(b"@example.test")) + b"@example.test"
+    )
+    raw = (
+        f"object {object_id}\ntype commit\ntag portable\n".encode("ascii")
+        + b"tagger Release Test <"
+        + oversized_email
+        + b"> 1700000000 +0000\n\nmessage\n"
+    )
+
+    with pytest.raises(RuntimeError, match="publication tag .* is malformed"):
+        feed_consumer_in_chunks(tag, raw, chunk_size)
+
+    assert accounting.max_identity_email_bytes_retained == email_limit
+
+
+@pytest.mark.parametrize("chunk_size", [1, 7, 17])
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        (
+            b"tree " + b"a" * 40 + b"\n"
+            b"author Release Test <release@example.test> 1 +0000\n"
+            b"committer Release Test <release@example.test> 1 +0000\n",
+            "no message boundary",
+        ),
+        (
+            b"tree " + b"a" * 40 + b"\xff\n"
+            b"author Release Test <release@example.test> 1 +0000\n"
+            b"committer Release Test <release@example.test> 1 +0000\n\nmessage\n",
+            "invalid tree",
+        ),
+    ],
+)
+def test_streamed_commit_parser_preserves_malformed_input_checks_across_chunks(
+    chunk_size, raw, message,
+):
+    consumer = release_check._CommitObjectConsumer(
+        "b" * 40, release_check.EvidenceMemoryAccounting(),
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        feed_consumer_in_chunks(consumer, raw, chunk_size)
+        consumer.finish()
+
+
+@pytest.mark.parametrize("chunk_size", [1, 7, 17])
+@pytest.mark.parametrize(
+    "malformation", ["missing", "duplicate", "invalid", "continuation"],
+)
+def test_streamed_tag_parser_rejects_malformed_tagger_across_chunks(
+    chunk_size, malformation,
+):
+    object_id = "a" * 40
+    prefix = f"object {object_id}\ntype commit\ntag portable\n".encode("ascii")
+    identity = b"tagger Release Test <release@example.test> 1700000000 +0000\n"
+    if malformation == "missing":
+        raw = prefix + b"\nmessage\n"
+    elif malformation == "duplicate":
+        raw = prefix + identity + identity + b"\nmessage\n"
+    elif malformation == "invalid":
+        raw = (
+            prefix
+            + b"tagger Release Test release@example.test 1700000000 +0000\n"
+            + b"\nmessage\n"
+        )
+    else:
+        raw = prefix + identity + b" alice@gmail.com\n\nmessage\n"
+    consumer = release_check._TagObjectConsumer(
+        object_id, release_check.EvidenceMemoryAccounting(),
+    )
+
+    with pytest.raises(RuntimeError, match="publication tag .* is malformed"):
+        feed_consumer_in_chunks(consumer, raw, chunk_size)
+        consumer.finish()
 
 
 @pytest.mark.parametrize("chunk_size", [1, 7, 17])
@@ -964,6 +1064,67 @@ def test_large_annotated_tag_is_streamed_and_discarded(tmp_path):
     assert accounting.max_resident_body_bytes == (
         1024 + release_check.BLOB_SCAN_OVERLAP
     )
+    assert accounting.announced_body_bytes == accounting.consumed_body_bytes
+    assert accounting.objects_requested == accounting.objects_completed
+
+
+@pytest.mark.parametrize("object_format", ["sha1", "sha256"])
+def test_history_rejects_personal_annotated_tag_tagger_email(
+    tmp_path, object_format,
+):
+    repository, _, base = publication_repository(tmp_path, object_format)
+    tag = write_raw_object(
+        repository,
+        "tag",
+        (
+            f"object {base}\ntype commit\ntag personal-tagger\n".encode("ascii")
+            + b"tagger Release Test <alice@gmail.com> 1700000000 +0000\n\n"
+            + b"portable tag message\n"
+        ),
+    )
+    git_at(repository, "update-ref", "refs/tags/personal-tagger", tag)
+
+    errors = release_check.history_errors(repository, blob_chunk_size=17)
+
+    assert "reachable history exposes a personal email: alice@gmail.com" in errors
+
+
+@pytest.mark.parametrize("object_format", ["sha1", "sha256"])
+def test_history_stream_scans_annotated_tag_messages(
+    tmp_path, object_format,
+):
+    repository, _, base = publication_repository(tmp_path, object_format)
+    chunk_size = 17
+    message = chunk_crossing_payload(
+        chunk_size,
+        b"/" + b"Users/alice/private/",
+        b"github" + b"_pat_abcdefghijklmnopqrstuvwxyz123456",
+    )
+    tag = write_raw_object(
+        repository,
+        "tag",
+        (
+            f"object {base}\ntype commit\ntag message-evidence\n".encode("ascii")
+            + b"tagger Release Test <release@example.test> 1700000000 +0000\n\n"
+            + message
+        ),
+    )
+    git_at(repository, "update-ref", "refs/tags/message-evidence", tag)
+    accounting = release_check.EvidenceMemoryAccounting()
+
+    errors = release_check.history_errors(
+        repository, blob_chunk_size=chunk_size, accounting=accounting,
+    )
+
+    assert (
+        "reachable history annotated tag message contains a "
+        "personal absolute home path"
+    ) in errors
+    assert (
+        "reachable history annotated tag message contains a possible GitHub token"
+    ) in errors
+    assert accounting.retained_full_nonblob_bodies == 0
+    assert accounting.max_body_chunk_bytes == chunk_size
     assert accounting.announced_body_bytes == accounting.consumed_body_bytes
     assert accounting.objects_requested == accounting.objects_completed
 
@@ -1204,16 +1365,6 @@ def test_publication_gates_reject_a_clean_author_with_a_personal_committer(tmp_p
         "reachable history exposes a personal email: alice@gmail.com"
         in history.stderr
     )
-
-    raw = subprocess.run(
-        ["git", "cat-file", "commit", head],
-        cwd=repository,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=True,
-    ).stdout
-    assert release_check.parse_raw_commit(head, raw).committer_email == "alice@gmail.com"
-
 
 def test_publication_range_ignores_tainted_checked_out_sibling(tmp_path):
     repository, script, base = publication_repository(tmp_path)
@@ -2020,20 +2171,9 @@ def test_publication_range_scans_full_selected_commit_messages(tmp_path):
     ) in result.stderr
 
 
-def test_publication_object_parsers_fail_closed_on_malformed_git_output():
+def test_publication_tree_parser_fails_closed_on_malformed_git_output():
     with pytest.raises(RuntimeError, match="unparseable entry"):
         release_check.parse_raw_tree(b"truncated", 20)
-
-    with pytest.raises(RuntimeError, match="no message boundary"):
-        release_check.parse_raw_commit("b" * 40, b"tree deadbeef\n")
-
-    malformed_raw_commit = (
-        b"tree " + b"a" * 40 + b"\xff\n"
-        b"author Release Test <release@example.test> 1 +0000\n"
-        b"committer Release Test <release@example.test> 1 +0000\n\nmessage\n"
-    )
-    with pytest.raises(RuntimeError, match="invalid tree"):
-        release_check.parse_raw_commit("c" * 40, malformed_raw_commit)
 
 
 def test_raw_parent_traversal_fails_closed_on_missing_parent_object(tmp_path):

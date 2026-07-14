@@ -66,6 +66,8 @@ MAX_BATCH_HEADER_BYTES = 192
 MAX_BATCH_STDERR_BYTES = 64 * 1024
 BATCH_MAX_SECONDS = 300.0
 MAX_TREE_COMPONENT_BYTES = 255
+# RFC 5321's 256-octet forward-path limit includes the surrounding angle brackets.
+MAX_IDENTITY_EMAIL_BYTES = 254
 
 _ASCII_WORD_BYTES = frozenset(
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
@@ -106,6 +108,7 @@ class EvidenceMemoryAccounting:
     max_commit_summary_bytes: int = 0
     retained_commit_summary_bytes: int = 0
     max_tag_summary_bytes: int = 0
+    max_identity_email_bytes_retained: int = 0
     max_pending_tree_walk_items: int = 0
     max_tree_path_nodes_retained: int = 0
     max_tree_path_component_bytes_retained: int = 0
@@ -186,6 +189,14 @@ class RawCommit:
 
 
 @dataclass(frozen=True)
+class RawTag:
+    target: str
+    declared_type: str
+    tagger_email: str
+    message_findings: frozenset[str]
+
+
+@dataclass(frozen=True)
 class RawTreeItem:
     mode: str
     kind: str
@@ -205,97 +216,6 @@ def _whole_content_findings(raw: bytes) -> frozenset[str]:
         if pattern.search(raw):
             findings.add(f"possible {label}")
     return frozenset(findings)
-
-
-def _parse_identity_email(value: bytes, object_id: str) -> str:
-    match = re.fullmatch(
-        rb"[^\r\n<>]* <([^\r\n<>]+)> [0-9]+ [+-][0-9]{4}", value,
-    )
-    if match is None:
-        raise RuntimeError(f"publication commit {object_id} has an invalid author")
-    try:
-        return match.group(1).decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise RuntimeError(
-            f"publication commit {object_id} has an undecodable author"
-        ) from exc
-
-
-def parse_raw_commit(object_id: str, raw: bytes) -> RawCommit:
-    """Parse the stored commit object; no revision or graph virtualization applies."""
-    if OID.fullmatch(object_id) is None:
-        raise RuntimeError(f"publication commit has an invalid object id: {object_id}")
-    try:
-        raw_headers, message = raw.split(b"\n\n", 1)
-    except ValueError as exc:
-        raise RuntimeError(f"publication commit {object_id} has no message boundary") from exc
-
-    headers: list[tuple[bytes, bytes]] = []
-    for line in raw_headers.split(b"\n"):
-        if line.startswith(b" "):
-            if not headers:
-                raise RuntimeError(
-                    f"publication commit {object_id} has an orphan header continuation"
-                )
-            name, value = headers[-1]
-            headers[-1] = (name, value + b"\n" + line)
-            continue
-        try:
-            name, value = line.split(b" ", 1)
-        except ValueError as exc:
-            raise RuntimeError(
-                f"publication commit {object_id} has an invalid header"
-            ) from exc
-        if re.fullmatch(rb"[A-Za-z0-9-]+", name) is None or not value:
-            raise RuntimeError(f"publication commit {object_id} has an invalid header")
-        headers.append((name, value))
-
-    by_name: dict[bytes, list[bytes]] = {}
-    for name, value in headers:
-        by_name.setdefault(name, []).append(value)
-    for required in (b"tree", b"author", b"committer"):
-        if len(by_name.get(required, ())) != 1:
-            label = required.decode("ascii")
-            raise RuntimeError(
-                f"publication commit {object_id} must contain exactly one {label} header"
-            )
-
-    raw_tree = by_name[b"tree"][0]
-    raw_parents = by_name.get(b"parent", [])
-    try:
-        tree = raw_tree.decode("ascii")
-    except UnicodeDecodeError as exc:
-        raise RuntimeError(f"publication commit {object_id} has an invalid tree") from exc
-    if OID.fullmatch(tree) is None:
-        raise RuntimeError(f"publication commit {object_id} has an invalid tree")
-    parents: list[str] = []
-    for raw_parent in raw_parents:
-        try:
-            parent = raw_parent.decode("ascii")
-        except UnicodeDecodeError as exc:
-            raise RuntimeError(
-                f"publication commit {object_id} has an invalid parent"
-            ) from exc
-        if OID.fullmatch(parent) is None:
-            raise RuntimeError(f"publication commit {object_id} has an invalid parent")
-        parents.append(parent)
-    if len(parents) != len(set(parents)):
-        raise RuntimeError(f"publication commit {object_id} has a duplicate parent")
-
-    author = by_name[b"author"][0]
-    committer = by_name[b"committer"][0]
-    if b"\n" in author or b"\n" in committer:
-        raise RuntimeError(f"publication commit {object_id} has an invalid author")
-    author_email = _parse_identity_email(author, object_id)
-    committer_email = _parse_identity_email(committer, object_id)
-    return RawCommit(
-        object_id=object_id,
-        tree=tree,
-        parents=tuple(parents),
-        message_findings=_whole_content_findings(message),
-        author_email=author_email,
-        committer_email=committer_email,
-    )
 
 
 def _tree_name_order(
@@ -714,8 +634,11 @@ class _BlobObjectConsumer:
 
 
 class _IdentityValueParser:
-    def __init__(self, *, retain_email: bool) -> None:
+    def __init__(
+        self, *, retain_email: bool, accounting: EvidenceMemoryAccounting,
+    ) -> None:
         self.retain_email = retain_email
+        self.accounting = accounting
         self.state = "name"
         self.previous: int | None = None
         self.email = bytearray()
@@ -744,10 +667,16 @@ class _IdentityValueParser:
                 return
             if value in (ord("\r"), ord("\n"), ord("<")):
                 raise ValueError
+            if self.email_count >= MAX_IDENTITY_EMAIL_BYTES:
+                raise ValueError
             raw = bytes((value,))
             self.email_decoder.decode(raw, final=False)
             if self.retain_email:
                 self.email.append(value)
+                self.accounting.max_identity_email_bytes_retained = max(
+                    self.accounting.max_identity_email_bytes_retained,
+                    len(self.email),
+                )
             self.email_count += 1
             return
         if self.state == "email-space":
@@ -905,7 +834,9 @@ class _CommitObjectConsumer:
                 self.saw_space = True
                 field = self._field()
                 if field in {b"author", b"committer"}:
-                    self.identity = _IdentityValueParser(retain_email=True)
+                    self.identity = _IdentityValueParser(
+                        retain_email=True, accounting=self.accounting,
+                    )
                 return
             if not (
                 ord("A") <= value <= ord("Z")
@@ -1006,9 +937,12 @@ class _TagObjectConsumer:
         self.saw_space = False
         self.value_nonempty = False
         self.value = bytearray()
+        self.identity: _IdentityValueParser | None = None
         self.previous_name: bytes | None = None
         self.counts = {name: 0 for name in self._REQUIRED}
         self.values = {name: [] for name in self._CAPTURED}
+        self.tagger_emails: list[str] = []
+        self.scanner = _BoundedContentScanner()
 
     def _error(self) -> RuntimeError:
         return RuntimeError(f"publication tag {self.object_id} is malformed")
@@ -1021,6 +955,7 @@ class _TagObjectConsumer:
         self.saw_space = False
         self.value_nonempty = False
         self.value.clear()
+        self.identity = None
 
     def _feed_byte(self, value: int) -> None:
         if self.line_length == 0 and value == ord(" "):
@@ -1036,6 +971,10 @@ class _TagObjectConsumer:
                     if not self.name_too_long:
                         raise self._error()
                 self.saw_space = True
+                if not self.name_too_long and bytes(self.name) == b"tagger":
+                    self.identity = _IdentityValueParser(
+                        retain_email=True, accounting=self.accounting,
+                    )
                 return
             if not (
                 ord("A") <= value <= ord("Z")
@@ -1050,13 +989,23 @@ class _TagObjectConsumer:
                 self.name_too_long = True
             return
         self.value_nonempty = True
-        if not self.name_too_long and bytes(self.name) in self._CAPTURED:
+        name = bytes(self.name) if not self.name_too_long else b""
+        if name in self._CAPTURED:
             if len(self.value) <= 64:
                 self.value.append(value)
+        elif name == b"tagger":
+            assert self.identity is not None
+            try:
+                self.identity.feed(value)
+            except (UnicodeDecodeError, ValueError) as exc:
+                raise self._error() from exc
 
     def _finish_line(self) -> None:
         if self.continuation:
-            if self.previous_name is None:
+            if (
+                self.previous_name is None
+                or self.previous_name in self._REQUIRED
+            ):
                 raise self._error()
             return
         if not self.saw_space or not self.value_nonempty:
@@ -1065,22 +1014,34 @@ class _TagObjectConsumer:
         self.previous_name = name
         if name in self.counts:
             self.counts[name] += 1
+        if name == b"tagger":
+            assert self.identity is not None
+            try:
+                email = self.identity.finish()
+            except (UnicodeDecodeError, ValueError) as exc:
+                raise self._error() from exc
+            if self.counts[name] == 1:
+                self.tagger_emails.append(email)
         if name in self.values and self.counts[name] == 1:
             self.values[name].append(bytes(self.value))
-            retained = sum(
-                len(values[0]) for values in self.values.values() if values
-            )
-            self.accounting.max_tag_summary_bytes = max(
-                self.accounting.max_tag_summary_bytes, retained,
-            )
+        retained = (
+            sum(len(values[0]) for values in self.values.values() if values)
+            + sum(len(email.encode("utf-8")) for email in self.tagger_emails)
+        )
+        self.accounting.max_tag_summary_bytes = max(
+            self.accounting.max_tag_summary_bytes, retained,
+        )
 
     def feed(self, raw: memoryview) -> None:
         if not self.in_headers:
+            self.scanner.feed(raw)
             return
-        for value in raw:
+        for position, value in enumerate(raw):
             if self.raw_previous_lf and value == ord("\n"):
                 self.in_headers = False
                 self.boundary_seen = True
+                if position + 1 < len(raw):
+                    self.scanner.feed(raw[position + 1:])
                 return
             self.raw_previous_lf = value == ord("\n")
             if self.previous_break_was_cr and value == ord("\n"):
@@ -1096,7 +1057,7 @@ class _TagObjectConsumer:
             else:
                 self._feed_byte(value)
 
-    def finish(self) -> tuple[str, str]:
+    def finish(self) -> RawTag:
         if not self.boundary_seen or any(
             self.counts[required] != 1
             for required in self._REQUIRED
@@ -1115,7 +1076,12 @@ class _TagObjectConsumer:
             raise RuntimeError(
                 f"publication tag {self.object_id} has an invalid target type"
             )
-        return target, declared_type
+        return RawTag(
+            target=target,
+            declared_type=declared_type,
+            tagger_email=self.tagger_emails[0],
+            message_findings=self.scanner.finish(),
+        )
 
 
 class _TreeObjectConsumer:
@@ -1974,7 +1940,7 @@ class EvidenceGitEndpoint:
             mismatch=f"publication object {object_id} is not a tree",
         )
 
-    def read_tag(self, object_id: str) -> tuple[str, str]:
+    def read_tag(self, object_id: str) -> RawTag:
         consumer = _TagObjectConsumer(
             object_id, self._reader().accounting,
         )
@@ -1985,7 +1951,7 @@ class EvidenceGitEndpoint:
             consumer=consumer,
             mismatch=f"publication object {object_id} is not a tag",
         )
-        assert isinstance(result, tuple)
+        assert isinstance(result, RawTag)
         return result
 
     def ancestors(self, start: str) -> dict[str, RawCommit]:
@@ -2367,22 +2333,24 @@ def raw_ref_objects(endpoint: EvidenceGitEndpoint) -> tuple[str, ...]:
     return object_ids
 
 
-def raw_tag_target(endpoint: EvidenceGitEndpoint, object_id: str) -> tuple[str, str]:
-    target, declared_type = endpoint.read_tag(object_id)
+def raw_tag_target(endpoint: EvidenceGitEndpoint, object_id: str) -> RawTag:
+    tag = endpoint.read_tag(object_id)
     actual_type, _ = endpoint.object_header(
-        target, label=f"publication tag target {target}",
+        tag.target, label=f"publication tag target {tag.target}",
     )
-    if declared_type != actual_type:
+    if tag.declared_type != actual_type:
         raise RuntimeError(f"publication tag {object_id} target type does not match")
-    return target, actual_type
+    return tag
 
 
 def raw_history_commit_roots(
     endpoint: EvidenceGitEndpoint, ref_objects: tuple[str, ...],
-) -> tuple[set[str], set[str], set[str]]:
+) -> tuple[set[str], set[str], set[str], set[str], set[str]]:
     roots: set[str] = set()
     raw_blob_ids: set[str] = set()
     raw_tree_ids: set[str] = set()
+    tagger_emails: set[str] = set()
+    tag_message_findings: set[str] = set()
     pending = list(ref_objects)
     seen: set[str] = set()
     while pending:
@@ -2395,15 +2363,23 @@ def raw_history_commit_roots(
             endpoint.commit(object_id)
             roots.add(object_id)
         elif kind == "tag":
-            target, target_type = raw_tag_target(endpoint, object_id)
-            pending.append(target)
+            tag = raw_tag_target(endpoint, object_id)
+            tagger_emails.add(tag.tagger_email)
+            tag_message_findings.update(tag.message_findings)
+            pending.append(tag.target)
         elif kind == "blob":
             raw_blob_ids.add(object_id)
         elif kind == "tree":
             raw_tree_ids.add(object_id)
         else:
             raise RuntimeError(f"publication object {object_id} has unknown type")
-    return roots, raw_blob_ids, raw_tree_ids
+    return (
+        roots,
+        raw_blob_ids,
+        raw_tree_ids,
+        tagger_emails,
+        tag_message_findings,
+    )
 
 
 def history_errors(
@@ -2436,9 +2412,13 @@ def history_errors(
             except OSError as exc:
                 raise RuntimeError(f"publication working tree scan failed: {exc}") from exc
             ref_objects = raw_ref_objects(endpoint)
-            roots, raw_ref_blob_ids, raw_ref_tree_ids = raw_history_commit_roots(
-                endpoint, ref_objects,
-            )
+            (
+                roots,
+                raw_ref_blob_ids,
+                raw_ref_tree_ids,
+                tagger_emails,
+                tag_message_findings,
+            ) = raw_history_commit_roots(endpoint, ref_objects)
             roots.add(head)
             commits: dict[str, RawCommit] = {}
             for object_id in roots:
@@ -2494,9 +2474,14 @@ def history_errors(
         f"reachable history commit message contains a {finding}"
         for finding in sorted(message_findings)
     )
+    errors.extend(
+        f"reachable history annotated tag message contains a {finding}"
+        for finding in sorted(tag_message_findings)
+    )
     for email in sorted(
         {commit.author_email for commit in commits.values()}
         | {commit.committer_email for commit in commits.values()}
+        | tagger_emails
     ):
         if PERSONAL_EMAIL.search(email.strip()):
             errors.append(f"reachable history exposes a personal email: {email.strip()}")
