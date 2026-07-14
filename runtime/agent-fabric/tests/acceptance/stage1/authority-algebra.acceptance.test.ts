@@ -8,6 +8,7 @@ import Database from "better-sqlite3";
 import { openFabric } from "../../../src/index.ts";
 import { FABRIC_OPERATIONS } from "../../../src/domain/operations.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 
 describe("Stage 1 authority algebra", () => {
   it("preserves a canonical delegated path when its filesystem target changes before restart", async () => {
@@ -18,6 +19,7 @@ describe("Stage 1 authority algebra", () => {
       mkdir(join(workspaceRoot, "secret")),
     ]);
     const rootAuthority = {
+      ...TEST_AUTHORITY_V2_FIELDS,
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: ["."],
@@ -74,6 +76,7 @@ describe("Stage 1 authority algebra", () => {
       mkdir(join(workspaceRoot, "secret")),
     ]);
     const rootAuthority = {
+      ...TEST_AUTHORITY_V2_FIELDS,
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: ["."],
@@ -139,6 +142,7 @@ describe("Stage 1 authority algebra", () => {
     const databasePath = join(configuredRoot, "fabric.sqlite3");
     await mkdir(projectRoot);
     const authority = {
+      ...TEST_AUTHORITY_V2_FIELDS,
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: ["."],
@@ -183,6 +187,7 @@ describe("Stage 1 authority algebra", () => {
         chair: {
           agentId: "chair",
           authority: {
+            ...TEST_AUTHORITY_V2_FIELDS,
             workspaceRoots: [workspaceRoot],
             sourcePaths: [join(workspaceRoot, "src")],
             artifactPaths: [runDirectory],
@@ -214,6 +219,7 @@ describe("Stage 1 authority algebra", () => {
         chair: {
           agentId: "chair",
           authority: {
+            ...TEST_AUTHORITY_V2_FIELDS,
             workspaceRoots: ["."],
             sourcePaths: ["src"],
             artifactPaths: [".agent-run"],

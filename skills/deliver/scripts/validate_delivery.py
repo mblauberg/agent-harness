@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import copy
 from datetime import datetime
+from functools import lru_cache
 import hashlib
 import importlib.util
 import json
@@ -18,6 +19,8 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
 PROFILES_PATH = ROOT / "config" / "delivery-profiles.json"
+AUTHORITY_MAPPING_PATH = Path(__file__).with_name("authority_mapping.py")
+AUTHORITY_SCHEMA_PATH = ROOT / "runtime" / "agent-fabric-protocol" / "schemas" / "authority-envelope.v2.schema.json"
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 SAFE_CLASSES = {"canonical", "evidence", "handoff", "scratch", "external"}
@@ -110,6 +113,45 @@ def _safe_path(value: Any, field: str) -> str:
 
 def _inside(path: str, scope: str) -> bool:
     return scope in {"", "."} or path == scope or path.startswith(scope + "/")
+
+
+@lru_cache(maxsize=1)
+def _authority_mapping_module():
+    spec = importlib.util.spec_from_file_location("delivery_authority_mapping", AUTHORITY_MAPPING_PATH)
+    fail(spec is None or spec.loader is None, "authority mapper is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@lru_cache(maxsize=1)
+def _fabric_operations() -> frozenset[str]:
+    try:
+        schema = json.loads(AUTHORITY_SCHEMA_PATH.read_text())
+        operations = schema["properties"]["actions"]["items"]["enum"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise Invalid("canonical Fabric authority schema is unavailable") from exc
+    fail(
+        not isinstance(operations, list)
+        or not operations
+        or any(not isinstance(operation, str) for operation in operations),
+        "canonical Fabric operation registry is invalid",
+    )
+    return frozenset(operations)
+
+
+@lru_cache(maxsize=1)
+def _fabric_cost_pattern() -> re.Pattern[str]:
+    try:
+        schema = json.loads(AUTHORITY_SCHEMA_PATH.read_text())
+        alternatives = schema["properties"]["budget"]["propertyNames"]["oneOf"]
+        pattern = next(
+            item["pattern"] for item in alternatives
+            if isinstance(item, dict) and isinstance(item.get("pattern"), str) and item["pattern"].startswith("^cost:")
+        )
+        return re.compile(pattern)
+    except (OSError, KeyError, TypeError, StopIteration, re.error, json.JSONDecodeError) as exc:
+        raise Invalid("canonical Fabric cost-unit registry is unavailable") from exc
 
 
 def _validate_profile(name: str, profile: Any) -> None:
@@ -287,33 +329,23 @@ def _validate_risk(run: dict[str, Any], root: Path) -> None:
 
 
 def _validate_authority(authority: dict[str, Any], run: dict[str, Any]) -> None:
-    fail(not authority.get("approved_by"), "authority.approved_by is required")
-    fail(not authority.get("evidence"), "authority.evidence is required")
+    mapper = _authority_mapping_module()
+    try:
+        mapper.map_delivery_authority(
+            authority,
+            valid_operations=_fabric_operations(),
+            valid_cost_pattern=_fabric_cost_pattern(),
+        )
+        mapper.map_delivery_delegations(
+            authority,
+            valid_operations=_fabric_operations(),
+            valid_cost_pattern=_fabric_cost_pattern(),
+        )
+    except mapper.AuthorityMappingError as exc:
+        raise Invalid(str(exc)) from exc
     expiry = _utc(authority.get("expires_at"), "authority.expires_at")
     history_times = [_utc(item.get("at"), "state_history.at") for item in run.get("state_history", []) if isinstance(item, dict)]
     fail(bool(history_times) and expiry <= max(history_times), "authority must cover the current run checkpoint")
-    sources = [_safe_path(item, "authority.allowed_source_paths") for item in _list(authority.get("allowed_source_paths"), "authority.allowed_source_paths")]
-    artifacts = [_safe_path(item, "authority.allowed_artifact_paths") for item in _list(authority.get("allowed_artifact_paths"), "authority.allowed_artifact_paths")]
-    fail(not sources or not artifacts, "authority requires source and artifact paths")
-    prohibited = _list(authority.get("prohibited_actions"), "authority.prohibited_actions")
-    fail(any(not isinstance(item, str) or not item for item in prohibited), "authority prohibited actions must be tokens")
-    disclosure = authority.get("disclosure")
-    disclosure_rank = {"local-only": 0, "approved-providers": 1, "public": 2}
-    fail(disclosure not in disclosure_rank, "authority disclosure is invalid")
-    fail(authority.get("secrets_access") not in {"none", "use-without-disclosure"}, "authority.secrets_access is invalid")
-    for field in ("deployment", "irreversible_actions"):
-        fail(not isinstance(authority.get(field), bool), f"authority.{field} must be boolean")
-    fail(authority.get("deployment") is False and "deployment" not in prohibited, "authority must prohibit deployment when deployment is false")
-    fail(authority.get("irreversible_actions") is False and "irreversible-action" not in prohibited, "authority must prohibit irreversible-action when irreversible_actions is false")
-    for index, raw in enumerate(_list(authority.get("delegations"), "authority.delegations")):
-        delegate = _mapping(raw, f"authority.delegations[{index}]")
-        fail(not delegate.get("actor"), f"delegation {index} requires an actor")
-        for field, parent in (("source_paths", sources), ("artifact_paths", artifacts)):
-            values = [_safe_path(item, f"delegation {index}.{field}") for item in _list(delegate.get(field), f"delegation {index}.{field}")]
-            fail(any(not any(_inside(value, scope) for scope in parent) for value in values), f"delegation {index} broadens {field}")
-        child_prohibited = set(_list(delegate.get("prohibited_actions"), f"delegation {index}.prohibited_actions"))
-        fail(not set(prohibited) <= child_prohibited, f"delegation {index} weakens prohibited actions")
-        fail(delegate.get("disclosure") not in disclosure_rank or disclosure_rank[delegate["disclosure"]] > disclosure_rank[disclosure], f"delegation {index} broadens disclosure")
 
 
 def _validate_artifacts(
@@ -1022,6 +1054,11 @@ def validate(
     )
     authority_evidence = evidence.get(authority.get("evidence"))
     fail(not authority_evidence or authority_evidence.get("kind") != "human" or authority_evidence.get("status") != "pass" or authority_evidence.get("gate") != "authority-approval", "authority must link matching passing human evidence")
+    approval_artifact = artifacts.get(authority_evidence.get("artifact_id")) if authority_evidence else None
+    fail(
+        not approval_artifact or authority.get("evidence_digest") != approval_artifact.get("digest"),
+        "authority.evidence_digest must bind the linked authority-approval artifact",
+    )
     if run["risk_override"].get("status") == "approved":
         override_evidence = evidence.get(run["risk_override"].get("evidence"))
         fail(not override_evidence or override_evidence.get("kind") != "human" or override_evidence.get("status") != "pass" or override_evidence.get("gate") != "risk-override", "risk override must link matching passing human evidence")

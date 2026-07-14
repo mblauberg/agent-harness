@@ -40,6 +40,7 @@ import { ProjectSessionStore } from "../../../src/project-session/store.ts";
 import { ProjectFabricCoreError } from "../../../src/project-session/contracts.ts";
 import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
 import { admitProviderActionFixture } from "../../support/provider-action-fixture.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 
 const databases: Database.Database[] = [];
 const directories: string[] = [];
@@ -152,6 +153,7 @@ function createFixture(options: Readonly<{
   const resourcePlanRef = parseArtifactRef({ path: "launch-resources.json", digest: digest(resourcePlanText) }, "test.resourcePlanRef");
 
   const chairAuthority = {
+    ...TEST_AUTHORITY_V2_FIELDS,
     workspaceRoots: ["."],
     sourcePaths: ["."],
     artifactPaths: [".agent-run/AFAB-LAUNCH"],

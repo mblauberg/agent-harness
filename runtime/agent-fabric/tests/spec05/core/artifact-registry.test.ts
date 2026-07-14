@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../../src/index.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const roots: string[] = [];
@@ -39,6 +40,7 @@ async function registryFixture(options: Readonly<{
     chair: {
       agentId: "chair",
       authority: {
+        ...TEST_AUTHORITY_V2_FIELDS,
         workspaceRoots: ["."],
         sourcePaths: ["."],
         artifactPaths: [...(options.artifactPaths ?? [options.rootEqual === true ? "." : ".agent-run/run-registry"])],

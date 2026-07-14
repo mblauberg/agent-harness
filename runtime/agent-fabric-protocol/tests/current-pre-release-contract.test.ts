@@ -10,11 +10,24 @@ import {
 } from "../src/index.js";
 
 const authority = {
+  schemaVersion: 2,
+  approval: {
+    approvedBy: "human-maintainer",
+    evidenceId: "authority-approval",
+    evidenceDigest: `sha256:${"a".repeat(64)}`,
+  },
   workspaceRoots: ["project"],
   sourcePaths: ["runtime/agent-fabric"],
   artifactPaths: [".agent-run/AFAB-005"],
   actions: [FABRIC_OPERATIONS.createTask],
+  deniedPaths: [],
+  deniedActions: [],
+  prohibitedActions: [],
   disclosure: { level: "forbidden" as const },
+  secrets: { access: "none" as const },
+  deployment: { allowed: false as const },
+  irreversibleActions: { allowed: false as const },
+  network: { toolEgress: "none" as const },
   expiresAt: "2026-07-13T12:00:00Z",
   budget: { concurrent_turns: 2 },
 };

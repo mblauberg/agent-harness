@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { constants } from "node:fs";
 import { chmod, lstat, open, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { parseAuthorityEnvelopeV2 } from "@local/agent-fabric-protocol";
 
 import { connectFabricDaemon } from "../daemon/client.js";
 import { FABRIC_OPERATIONS } from "../domain/operations.js";
@@ -51,6 +52,31 @@ function seatMetadata(value: unknown): SeatMetadata {
   return value as SeatMetadata;
 }
 
+export function observerAuthority(parent: AuthorityInput): AuthorityInput {
+  const disclosure = parent.disclosure.level === "allowed" ||
+      (parent.disclosure.level === "scoped" && parent.disclosure.scopes.includes("local"))
+    ? { level: "scoped", scopes: ["local"] } as const
+    : { level: "forbidden" } as const;
+  return {
+    schemaVersion: 2,
+    approval: parent.approval,
+    workspaceRoots: [...parent.workspaceRoots],
+    sourcePaths: [],
+    artifactPaths: [],
+    actions: [FABRIC_OPERATIONS.observeEvents],
+    deniedPaths: [...parent.deniedPaths],
+    deniedActions: [...parent.deniedActions],
+    prohibitedActions: [...parent.prohibitedActions],
+    disclosure,
+    secrets: { access: "none" },
+    deployment: { allowed: false },
+    irreversibleActions: { allowed: false },
+    network: { toolEgress: "none" },
+    expiresAt: parent.expiresAt,
+    budget: {},
+  };
+}
+
 export async function provisionObserverCredential(input: { project: string; paths: FabricPaths }): Promise<{
   schemaVersion: 1;
   runId: string;
@@ -73,19 +99,26 @@ export async function provisionObserverCredential(input: { project: string; path
   const capability = (await privateRead(chair.credentialPath)).trim();
   const database = new Database(input.paths.databasePath, { readonly: true, fileMustExist: true });
   let parentAuthorityId: string;
+  let parentAuthority: AuthorityInput;
   try {
-    const row = database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(chair.runId, chair.agentId) as { authority_id?: unknown } | undefined;
-    if (typeof row?.authority_id !== "string") throw new Error("chair authority is unavailable");
+    const row = database.prepare(`
+      SELECT agent.authority_id, authority.authority_json
+        FROM agents agent
+        JOIN authorities authority ON authority.run_id=agent.run_id AND authority.authority_id=agent.authority_id
+       WHERE agent.run_id=? AND agent.agent_id=?
+    `).get(chair.runId, chair.agentId) as { authority_id?: unknown; authority_json?: unknown } | undefined;
+    if (typeof row?.authority_id !== "string" || typeof row.authority_json !== "string") {
+      throw new Error("chair authority is unavailable");
+    }
     parentAuthorityId = row.authority_id;
+    parentAuthority = parseAuthorityEnvelopeV2(JSON.parse(row.authority_json), "chair authority");
   } finally {
     database.close();
   }
   const client = await connectFabricDaemon({ socketPath: input.paths.socketPath, capability });
   try {
-    const authority: AuthorityInput = {
-      workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: [".agent-run"],
-      actions: [FABRIC_OPERATIONS.observeEvents], disclosure: { level: "scoped", scopes: ["local"] } as const, expiresAt: chair.expiresAt, budget: {},
-    };
+    const observerExpiresAt = parentAuthority.expiresAt;
+    const authority = observerAuthority(parentAuthority);
     const delegated = await client.delegateAuthority({
       parentAuthorityId,
       authority,
@@ -99,9 +132,9 @@ export async function provisionObserverCredential(input: { project: string; path
     await privateWrite(credentialPath, `${registration.capability}\n`);
     await privateWrite(metadataPath, `${JSON.stringify({
       schemaVersion: 1, projectKey: chair.projectKey, projectPath: chair.projectPath, runId: chair.runId,
-      agentId, role: "observer", credentialPath, expiresAt: chair.expiresAt,
+      agentId, role: "observer", credentialPath, expiresAt: observerExpiresAt,
     }, null, 2)}\n`);
-    return { schemaVersion: 1, runId: chair.runId, agentId, credentialPath, metadataPath, expiresAt: chair.expiresAt };
+    return { schemaVersion: 1, runId: chair.runId, agentId, credentialPath, metadataPath, expiresAt: observerExpiresAt };
   } finally {
     await client.close();
   }

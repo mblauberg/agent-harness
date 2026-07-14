@@ -10,6 +10,8 @@ import {
   LIFECYCLE_CURRENT_STATE_V1_CODEC,
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   RUN_SESSION_PROJECTION_FEATURE,
+  authorityEnvelopeV2Contained,
+  parseAuthorityEnvelopeV2,
   type AgentCustodyResult,
   type EvidenceArtifactRegistration,
   type EvidencePublishRequest,
@@ -43,7 +45,6 @@ import {
   FABRIC_OPERATIONS,
   OPERATION_REGISTRY,
   expandAuthorityActions,
-  isAgentAuthorityOperation,
   isReadFabricOperation,
   type FabricOperation,
 } from "../domain/operations.js";
@@ -255,17 +256,7 @@ type TaskCreateInput = {
 };
 const MAXIMUM_EPHEMERAL_PROVIDER_PROMPT_BYTES = 65_536;
 const MAXIMUM_LIFECYCLE_HANDOFF_BYTES = 65_536;
-type StoredAuthority = {
-  workspaceRoots: string[];
-  sourcePaths: string[];
-  artifactPaths: string[];
-  actions: FabricOperation[];
-  deniedPaths: string[];
-  deniedActions: FabricOperation[];
-  disclosure: DisclosurePolicy;
-  expiresAt: string;
-  budget: Record<string, number>;
-};
+type StoredAuthority = AuthorityInput;
 
 class LifecycleAdoptionSourceVectorDriftError extends Error {
   constructor(readonly expectedDigest: string, readonly observedDigest: string) {
@@ -486,13 +477,6 @@ function normaliseDisclosure(value: AuthorityInput["disclosure"]): DisclosurePol
   throw new FabricError("AUTHORITY_WIDENING", "authority disclosure policy is invalid");
 }
 
-function disclosureContained(child: DisclosurePolicy, parent: DisclosurePolicy): boolean {
-  const rank = { allowed: 0, scoped: 1, forbidden: 2 } as const;
-  if (rank[child.level] < rank[parent.level]) return false;
-  if (child.level !== "scoped" || parent.level !== "scoped") return true;
-  return child.scopes.every((scope) => parent.scopes.includes(scope));
-}
-
 function validateIntegerBudget(budget: Record<string, number>): void {
   for (const [dimension, value] of Object.entries(budget)) {
     if (!isBudgetUnitKey(dimension)) {
@@ -512,41 +496,62 @@ function validateBudgetUnitKeys(budget: Record<string, unknown>): void {
 export function normaliseAuthority(
   authority: AuthorityInput,
   workspaceRoot: string,
-  parent?: StoredAuthority,
 ): StoredAuthority {
-  validateIntegerBudget(authority.budget);
-  const expires = Date.parse(authority.expiresAt);
+  let parsed: AuthorityInput;
+  try {
+    parsed = parseAuthorityEnvelopeV2(authority, "authority");
+  } catch (cause: unknown) {
+    throw new FabricError(
+      "AUTHORITY_WIDENING",
+      cause instanceof Error ? cause.message : "authority does not match AuthorityEnvelopeV2",
+      { cause },
+    );
+  }
+  validateIntegerBudget(parsed.budget);
+  const expires = Date.parse(parsed.expiresAt);
   if (!Number.isFinite(expires)) {
     throw new FabricError("AUTHORITY_WIDENING", "authority expiry must be an ISO timestamp");
   }
-  const actionExpansion = expandAuthorityActions(authority.actions);
+  const actionExpansion = expandAuthorityActions(parsed.actions);
   if (!actionExpansion.ok) {
     throw new FabricError("AUTHORITY_WIDENING", `unknown authority actions: ${actionExpansion.unknownActions.join(", ")}`);
   }
-  const deniedActionExpansion = expandAuthorityActions(authority.deniedActions ?? []);
+  const deniedActionExpansion = expandAuthorityActions(parsed.deniedActions);
   if (!deniedActionExpansion.ok) {
     throw new FabricError("AUTHORITY_WIDENING", `unknown denied authority actions: ${deniedActionExpansion.unknownActions.join(", ")}`);
   }
   const canonicalisePath = (path: string): string => canonicalAuthorityPath(workspaceRoot, path);
-  const workspaceRoots = [...new Set(authority.workspaceRoots.map(canonicalisePath))].sort();
-  const sourcePaths = [...new Set(authority.sourcePaths.map(canonicalisePath))].sort();
-  const artifactPaths = [...new Set(authority.artifactPaths.map(canonicalisePath))].sort();
+  const workspaceRoots = [...new Set(parsed.workspaceRoots.map(canonicalisePath))].sort();
+  const sourcePaths = [...new Set(parsed.sourcePaths.map(canonicalisePath))].sort();
+  const artifactPaths = [...new Set(parsed.artifactPaths.map(canonicalisePath))].sort();
   if (workspaceRoots.length === 0 || sourcePaths.some((path) => !workspaceRoots.some((root) => pathContains(root, path))) || artifactPaths.some((path) => !workspaceRoots.some((root) => pathContains(root, path)))) {
     throw new FabricError("AUTHORITY_WIDENING", "source and artifact paths must be inside an authority workspace root");
   }
   return {
+    schemaVersion: 2,
+    approval: parsed.approval,
     workspaceRoots,
     sourcePaths,
     artifactPaths,
     actions: actionExpansion.operations,
-    deniedPaths: [...new Set([
-      ...(parent?.deniedPaths ?? []),
-      ...(authority.deniedPaths ?? []).map(canonicalisePath),
-    ])].sort(),
-    deniedActions: [...new Set([...(parent?.deniedActions ?? []), ...deniedActionExpansion.operations])].sort(),
-    disclosure: normaliseDisclosure(authority.disclosure),
+    deniedPaths: [...new Set(parsed.deniedPaths.map(canonicalisePath))].sort(),
+    deniedActions: [...new Set(deniedActionExpansion.operations)].sort(),
+    prohibitedActions: [...new Set(parsed.prohibitedActions)].sort(),
+    disclosure: normaliseDisclosure(parsed.disclosure),
+    secrets: parsed.secrets.access === "none"
+      ? parsed.secrets
+      : { access: "use-without-disclosure", references: [...parsed.secrets.references].sort() },
+    deployment: !parsed.deployment.allowed
+      ? parsed.deployment
+      : { allowed: true, targets: [...parsed.deployment.targets].sort() },
+    irreversibleActions: !parsed.irreversibleActions.allowed
+      ? parsed.irreversibleActions
+      : { allowed: true, actionIds: [...parsed.irreversibleActions.actionIds].sort() },
+    network: parsed.network.toolEgress === "none"
+      ? parsed.network
+      : { toolEgress: "allowlist", allowedHosts: [...parsed.network.allowedHosts].sort() },
     expiresAt: new Date(expires).toISOString(),
-    budget: Object.fromEntries(Object.entries(authority.budget).sort(([left], [right]) => left.localeCompare(right))),
+    budget: Object.fromEntries(Object.entries(parsed.budget).sort(([left], [right]) => left.localeCompare(right))),
   };
 }
 
@@ -558,54 +563,17 @@ function isNumberRecord(value: unknown): value is Record<string, number> {
   return isRow(value) && Object.values(value).every((item) => typeof item === "number");
 }
 
-function isStoredAuthority(value: unknown): value is StoredAuthority {
-  return (
-    isRow(value) &&
-    isStringArray(value.workspaceRoots) &&
-    isStringArray(value.sourcePaths) &&
-    isStringArray(value.artifactPaths) &&
-    isStringArray(value.actions) && value.actions.every(isAgentAuthorityOperation) &&
-    isStringArray(value.deniedPaths) &&
-    isStringArray(value.deniedActions) && value.deniedActions.every(isAgentAuthorityOperation) &&
-    isRow(value.disclosure) &&
-    (value.disclosure.level === "allowed" || value.disclosure.level === "forbidden" || (value.disclosure.level === "scoped" && isStringArray(value.disclosure.scopes))) &&
-    typeof value.expiresAt === "string" &&
-    isNumberRecord(value.budget)
-  );
-}
-
 function parseAuthority(serialised: string): StoredAuthority {
   const value: unknown = JSON.parse(serialised);
-  if (!isStoredAuthority(value)) {
-    throw new Error("stored authority is invalid");
+  try {
+    return parseAuthorityEnvelopeV2(value, "stored authority");
+  } catch (cause: unknown) {
+    throw new Error("stored authority is invalid", { cause });
   }
-  return value;
 }
 
 function authorityContained(child: StoredAuthority, parent: StoredAuthority): boolean {
-  const pathSets: Array<[string[], string[]]> = [
-    [child.workspaceRoots, parent.workspaceRoots],
-    [child.sourcePaths, parent.sourcePaths],
-    [child.artifactPaths, parent.artifactPaths],
-  ];
-  if (pathSets.some(([children, parents]) => children.some((path) => !parents.some((root) => pathContains(root, path))))) {
-    return false;
-  }
-  if (child.actions.some((action) => !parent.actions.includes(action))) {
-    return false;
-  }
-  if (parent.deniedPaths.some((path) => !child.deniedPaths.includes(path)) || parent.deniedActions.some((action) => !child.deniedActions.includes(action))) {
-    return false;
-  }
-  if (!disclosureContained(child.disclosure, parent.disclosure)) {
-    return false;
-  }
-  if (Date.parse(child.expiresAt) > Date.parse(parent.expiresAt)) {
-    return false;
-  }
-  return Object.entries(child.budget).every(
-    ([dimension, value]) => parent.budget[dimension] !== undefined && value <= parent.budget[dimension],
-  );
+  return authorityEnvelopeV2Contained(child, parent);
 }
 
 function capabilityToken(key: string, runId: string, agentId: string, principalGeneration: number): string {
@@ -3220,7 +3188,7 @@ export class Fabric {
         throw new FabricError("CAPABILITY_FORBIDDEN", "actor does not hold the parent authority");
       }
       const parent = parseAuthority(stringField(parentRow, "authority_json"));
-      const child = normaliseAuthority(input.authority, this.#workspaceRootForRun(runId), parent);
+      const child = normaliseAuthority(input.authority, this.#workspaceRootForRun(runId));
       if (!authorityContained(child, parent)) {
         throw new FabricError("AUTHORITY_WIDENING", "child authority exceeds its parent");
       }

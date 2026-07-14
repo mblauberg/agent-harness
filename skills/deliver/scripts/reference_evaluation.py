@@ -358,6 +358,12 @@ def _materialise_deterministic_evidence_bundle(
     for item in run["evidence"]:
         if item.get("kind") == "deterministic" and item.get("artifact_id") == artifact["id"]:
             item["result"]["receipt_digest"] = artifact["digest"]
+    approval_evidence = next(
+        (item for item in run["evidence"] if item.get("id") == run["authority"]["evidence"]),
+        None,
+    )
+    if approval_evidence and approval_evidence.get("artifact_id") == artifact["id"]:
+        run["authority"]["evidence_digest"] = artifact["digest"]
 
 
 def materialise_reference_run(

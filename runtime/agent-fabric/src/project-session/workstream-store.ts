@@ -620,13 +620,28 @@ export class CoordinatedWorkstreamStore {
       ? { level: "scoped", scopes: [...authority.disclosure.scopes] }
       : { ...authority.disclosure };
     return {
+      schemaVersion: 2,
+      approval: { ...authority.approval },
       workspaceRoots: [...authority.workspaceRoots],
       sourcePaths: [...authority.sourcePaths],
       artifactPaths: [...authority.artifactPaths],
       actions: [...authority.actions],
-      ...(authority.deniedPaths === undefined ? {} : { deniedPaths: [...authority.deniedPaths] }),
-      ...(authority.deniedActions === undefined ? {} : { deniedActions: [...authority.deniedActions] }),
+      deniedPaths: [...authority.deniedPaths],
+      deniedActions: [...authority.deniedActions],
+      prohibitedActions: [...authority.prohibitedActions],
       disclosure,
+      secrets: authority.secrets.access === "none"
+        ? { access: "none" }
+        : { access: "use-without-disclosure", references: [...authority.secrets.references] },
+      deployment: authority.deployment.allowed
+        ? { allowed: true, targets: [...authority.deployment.targets] }
+        : { allowed: false },
+      irreversibleActions: authority.irreversibleActions.allowed
+        ? { allowed: true, actionIds: [...authority.irreversibleActions.actionIds] }
+        : { allowed: false },
+      network: authority.network.toolEgress === "none"
+        ? { toolEgress: "none" }
+        : { toolEgress: "allowlist", allowedHosts: [...authority.network.allowedHosts] },
       expiresAt: authority.expiresAt,
       budget: { ...authority.budget },
     };

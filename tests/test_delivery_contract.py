@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import re
 
 import pytest
 
@@ -12,6 +13,9 @@ VALIDATOR_PATH = ROOT / "skills" / "deliver" / "scripts" / "validate_delivery.py
 REFERENCE_RUNS_PATH = ROOT / "skills" / "deliver" / "scripts" / "reference_runs.py"
 REFERENCE_EVALUATION_PATH = ROOT / "skills" / "deliver" / "scripts" / "reference_evaluation.py"
 RUN_TEMPLATE_PATH = ROOT / "skills" / "deliver" / "templates" / "RUN.template.json"
+AUTHORITY_MAPPER_PATH = ROOT / "skills" / "deliver" / "scripts" / "authority_mapping.py"
+AUTHORITY_FIXTURE_ROOT = ROOT / "tests" / "fixtures" / "authority-envelope-v2"
+COST_PATTERN = re.compile(r"^cost:(?:AUD|USD)$")
 
 
 def load_validator():
@@ -63,6 +67,128 @@ def terminalise_reference_evaluation(run, status="failed"):
         },
     })
     return binding
+
+
+def test_delivery_authority_v2_maps_to_the_cross_language_golden():
+    module = load(AUTHORITY_MAPPER_PATH, "authority_mapping")
+    delivery = json.loads((AUTHORITY_FIXTURE_ROOT / "delivery-authority.json").read_text())
+    expected = json.loads((AUTHORITY_FIXTURE_ROOT / "fabric-authority.json").read_text())
+
+    actual = module.map_delivery_authority(
+        delivery,
+        valid_operations={*delivery["allowed_fabric_operations"], *delivery["denied_fabric_operations"]},
+        valid_cost_pattern=COST_PATTERN,
+    )
+    def canonical(value):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    assert canonical(actual) == canonical(expected)
+
+
+def test_delivery_authority_v2_is_closed_and_rejects_unknown_operations():
+    module = load(AUTHORITY_MAPPER_PATH, "authority_mapping_closed")
+    delivery = json.loads((AUTHORITY_FIXTURE_ROOT / "delivery-authority.json").read_text())
+    valid_operations = {*delivery["allowed_fabric_operations"], *delivery["denied_fabric_operations"]}
+
+    missing = copy.deepcopy(delivery)
+    del missing["network"]
+    with pytest.raises(module.AuthorityMappingError, match="missing=.*network"):
+        module.map_delivery_authority(missing, valid_operations=valid_operations, valid_cost_pattern=COST_PATTERN)
+
+    unknown = copy.deepcopy(delivery)
+    unknown["implicit_default"] = True
+    with pytest.raises(module.AuthorityMappingError, match="unknown=.*implicit_default"):
+        module.map_delivery_authority(unknown, valid_operations=valid_operations, valid_cost_pattern=COST_PATTERN)
+
+    unknown_operation = copy.deepcopy(delivery)
+    unknown_operation["allowed_fabric_operations"] = ["fabric.v1.not-real"]
+    with pytest.raises(module.AuthorityMappingError, match="unknown Fabric operation"):
+        module.map_delivery_authority(
+            unknown_operation,
+            valid_operations=valid_operations,
+            valid_cost_pattern=COST_PATTERN,
+        )
+
+    unknown_currency = copy.deepcopy(delivery)
+    unknown_currency["budget"] = {"cost:ZZZ": 1}
+    with pytest.raises(module.AuthorityMappingError, match="invalid budget unit"):
+        module.map_delivery_authority(
+            unknown_currency,
+            valid_operations=valid_operations,
+            valid_cost_pattern=COST_PATTERN,
+        )
+
+
+def test_complete_delivery_delegation_inherits_approval_and_must_narrow_every_dimension():
+    module = load(AUTHORITY_MAPPER_PATH, "authority_mapping_delegation")
+    delivery = json.loads((AUTHORITY_FIXTURE_ROOT / "delivery-authority.json").read_text())
+    valid_operations = {*delivery["allowed_fabric_operations"], *delivery["denied_fabric_operations"]}
+    delegation = {
+        "actor": "worker-1",
+        "schema_version": 2,
+        "workspace_roots": ["."],
+        "allowed_source_paths": ["input"],
+        "allowed_artifact_paths": ["output/worker-1"],
+        "allowed_fabric_operations": ["fabric.v1.task.read"],
+        "denied_paths": [".git"],
+        "denied_fabric_operations": ["fabric.v1.write-lease.acquire"],
+        "prohibited_actions": ["deployment", "external-release"],
+        "disclosure": "local-only",
+        "secrets_access": "none",
+        "secret_refs": [],
+        "deployment": False,
+        "deployment_targets": [],
+        "irreversible_actions": False,
+        "irreversible_action_ids": [],
+        "network": {"tool_egress": "none", "allowed_hosts": []},
+        "expires_at": "2026-07-19T00:00:00Z",
+        "budget": {"turns": 2},
+    }
+    delivery["delegations"] = [delegation]
+
+    mapped = module.map_delivery_delegations(
+        delivery,
+        valid_operations=valid_operations,
+        valid_cost_pattern=COST_PATTERN,
+    )
+    parent = module.map_delivery_authority(
+        delivery,
+        valid_operations=valid_operations,
+        valid_cost_pattern=COST_PATTERN,
+    )
+    assert len(mapped) == 1
+    assert mapped[0]["actor"] == "worker-1"
+    assert mapped[0]["authority"]["artifactPaths"] == ["output/worker-1"]
+    assert mapped[0]["authority"]["approval"] == parent["approval"]
+
+    widened = copy.deepcopy(delivery)
+    widened["delegations"][0]["network"] = {
+        "tool_egress": "allowlist",
+        "allowed_hosts": ["api.example.test", "outside.example.test"],
+    }
+    with pytest.raises(module.AuthorityMappingError, match="broadens parent authority"):
+        module.map_delivery_delegations(
+            widened,
+            valid_operations=valid_operations,
+            valid_cost_pattern=COST_PATTERN,
+        )
+
+    widened_budget = copy.deepcopy(delivery)
+    widened_budget["delegations"][0]["budget"] = {"cost:AUD": 1}
+    with pytest.raises(module.AuthorityMappingError, match="broadens parent authority"):
+        module.map_delivery_delegations(
+            widened_budget,
+            valid_operations=valid_operations,
+            valid_cost_pattern=COST_PATTERN,
+        )
+
+
+def test_authority_evidence_digest_must_bind_the_linked_approval_artifact():
+    module = load_validator()
+    candidate = fixture()
+    candidate["authority"]["evidence_digest"] = "sha256:" + "c" * 64
+
+    with pytest.raises(module.Invalid, match="evidence_digest must bind"):
+        module.validate(candidate, ROOT)
 
 
 def test_reference_run_for_every_profile_passes(tmp_path):
@@ -311,24 +437,27 @@ def test_repair_cycle_count_must_match_history():
         module.validate(candidate, ROOT)
 
 
-def test_delegate_authority_can_only_narrow_parent():
+def test_partial_delivery_delegation_is_rejected():
     module = load_validator()
     candidate = fixture()
     candidate["authority"]["delegations"] = [{
         "actor": "worker-1",
-        "source_paths": ["../outside"],
-        "artifact_paths": [".agent-run/DEL-001/worker-1"],
-        "prohibited_actions": [],
-        "disclosure": "external-approved",
+        "allowed_source_paths": ["input"],
+        "allowed_artifact_paths": ["worker-1"],
     }]
-    with pytest.raises(module.Invalid, match="delegation"):
+    with pytest.raises(module.Invalid, match="delegations.*fields are invalid"):
         module.validate(candidate, ROOT)
 
 
 def test_authority_requires_approver_expiry_and_external_action_controls():
     module = load_validator()
     candidate = fixture()
-    for field in ("approved_by", "evidence", "expires_at", "secrets_access", "deployment", "irreversible_actions"):
+    for field in (
+        "schema_version", "approved_by", "evidence", "evidence_digest",
+        "workspace_roots", "expires_at", "allowed_fabric_operations",
+        "denied_paths", "secrets_access", "deployment",
+        "irreversible_actions", "network", "budget",
+    ):
         broken = copy.deepcopy(candidate)
         del broken["authority"][field]
         with pytest.raises(module.Invalid, match="authority"):

@@ -12,11 +12,20 @@ import {
 
 const digest = `sha256:${"a".repeat(64)}`;
 const authority = {
+  schemaVersion: 2,
+  approval: { approvedBy: "human-maintainer", evidenceId: "authority-approval", evidenceDigest: digest },
   workspaceRoots: ["."],
   sourcePaths: ["src"],
   artifactPaths: ["artifacts"],
   actions: ["fabric.v1.task.read"],
+  deniedPaths: [],
+  deniedActions: [],
+  prohibitedActions: [],
   disclosure: { level: "forbidden" as const },
+  secrets: { access: "none" as const },
+  deployment: { allowed: false as const },
+  irreversibleActions: { allowed: false as const },
+  network: { toolEgress: "none" as const },
   expiresAt: "2027-01-01T00:00:00.000Z",
   budget: { provider_calls: 2 },
 };

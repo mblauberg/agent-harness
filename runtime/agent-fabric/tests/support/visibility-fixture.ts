@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../src/index.ts";
 
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "./authority-v2-testkit.ts";
 import { FakeHerdrBoundary, FakeProviderBoundary, VisibilityClock } from "./visibility-fakes.ts";
 
 export const MANAGED_CAPABILITIES = [
@@ -27,6 +28,7 @@ export async function createVisibilityFixture(runId = "run-visibility") {
   const databasePath = join(directory, "fabric.sqlite3");
   const fabric = await openFabric({ databasePath, workspaceRoots: [directory], clock: clock.now });
   const authority = {
+    ...TEST_AUTHORITY_V2_FIELDS,
     workspaceRoots: ["."],
     sourcePaths: ["src"],
     artifactPaths: [".agent-run"],

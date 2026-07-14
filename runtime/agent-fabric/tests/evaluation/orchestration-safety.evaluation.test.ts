@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { FABRIC_OPERATIONS } from "../../src/domain/operations.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../support/authority-v2-testkit.ts";
 import { createLifecycleFixture, writeLifecycleCheckpoint } from "../support/lifecycle-testkit.ts";
 import {
   advanceOptionalLeg,
@@ -83,6 +84,7 @@ describe("AFAB-001 Stage 5 orchestration safety evaluation", () => {
         parentAuthorityId: fixture.authorities.leaderA,
         commandId: "evaluation:over-delegation",
         authority: {
+          ...TEST_AUTHORITY_V2_FIELDS,
           workspaceRoots: [fixture.directory],
           sourcePaths: [join(fixture.directory, "src", "outside-team-a")],
           artifactPaths: [fixture.runDirectory],
