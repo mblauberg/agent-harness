@@ -216,7 +216,10 @@ function seedOpenGenerationLoss(database: Database.Database): void {
   `).run(semanticDigest, semanticDigest, journalDigest);
 }
 
-function seedOpenChildGenerationLoss(database: Database.Database): void {
+function seedOpenChildGenerationLoss(
+  database: Database.Database,
+  mutation: "none" | "chair-bindings" | "stale-bridge-revision" = "none",
+): void {
   database.prepare(`
     INSERT INTO authorities(authority_id,run_id,authority_json,authority_hash,created_at)
     VALUES ('child-authority','run','{}',?,1)
@@ -318,10 +321,18 @@ function seedOpenChildGenerationLoss(database: Database.Database): void {
       checkpoint_digest,loss_evidence_digest,creation_json,creation_digest,created_at
     ) VALUES ('session','run','child','child-loss','generation-advance',
               'child-provider-session-1','child-provider-session-2',1,2,0,1,
-              'child-source-action','child-adapter',?,1,1,'child','run:child',1,
-              'child-source-capability',NULL,NULL,NULL,'last-validated',
+              'child-source-action','child-adapter',?,1,1,'child','run:child',?,
+              'child-source-capability',?,?,?,'last-validated',
               'child-checkpoint',?,?, '{}','child-loss-creation',1)
-  `).run(SHA_A, SHA_A, SHA_A);
+  `).run(
+    SHA_A,
+    mutation === "stale-bridge-revision" ? 2 : 1,
+    mutation === "chair-bindings" ? 1 : null,
+    mutation === "chair-bindings" ? 1 : null,
+    mutation === "chair-bindings" ? 1 : null,
+    SHA_A,
+    SHA_A,
+  );
   database.prepare(`
     INSERT INTO lifecycle_generation_loss_revisions(
       project_session_id,run_id,agent_id,generation_loss_id,revision,
@@ -1143,6 +1154,36 @@ describe("lifecycle recovery repository", () => {
       source_chair_lease_generation: null,
       bridge_owner_kind: "child",
     });
+
+    database.close();
+  });
+
+  it.each([
+    ["chair generation bindings", "chair-bindings", "child lifecycle recovery source carries chair generation bindings"],
+    ["a stale bridge revision", "stale-bridge-revision", "lifecycle recovery source bridge is not exact"],
+  ] as const)("rejects a child recovery issue whose source carries %s", (_label, mutation, message) => {
+    const database = openDatabase();
+    seedOpenGenerationLoss(database);
+    seedOpenChildGenerationLoss(database, mutation);
+    const repository = new LifecycleRecoveryRepository(database);
+
+    expect(() => database.transaction(() => repository.createIssueInCurrentTransaction({
+      issueId: "child-issue",
+      capabilityHash: "e".repeat(64),
+      operatorId: "operator",
+      projectSessionId: "session",
+      runId: "run",
+      agentId: "child",
+      source: { kind: "generation-loss", generationLossId: "child-loss" },
+      parentCapabilityId: "parent-capability",
+      consequentialGateId: "recovery-gate",
+      issuedAt: 100,
+      expiresAt: 200,
+    })).immediate()).toThrow(message);
+    expect(database.prepare(`
+      SELECT count(*) AS count FROM agent_lifecycle_recovery_capability_issues
+       WHERE agent_id='child'
+    `).get()).toEqual({ count: 0 });
 
     database.close();
   });
