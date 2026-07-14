@@ -168,12 +168,28 @@ function largeFixture(count: number) {
     lastActionStatus: null,
     lastReceipt: null,
   };
-  return { dataset, controller };
+  return { dataset, controller, rows };
+}
+
+function countRowProjections(row: ConsoleRow<"attention">): () => number {
+  const summary = row.summary;
+  let count = 0;
+  Object.defineProperty(row, "summary", {
+    get: () => {
+      count += 1;
+      return summary;
+    },
+  });
+  return () => count;
 }
 
 describe("Console bounded load gates", () => {
   it("renders 10,000 projected rows through repeated dynamic resize within the cell bound", () => {
-    const { dataset, controller } = largeFixture(10_000);
+    const { dataset, controller, rows } = largeFixture(10_000);
+    const projectionSentinel = rows[5_000];
+    expect(projectionSentinel).toBeDefined();
+    if (projectionSentinel === undefined) return;
+    const sentinelProjectionCount = countRowProjections(projectionSentinel);
     const ui = createFabricUiState({
       focusId: "row:attention:attention:000000",
       scrollOffsetByView: { attention: 9_950 },
@@ -206,9 +222,42 @@ describe("Console bounded load gates", () => {
     const durationMs = performance.now() - started;
 
     expect(renderedCells).toBeGreaterThan(0);
+    expect(sentinelProjectionCount()).toBe(1);
     expect(durationMs).toBeLessThan(5_000);
     expect(ui).toStrictEqual(before);
   }, 10_000);
+
+  it("projects each independent Console runtime once across alternating resizes", () => {
+    const first = largeFixture(100);
+    const second = largeFixture(100);
+    const firstSentinel = first.rows[50];
+    const secondSentinel = second.rows[50];
+    expect(firstSentinel).toBeDefined();
+    expect(secondSentinel).toBeDefined();
+    if (firstSentinel === undefined || secondSentinel === undefined) return;
+    const firstProjectionCount = countRowProjections(firstSentinel);
+    const secondProjectionCount = countRowProjections(secondSentinel);
+    const firstUi = createFabricUiState();
+    const secondUi = createFabricUiState();
+
+    for (let index = 0; index < 20; index += 1) {
+      renderFabricConsoleFrame(
+        first.dataset,
+        first.controller,
+        firstUi,
+        { columns: 80, rows: 24 },
+      );
+      renderFabricConsoleFrame(
+        second.dataset,
+        second.controller,
+        secondUi,
+        { columns: 160, rows: 50 },
+      );
+    }
+
+    expect(firstProjectionCount()).toBe(1);
+    expect(secondProjectionCount()).toBe(1);
+  });
 
   it("rejects frames beyond the shared cell budget without allocation", () => {
     const { dataset, controller } = largeFixture(1);
