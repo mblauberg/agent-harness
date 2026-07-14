@@ -36,6 +36,12 @@ def test_rejects_spec_missing_from_discovery_index(tmp_path: Path) -> None:
     assert_code(tmp_path, "index-drift")
 
 
+def test_rejects_root_markdown_outside_discovery_index(tmp_path: Path) -> None:
+    write_repo(tmp_path)
+    (tmp_path / "docs" / "specs" / "notes.md").write_text("# Notes\n")
+    assert_code(tmp_path, "unsupported-path")
+
+
 def test_rejects_line_cap(tmp_path: Path) -> None:
     write_repo(tmp_path, "# Authority\n" + "line\n" * 999)
     assert_code(tmp_path, "over-cap")
@@ -84,9 +90,14 @@ def test_ignores_examples_inside_fences(tmp_path: Path) -> None:
     check_repository(tmp_path)
 
 
-def test_nested_spec_cannot_bypass_duplicate_id_check(tmp_path: Path) -> None:
+def test_rejects_unique_indexed_nested_spec(tmp_path: Path) -> None:
     write_repo(tmp_path)
     nested = tmp_path / "docs" / "specs" / "agent-fabric" / "detail" / "lease.md"
     nested.parent.mkdir()
-    nested.write_text("# Lease\n\n### FR-001 Duplicate owner\n")
-    assert_code(tmp_path, "duplicate-id")
+    nested.write_text("# Lease\n\n### FR-002 Unique owner\n")
+    (tmp_path / "docs" / "specs" / "README.md").write_text(
+        "# Specifications\n\n"
+        "[Authority](agent-fabric/authority.md)\n"
+        "[Lease](agent-fabric/detail/lease.md)\n"
+    )
+    assert_code(tmp_path, "unsupported-path")

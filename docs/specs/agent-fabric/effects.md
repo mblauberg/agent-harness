@@ -268,7 +268,8 @@ The gate shall belong to the draft's project session and coordination run, have 
 
   The additive closed request variants are:
 
-  ```yaml   operator_action_reconcile:
+  ```yaml
+  operator_action_reconcile:
     command: exact-operator-mutation-context
     project_id: exact-authenticated-project
     target_command_id: exact-original-git-command
@@ -290,7 +291,8 @@ The gate shall belong to the draft's project session and coordination run, have 
       expected_resolution_eligibility: none
   ```
 
-  ```yaml   operator_action_reconcile:
+  ```yaml
+  operator_action_reconcile:
     command: exact-operator-mutation-context
     project_id: exact-authenticated-project
     target_command_id: exact-typed-successor-git-command
@@ -314,7 +316,8 @@ The gate shall belong to the draft's project session and coordination run, have 
 
   The outer status and binding state must map `pending -> prepared`,   `ambiguous -> ambiguous` or `quarantined -> quarantined`. An   `owned-conflict` request instead requires `conflict -> conflict`, positive   owned generation and the exact nullable predecessor generation. The existing   generic `pending`/`ambiguous` request rejects `git_conflict`; `quarantined` is   accepted only for the inherited-successor form. Both Git forms reject their   absence, crossed lineage fields, an existing eligibility marker or any   unknown field. The nullable expected evidence   value shall exactly equal the stored value and is null only before the first   lookup. An accepted inspection increments lookup and binding-state revision,   advances attempt generation exactly once, persists a bounded   outcome/evidence/timestamp and returns the exact current target-command status   below. It does not change reservation generation,   conflict-lineage generations or common-directory identity. Exact conflict   retains an owned conflict or atomically promotes an intact inherited   successor to the next owned conflict generation. Incomplete, unavailable or   inconsistent observation retains an existing conflict, otherwise leaves or   moves the inherited successor to `ambiguous`/`quarantined`, and creates no   resolution eligibility while transient. Complete proof that the persisted   owned or inherited conflict no longer holds, or one closed permanent   inspector/integrity outcome, returns `quarantined` with the matching   eligibility tuple and retained reservation.
 
-  ```yaml   operator_action_git_custody_status:
+  ```yaml
+  operator_action_git_custody_status:
     status: pending-or-ambiguous-or-conflict-or-quarantined
     phase: prepared-when-status-pending-otherwise-absent
     command_id: exact-original-git-command

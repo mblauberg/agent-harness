@@ -105,13 +105,24 @@ def _check_links(repo_root: Path, source: Path, text: str) -> None:
 
 def current_spec_paths(repo_root: Path) -> tuple[Path, ...]:
     specs = repo_root / "docs" / "specs"
-    paths = [
-        specs / "README.md",
-        *sorted(path for path in specs.rglob("*.md") if path.parent != specs),
-    ]
-    if len(paths) == 1 or not paths[0].is_file():
+    index = specs / "README.md"
+    if not index.is_file():
         _fail("missing-specs", specs, "README and standalone specifications are required")
-    return tuple(paths)
+    supported: list[Path] = []
+    for path in sorted(specs.rglob("*.md")):
+        if path == index:
+            continue
+        relative = path.relative_to(specs)
+        if len(relative.parts) != 2:
+            _fail(
+                "unsupported-path",
+                path,
+                "spec Markdown must be README.md or <domain>/<topic>.md",
+            )
+        supported.append(path)
+    if not supported:
+        _fail("missing-specs", specs, "README and standalone specifications are required")
+    return (index, *supported)
 
 
 def _check_index(repo_root: Path, index: Path, text: str, specs: tuple[Path, ...]) -> None:
