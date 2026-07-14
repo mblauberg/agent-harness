@@ -29,6 +29,12 @@ def trigger_sql(text: str, name: str) -> str:
     return text[start:end]
 
 
+def create_index_sql(text: str, name: str) -> str:
+    start = text.index(f"CREATE UNIQUE INDEX {name}\n")
+    end = text.index(";", start) + 1
+    return text[start:end]
+
+
 TRIGGER_FIXTURE_SCHEMA = r"""
 CREATE TABLE lifecycle_receipt_batch_completions(
   batch_id TEXT, transition_kind TEXT,
@@ -555,6 +561,20 @@ class SpecRepairTests(unittest.TestCase):
         self.assertEqual([], db.execute("PRAGMA foreign_key_check").fetchall())
 
     def test_scope_admission_ddl_accepts_zero_member_and_rejects_near_valid(self) -> None:
+        resolution_ddl = ddl_block(
+            SPEC_04, "lifecycle_scope_admission_resolutions"
+        )
+        self.assertEqual(resolution_ddl.count("initial_head_receipt_digest"), 2)
+        self.assertNotIn(
+            "FOREIGN KEY(project_session_id,run_id,authority_id,"
+            "initial_receipt_count",
+            resolution_ddl,
+        )
+        self.assertNotIn(
+            "FOREIGN KEY(project_id,namespace_checkpoint_digest,"
+            "project_session_id,run_id",
+            resolution_ddl,
+        )
         db = sqlite3.connect(":memory:", isolation_level=None)
         db.execute("PRAGMA foreign_keys=ON")
         for table in (
@@ -605,9 +625,8 @@ class SpecRepairTests(unittest.TestCase):
              "scope-checkpoint", "attestation", "verified-at"),
         )
         db.execute(
-            "INSERT INTO lifecycle_receipt_scope_heads VALUES(?,?,?,?,?,?,?,?,?)",
-            ("session", "run", "authority", 0, 0, None, "empty-set",
-             "scope-checkpoint", 1),
+            "INSERT INTO lifecycle_receipt_scope_heads VALUES(?,?,?,?)",
+            ("session", "run", "scope-checkpoint", 1),
         )
         db.execute(
             "INSERT INTO lifecycle_receipt_namespace_checkpoints VALUES(?,?,?,?,?,?,?,?)",
@@ -648,9 +667,8 @@ class SpecRepairTests(unittest.TestCase):
              "{}", "scope-checkpoint-gap", "attestation", "verified-at"),
         )
         db.execute(
-            "INSERT INTO lifecycle_receipt_scope_heads VALUES(?,?,?,?,?,?,?,?,?)",
-            ("session-gap", "run-gap", "authority", 0, 0, None, "empty-set-gap",
-             "scope-checkpoint-gap", 1),
+            "INSERT INTO lifecycle_receipt_scope_heads VALUES(?,?,?,?)",
+            ("session-gap", "run-gap", "scope-checkpoint-gap", 1),
         )
         db.execute(
             "INSERT INTO lifecycle_receipt_namespace_checkpoints VALUES(?,?,?,?,?,?,?,?)",
@@ -763,9 +781,8 @@ class SpecRepairTests(unittest.TestCase):
              "scope-checkpoint-missing", 0, None),
         )
         db.execute(
-            "INSERT INTO lifecycle_receipt_scope_heads VALUES(?,?,?,?,?,?,?,?,?)",
-            ("session-missing", "run-missing", "authority", 0, 0, None,
-             "empty-set-missing", "scope-checkpoint-missing", 1),
+            "INSERT INTO lifecycle_receipt_scope_heads VALUES(?,?,?,?)",
+            ("session-missing", "run-missing", "scope-checkpoint-missing", 1),
         )
         resolution_insert = (
             "INSERT INTO lifecycle_scope_admission_resolutions VALUES("
@@ -1707,6 +1724,9 @@ class SpecRepairTests(unittest.TestCase):
         attached_guard = trigger_sql(
             SPEC_04, "provider_action_route_reservation_attached_guard"
         )
+        self.assertEqual(SPEC_04.count("\nprovider_action_routes("), 1)
+        self.assertIn("...remaining route/admission columns...", route)
+        self.assertNotIn("...existing columns...", route)
         self.assertIn(
             "FROM review_finding_capacity_reservations AS reservation",
             attached_guard,
@@ -1845,6 +1865,15 @@ class SpecRepairTests(unittest.TestCase):
             SPEC_04, "lifecycle_generation_loss_revisions"
         )
         loss_head = ddl_block(SPEC_04, "lifecycle_generation_loss_heads")
+        for required_key in (
+            "project_session_id NOT NULL",
+            "run_id NOT NULL",
+            "agent_id NOT NULL",
+            "generation_loss_id NOT NULL",
+            "current_revision NOT NULL CHECK(current_revision >= 1)",
+            "terminal NOT NULL CHECK(terminal IN (0,1))",
+        ):
+            self.assertIn(required_key, loss_head)
         self.assertIn(
             "UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,"
             "revision,\n    state,abandon_kind_code,semantic_digest,"
@@ -1860,6 +1889,15 @@ class SpecRepairTests(unittest.TestCase):
         self.assertIn("head_revision NOT NULL CHECK(head_revision >= 1)", loss_head)
 
         custody = ddl_block(SPEC_04, "lifecycle_rotation_custody_heads")
+        for required_key in (
+            "project_session_id NOT NULL",
+            "run_id NOT NULL",
+            "agent_id NOT NULL",
+            "custody_id NOT NULL",
+            "current_revision NOT NULL CHECK(current_revision >= 1)",
+            "terminal NOT NULL CHECK(terminal IN (0,1))",
+        ):
+            self.assertIn(required_key, custody)
         self.assertIn("disposition_code NOT NULL", custody)
         self.assertIn("head_revision NOT NULL CHECK(head_revision >= 1)", custody)
         self.assertIn(
@@ -1867,18 +1905,171 @@ class SpecRepairTests(unittest.TestCase):
             custody,
         )
 
+    def test_normative_lifecycle_head_ddl_rejects_null_vacuity(self) -> None:
+        db = sqlite3.connect(":memory:")
+        db.execute("PRAGMA foreign_keys=ON")
+        db.executescript("""
+            CREATE TABLE lifecycle_rotation_custody_revisions(
+              project_session_id,run_id,agent_id,custody_id,revision,state,
+              disposition_code,semantic_digest,source_ref_digest,journal_digest,
+              UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,
+                state,disposition_code,semantic_digest,source_ref_digest,
+                journal_digest));
+            CREATE TABLE lifecycle_generation_loss_revisions(
+              project_session_id,run_id,agent_id,generation_loss_id,revision,
+              state,abandon_kind_code,semantic_digest,source_ref_digest,
+              journal_digest,
+              UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,
+                revision,state,abandon_kind_code,semantic_digest,
+                source_ref_digest,journal_digest));
+        """)
+        for table in (
+            "lifecycle_rotation_custody_heads",
+            "lifecycle_generation_loss_heads",
+        ):
+            db.execute("CREATE TABLE " + ddl_block(SPEC_04, table))
+        db.execute(
+            "INSERT INTO lifecycle_rotation_custody_revisions "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("session", "run", "agent", "custody", 1, "finalized",
+             "adopted", "semantic", "source", "journal"),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_generation_loss_revisions "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("session", "run", "agent", "loss", 1, "abandoned",
+             "direct-open", "semantic", "source", "journal"),
+        )
+
+        for label, statement, values in (
+            (
+                "custody-null-revision",
+                "INSERT INTO lifecycle_rotation_custody_heads "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("session", "run", "agent", "custody", None, "finalized",
+                 "adopted", "semantic", "source", "journal", 1, 1),
+            ),
+            (
+                "custody-null-terminal",
+                "INSERT INTO lifecycle_rotation_custody_heads "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("session", "run", "agent", "custody", 1, "finalized",
+                 "adopted", "semantic", "source", "journal", None, 1),
+            ),
+            (
+                "loss-null-revision",
+                "INSERT INTO lifecycle_generation_loss_heads "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("session", "run", "agent", "loss", None, "abandoned",
+                 "direct-open", "semantic", "source", "journal", 1, 1),
+            ),
+            (
+                "loss-null-terminal",
+                "INSERT INTO lifecycle_generation_loss_heads "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("session", "run", "agent", "loss", 1, "abandoned",
+                 "direct-open", "semantic", "source", "journal", None, 1),
+            ),
+            (
+                "custody-missing-parent",
+                "INSERT INTO lifecycle_rotation_custody_heads "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("session", "run", "agent", "missing-custody", 1, "finalized",
+                 "adopted", "semantic", "source", "journal", 1, 1),
+            ),
+            (
+                "loss-missing-parent",
+                "INSERT INTO lifecycle_generation_loss_heads "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("session", "run", "agent", "missing-loss", 1, "abandoned",
+                 "direct-open", "semantic", "source", "journal", 1, 1),
+            ),
+        ):
+            with self.subTest(label=label):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    db.execute(statement, values)
+        self.assertEqual([], db.execute("PRAGMA foreign_key_check").fetchall())
+
     def test_review_evidence_and_slot_head_are_relationally_closed(self) -> None:
         actual = ddl_block(
             SPEC_04, "provider_action_actual_route_identities"
         )
         evidence = ddl_block(SPEC_04, "provider_review_evidence")
         head = ddl_block(SPEC_04, "review_slot_heads")
+        result = ddl_block(SPEC_04, "provider_review_results")
+        journal = ddl_block(SPEC_04, "provider_review_terminal_journal")
+        observation = ddl_block(
+            SPEC_04, "provider_action_route_observations"
+        )
 
         self.assertIn(
             "FOREIGN KEY(adapter_id,action_id,admission_digest,"
             "observation_digest)",
             actual,
         )
+        self.assertIn(
+            "UNIQUE(adapter_id,action_id,admission_digest,observation_digest)",
+            observation,
+        )
+        self.assertIn(
+            "adapter_id,action_id,route_receipt_digest,"
+            "deployed_route_admission_digest",
+            create_index_sql(
+                SPEC_04, "provider_action_route_review_evidence_parent"
+            ),
+        )
+        for baseline_result_field in (
+            "result_kind TEXT NOT NULL CHECK(result_kind IN",
+            "provider_answer_length INTEGER CHECK(",
+            "safe_result_json TEXT CHECK(",
+            "finding_set_digest TEXT",
+            "resolved_finding_set_digest TEXT",
+            "classifier_digest TEXT",
+            "secret_selector_digest TEXT",
+            "failure_code TEXT CHECK(",
+            "private_diagnostic_digest TEXT",
+        ):
+            self.assertIn(baseline_result_field, result)
+        self.assertIn(
+            "UNIQUE(adapter_id,action_id,terminal_sequence,result_digest)",
+            result,
+        )
+        for baseline_journal_field in (
+            "run_id TEXT NOT NULL",
+            "target_generation INTEGER NOT NULL",
+            "attempt_generation INTEGER NOT NULL CHECK(attempt_generation >= 1)",
+            "terminal_input_digest TEXT NOT NULL",
+            "private_answer_digest TEXT",
+            "private_result_digest TEXT",
+            "private_adapter_result_digest TEXT",
+            "authenticated_usage_digest TEXT",
+            "read_journal_digest TEXT",
+            "public_terminal_projection_digest TEXT NOT NULL",
+            "evidence_mutation_receipt_digest TEXT",
+        ):
+            self.assertIn(baseline_journal_field, journal)
+        self.assertIn(
+            "UNIQUE(adapter_id,action_id,terminal_sequence)", journal
+        )
+        for required_column in (
+            "task_id NOT NULL",
+            "provider_answer_digest NOT NULL",
+            "final_prompt_digest NOT NULL",
+            "chair_binding_digest NOT NULL",
+            "prior_open_finding_set_digest NOT NULL",
+            "reported_resolved_finding_set_digest NOT NULL",
+            "accepted_resolved_finding_set_digest NOT NULL",
+            "finding_set_digest NOT NULL",
+            "new_open_finding_set_digest NOT NULL",
+            "repair_required_finding_set_digest NOT NULL",
+            "finding_window_digest NOT NULL",
+            "read_coverage_digest NOT NULL",
+            "coverage_summary_digest NOT NULL",
+            "certification_basis_at_terminal_digest NOT NULL",
+            "mutation_receipt_digest NOT NULL",
+        ):
+            with self.subTest(required_column=required_column):
+                self.assertIn(required_column, evidence)
         self.assertIn(
             "CHECK(actual_route_identity_digest IS NULL OR\n"
             "    route_observation_digest IS NOT NULL)",
@@ -1890,6 +2081,25 @@ class SpecRepairTests(unittest.TestCase):
             evidence,
         )
         self.assertIn(
+            "FOREIGN KEY(run_id,target_generation,slot,prior_head_generation,\n"
+            "      prior_evidence_id)",
+            evidence,
+        )
+        self.assertIn(
+            "FOREIGN KEY(run_id,target_generation,task_id,bundle_digest,"
+            "coverage_digest,\n      profile_digest)",
+            evidence,
+        )
+        self.assertIn(
+            "FOREIGN KEY(run_id,target_generation,chair_binding_generation,\n"
+            "      chair_binding_digest,task_id,bundle_digest,profile_digest)",
+            evidence,
+        )
+        self.assertEqual(
+            evidence.count("REFERENCES review_finding_sets(finding_set_digest)"),
+            6,
+        )
+        self.assertIn(
             "CHECK((head_generation=0 AND head_evidence_id IS NULL) OR",
             head,
         )
@@ -1898,6 +2108,133 @@ class SpecRepairTests(unittest.TestCase):
             "      head_evidence_id)",
             head,
         )
+
+    def test_normative_review_evidence_ddl_executes_exactly(self) -> None:
+        db = sqlite3.connect(":memory:")
+        db.execute("PRAGMA foreign_keys=ON")
+        db.executescript("""
+            CREATE TABLE provider_actions(
+              adapter_id,action_id,PRIMARY KEY(adapter_id,action_id));
+            CREATE TABLE provider_action_routes(
+              adapter_id,action_id,route_receipt_digest,
+              deployed_route_admission_digest,
+              PRIMARY KEY(adapter_id,action_id),
+              UNIQUE(adapter_id,action_id,deployed_route_admission_digest));
+            CREATE TABLE review_finding_capacity_reservations(
+              adapter_id,action_id,run_id,target_generation,slot,
+              attempt_generation,reservation_digest,
+              UNIQUE(adapter_id,action_id,run_id,target_generation,slot,
+                attempt_generation,reservation_digest));
+            CREATE TABLE review_completion_targets(
+              run_id,target_generation,task_id,bundle_digest,coverage_digest,
+              resolved_profile_digest,
+              UNIQUE(run_id,target_generation,task_id,bundle_digest,
+                coverage_digest,resolved_profile_digest));
+            CREATE TABLE review_target_chair_bindings(
+              run_id,target_generation,binding_generation,binding_digest,
+              task_id,bundle_digest,profile_digest,
+              UNIQUE(run_id,target_generation,binding_generation,
+                binding_digest,task_id,bundle_digest,profile_digest));
+            CREATE TABLE review_finding_sets(
+              finding_set_digest PRIMARY KEY);
+        """)
+        db.execute(create_index_sql(
+            SPEC_04, "provider_action_route_review_evidence_parent"
+        ))
+        db.execute(
+            "CREATE TABLE "
+            + ddl_block(SPEC_04, "provider_action_route_observations")
+        )
+        for table in (
+            "provider_action_actual_route_identities",
+            "provider_review_terminal_journal",
+            "provider_review_results",
+            "provider_review_evidence",
+            "review_slot_heads",
+        ):
+            db.execute("CREATE TABLE " + ddl_block(SPEC_04, table))
+        db.execute("INSERT INTO provider_actions VALUES('adapter','action')")
+        db.execute(
+            "INSERT INTO provider_action_routes VALUES(?,?,?,?)",
+            ("adapter", "action", "route-receipt", "admission"),
+        )
+        db.execute(
+            "INSERT INTO provider_action_route_observations VALUES(?,?,?,?,?,?)",
+            ("adapter", "action", "admission", "{}", "observation",
+             "observed-at"),
+        )
+        db.execute(
+            "INSERT INTO provider_action_actual_route_identities "
+            "VALUES(?,?,?,?,?,?)",
+            ("adapter", "action", "admission", "observation", "{}",
+             "actual-route"),
+        )
+        db.execute(
+            "INSERT INTO provider_review_terminal_journal "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("adapter", "action", "run", 1, "native", 1,
+             "unusable-answer", 1, "terminal-input", "answer", None,
+             "adapter-result", "usage", "read-journal", "projection", None,
+             1),
+        )
+        db.execute(
+            "INSERT INTO provider_review_results VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("adapter", "action", 1, "unusable-answer", "answer", 0,
+             None, "result", None, None, "classifier", "selector", None,
+             None, 1),
+        )
+        db.execute("INSERT INTO review_finding_sets VALUES('empty-set')")
+        db.execute(
+            "INSERT INTO review_slot_heads VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("run", 1, "native", 0, None, 0, None, None, None,
+             "empty-set", "empty-set", None, None, 1, "updated-at"),
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute(
+                "INSERT INTO review_slot_heads VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("run", 2, "native", 1, "fabricated-evidence", 0,
+                 None, None, None, "empty-set", "empty-set", None, None,
+                 1, "updated-at"),
+            )
+        self.assertEqual([], db.execute("PRAGMA foreign_key_check").fetchall())
+
+    def test_review_evidence_parent_candidate_indexes_are_required(self) -> None:
+        cases = (
+            (
+                "provider_action_route_review_evidence_parent",
+                "provider_action_routes",
+                "CREATE TABLE provider_action_routes("
+                "adapter_id,action_id,route_receipt_digest,"
+                "deployed_route_admission_digest)",
+                "CREATE TABLE route_child("
+                "adapter_id,action_id,route_receipt_digest,admission_digest,"
+                "FOREIGN KEY(adapter_id,action_id,route_receipt_digest,"
+                "admission_digest) REFERENCES provider_action_routes("
+                "adapter_id,action_id,route_receipt_digest,"
+                "deployed_route_admission_digest))",
+                ("adapter", "action", "receipt", "admission"),
+                "INSERT INTO route_child VALUES(?,?,?,?)",
+            ),
+        )
+        for index_name, parent, parent_ddl, child_ddl, values, child_insert in cases:
+            with self.subTest(index=index_name):
+                db = sqlite3.connect(":memory:")
+                db.execute("PRAGMA foreign_keys=ON")
+                db.execute(parent_ddl)
+                db.execute(child_ddl)
+                with self.assertRaisesRegex(
+                    sqlite3.OperationalError, "foreign key mismatch"
+                ):
+                    db.execute(child_insert, values)
+                db.execute(create_index_sql(SPEC_04, index_name))
+                db.execute(
+                    f"INSERT INTO {parent} VALUES(?,?,?,?)",
+                    values,
+                )
+                db.execute(child_insert, values)
+                self.assertEqual(
+                    [], db.execute("PRAGMA foreign_key_check").fetchall()
+                )
 
     def test_recovery_issue_source_head_closes_both_race_orders(self) -> None:
         source_head = ddl_block(

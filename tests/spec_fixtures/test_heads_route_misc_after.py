@@ -2131,6 +2131,47 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
         self.reject_evidence(skipped_generation)
         self.assert_foreign_keys_clean()
 
+    def test_review_evidence_prior_chain_is_exactly_target_and_slot_bound(self) -> None:
+        self.seed_route(
+            "adapter-a", "review-a", kind="certifying", target=1,
+            slot="native", ordinal=1,
+        )
+        self.seed_review_terminal("adapter-a", "review-a", identity=False)
+        first = self.evidence_values(
+            "adapter-a", "review-a", evidence="evidence-first",
+            observation="observation-review-a",
+        )
+        self.insert_evidence(first)
+        mark_case()
+
+        self.seed_route(
+            "adapter-b", "review-b", kind="certifying", target=1,
+            slot="native", attempt=2, ordinal=2,
+        )
+        self.seed_review_terminal("adapter-b", "review-b", identity=False)
+        successor = self.evidence_values(
+            "adapter-b", "review-b", evidence="evidence-successor",
+            observation="observation-review-b", prior_generation=1,
+            new_generation=2, prior_evidence="evidence-first",
+        )
+        successor[12] = 2
+        self.insert_evidence(successor)
+        mark_case()
+
+        self.seed_route(
+            "adapter-c", "review-c", kind="certifying", target=2,
+            slot="other-primary", ordinal=3,
+        )
+        self.seed_review_terminal("adapter-c", "review-c", identity=False)
+        crossed = self.evidence_values(
+            "adapter-c", "review-c", evidence="evidence-crossed-prior",
+            target=2, slot="other-primary",
+            observation="observation-review-c", prior_generation=1,
+            new_generation=2, prior_evidence="evidence-first",
+        )
+        self.reject_evidence(crossed)
+        self.assert_foreign_keys_clean()
+
     def reject_evidence(self, values: Sequence[Any]) -> None:
         with self.assertRaises(sqlite3.IntegrityError):
             self.insert_evidence(values)

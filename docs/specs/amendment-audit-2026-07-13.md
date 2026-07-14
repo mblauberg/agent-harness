@@ -252,6 +252,14 @@ built.
   retirement result and/or fresh commit before accepting the immutable apply
   marker; child-to-apply FKs are deferred and the public fixture executes every
   incomplete arm family.
+- Lead 7 / MF01-2 — scope heads are now canonical non-null checkpoint pointers;
+  generation-loss and custody heads carry only non-null exact revision-key
+  state; and head-local discriminator parity closes terminal crossings. The
+  immutable review-evidence relation publishes every receipt-record identity,
+  binds result, route, observation, proved actual-route identity, reservation,
+  prior evidence and all finding-set roots, while `review_slot_heads` has a
+  real generation/evidence foreign key. Executable fixtures reject null-vacuous
+  heads, fabricated/crossed evidence and skipped generations.
 - Lead 8 — `agent_lifecycle_recovery_source_heads` now owns the immutable
   current-issue pointer, monotonic reissue and current-head handoff FK; exact
   issue/handoff/revocation triggers close both race orders and all three
@@ -294,10 +302,6 @@ built.
 **Pending structural repair (needed before freeze; codex-certified):** these
 close only with multi-part DDL changes, not one-line additions, so they are
 deliberately not half-applied —
-- Lead 7 — systemic head parity: restructure scope/loss/custody heads to
-  canonical pointers or non-null sentinels so the fuller FKs cannot be
-  null-vacuous; give `review_slot_heads` a real FK; publish
-  `provider_review_evidence` DDL (unifies with MF01-2).
 - MF01-1 (§32.21/§32.22 requirement IDs; new IDs start FR-077/NFR-034/AC-056);
   MF01-4 (generic-route recovery owner cross-reference).
 - Newly found — `lifecycleMutationPlanV1`'s closed relation enum omits

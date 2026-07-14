@@ -2929,6 +2929,8 @@ review_completion_targets(
   initial_chair_binding_digest, state, created_at,
   PRIMARY KEY(run_id, target_generation),
   UNIQUE(run_id, target_generation, review_subject_digest),
+  UNIQUE(run_id,target_generation,task_id,bundle_digest,coverage_digest,
+    resolved_profile_digest),
   UNIQUE(run_id, review_subject_digest),
   UNIQUE(preparation_id),
   CHECK(state IN ('current', 'superseded'))
@@ -2954,6 +2956,8 @@ review_target_chair_bindings(
   binding_digest, created_at,
   PRIMARY KEY(run_id, target_generation, binding_generation),
   UNIQUE(run_id, target_generation, binding_generation, binding_digest),
+  UNIQUE(run_id,target_generation,binding_generation,binding_digest,task_id,
+    bundle_digest,profile_digest),
   FOREIGN KEY(run_id, target_generation, review_subject_digest)
     REFERENCES review_completion_targets(
       run_id, target_generation, review_subject_digest),
@@ -5492,19 +5496,245 @@ derives a manifest-complete-risk-directed gap summary with per-group total/read/
 unread counts and unread-set digests; byteComplete is false unless every object
 was fully read.
 
+The proved actual-route identity is a dedicated immutable child of the exact
+admission observation. A digest cannot be coined directly on review evidence.
+The full current-baseline result relation is reproduced below rather than
+replaced by a thinner parent stub. It retains every result field and arm CHECK;
+the only extension is the journal-bound terminal sequence and composite
+evidence-parent key.
+
+~~~sql
+provider_action_actual_route_identities(
+  adapter_id NOT NULL, action_id NOT NULL,
+  admission_digest NOT NULL, observation_digest NOT NULL,
+  actual_route_identity_json NOT NULL,
+  actual_route_identity_digest NOT NULL,
+  PRIMARY KEY(adapter_id,action_id),
+  UNIQUE(adapter_id,action_id,admission_digest,observation_digest,
+    actual_route_identity_digest),
+  FOREIGN KEY(adapter_id,action_id,admission_digest,observation_digest)
+    REFERENCES provider_action_route_observations(
+      adapter_id,action_id,admission_digest,observation_digest)
+)
+
+provider_review_terminal_journal(
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  target_generation INTEGER NOT NULL,
+  slot TEXT NOT NULL,
+  attempt_generation INTEGER NOT NULL CHECK(attempt_generation >= 1),
+  terminal_kind TEXT NOT NULL CHECK(terminal_kind IN
+    ('safe-answer','unusable-answer','provider-terminal-failure',
+      'terminal-no-effect','integrity-terminal','retired-unknown')),
+  terminal_sequence INTEGER NOT NULL CHECK(terminal_sequence >= 1),
+  terminal_input_digest TEXT NOT NULL,
+  private_answer_digest TEXT,
+  private_result_digest TEXT,
+  private_adapter_result_digest TEXT,
+  authenticated_usage_digest TEXT,
+  read_journal_digest TEXT,
+  public_terminal_projection_digest TEXT NOT NULL,
+  evidence_mutation_receipt_digest TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(adapter_id,action_id),
+  UNIQUE(adapter_id,action_id,target_generation,slot,attempt_generation),
+  UNIQUE(run_id,terminal_sequence),
+  UNIQUE(adapter_id,action_id,terminal_sequence),
+  FOREIGN KEY(adapter_id,action_id)
+    REFERENCES provider_action_routes(adapter_id,action_id)
+)
+
+provider_review_results(
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  terminal_sequence INTEGER NOT NULL CHECK(terminal_sequence >= 1),
+  result_kind TEXT NOT NULL CHECK(result_kind IN
+    ('safe-answer','unusable-answer','provider-terminal-failure')),
+  provider_answer_digest TEXT,
+  provider_answer_length INTEGER CHECK(
+    provider_answer_length IS NULL OR provider_answer_length >= 0),
+  safe_result_json TEXT CHECK(
+    safe_result_json IS NULL OR json_valid(safe_result_json)),
+  result_digest TEXT NOT NULL UNIQUE,
+  finding_set_digest TEXT,
+  resolved_finding_set_digest TEXT,
+  classifier_digest TEXT,
+  secret_selector_digest TEXT,
+  failure_code TEXT CHECK(failure_code IS NULL OR failure_code IN
+    ('max-turns-exhausted','provider-rejected','terminal-no-answer',
+      'adapter-terminal-failure')),
+  private_diagnostic_digest TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(adapter_id,action_id),
+  UNIQUE(adapter_id,action_id,terminal_sequence,result_digest),
+  FOREIGN KEY(adapter_id,action_id,terminal_sequence)
+    REFERENCES provider_review_terminal_journal(
+      adapter_id,action_id,terminal_sequence),
+  CHECK((result_kind='safe-answer' AND provider_answer_digest IS NOT NULL AND
+      provider_answer_length IS NOT NULL AND safe_result_json IS NOT NULL AND
+      finding_set_digest IS NOT NULL AND
+      resolved_finding_set_digest IS NOT NULL AND
+      classifier_digest IS NOT NULL AND secret_selector_digest IS NOT NULL AND
+      failure_code IS NULL AND private_diagnostic_digest IS NULL) OR
+    (result_kind='unusable-answer' AND provider_answer_digest IS NOT NULL AND
+      provider_answer_length IS NOT NULL AND safe_result_json IS NULL AND
+      finding_set_digest IS NULL AND resolved_finding_set_digest IS NULL AND
+      classifier_digest IS NOT NULL AND secret_selector_digest IS NOT NULL AND
+      failure_code IS NULL AND private_diagnostic_digest IS NULL) OR
+    (result_kind='provider-terminal-failure' AND
+      provider_answer_digest IS NULL AND provider_answer_length IS NULL AND
+      safe_result_json IS NULL AND finding_set_digest IS NULL AND
+      resolved_finding_set_digest IS NULL AND classifier_digest IS NULL AND
+      secret_selector_digest IS NULL AND failure_code IS NOT NULL AND
+      private_diagnostic_digest IS NOT NULL))
+)
+
+provider_review_evidence(
+  run_id NOT NULL, evidence_id NOT NULL,
+  target_generation NOT NULL CHECK(target_generation >= 1),
+  slot NOT NULL CHECK(slot IN
+    ('native','other-primary','cursor-grok','agy-gemini')),
+  task_id NOT NULL,
+  action_adapter_id NOT NULL, action_id NOT NULL,
+  terminal_sequence NOT NULL CHECK(terminal_sequence >= 1),
+  terminal_kind NOT NULL CHECK(terminal_kind IN
+    ('safe-answer','unusable-answer')),
+  verdict NOT NULL CHECK(verdict IN ('CLEAN','FINDINGS','UNUSABLE')),
+  answer_safety NOT NULL CHECK(answer_safety IN ('safe','unusable')),
+  provider_answer_digest NOT NULL, terminal_result_digest NOT NULL,
+  review_result_digest,
+  route_receipt_digest NOT NULL, route_admission_digest NOT NULL,
+  route_observation_digest, actual_route_identity_digest,
+  final_prompt_digest NOT NULL,
+  endpoint_provider NOT NULL, provider_family NOT NULL, model NOT NULL,
+  bundle_digest NOT NULL, coverage_digest NOT NULL, profile_digest NOT NULL,
+  chair_binding_generation NOT NULL CHECK(chair_binding_generation >= 1),
+  chair_binding_digest NOT NULL,
+  prior_head_generation NOT NULL CHECK(prior_head_generation >= 0),
+  new_head_generation NOT NULL CHECK(new_head_generation >= 1),
+  attempt_generation NOT NULL CHECK(attempt_generation >= 1),
+  prior_evidence_id,
+  prior_open_finding_set_digest NOT NULL,
+  reported_resolved_finding_set_digest NOT NULL,
+  accepted_resolved_finding_set_digest NOT NULL,
+  finding_set_digest NOT NULL, new_open_finding_set_digest NOT NULL,
+  repair_required_finding_set_digest NOT NULL,
+  finding_window_digest NOT NULL,
+  finding_capacity_reservation_digest NOT NULL,
+  read_coverage_digest NOT NULL, coverage_summary_digest NOT NULL,
+  reviewer_family_relation NOT NULL CHECK(reviewer_family_relation IN
+    ('same-family-exempt','distinct-family-proved','same-family-forbidden',
+      'family-unproved')),
+  certification_basis_at_terminal_digest NOT NULL,
+  mutation_receipt_digest NOT NULL,
+  evidence_json NOT NULL, evidence_digest NOT NULL, created_at NOT NULL,
+  PRIMARY KEY(run_id,evidence_id),
+  UNIQUE(action_adapter_id,action_id),
+  UNIQUE(evidence_digest), UNIQUE(mutation_receipt_digest),
+  UNIQUE(run_id,target_generation,slot,evidence_id),
+  UNIQUE(run_id,target_generation,slot,new_head_generation),
+  UNIQUE(run_id,target_generation,slot,new_head_generation,evidence_id),
+  CHECK(new_head_generation=prior_head_generation+1),
+  CHECK((prior_head_generation=0)=(prior_evidence_id IS NULL)),
+  CHECK((terminal_kind='safe-answer' AND answer_safety='safe' AND
+      verdict IN ('CLEAN','FINDINGS') AND review_result_digest IS NOT NULL) OR
+    (terminal_kind='unusable-answer' AND answer_safety='unusable' AND
+      verdict='UNUSABLE' AND review_result_digest IS NULL)),
+  CHECK(actual_route_identity_digest IS NULL OR
+    route_observation_digest IS NOT NULL),
+  FOREIGN KEY(action_adapter_id,action_id,terminal_sequence,
+      terminal_result_digest)
+    REFERENCES provider_review_results(
+      adapter_id,action_id,terminal_sequence,result_digest),
+  FOREIGN KEY(action_adapter_id,action_id,route_receipt_digest,
+      route_admission_digest)
+    REFERENCES provider_action_routes(
+      adapter_id,action_id,route_receipt_digest,
+      deployed_route_admission_digest),
+  FOREIGN KEY(action_adapter_id,action_id,route_admission_digest,
+      route_observation_digest)
+    REFERENCES provider_action_route_observations(
+      adapter_id,action_id,admission_digest,observation_digest),
+  FOREIGN KEY(action_adapter_id,action_id,route_admission_digest,
+      route_observation_digest,actual_route_identity_digest)
+    REFERENCES provider_action_actual_route_identities(
+      adapter_id,action_id,admission_digest,observation_digest,
+      actual_route_identity_digest),
+  FOREIGN KEY(action_adapter_id,action_id,run_id,target_generation,slot,
+      attempt_generation,finding_capacity_reservation_digest)
+    REFERENCES review_finding_capacity_reservations(
+      adapter_id,action_id,run_id,target_generation,slot,
+      attempt_generation,reservation_digest),
+  FOREIGN KEY(run_id,target_generation,task_id,bundle_digest,coverage_digest,
+      profile_digest)
+    REFERENCES review_completion_targets(
+      run_id,target_generation,task_id,bundle_digest,coverage_digest,
+      resolved_profile_digest),
+  FOREIGN KEY(run_id,target_generation,chair_binding_generation,
+      chair_binding_digest,task_id,bundle_digest,profile_digest)
+    REFERENCES review_target_chair_bindings(
+      run_id,target_generation,binding_generation,binding_digest,task_id,
+      bundle_digest,profile_digest),
+  FOREIGN KEY(run_id,target_generation,slot,prior_head_generation,
+      prior_evidence_id)
+    REFERENCES provider_review_evidence(
+      run_id,target_generation,slot,new_head_generation,evidence_id),
+  FOREIGN KEY(prior_open_finding_set_digest)
+    REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY(reported_resolved_finding_set_digest)
+    REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY(accepted_resolved_finding_set_digest)
+    REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY(finding_set_digest)
+    REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY(new_open_finding_set_digest)
+    REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY(repair_required_finding_set_digest)
+    REFERENCES review_finding_sets(finding_set_digest)
+)
+~~~
+
 review_slot_heads is the sole linear current evidence owner:
 
 ~~~sql
 review_slot_heads(
-  run_id, target_generation, slot,
-  head_generation, head_evidence_id,
-  latest_attempt_generation,
+  run_id NOT NULL,
+  target_generation NOT NULL CHECK(target_generation >= 1),
+  slot NOT NULL CHECK(slot IN
+    ('native','other-primary','cursor-grok','agy-gemini')),
+  head_generation NOT NULL CHECK(head_generation >= 0), head_evidence_id,
+  latest_attempt_generation NOT NULL CHECK(latest_attempt_generation >= 0),
   latest_action_adapter_id, latest_action_id, latest_action_state,
-  open_finding_set_digest,
-  repair_required_finding_set_digest,
+  open_finding_set_digest NOT NULL,
+  repair_required_finding_set_digest NOT NULL,
   prior_target_generation, prior_target_head_evidence_id,
-  revision, updated_at,
-  PRIMARY KEY(run_id, target_generation, slot)
+  revision NOT NULL CHECK(revision >= 1), updated_at NOT NULL,
+  PRIMARY KEY(run_id,target_generation,slot),
+  CHECK((head_generation=0 AND head_evidence_id IS NULL) OR
+    (head_generation>=1 AND head_evidence_id IS NOT NULL)),
+  CHECK((latest_attempt_generation=0 AND latest_action_adapter_id IS NULL AND
+      latest_action_id IS NULL AND latest_action_state IS NULL) OR
+    (latest_attempt_generation>=1 AND latest_action_adapter_id IS NOT NULL AND
+      latest_action_id IS NOT NULL AND latest_action_state IS NOT NULL)),
+  CHECK((prior_target_generation IS NULL)=
+    (prior_target_head_evidence_id IS NULL)),
+  CHECK(prior_target_generation IS NULL OR
+    prior_target_generation=target_generation-1),
+  FOREIGN KEY(run_id,target_generation,slot,head_generation,
+      head_evidence_id)
+    REFERENCES provider_review_evidence(
+      run_id,target_generation,slot,new_head_generation,evidence_id),
+  FOREIGN KEY(run_id,prior_target_generation,slot,
+      prior_target_head_evidence_id)
+    REFERENCES provider_review_evidence(
+      run_id,target_generation,slot,evidence_id),
+  FOREIGN KEY(latest_action_adapter_id,latest_action_id)
+    REFERENCES provider_actions(adapter_id,action_id),
+  FOREIGN KEY(open_finding_set_digest)
+    REFERENCES review_finding_sets(finding_set_digest),
+  FOREIGN KEY(repair_required_finding_set_digest)
+    REFERENCES review_finding_sets(finding_set_digest)
 )
 ~~~
 
@@ -5514,20 +5744,15 @@ evidence becomes current for the new target. Head and attempt generations are
 contiguous. Canonical paged set roots are complete/sorted/unique/digest-valid. A head evidence
 foreign key matches the same run/target/slot/generation.
 
-provider_review_evidence is immutable and includes target/slot, prior and new
-head generations, prior evidence, complete prior open set, separately stored
-provider-reported-resolved and daemon-accepted-resolved prior sets, current
-finding set, complete new open set,
-repair-required set, finding-window reservation, terminal sequence,
-certification-basis-at-terminal digest, canonical action pair/result/route/bundle/coverage/profile/
-chair-binding, `route_observation_digest`, nullable
-`actual_route_identity_digest` and safe reviewer-family-relation/read-coverage
-fields. The actual digest is nonnull only for a closed proved endpoint-provider/
-family/model object bound to admission and observation. Profile/admission or
-other observed-field inequality retains that digest as mismatch evidence; its
-absence/mismatch blocker and resolution-denial outcome are immutable. It also stores the exact
-task, answer/result safety digests and final-prompt route join required by
-reviewEvidenceReadV1. It contains no currency column.
+provider_review_evidence is immutable. The published relation above is the
+complete persistence contract for the receipt `reviewEvidenceRecord`: it names
+every scalar identity and uses canonical finding-set roots for every stored
+set. The actual-route digest is nonnull only through the closed proved
+endpoint-provider/family/model child bound to the exact admission observation.
+Profile/admission or other observed-field inequality retains that proved object
+as mismatch evidence; its absence/mismatch blocker and resolution-denial
+outcome remain inside the immutable evidence JSON and digest. Currency is never
+stored in this relation.
 
 `fabric.v1.review-finding-page.read` joins an authenticated session/run to an
 authorised evidence/completion/receipt finding-set root, then equality-checks
@@ -5956,20 +6181,20 @@ lifecycle_rotation_custodies(
 
 lifecycle_rotation_custody_revisions(
   project_session_id, run_id, agent_id, custody_id,
-  revision CHECK(revision >= 1), prior_revision, prior_journal_digest,
-  state CHECK(state IN ('awaiting-boundary','prepared','dispatched','accepted',
+  revision NOT NULL CHECK(revision >= 1), prior_revision, prior_journal_digest,
+  state NOT NULL CHECK(state IN ('awaiting-boundary','prepared','dispatched','accepted',
     'ambiguous','provider-terminal','committing','finalized')),
-  disposition_code CHECK(disposition_code IN
+  disposition_code NOT NULL CHECK(disposition_code IN
     ('none','adopted','no-effect','quarantined','superseded','abandoned')),
   proof_kind CHECK(proof_kind IN ('none','zero-dispatch-no-effect',
     'predispatch-superseded','postterminal-adoption-cas-superseded',
     'fresh-handoff-superseded','provider-terminal','provider-no-effect',
     'integrity-quarantine','confirmed-abandon')),
   terminal_evidence_digest,
-  semantic_json, semantic_digest, source_ref_digest,
+  semantic_json, semantic_digest NOT NULL, source_ref_digest NOT NULL,
   origin_fresh_apply_id, origin_fresh_apply_digest,
   receipt_batch_id, receipt_apply_id, receipt_apply_digest,
-  journal_json, journal_digest, recorded_at,
+  journal_json, journal_digest NOT NULL, recorded_at,
   PRIMARY KEY(run_id,agent_id,custody_id,revision),
   UNIQUE(project_session_id,run_id,agent_id,custody_id,revision),
   UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,
@@ -6035,9 +6260,13 @@ lifecycle_rotation_custody_revisions(
 )
 
 lifecycle_rotation_custody_heads(
-  project_session_id, run_id, agent_id, custody_id, current_revision,
-  state, disposition_code, semantic_digest, source_ref_digest, journal_digest,
-  terminal CHECK(terminal IN (0,1)), head_revision,
+  project_session_id NOT NULL, run_id NOT NULL, agent_id NOT NULL,
+  custody_id NOT NULL,
+  current_revision NOT NULL CHECK(current_revision >= 1),
+  state NOT NULL, disposition_code NOT NULL,
+  semantic_digest NOT NULL, source_ref_digest NOT NULL, journal_digest NOT NULL,
+  terminal NOT NULL CHECK(terminal IN (0,1)),
+  head_revision NOT NULL CHECK(head_revision >= 1),
   PRIMARY KEY(run_id,agent_id,custody_id),
   UNIQUE(project_session_id,run_id,agent_id,custody_id),
   FOREIGN KEY(project_session_id,run_id,agent_id,custody_id,current_revision,
@@ -6045,7 +6274,8 @@ lifecycle_rotation_custody_heads(
     REFERENCES lifecycle_rotation_custody_revisions(
       project_session_id,run_id,agent_id,custody_id,revision,state,
       disposition_code,semantic_digest,source_ref_digest,journal_digest),
-  CHECK((terminal=1)=(state='finalized'))
+  CHECK((terminal=1)=(state='finalized')),
+  CHECK((state='finalized')=(disposition_code<>'none'))
 )
 
 CREATE UNIQUE INDEX one_nonfinal_lifecycle_custody_per_agent
@@ -6131,37 +6361,18 @@ lifecycle_scope_admission_resolutions(
     REFERENCES lifecycle_scope_admission_outbox(
       admission_request_id,project_id,project_session_id,run_id,authority_id,
       scope_digest),
-  FOREIGN KEY(project_session_id,run_id,authority_id,initial_receipt_count,
-      initial_scope_checkpoint_digest,initial_head_receipt_digest)
-    REFERENCES lifecycle_receipt_scope_checkpoints(
-      project_session_id,run_id,authority_id,receipt_count,checkpoint_digest,
-      head_receipt_digest),
   FOREIGN KEY(project_id,namespace_checkpoint_digest,authority_id)
     REFERENCES lifecycle_receipt_namespace_checkpoints(
-      project_id,checkpoint_digest,authority_id),
-  FOREIGN KEY(project_id,namespace_checkpoint_digest,project_session_id,run_id,
-      authority_id,initial_scope_checkpoint_digest,initial_receipt_count,
-      initial_head_receipt_digest)
-    REFERENCES lifecycle_receipt_namespace_members(
-      project_id,checkpoint_digest,project_session_id,run_id,authority_id,
-      scope_checkpoint_digest,receipt_count,head_receipt_digest)
+      project_id,checkpoint_digest,authority_id)
 )
 
 lifecycle_receipt_scope_heads(
-  project_session_id, run_id, authority_id, receipt_count,
-  head_authority_sequence, head_receipt_digest,
-  ordered_record_set_digest, checkpoint_digest, revision,
+  project_session_id NOT NULL, run_id NOT NULL, checkpoint_digest NOT NULL,
+  revision NOT NULL CHECK(revision >= 1),
   PRIMARY KEY(project_session_id,run_id),
   FOREIGN KEY(project_session_id,run_id,checkpoint_digest)
     REFERENCES lifecycle_receipt_scope_checkpoints(
-      project_session_id,run_id,checkpoint_digest),
-  FOREIGN KEY(project_session_id,run_id,authority_id,receipt_count,
-      head_authority_sequence,head_receipt_digest,ordered_record_set_digest,
-      checkpoint_digest)
-    REFERENCES lifecycle_receipt_scope_checkpoints(
-      project_session_id,run_id,authority_id,receipt_count,
-      head_authority_sequence,head_receipt_digest,ordered_record_set_digest,
-      checkpoint_digest)
+      project_session_id,run_id,checkpoint_digest)
 )
 
 CREATE TRIGGER lifecycle_scope_admission_resolution_requires_initial_head
@@ -6170,12 +6381,16 @@ BEGIN
   SELECT RAISE(
     ABORT,'lifecycle-scope-admission-initial-head-missing-or-crossed')
   WHERE NOT EXISTS (
-    SELECT 1 FROM lifecycle_receipt_scope_heads h
+    SELECT 1
+    FROM lifecycle_receipt_scope_heads h
+    JOIN lifecycle_receipt_scope_checkpoints c
+      ON c.project_session_id=h.project_session_id AND
+         c.run_id=h.run_id AND c.checkpoint_digest=h.checkpoint_digest
     WHERE h.project_session_id=NEW.project_session_id AND
-      h.run_id=NEW.run_id AND h.authority_id=NEW.authority_id AND
-      h.receipt_count=NEW.initial_receipt_count AND
-      h.head_authority_sequence=NEW.initial_receipt_count AND
-      h.head_receipt_digest IS NEW.initial_head_receipt_digest AND
+      h.run_id=NEW.run_id AND c.authority_id=NEW.authority_id AND
+      c.receipt_count=NEW.initial_receipt_count AND
+      c.head_authority_sequence=NEW.initial_receipt_count AND
+      c.head_receipt_digest IS NEW.initial_head_receipt_digest AND
       h.checkpoint_digest=NEW.initial_scope_checkpoint_digest AND
       h.revision=1
   );
@@ -7740,16 +7955,17 @@ lifecycle_generation_losses(
 
 lifecycle_generation_loss_revisions(
   project_session_id, run_id, agent_id, generation_loss_id,
-  revision CHECK(revision >= 1), prior_revision, prior_journal_digest,
-  state CHECK(state IN
+  revision NOT NULL CHECK(revision >= 1), prior_revision, prior_journal_digest,
+  state NOT NULL CHECK(state IN
     ('open','recovery-in-progress','recovered-adopted','abandoned')),
-  abandon_kind_code CHECK(
+  abandon_kind_code NOT NULL CHECK(
     abandon_kind_code IN ('none','direct-open','recovery-attempt')),
   recovery_action_adapter_id, recovery_action_id, active_recovery_custody_id,
-  terminal_evidence_digest, semantic_json, semantic_digest, source_ref_digest,
+  terminal_evidence_digest, semantic_json,
+  semantic_digest NOT NULL, source_ref_digest NOT NULL,
   origin_fresh_apply_id, origin_fresh_apply_digest,
   receipt_batch_id, receipt_apply_id, receipt_apply_digest,
-  journal_json, journal_digest, recorded_at,
+  journal_json, journal_digest NOT NULL, recorded_at,
   PRIMARY KEY(run_id,agent_id,generation_loss_id,revision),
   UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision),
   UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision,
@@ -7772,6 +7988,8 @@ lifecycle_generation_loss_revisions(
   UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision,state,
     abandon_kind_code,recovery_action_adapter_id,recovery_action_id,
     active_recovery_custody_id,semantic_digest,source_ref_digest,journal_digest),
+  UNIQUE(project_session_id,run_id,agent_id,generation_loss_id,revision,
+    state,abandon_kind_code,semantic_digest,source_ref_digest,journal_digest),
   UNIQUE(semantic_digest), UNIQUE(source_ref_digest), UNIQUE(journal_digest),
   CHECK((revision=1 AND prior_revision IS NULL AND
       prior_journal_digest IS NULL) OR
@@ -7846,27 +8064,23 @@ lifecycle_generation_loss_revisions(
 )
 
 lifecycle_generation_loss_heads(
-  project_session_id, run_id, agent_id, generation_loss_id, current_revision,
-  state, abandon_kind_code, recovery_action_adapter_id, recovery_action_id,
-  active_recovery_custody_id, semantic_digest, source_ref_digest,
-  journal_digest, terminal CHECK(terminal IN (0,1)), head_revision,
+  project_session_id NOT NULL, run_id NOT NULL, agent_id NOT NULL,
+  generation_loss_id NOT NULL,
+  current_revision NOT NULL CHECK(current_revision >= 1),
+  state NOT NULL, abandon_kind_code NOT NULL,
+  semantic_digest NOT NULL, source_ref_digest NOT NULL, journal_digest NOT NULL,
+  terminal NOT NULL CHECK(terminal IN (0,1)),
+  head_revision NOT NULL CHECK(head_revision >= 1),
   PRIMARY KEY(run_id,agent_id,generation_loss_id),
   UNIQUE(project_session_id,run_id,agent_id,generation_loss_id),
   FOREIGN KEY(project_session_id,run_id,agent_id,generation_loss_id,
-      current_revision,semantic_digest,source_ref_digest,journal_digest)
-    REFERENCES lifecycle_generation_loss_revisions(
-      project_session_id,run_id,agent_id,generation_loss_id,revision,
-      semantic_digest,source_ref_digest,journal_digest),
-  FOREIGN KEY(project_session_id,run_id,agent_id,generation_loss_id,
-      current_revision,state,abandon_kind_code,recovery_action_adapter_id,
-      recovery_action_id,active_recovery_custody_id,semantic_digest,
+      current_revision,state,abandon_kind_code,semantic_digest,
       source_ref_digest,journal_digest)
     REFERENCES lifecycle_generation_loss_revisions(
       project_session_id,run_id,agent_id,generation_loss_id,revision,state,
-      abandon_kind_code,recovery_action_adapter_id,recovery_action_id,
-      active_recovery_custody_id,semantic_digest,source_ref_digest,
-      journal_digest),
-  CHECK((terminal=1)=(state IN ('recovered-adopted','abandoned')))
+      abandon_kind_code,semantic_digest,source_ref_digest,journal_digest),
+  CHECK((terminal=1)=(state IN ('recovered-adopted','abandoned'))),
+  CHECK((state='abandoned')=(abandon_kind_code<>'none'))
 )
 
 CREATE UNIQUE INDEX one_nonterminal_generation_loss_per_agent
@@ -9320,45 +9534,10 @@ The existing `provider_action_routes` row gains non-null
 `discovery_surface_digest` for every new
 answer-bearing action. Foreign keys bind the exact adapter/generation/digest.
 
-```sql
-provider_action_routes(
-  ...existing columns...,
-  capability_snapshot_generation, capability_snapshot_digest,
-  capability_body_digest,
-  effective_configuration_id, effective_configuration_revision,
-  effective_configuration_ref_digest,
-  requested_configuration_digest, effective_route_configuration_digest,
-  discovery_surface_evidence_id, discovery_surface_evidence_revision,
-  discovery_surface_digest,
-  deployed_route_admission_digest,
-  ...remaining admission columns...,
-  UNIQUE(adapter_id, action_id, deployed_route_admission_digest),
-  UNIQUE(adapter_id, action_id, deployed_route_admission_digest,
-    capability_body_digest, effective_configuration_id,
-    effective_configuration_revision, effective_configuration_ref_digest,
-    permission_profile_digest, discovery_surface_evidence_id,
-    discovery_surface_evidence_revision, discovery_surface_digest),
-  FOREIGN KEY(adapter_id, capability_snapshot_generation,
-    capability_snapshot_digest, capability_body_digest)
-    REFERENCES adapter_capability_snapshots(
-      adapter_id, snapshot_generation, snapshot_digest,
-      capability_body_digest),
-  FOREIGN KEY(adapter_id, action_id, effective_configuration_id,
-      effective_configuration_revision, effective_configuration_ref_digest,
-      capability_body_digest, permission_profile_digest,
-      discovery_surface_evidence_id, discovery_surface_evidence_revision,
-      discovery_surface_digest)
-    REFERENCES adapter_effective_configurations(
-      subject_action_adapter_id, subject_action_id, configuration_id,
-      configuration_revision, configuration_digest, capability_body_digest,
-      permission_profile_digest, discovery_surface_evidence_id,
-      discovery_surface_evidence_revision, discovery_surface_digest),
-  FOREIGN KEY(discovery_surface_evidence_id,
-      discovery_surface_evidence_revision, discovery_surface_digest)
-    REFERENCES discovery_surface_manifests(
-      evidence_id, evidence_revision, manifest_digest)
-)
-```
+Section 9.24 publishes the one canonical current
+`provider_action_routes` relation. That declaration includes these capability,
+configuration, discovery-surface and admission fields and their exact parent
+keys; this section does not declare a second patch-shaped route relation.
 
 The explicit composite foreign key means a digest cannot cross another
 adapter/generation. Historical routes reference immutable snapshots, never the
@@ -9430,6 +9609,7 @@ provider_action_route_observations(
   adapter_id, action_id, admission_digest,
   observation_json, observation_digest, observed_at,
   PRIMARY KEY(adapter_id, action_id), UNIQUE(observation_digest),
+  UNIQUE(adapter_id,action_id,admission_digest,observation_digest),
   FOREIGN KEY(adapter_id, action_id, admission_digest)
     REFERENCES provider_action_routes(
       adapter_id, action_id, deployed_route_admission_digest)
@@ -9762,10 +9942,29 @@ provider_action_routes(
   route_ordinal NOT NULL,
   certifying_review NOT NULL CHECK(certifying_review IN (0, 1)),
   target_generation, slot, attempt_generation, reservation_digest,
+  route_receipt_digest NOT NULL,
+  capability_snapshot_generation NOT NULL,
+  capability_snapshot_digest NOT NULL, capability_body_digest NOT NULL,
+  effective_configuration_id NOT NULL,
+  effective_configuration_revision NOT NULL,
+  effective_configuration_ref_digest NOT NULL,
+  requested_configuration_digest NOT NULL,
+  effective_route_configuration_digest NOT NULL,
+  permission_profile_digest NOT NULL,
+  discovery_surface_evidence_id NOT NULL,
+  discovery_surface_evidence_revision NOT NULL,
+  discovery_surface_digest NOT NULL,
+  deployed_route_admission_digest NOT NULL,
   created_at NOT NULL,
-  ...existing route/admission/configuration columns...,
+  ...remaining route/admission columns...,
   PRIMARY KEY(adapter_id, action_id),
   UNIQUE(run_id, route_ordinal),
+  UNIQUE(adapter_id, action_id, deployed_route_admission_digest),
+  UNIQUE(adapter_id, action_id, deployed_route_admission_digest,
+    capability_body_digest, effective_configuration_id,
+    effective_configuration_revision, effective_configuration_ref_digest,
+    permission_profile_digest, discovery_surface_evidence_id,
+    discovery_surface_evidence_revision, discovery_surface_digest),
   FOREIGN KEY(adapter_id, action_id, run_id, task_id, route_ordinal)
     REFERENCES provider_actions(
       adapter_id, action_id, run_id, task_id, route_ordinal),
@@ -9776,6 +9975,25 @@ provider_action_routes(
       attempt_generation, reservation_digest),
   FOREIGN KEY(run_id, target_generation, slot)
     REFERENCES review_slot_heads(run_id, target_generation, slot),
+  FOREIGN KEY(adapter_id, capability_snapshot_generation,
+      capability_snapshot_digest, capability_body_digest)
+    REFERENCES adapter_capability_snapshots(
+      adapter_id, snapshot_generation, snapshot_digest,
+      capability_body_digest),
+  FOREIGN KEY(adapter_id, action_id, effective_configuration_id,
+      effective_configuration_revision, effective_configuration_ref_digest,
+      capability_body_digest, permission_profile_digest,
+      discovery_surface_evidence_id, discovery_surface_evidence_revision,
+      discovery_surface_digest)
+    REFERENCES adapter_effective_configurations(
+      subject_action_adapter_id, subject_action_id, configuration_id,
+      configuration_revision, configuration_digest, capability_body_digest,
+      permission_profile_digest, discovery_surface_evidence_id,
+      discovery_surface_evidence_revision, discovery_surface_digest),
+  FOREIGN KEY(discovery_surface_evidence_id,
+      discovery_surface_evidence_revision, discovery_surface_digest)
+    REFERENCES discovery_surface_manifests(
+      evidence_id, evidence_revision, manifest_digest),
   CHECK(route_ordinal >= 1),
   CHECK(
     (certifying_review = 1 AND
@@ -9786,6 +10004,10 @@ provider_action_routes(
       attempt_generation IS NULL AND reservation_digest IS NULL)
   )
 )
+
+CREATE UNIQUE INDEX provider_action_route_review_evidence_parent
+  ON provider_action_routes(
+    adapter_id,action_id,route_receipt_digest,deployed_route_admission_digest);
 
 CREATE TRIGGER provider_action_route_reservation_attached_guard
 BEFORE INSERT ON provider_action_routes
