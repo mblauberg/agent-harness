@@ -26,6 +26,35 @@ done, by design.
 | `3656240` | Recoverability — tracked the untracked re-review dir and the outstanding SPEC05 edit; ignored `.review-snapshots/` |
 | `701d663` | H4 — deleted both superseded review programmes |
 | `eb2fbc9` | ADRs 0009 and 0010; ADR-0007 amendment |
+| `e7fdf20` | This handoff |
+| `91d73fe` | Merged `comprehensive-review` selectively: kept the live lab, rejected the spec split |
+| `4a05919` | Carried the worktree's uncommitted live state (D-035, D-036, W005/W007/W012) into `docs/lab/` |
+
+All pushed to `origin/main`. `scripts/check-harness`: **608 passed**.
+
+### The lab moved, and the branch is gone
+
+`comprehensive-review` is **merged and pruned** — worktree, local branch and remote
+branch all deleted. The live lab moved from
+`docs/agent-harness-comprehensive-review/lab/` to **`docs/lab/`** and now lives on
+`main`, with a durable home that does not depend on a worktree. Its internal
+self-references and link depths were rewritten for the new location.
+
+Two things this protects:
+
+- The supersession can no longer be undone. There is no branch left from which the
+  W014 PR could re-add the deleted review directory (issue #19, closed).
+- The worktree held **uncommitted** programme state that a plain merge of the branch
+  tip would have destroyed: decisions **D-035** and **D-036**, and current W005/W007/
+  W012 status. It was captured to `docs/lab/` in `4a05919` before the prune.
+
+The spec-family split, `scripts/check_spec_families.py`, `tests/test_spec_families.py`
+and `tests/spec_fixtures/` were **not** merged — they are coupled (the fixtures load
+spec text through `load_family_text()`, so they cannot collect without the family
+manifests) and the split is rejected by ADR 0009. All of it is recoverable:
+`d773cf0` is an ancestor of `main`, so `git show d773cf0:<path>` restores any of it.
+`check_spec_families.py` is consequently **not wired into `check-harness`** today;
+re-wire it when the split lands per ADR 0009.
 
 ### Review record
 
