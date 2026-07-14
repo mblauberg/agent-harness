@@ -70,10 +70,12 @@ describe("non-destructive retention operations", () => {
     const archived = await archiveRun(value.databasePath, "run-terminal", join(value.root, "archives"));
     expect(archived).toMatchObject({ runId: "run-terminal", sourceMutation: "none", receipt: { sha256 } });
     expect(await readFile(receiptPath)).toEqual(receipt);
-    expect(await readFile(value.databasePath)).toEqual(before);
+    const after = await readFile(value.databasePath);
+    expect(after.byteLength).toBe(before.byteLength);
+    expect(after.equals(before)).toBe(true);
     expect(basename(String(archived.archiveDirectory))).toMatch(/^run-[0-9a-f]{24}$/u);
     expect(JSON.parse(await readFile(join(String(archived.archiveDirectory), "archive-manifest.json"), "utf8"))).toMatchObject({ receipt: { relativePath: receiptName, sha256 } });
-  });
+  }, 5_000);
 
   it("refuses active and quarantined runs", async () => {
     const value = await fixture();
