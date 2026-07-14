@@ -1002,7 +1002,10 @@ class _TagObjectConsumer:
 
     def _finish_line(self) -> None:
         if self.continuation:
-            if self.previous_name is None:
+            if (
+                self.previous_name is None
+                or self.previous_name in self._REQUIRED
+            ):
                 raise self._error()
             return
         if not self.saw_space or not self.value_nonempty:

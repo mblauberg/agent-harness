@@ -827,7 +827,9 @@ def test_streamed_commit_parser_preserves_malformed_input_checks_across_chunks(
 
 
 @pytest.mark.parametrize("chunk_size", [1, 7, 17])
-@pytest.mark.parametrize("malformation", ["missing", "duplicate", "invalid"])
+@pytest.mark.parametrize(
+    "malformation", ["missing", "duplicate", "invalid", "continuation"],
+)
 def test_streamed_tag_parser_rejects_malformed_tagger_across_chunks(
     chunk_size, malformation,
 ):
@@ -838,12 +840,14 @@ def test_streamed_tag_parser_rejects_malformed_tagger_across_chunks(
         raw = prefix + b"\nmessage\n"
     elif malformation == "duplicate":
         raw = prefix + identity + identity + b"\nmessage\n"
-    else:
+    elif malformation == "invalid":
         raw = (
             prefix
             + b"tagger Release Test release@example.test 1700000000 +0000\n"
             + b"\nmessage\n"
         )
+    else:
+        raw = prefix + identity + b" alice@gmail.com\n\nmessage\n"
     consumer = release_check._TagObjectConsumer(
         object_id, release_check.EvidenceMemoryAccounting(),
     )
