@@ -8,11 +8,16 @@
 false circular dependency:
 
 1. **`lifecycle_authority_receipts`** — attestation of lifecycle *transitions*
-   by an external append-only ledger. Frozen in
-   `runtime/agent-fabric/migrations/0001-current-baseline.sql:1874`, with
-   `lifecycle_receipt_batches:1372`, `_batch_completions:1924`,
-   `_batch_authorizations:2147`, `lifecycle_transition_applies:2171` and
-   `lifecycle_admitted_run_scopes:1153`.
+   by an external append-only ledger, with `lifecycle_receipt_batches`,
+   `_batch_completions`, `_batch_authorizations`, `lifecycle_transition_applies`
+   and `lifecycle_admitted_run_scopes`.
+
+   **This schema is not on `main`.** It exists only in the **uncommitted** W005
+   working tree (branch `w005-preflight-fixtures`,
+   `runtime/agent-fabric/migrations/0001-current-baseline.sql`). `main`'s migration
+   contains none of these tables. This ADR decides the *target* boundary; it does
+   not describe shipped code. Re-anchor these citations to real line numbers when
+   W005 lands.
 2. **`AuthorityEnvelopeV2`** / the provider authority-compilation receipt —
    *provider capability compilation* (ADR 0002). It does not exist in code yet.
 3. **"receipt portability"** — publication of *release evidence*. Unrelated to
@@ -31,16 +36,24 @@ text. Specifically, for the lifecycle receipt authority:
 
 - It is an **external, append-only ledger, read outside the resealable lifecycle
   snapshot**. It is exposed as an optional port on `FabricRuntimeOpenOptions`
-  (`lifecycleReceiptAuthority?: LifecycleIntegrityReceiptAuthorityPort`,
-  `runtime/agent-fabric/src/core/fabric.ts:232`), following the existing
-  `externalEffects` ports/adapters precedent in the same options block
-  (`…/fabric.ts:224`).
+  (`lifecycleReceiptAuthority?: LifecycleIntegrityReceiptAuthorityPort`),
+  following the existing `externalEffects` ports/adapters precedent in the same
+  options block.
+
+  **Status on `main`: not wired.** `FabricRuntimeOpenOptions`
+  (`runtime/agent-fabric/src/core/fabric.ts:192-206`) exposes no such member. The
+  interface itself does exist on `main`, but only as the optional
+  `LifecycleDomainPorts.integrityReceipts`
+  (`runtime/agent-fabric/src/lifecycle/types.ts:435-440`, `:310-317`). The W005
+  working tree already adds the port to the options block; this ADR ratifies that
+  shape rather than reporting it as shipped.
 - It **cannot mint its own identity**. `authority_id` is FK-bound to
   `lifecycle_admitted_run_scopes`, which permits exactly one authority per
   `(project_session_id, run_id)` — the receipt chain is also hash-linked, with
   sequence 1 forbidden a predecessor and every later sequence required to name
   one. An in-process default may never forge an authority, and must not claim
-  third-party attestation it does not hold.
+  third-party attestation it does not hold. (Verified against the W005 working
+  tree, not `main` — see the Context note.)
 - **W005 ships the lifecycle receipt authority** and keeps an **explicitly
   labelled transitional unrouted provider-action arm** that claims **no** Spec-04
   v1.32 authority conformance. W008 closes that arm.

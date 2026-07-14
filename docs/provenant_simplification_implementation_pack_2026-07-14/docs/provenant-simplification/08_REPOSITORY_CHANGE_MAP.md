@@ -197,21 +197,39 @@ Binding today. It pins the four certifying slots (native, other-primary, cursor-
 
 ### Review-policy migration
 
-Review policy is enforced far more widely than a config change suggests. The four slots (`native`, `other-primary`, `cursor-grok`, `agy-gemini`) and the blanket substantial+ other-primary rule are live in normative spec text, root instructions, protocol wire codecs and their generated closed schemas, runtime completion-domain logic, SQLite slot and ordinal constraints, the delivery kernel validator, and the Spec 05 acceptance selector/requirements catalogue.
+Review policy is enforced far more widely than a config change suggests. The four slots (`native`, `other-primary`, `cursor-grok`, `agy-gemini`) and the blanket substantial+ other-primary rule are live in normative spec text, the accepted architecture, the decision record, root instructions, the lifecycle and orchestration skills, generated autonomous-lab instructions, protocol wire codecs and their generated closed schemas, runtime completion-domain logic, SQLite slot and ordinal constraints, the delivery kernel validator, and the Spec 05 acceptance selector/requirements catalogue.
+
+Two kinds of surface appear below and both are load-bearing. Some *enforce* the gate — the validator, the codecs, the schemas, the database constraints. Others *instruct* it — the specs, the architecture, ADR 0008, the root documents and the skills. Migrating only the enforcing surfaces leaves the instructing ones telling every agent, and every generated lab, to run the policy that no longer exists. Migrating only the instructing ones leaves the machine rejecting the receipts the new policy produces. Both classes are current-policy owners; both move in the same change.
 
 Treat the change as one atomic, effective-dated migration carrying a single amendment identifier across every surface below. No surface is amended, relaxed or deleted alone.
 
 **Root instructions and product prose**
 
-- `HARNESS.md` coverage table (lines 78-90) — the risk-to-review-pressure ladder;
-- `README.md` (line 76) — states that substantial+ cannot reach acceptance with the other-primary leg missing;
+- `HARNESS.md` coverage table (lines 78-90) — the risk-to-review-pressure ladder; and `HARNESS.md` (line 19) — the constitution's own prose rule that substantial work uses native subagents plus the other primary, outside the table;
+- `README.md` (line 76) — states that substantial+ cannot reach acceptance with the other-primary leg missing; and `README.md` (lines 163-171) — the second copy of the coverage ladder in the product-facing review section;
+- `MAINTAINING.md` (lines 141-143) — a substantial `implement` run gets a fresh native reviewer and the other primary family;
+- `docs/ARCHITECTURE.md` — the accepted architecture states the gate five times and asserts the validator enforces it: lines 20-24 (substantial+ owes both legs and `validate_delivery.py` fails any receipt reaching acceptance missing either), 41, 96-99, 235-245 (legs 2 and 3 both load-bear; no degradation note buys past the other primary) and 292-295. The Mermaid lifecycle and topology figures carry the same rule in node labels and `accDescr` text (lines 47, 61, 257, 268, 271-272); diagram prose is normative here, not decoration;
 - `skills/implement/SKILL.md` (line 42) — restates native plus other-primary as load-bearing, bonus families as opportunistic.
 
-**Normative specifications**
+**Skills and generated lab instructions**
 
-- `docs/specs/01-agent-fabric.md` §32.19.3 (lines 7057-7138) — the owned closed four-slot profile, per-slot adapter class/family/model mapping, enforced read-only requirement per certifying slot, and the reviewer-family relation table;
-- `docs/specs/04-agent-fabric-operational-hardening.md` (lines 3339-3348, 5623-5627) — the baseline requiring exactly the four slots with the exact Spec 01 mapping, and the completion read that demands one resolved four-slot profile and exactly four slot heads;
-- `docs/specs/05-project-fabric-console.md` (lines 39, 546-547, 669, 1052) — the four-slot mandate, slot names and target snapshot.
+The lifecycle owner and its collaborators restate the gate in their own instruction text. A migration that changed only the validator and the specs would leave these skills instructing agents to run the old gate.
+
+- `skills/deliver/SKILL.md` (lines 40-42) — "Substantial+ requires a fresh native reviewer and the other primary family", stated in the canonical lifecycle owner itself;
+- `skills/orchestrate/SKILL.md` (lines 27-28) — the other primary is load-bearing at substantial+, under the HARNESS risk ladder;
+- `skills/autonomous-lab/SKILL.md` (lines 58-60) — hard gates require adversarial falsification, objective RED-on-mutation evidence and the other primary;
+- `skills/autonomous-lab/scripts/bootstrap-lab.sh` (lines 567, 1165, 1169, 1178) — the generator writes the gate into every bootstrapped lab: `CROSS_FAMILY_VERIFIER` (line 1165), the `MODEL_MATRIX` instruction to apply the HARNESS native-plus-other-primary gate to hard gates and finish verification (line 1169), and `EXTERNAL_FAMILIES` (line 1178). Generated labs already in flight carry the old gate in their own `GOAL.md`; the migration must say whether they are re-bootstrapped or left on the superseded policy;
+- `skills/autonomous-lab/templates/GOAL.template.md` (lines 104, 202) and `skills/autonomous-lab/templates/OPERATING_MANUAL.template.md` (line 475) — the templates those labs are generated from;
+- `skills/autonomous-lab/references/model-effort-policy.md` (lines 30, 71), `references/operating-loop.md` (line 162), `references/decision-lifecycle.md` (line 355) and `references/workflow-patterns.md` (line 314) — the lab's own binding statements that the other primary covers the irreversible core and defines the cross-family reviewer;
+- `docs/evals/skill-portfolio-2026/routing-holdout.yaml` (line 129) — a held-out routing case whose expected answer routes a review packet to the other primary. `scripts/check-harness` runs this holdout and reports a match percentage, so a policy change that does not update the fixture is scored as a routing regression.
+
+**Normative specifications and decision record**
+
+- `docs/specs/01-agent-fabric.md` §32.19.3 (lines 7057-7138) — the owned closed four-slot profile, per-slot adapter class/family/model mapping, enforced read-only requirement per certifying slot, and the reviewer-family relation table. The four-slot enumeration is not confined to §32.19.3: the same closed slot set is restated in the schema fragments and completion reads at lines 2287, 2475, 2496, 2749, 2768, 2841 (slot order), 6032, 6853, 7031, 7462, 7667, 7900, 7919, 8127, 8174, 8255 (FR-056) and 9546, and the other-primary family relation at lines 7136 and 7147. Migrating §32.19.3 alone leaves the rest of Spec 01 normative and contradictory;
+- `docs/specs/02-adaptive-agent-harness.md` (lines 271-275) — §9.2 multi-lens review: "Substantial work requires a fresh native reviewer and the other primary family." This is the normative Spec 02 rule and the source the skills restate;
+- `docs/specs/04-agent-fabric-operational-hardening.md` (lines 3339-3348, 5623-5627) — the baseline requiring exactly the four slots with the exact Spec 01 mapping, and the completion read that demands one resolved four-slot profile and exactly four slot heads; also line 260 (acceptance criterion: fresh native and other-primary reviews must report no unresolved P0-P2 findings), lines 2626, 2861 (embedded slot `CHECK`), 3149, 5676 (embedded slot `CHECK`) and 5784;
+- `docs/specs/05-project-fabric-console.md` (lines 39, 546-547, 669, 1052) — the four-slot mandate, slot names and target snapshot; also lines 312, 706, 1064, 1078, 1192 (the acceptance criterion behind SPEC05-AC-033), 1243 and 1336;
+- `docs/adr/0008-review-pressure-risk-and-oracle-adjusted.md` — the accepted decision that authorises this migration is itself a current-policy owner. Its status header (lines 3-5) says the four-slot profile "remains binding for Spec 05 deliveries until amended", and its decision text (lines 16-19) keeps other-primary review mandatory for crucial+ tiers. The migration carries the ADR 0008 amendment, and `docs/adr/README.md` (line 20) carries the matching status row. Until both change, ADR 0008 is the reason the old gate is still binding.
 
 **Protocol and wire (codecs, generated closed schemas, regression tests)**
 
@@ -226,7 +244,7 @@ Treat the change as one atomic, effective-dated migration carrying a single amen
 
 - `runtime/agent-fabric/src/review/canonical/domains.ts` (lines 249-255) — the canonical completion-domain check that a completion profile carries exactly four slots;
 - `runtime/agent-fabric/schemas/review-profile.v1.schema.json` and `runtime/agent-fabric/src/review/profile/index.ts` — runtime profile enforcement;
-- `runtime/agent-fabric/migrations/0001-current-baseline.sql` — SQLite slot and ordinal constraints in `review_finding_capacity_reservations` (lines 5565-5571), `review_certifying_slot_availability_revisions` (lines 5837-5843) and `review_profile_slots` (lines 5908-5913, slot `CHECK` plus `ordinal BETWEEN 0 AND 3`). Persisted rows outlive the code change: the migration must state what happens to existing four-slot rows, not only to new writes;
+- `runtime/agent-fabric/migrations/0001-current-baseline.sql` — SQLite slot and ordinal constraints in `review_finding_capacity_reservations` (lines 5565-5571), `review_certifying_slot_availability_revisions` (lines 5837-5843) and `review_profile_slots` (lines 5908-5913, slot `CHECK` plus `ordinal BETWEEN 0 AND 3`), plus two further closed-slot `CHECK`s that a §4 sweep must not miss: the certifying-review row constraint (line 6086) and `review_slot_heads` (line 6181). Persisted rows outlive the code change: the migration must state what happens to existing four-slot rows, not only to new writes;
 - `runtime/agent-fabric/tests/spec05/review-algorithms/` — `profile.test.ts`, `digest-domains.test.ts`, `schemas-config.test.ts` and siblings.
 
 **Delivery kernel (config, validator, fixtures)**
@@ -234,20 +252,23 @@ Treat the change as one atomic, effective-dated migration carrying a single amen
 - `config/review-profiles/spec05-four-slot-v1.json` — the checked-in closed profile;
 - `config/delivery-profiles.json` evidence minima and gates;
 - `config/risk-policy.json` risk floors;
-- `skills/deliver/scripts/validate_delivery.py` — the `_validate_reviews` gate (native plus distinct other-primary, distinct evidence ids, minimum lens count, non-primary bonus family) and the acceptance-transition evidence check;
+- `skills/deliver/scripts/validate_delivery.py` — the `_validate_reviews` gate (native plus distinct other-primary, distinct evidence ids, minimum lens count, non-primary bonus family) and the acceptance-transition evidence check. The two executable assertions are lines 620-622: substantial+ requires a native review, requires an other-primary review, and requires the two to be on distinct primary families. This is the enforcement that `docs/ARCHITECTURE.md` and `README.md` promise;
 - `skills/deliver/scripts/reference_runs.py` (line 195) and `scripts/validate_delivery_scenarios.py` (line 202) — reference and scenario runs that bake the `other-primary` role into the golden shapes;
 - regression fixtures: `tests/test_delivery_contract.py`, `tests/test_delivery_profile_scenarios.py`, `tests/test_model_route.py` (line 46), `skills/orchestrate/evals/test_cf_dispatch.py` (lines 105, 137).
 
 **Spec 05 acceptance catalogue**
 
-- `config/spec05-evidence-selector-registry.v1.json` (line 40) — the `spec05-post-review-acceptance-four-family-final-review-v1` selector, proof domain `current-four-family-clean-review`, owned by the review-completion gate;
-- `config/spec05-delivery-requirements.v1.json` (lines 468-477) — SPEC05-AC-033, which binds that selector as a `complete-nonempty-current-set` post-review-acceptance requirement with `requiredStatus: approved`.
+- `config/spec05-evidence-selector-registry.v1.json` (line 40) — the `spec05-post-review-council-four-family-adjudication-v1` selector, proof domain `current-four-family-clean-review`, owner `llm-council`, state `post-review-gate`;
+- `config/spec05-delivery-requirements.v1.json` (lines 468-479) — SPEC05-AC-033, which binds that selector as a `complete-nonempty-current-set` post-review-acceptance requirement with `requiredStatus: approved`;
+- `config/spec05-evidence-selector-registry.v1.json` (line 49) — the second four-family selector, `spec05-test-four-family-portal-confinement-v1`, proof domain `four-family-portal-confinement-helper-custody`, bound by SPEC05-AC-042 in `config/spec05-delivery-requirements.v1.json` (lines 594-605). It proves portal confinement across the same four families, so it depends on the four-slot set even though it is a test rather than a review requirement.
 
-Acceptance is catalogued, not only enforced: changing the gate without changing SPEC05-AC-033 and its selector leaves the acceptance requirement demanding a four-family clean review that the new policy no longer produces.
+Acceptance is catalogued, not only enforced: changing the gate without changing SPEC05-AC-033, SPEC05-AC-042 and their selectors leaves the acceptance requirements demanding a four-family clean review and a four-family confinement proof that the new policy no longer produces.
 
 The migration passes as a unit — spec, constitution, protocol codecs and regenerated schemas, completion logic, database constraints, validator logic, fixtures and the acceptance catalogue all green in one change — or it does not pass. A partial landing is not a partial improvement: it leaves incompatible enforcement behind, in which the wire, the database and the acceptance catalogue still require what the policy has abandoned.
 
-Before the migration is authored, sweep the tree again for slot literals and gate restatements; this list is the surfaces known at pack time, not a guarantee of completeness, and any newly found surface joins the same single amendment.
+The list above is complete to the best of current knowledge: every live enforcement and normative owner of the substantial+/other-primary gate and the Spec 05 four-slot profile found by sweeping `docs/`, `skills/`, `scripts/`, `config/`, `runtime/`, `tests/`, `README.md`, `HARNESS.md`, `AGENTS.md` and `MAINTAINING.md`. Deliberately excluded, and not migration surfaces: historical review artifacts and handoffs; `docs/research/` advisory analysis; `skills/orchestrate/references/paired-primary.md` and `herdr-panes.md`, which describe the peer and its pane rather than restating the gate; `skills/code-review/SKILL.md` (line 27), which scales blind-agent count at substantial+ without binding a family; and `config/adapter-compatibility.yaml` (line 241), which allowlists model patterns, not review slots.
+
+Still, sweep the tree again before the migration is authored. The list is the surfaces known at pack time, not a guarantee of completeness, and any newly found surface joins the same single amendment.
 
 Until the migration lands, the present gate remains binding: blanket other-primary review for substantial+, and the four-slot profile for Spec 05 deliveries (ADR 0008). The risk/oracle-adjusted planner described in `06_LOOP_AND_REVIEW_POLICY.md` is a proposal, not an entitlement, until this migration lands.
 

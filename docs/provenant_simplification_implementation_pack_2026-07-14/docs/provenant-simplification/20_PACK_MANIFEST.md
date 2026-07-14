@@ -14,7 +14,7 @@ The manifest intentionally excludes its own hash.
 | `docs/provenant-simplification/05_ROUTING_AND_MODEL_POLICY.md` | `5d9e51191099acd242e434eddba9b2012381a88e5d8170cb20e09ed0767cbf8b` |
 | `docs/provenant-simplification/06_LOOP_AND_REVIEW_POLICY.md` | `960cf1fe556c49155109414626fa30d81a2dcca8e0912bd5c950ebfb21a9ab54` |
 | `docs/provenant-simplification/07_SECURITY_AUTHORITY_AND_EFFECTS.md` | `d6321aa027b66de9f279e96edc43e4e67aee3e5512b3455ce3428ec1f00e2c18` |
-| `docs/provenant-simplification/08_REPOSITORY_CHANGE_MAP.md` | `e728922a7f656977831137a3db11b7b8c71dae626c82754b713dd78ac1bdf728` |
+| `docs/provenant-simplification/08_REPOSITORY_CHANGE_MAP.md` | `d83c782a49ca4934313c001905bec43c010de6ad5749ba958257f1b2d0e08778` |
 | `docs/provenant-simplification/09_WORK_PACKAGES_AND_SEQUENCE.md` | `9cd45c4c5773b49329d803e5d2fe9beac002988fba178d1f00198b8b092aad7e` |
 | `docs/provenant-simplification/10_ACCEPTANCE_TESTS.md` | `6367880ad76d1d6894127a7e7c2bbf268471649760b10af565cbcf2760284678` |
 | `docs/provenant-simplification/11_MIGRATION_AND_DELETION.md` | `203c83e9984b61c9449c6113785f250a749d93a4ef86f3f93db6ba6ffb1d1fa0` |
@@ -50,5 +50,6 @@ The manifest intentionally excludes its own hash.
 | `review/native-mine-comprehensive.md` | `73cc053bce75c0984276b922f2bbf28ae3770cadeacc49acbe32bf5ed7600875` |
 | `review/native-mine-re-review.md` | `93394085c51cd4f8f3cb7aca2e69dd50388b293e88c03e65f7e9d4a8a46e7b45` |
 | `review/pair-codex-assignment.md` | `e0ed3efe57d2c56bc26d748c4b4924f65d89a5265ae517cf5c2edead8f2c18e7` |
+| `review/pair-codex-closeout-verification.md` | `f46c4be3ff9e612a55b2dfaa00d8e5a305c92469788813f8bfef2aa96f4351fa` |
 | `review/pair-codex-findings.md` | `aa73fec96902a1e801c8aaa55aae76c33a7facd8e2f8620ab46a29aa637bab7e` |
 | `review/pair-codex-h2b-verification.md` | `627950aa157ad856dc42acff6e88cfa4e3c5a16c0186157cf16ff2ac7903f113` |

@@ -1,7 +1,0 @@
-# Active orchestrator lease/lock are machine-local runtime state.
-LEASE.json
-LEASE.json.lock
-
-# Regenerable indexes produced by the lab tools.
-ADR_CODE_INDEX.md
-.decided-adr-manifest.json

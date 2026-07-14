@@ -1,6 +1,16 @@
 # Agent-harness comprehensive review checkpoint
 
-Status: active
+Status: **superseded 2026-07-15** — do not resume from this file.
+
+> The `comprehensive-review` branch and worktree are merged into `main` and pruned
+> (local and remote). The programme's work items are now GitHub issues #8-#23; the
+> lab that this handoff drove has been dismantled (its live TDD contracts and
+> diagnoses survive as `docs/efforts/W005-*.md` and `docs/efforts/W007-*.md`).
+> Several instructions below are now false: the dirty-root and re-review-directory
+> statements, the direction to implement `docs/provenant-re-review-2026-07-13`
+> (deleted and superseded into the simplification pack), and the
+> `gen-dashboard.mjs` command (the lab tools are gone). Kept as the programme's
+> historical record only.
 
 Effort: agent-harness-comprehensive-review
 
