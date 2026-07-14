@@ -51,7 +51,7 @@ def test_tdd_and_lab_cleanup_never_delete_unknown_or_preexisting_work():
 def test_caveman_preserves_evidence_altitude_and_never_grants_authority():
     skill = text("skills/caveman/SKILL.md")
     assert "presentation overlay, not authority" in skill
-    assert "governing harness or project instruction may enable adaptive mode" in skill
+    assert "ordinary governing preference for terse output does not trigger" in skill
     assert "Full and ultra remain user-explicit" in skill
     assert "evidence relationships" in skill
     assert "Never imply that an unverified source confirms a claim" in skill

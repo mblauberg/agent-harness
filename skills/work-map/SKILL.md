@@ -5,10 +5,9 @@ description: "Use when a multi-session effort needs one persistent route showing
 
 # work-map: the map for multi-session efforts
 
-A handoff file (see `session`) carries ONE session's baton. When an effort
-spans many sessions or agents, the batons pile up and nobody holds the route.
-The work map is the effort-level view: one file per effort, updated as legs
-complete, read first on every resume.
+A `session` handoff carries one session's baton. Across many sessions or agents,
+the work map holds the route: one file per effort, updated as legs complete and
+read first on resume.
 
 Record curated project/run/lead dependencies, outcome legs and human gates.
 The map is not live task truth: link canonical Fabric or project artifacts and
@@ -37,29 +36,31 @@ What done looks like, in one paragraph. Link the spec.
 ## Invariants for every leg
 Rules no session may break, with links — not restated content.
 
-## Trail (one line per session, newest first)
-- YYYY-MM-DD <operator/model>: <what moved>. <next>.
+## Trail (one line per route transition, newest first)
+- YYYY-MM-DD: <leg/status/dependency change>. <next>.
 ```
 
 ## Rules
 
-- **Legs are outcomes, not tasks**: each leg independently verifiable and
-  small enough for one session. A leg an agent can't finish in a session gets
-  split at the next update.
+- **Legs are outcomes, not tasks**: each is independently verifiable and small
+  enough for one session. Split an oversized leg at the next update.
 - **Resume order** (interleaves with `session` start): project state file →
   this map → the claimed leg's handoff only → start. Never reconstruct the
   route from old transcripts or piled-up handoffs; consumed handoffs should
   already be archived.
-- **Update on leg completion, not continuously**: the map is curated durable
-  project state; the trail line is one sentence, not a
-  log. Session-level detail stays in handoffs.
+- **Update on route transitions, not every session**: activate/block/complete a
+  leg or change a dependency/gate. The map is curated durable project state;
+  session-level detail stays in handoffs.
 - **One chair/map owner writes the map.** Parallel workers write namespaced
-  claim or handoff artifacts; the chair serially records `[>]` and `[x]` after
-  checking the leg is unclaimed. Do not let workers race on the shared file.
+  claim or handoff artifacts; the chair records `[>]` and `[x]` after checking
+  the leg is unclaimed. Do not race on the shared file.
   Completing `[x]` consumes and archives that handoff in the same update, so
   finished legs never retain an apparently-current baton.
 - **Effort done** → status `done`, then archive the map with the project's
   move-never-delete rule (`engineering-docs`).
+- Validate an authored map with
+  `scripts/validate_work_map.py <EFFORT-file>` before handoff. It enforces the
+  single active leg and consumed-handoff invariants.
 
 ## Red flags
 

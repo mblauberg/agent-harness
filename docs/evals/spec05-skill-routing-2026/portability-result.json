@@ -99,7 +99,7 @@
     },
     "mode": "isolated-empty-path"
   },
-  "evaluation_id": "spec05-skill-routing-20260712-v1-portability",
+  "evaluation_id": "spec05-skill-routing-20260714-v3-portability",
   "schema_version": 1,
   "status": "pass"
 }

@@ -55,6 +55,11 @@ FABRIC_RELATIONSHIP_FIELDS = {
     "mode", "delivery_run_id", "project_session_id", "coordination_run_id",
     "workstream_id", "lead_agent_id",
 }
+PROFILE_FIELDS = {
+    "artifact_types", "required_evidence", "required_measures", "stochastic_policy",
+    "security_surface_policy", "boundary_checks", "evidence_policy",
+    "release_semantics", "observation_examples",
+}
 
 
 class Invalid(ValueError):
@@ -107,16 +112,39 @@ def _inside(path: str, scope: str) -> bool:
     return scope in {"", "."} or path == scope or path.startswith(scope + "/")
 
 
+def _validate_profile(name: str, profile: Any) -> None:
+    fail(not isinstance(profile, dict) or set(profile) != PROFILE_FIELDS, f"profile {name} contract is incomplete")
+    artifact_types = profile["artifact_types"]
+    fail(
+        not isinstance(artifact_types, list)
+        or not artifact_types
+        or any(not isinstance(value, str) or not value for value in artifact_types)
+        or len(set(artifact_types)) != len(artifact_types),
+        f"profile {name} artifact_types must be a unique non-empty string list",
+    )
+    stochastic_policy = profile["stochastic_policy"]
+    fail(not isinstance(stochastic_policy, dict), f"profile {name} stochastic_policy must be an object")
+    classified_types = stochastic_policy.get("required_for_artifact_types")
+    if classified_types is not None:
+        fail(
+            not isinstance(classified_types, list)
+            or not classified_types
+            or any(not isinstance(value, str) or not value for value in classified_types)
+            or len(set(classified_types)) != len(classified_types)
+            or not set(classified_types) <= set(artifact_types),
+            f"profile {name} required_for_artifact_types must be a unique non-empty subset of artifact_types",
+        )
+    fail(not set(profile["boundary_checks"]) <= set(profile["required_evidence"]["deterministic"]), f"profile {name} boundary checks are not deterministic gates")
+
+
 def _load_profiles(root: Path) -> dict[str, Any]:
     try:
         data = json.loads((root / "config" / "delivery-profiles.json").read_text())
     except (OSError, json.JSONDecodeError) as exc:
         raise Invalid(f"profile registry is unreadable: {exc}") from exc
     fail(data.get("schema_version") != 1 or not isinstance(data.get("profiles"), dict), "profile registry is invalid")
-    required = {"artifact_types", "required_evidence", "required_measures", "stochastic_policy", "security_surface_policy", "boundary_checks", "evidence_policy", "release_semantics", "observation_examples"}
     for name, profile in data["profiles"].items():
-        fail(not isinstance(profile, dict) or set(profile) != required, f"profile {name} contract is incomplete")
-        fail(not set(profile["boundary_checks"]) <= set(profile["required_evidence"]["deterministic"]), f"profile {name} boundary checks are not deterministic gates")
+        _validate_profile(name, profile)
     return data
 
 
@@ -209,7 +237,7 @@ def _apply_project_policy(
     fail(actual != declared["digest"], "project_policy digest does not match")
     fail(not isinstance(overlay, dict) or set(overlay) != {"schema_version", "profiles"} or overlay.get("schema_version") != 1 or not isinstance(overlay.get("profiles"), dict), "project policy schema is invalid")
     strengthened = copy.deepcopy(registry)
-    profile_keys = set(next(iter(strengthened["profiles"].values())))
+    profile_keys = PROFILE_FIELDS
     for profile_name, additions in overlay["profiles"].items():
         if profile_name not in strengthened["profiles"]:
             fail(not isinstance(additions, dict) or set(additions) != profile_keys, f"new project profile {profile_name} must declare the complete profile contract")
@@ -228,6 +256,8 @@ def _apply_project_policy(
                 fail(kind not in strengthened["profiles"][profile_name][group], f"project profile {profile_name} has invalid {group} kind")
                 fail(not isinstance(values, list) or any(not isinstance(value, str) or not value for value in values), f"project profile {profile_name} {group}.{kind} is invalid")
                 strengthened["profiles"][profile_name][group][kind] = sorted(set(strengthened["profiles"][profile_name][group][kind]) | set(values))
+    for profile_name, profile in strengthened["profiles"].items():
+        _validate_profile(profile_name, profile)
     return strengthened
 
 
@@ -777,6 +807,18 @@ def _validate_measures_assurance(
     fail(not isinstance(assurance.get("stochastic_required"), bool) or not assurance.get("reason"), "assurance requires stochastic_required and reason")
     stochastic_policy = profile["stochastic_policy"]
     fail(stochastic_policy["required"] is True and assurance.get("stochastic_required") is not True, "profile requires stochastic assurance")
+    classified_types = set(stochastic_policy.get("required_for_artifact_types", []))
+    if classified_types:
+        canonical_types = {
+            artifact.get("artifact_type")
+            for artifact in artifacts.values()
+            if artifact.get("class") == "canonical"
+        }
+        classified_required = bool(canonical_types & classified_types)
+        fail(
+            assurance.get("stochastic_required") is not classified_required,
+            "assurance.stochastic_required does not match the canonical artifact classification",
+        )
     evaluations = _list(assurance.get("evaluations"), "assurance.evaluations")
     if required and assurance["stochastic_required"]:
         fail(not evaluations, "stochastic assurance requires evaluations")

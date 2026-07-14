@@ -1,56 +1,44 @@
 {
-  "catalogue_sha256": "sha256:c869bc273dda712312add66639d0c248ed648f487a9a07132f709d1730008a94",
+  "catalogue_sha256": "sha256:9346760fbab26c585e87822f88c54f54b47a2ea0231935b2befc72798ba886cf",
   "classifier_sha256": "sha256:f677ff7f5bb25ef4c16a271ec01b182a6c3dfa33a00917b648ea5f312d7c8dab",
-  "dataset_sha256": "sha256:239c855622f26b3bffbd69ff206de399b52ab0a25fa6a4102c1e6469145361bc",
-  "evaluation_id": "spec05-skill-routing-20260712-v1",
-  "harness_revision": "b5a855c4c810f2ed53d607b2b92b995aa8da0737",
+  "dataset_sha256": "sha256:f629d346f0c717781be8c01c7ffc9a10716e1c85fcbdf7b65c5246fc19f9f4d2",
+  "evaluation_id": "spec05-skill-routing-20260714-v3",
+  "harness_revision": "873a7569f2b319e48673a4f922fc8c40f2f892c5+spec05-v3-641d10ac6bc2",
   "invocations": [
     {
-      "action_evidence_artifact": "raw/anthropic-action.json",
-      "action_evidence_sha256": "sha256:faf2d18764ae6799b1bbac62064eaa72bf89b082edc507a66fc93f5d2fbe1bcc",
-      "action_id": "spec05-routing-anthropic:spawn",
-      "adapter_id": "claude-agent-sdk",
-      "family": "anthropic",
-      "invocation_id": "fabric-anthropic-01",
-      "model": "opus",
-      "output_artifact": "raw/anthropic-output.json",
-      "output_sha256": "sha256:4fb9f7c782e945c049efcd3ba1b339e7fc269aad4db5d8bde097854cbc685fe5",
-      "task_id": "spec05-routing-anthropic"
-    },
-    {
       "action_evidence_artifact": "raw/google-action.json",
-      "action_evidence_sha256": "sha256:a7205bd8087d1b4f66345235b4d5a46a9de80970ae36973ad8f58ab955d87e25",
-      "action_id": "spec05-routing-google:spawn",
+      "action_evidence_sha256": "sha256:cf285c01ab44d58285f9135d424206752e56984ac8149494269d0ff45fcc14c6",
+      "action_id": "spec05-routing-v3-google:spawn",
       "adapter_id": "agy",
       "family": "google",
       "invocation_id": "fabric-google-01",
       "model": "Gemini 3.1 Pro (High)",
       "output_artifact": "raw/google-output.json",
-      "output_sha256": "sha256:24fb64747e3282704b2b091a9c8bd7df4574c6660485bdcbe699c43a4be8ff60",
-      "task_id": "spec05-routing-google"
+      "output_sha256": "sha256:41a5088f106ad2bf1d1feacc63e08fc169958f56d259f4df1cbdd70689a01bc0",
+      "task_id": "spec05-routing-v3-google"
     },
     {
       "action_evidence_artifact": "raw/xai-action.json",
-      "action_evidence_sha256": "sha256:30e423d7b637a5f1dbb4e463df4b6e593ae5b186761e2f17f3f6bf90faf16236",
-      "action_id": "spec05-routing-xai:spawn",
+      "action_evidence_sha256": "sha256:a455750f8918261fd0d7743c394f2b4ebb730fed27b11620d03f3b82f5ff354f",
+      "action_id": "spec05-routing-v3-xai:spawn",
       "adapter_id": "cursor-agent",
       "family": "xai",
       "invocation_id": "fabric-xai-01",
       "model": "grok-4.5-xhigh",
       "output_artifact": "raw/xai-output.json",
-      "output_sha256": "sha256:712729a05fc6cf8b606bc0d65b3af92a41cd4111f80122949160adb9fffe162a",
-      "task_id": "spec05-routing-xai"
+      "output_sha256": "sha256:3a81ff9cce583b0a7bbe2cbd4c9c7882a9612cecf972d210b41b23f728691e83",
+      "task_id": "spec05-routing-v3-xai"
     }
   ],
   "metrics": {
-    "case_rows": 108,
-    "companion_correct": 101,
-    "companion_fidelity": 0.9351851851851852,
+    "case_rows": 72,
+    "companion_correct": 68,
+    "companion_fidelity": 0.9444444444444444,
     "critical_portability_failures": 0,
     "primary_accuracy": 1.0,
-    "primary_correct": 108
+    "primary_correct": 72
   },
-  "packet_sha256": "sha256:46ddf8069daf8729709df82824d49b5b0318df5a50689fca06ac80900d6bcc4b",
+  "packet_sha256": "sha256:892cf02f7ea40c07c0cf13c07c606f6bdcb4320d8ad49719fe50641d10ac6bc2",
   "schema_version": 1,
   "status": "pass"
 }

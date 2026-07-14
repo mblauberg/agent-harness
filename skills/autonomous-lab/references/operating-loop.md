@@ -36,7 +36,10 @@ Produce the most thoroughly-reasoned output a **team-equivalent** could, by fann
 - **Spend is proportional to risk and information gain.** Correctness, coverage
   and traceability outrank token thrift, but repeated low-yield fan-out stops at
   the convergence caps (§0a).
-- **Never self-halt.** An empty work queue is a trigger to **re-enumerate and deepen**, not a reason to stop. The only terminator is the human's STOP gate (see §6). Declaring "done" while finite known buildable work remains is the single most recurring failure mode of this loop.
+- **Never self-close the mission.** An empty queue triggers one bounded
+  re-enumeration pass. If the frontier remains dry, write an idle checkpoint and
+  pause the operator without another self-wake. Only the human STOP gate
+  terminates the mission (see §6).
 
 ---
 
@@ -81,7 +84,7 @@ retain the load-bearing synthesis/adjudication role.
 ## §2. The iteration loop
 
 ```
-LOOP until goal STATUS == STOP:
+RESUMABLE MISSION LOOP until goal STATUS == STOP (a dry frontier PAUSES it):
 
   0. RECONCILE   read the in-flight run table. For each row:
                    completed     -> ingest output (go to RECORD), then clear it
@@ -113,8 +116,10 @@ LOOP until goal STATUS == STOP:
 
   8. WAKE/STOP   if STOP -> write a clean handoff + HALT.
                  else if selectable non-blocked work remains -> continue NOW.
-                 else (everything selectable is in-flight) -> schedule a self-wake
-                      matched to the work + END the turn. Do NOT busy-loop.
+                 else if work is in-flight -> schedule a matched fallback wake.
+                 else -> run one bounded re-enumeration pass; if still dry,
+                      write STATE PAUSED + idle checkpoint + resume trigger,
+                      release the lease, and END without another self-wake.
 ```
 
 ### Record-before-launch is the load-bearing invariant
@@ -126,7 +131,8 @@ Appending the run→unit link to the ledger and state **before** you dispatch me
 The loop is **self-paced**. When all selectable work is in-flight:
 
 - **Schedule your own next wake** and exit the turn — do not re-read "everything in flight" repeatedly and burn iterations.
-- **Short delay** when polling a running job that should finish soon; **long delay** when genuinely idle.
+- **Short delay** when polling a running job that should finish soon; **long
+  delay** only for active backoff. A genuinely dry frontier pauses without a wake.
 - The harness also re-invokes you on background-job completion, so the **scheduled wake is a fallback, not the primary signal**. Completion-notify is primary.
 
 ---
@@ -189,9 +195,9 @@ Do not:
 - **Pick a one-way-door from one agent's opinion.** Fork it, judge it adversarially, cross-family-verify it.
 - **Let the tree sprawl.** Reorg on cadence and run the integrity sweep.
 - **Inherit prior scoping numbers as decisions.** They are priors to test, not settled outputs.
-- **Claim done without verification** — or while finite known buildable work remains. Re-enumerate to confirm the frontier is dry before declaring exhaustion.
+- **Claim done without verification** — or while finite known buildable work remains. Re-enumerate once to confirm the frontier before pausing.
 - **Block the whole run on one slow fork.** Keep it warm with a trigger and proceed elsewhere.
-- **Author content to look busy.** Once genuinely exhausted, reconcile and sleep; do not fabricate passes.
+- **Author content to look busy.** Once genuinely dry, reconcile and pause; do not fabricate passes or schedule idle churn.
 - **Trust a worker agent's self-reported verdict.** Read the independent verifier's result, never the worker's self-claim (see `cross-family-review.md`).
 
 ---

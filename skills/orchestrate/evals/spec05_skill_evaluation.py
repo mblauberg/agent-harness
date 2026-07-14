@@ -17,7 +17,7 @@ import yaml
 
 
 SCHEMA_VERSION = 1
-EVALUATION_ID = "spec05-skill-routing-20260712-v1"
+EVALUATION_ID = "spec05-skill-routing-20260714-v3"
 ROUTE = "generated MCP -> daemon -> task-bound ephemeral provider action"
 AFFECTED = (
     "deliver",
@@ -31,7 +31,6 @@ AFFECTED = (
     "work-map",
 )
 FAMILIES = {
-    "anthropic": "claude-agent-sdk",
     "google": "agy",
     "xai": "cursor-agent",
 }
@@ -270,6 +269,23 @@ def _action_evidence(
     return action
 
 
+def validate_canonical_raw_inventory(result: dict[str, Any], evidence: Path) -> None:
+    """Reject canonical raw files that are not bound by the current receipt."""
+    expected = {
+        invocation[field]
+        for invocation in result.get("invocations", [])
+        if isinstance(invocation, dict)
+        for field in ("action_evidence_artifact", "output_artifact")
+        if isinstance(invocation.get(field), str)
+    }
+    actual = {
+        path.relative_to(evidence).as_posix()
+        for path in (evidence / "raw").rglob("*")
+        if path.is_file() or path.is_symlink()
+    }
+    fail(actual != expected, "canonical raw inventory differs from current routing receipt")
+
+
 def validate_routing_result(
     result: Any,
     root: Path,
@@ -345,6 +361,8 @@ def validate_routing_result(
             if case["relation"] == "portability":
                 critical_failures += int(row["portable_workflow"] != _expected_workflow(case))
     fail(seen_families != set(FAMILIES), "routing result family coverage is incomplete")
+    if evidence_root is None:
+        validate_canonical_raw_inventory(result, evidence)
     metrics = {
         "case_rows": rows,
         "primary_correct": primary,

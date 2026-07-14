@@ -25,8 +25,10 @@ without authority. For an authorised one-run npx resolution, set:
 PLAYWRIGHT_CLI_ALLOW_NPX_INSTALL=1 "$PWCLI" --help
 ```
 
-The wrapper pins its package version and records it through `--help`/CLI output;
-update that pin deliberately rather than resolving `latest` per run.
+An existing PATH binary is used as installed; the wrapper does not attest its
+version. When lineage matters, record `command -v playwright-cli` and
+`playwright-cli --version`. Only the authorised `npx` fallback is package-pinned;
+`--help` proves available commands, not version identity.
 
 ## Skill path (set once)
 

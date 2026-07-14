@@ -1,45 +1,49 @@
 ---
 name: skill-audit
-description: "Use for read-only audit of existing Agent Skills: triggers, overlap, portability, token cost, security, and effectiveness evidence. Not for a new skill or edits; use skill-authoring or implement."
+description: "Use for read-only audit of existing Agent Skills: triggers, overlap, portability, token cost, security, and effectiveness evidence. For audit-plus-action work, the action/lifecycle owner is primary and skill-audit is a companion. Not for a new skill or edits; use skill-authoring or implement."
 ---
 
 # Skill audit
 
-Assess whether skills are discoverable, focused, portable and effective. This
-skill is read-only: return an evidence-backed report, never edit the skills.
+Assess skill discoverability, focus, portability and effectiveness. This skill
+is read-only: report evidence; never edit skills.
+When a request combines audit with revision, evaluation, export or documentation,
+the action-owning lifecycle remains primary and `skill-audit` is its companion.
 
-## Privacy boundary
+## Evidence modes
 
-Default to static analysis and frozen routing fixtures. Do not scan provider
-transcripts, private memory or project content merely because those stores
-exist. Historical session analysis requires explicit human authority naming the
-roots or receipts, time window, target skills, disclosure destination and
-retention. Show that scope before reading content.
+Default to static analysis and frozen routing fixtures. Do not inspect session
+history, private memory or project content merely because it exists.
 
-Use `scripts/collect_telemetry.py --dry-run-scope` to emit the proposed scope
-without reading source bodies. Collection requires the matching receipt with
-explicit human approval; unsupported schemas fail before traversal.
+For personal work, a direct human request authorises read-only analysis of the
+named local histories. Do not require a second privacy receipt,
+redaction pass, retention date or minimum-cell suppression. Read histories in
+place; keep temporary excerpts local and run-owned; never commit raw transcripts
+or promote them to project truth. Ask only when roots or the useful time window
+are materially ambiguous. Unsupported or unattributable evidence is `N/A`,
+never zero.
 
-Persist metadata-only aggregates: day/week bucket, platform, skill, event and
-count. Never persist prompts, responses, tool arguments/results, file content,
-absolute paths, usernames, project names, session IDs or free-text reactions.
-Evidence snippets require separate opt-in, local redaction and a private
-run-owned artifact; public reports use synthetic or paraphrased examples.
-Absent or unsupported telemetry is `N/A`, never zero usage.
-
-Use `scripts/validate_telemetry.py` before relying on a telemetry artifact.
+An aggregate or paraphrased report to the human in the same authorised
+session is local delivery, not sharing/export, and needs no second
+disclosure confirmation. Run-owned scratch is allowed. Separate
+authority is required before creating a persistent repository/shared artifact,
+sending raw excerpts to another provider, or disclosing to a new audience or
+external destination. When authorised, confirm with the human the audience,
+destination and whether excerpts are allowed; exclude secrets and out-of-scope
+third-party content.
 
 ## Workflow
 
 1. Resolve target skills from the canonical catalogue and deduplicate links.
-2. Run static checks: frontmatter/YAML, trigger and exclusion clarity,
+2. Check frontmatter/YAML, trigger and exclusion clarity,
    adjacent-skill conflicts, broken paths/tools, instruction density, body size,
    progressive disclosure, complete provider-rendered catalogue budget,
    provider-sidecar parity, provenance/licence, authority/state writes, scripts,
    hooks/MCP/network surfaces and deterministic fixtures.
-3. If authorised telemetry exists, verify its scope and privacy receipt, then
-   calculate trigger, completion, correction and cost signals. Never infer
-   invocation from a skill being loaded into context.
+3. If local history analysis was requested, classify provenance before
+   calculating signals: human, platform metadata, notification, managed worker,
+   skill injection, command or unknown. Never infer selection from a skill
+   merely being loaded, and state small-sample limitations.
 4. Use balanced, frozen routing evals for undertrigger and overtrigger
    claims. A raw keyword match is only a candidate, not ground truth.
 5. Report all dimensions from `references/method.md`; mark missing evidence

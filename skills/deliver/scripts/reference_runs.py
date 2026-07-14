@@ -179,7 +179,7 @@ def make_reference_run(profile_name: str, root: Path = ROOT, *, high_stakes: boo
         },
         "assurance": {
             "stochastic_required": profile_name == "agent-product",
-            "reason": "agent behaviour is judgement-bearing" if profile_name == "agent-product" else "profile reference uses deterministic and independent-review evidence",
+            "reason": "reference deliberately exercises stochastic agent behaviour" if profile_name == "agent-product" else "profile reference uses deterministic and independent-review evidence",
             "evaluations": ([{
                 "status": "complete",
                 "anchored_at": "2026-07-10T00:02:30Z",

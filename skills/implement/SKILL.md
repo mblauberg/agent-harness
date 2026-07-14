@@ -24,9 +24,10 @@ name a reconciliation run.
 
 ## Loop
 
-1. Create the canonical `delivery-run` from
+1. For substantial+ work, create the canonical `delivery-run` from
    `../deliver/templates/RUN.template.json`, set profile `software`, and follow
-   [run-contract.md](references/run-contract.md).
+   [run-contract.md](references/run-contract.md). Routine minor work may proceed
+   without `RUN.json` unless the human or project policy requests one.
 2. Keep an adaptive plan. Per slice use `tdd` for observable change, `refactor`
    for approved behaviour-preserving structure and `diagnose` for unknown
    causes. Migrations may also need behaviour tests and equivalence evidence.
@@ -47,12 +48,13 @@ name a reconciliation run.
    change. For substantial+ apply `session`: refresh the recovery checkpoint,
    audit context, graduate durable findings and classify retained/ephemeral
    artifacts in `RUN.json`.
-7. Validate with
+7. When a receipt exists, validate with
    `"${AGENTS_HOME:-$HOME/.agents}/skills/deliver/scripts/validate_delivery.py" \
    .agent-run/<id>/RUN.json --workspace-root "$PWD" --verify-hashes`.
    Hand off only after this machine gate.
 8. Human final acceptance is mandatory; promotion needs separate `release`
-   authority. After acceptance, failure or cancellation, terminalise with
+   authority. When a run directory exists, after acceptance, failure or
+   cancellation, terminalise with
    `${AGENTS_HOME:-$HOME/.agents}/skills/orchestrate/scripts/run_dir_finalize.py`;
    an outer orchestrator's `awaiting-human` transport remains active and does
    not rename the canonical receipt state.
@@ -65,9 +67,7 @@ name a reconciliation run.
   load-bearing primary coverage blocks; missing bonus-family output does not.
 - Objective evidence outranks reviewer confidence; adjudicate conclusions,
   never vote.
-- Routine minor work may continue automatically without `RUN.json` unless
-  requested. Substantial+ starts a fresh implementation session bound to
-  approved digests.
+- Substantial+ starts a fresh implementation session bound to approved digests.
 - `awaiting_acceptance` is the successful machine-gate state. Move the
   canonical receipt to `accepted` only after explicit human acceptance.
 

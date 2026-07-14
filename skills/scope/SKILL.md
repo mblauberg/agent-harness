@@ -21,10 +21,12 @@ evidence and decided/parked branches. Revise it; never fork competing scope.
 
 ## Grill
 
-Load `grill-me`: purpose -> users -> constraints -> edge cases -> failure modes
--> success -> exclusions. Ask one decision question per round; offer 2–3
-concrete choices and a recommendation when useful. Batch only human-permitted
-independent clerical confirmations.
+Load `grill-me` only when the user explicitly asks to be grilled or dependent
+owner decisions remain materially unresolved. Then work purpose -> users ->
+constraints -> edge cases -> failure modes -> success -> exclusions, one
+decision question per round. Otherwise use the supplied/current context and
+present a compact decision packet with 2–3 concrete choices, a recommendation
+and clearly parked owner calls.
 
 Agents decide engineering calls. Business, legal or financial owner calls stay
 parked as named open-decision rows; never guess. Put every unresolved branch in

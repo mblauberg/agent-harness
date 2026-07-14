@@ -67,7 +67,7 @@ Three members of the set sit on a different axis (human-entry + generated-status
 
 ## 2. GOAL.md — mission + the RUN/STOP gate
 
-Human-owned. The orchestrator reads it at the **start of every iteration** and obeys it. Only a human edit of `STATUS:` to `STOP` halts the run; **an empty queue does not** (see §8). It is the *only* file the orchestrator must never author content into. Contains:
+Human-owned. The orchestrator reads it at the **start of every iteration** and obeys it. Only a human edit of `STATUS:` to `STOP` closes the mission; an empty queue may pause the operator after bounded re-enumeration but cannot rewrite GOAL (see §8). It is the *only* file the orchestrator must never author content into. Contains:
 
 - **Mission** (`{{MISSION}}`): the open-ended objective. The framing is "never declare done — run until STOP."
 - **Traversal order**: the default work order (e.g. one-way-doors / foundational items first, then descend dependency tiers), overridable by directives.
@@ -106,7 +106,9 @@ but they do not grow the file a fresh session must read on every iteration.
 
 These are *overwritten* each iteration to reflect reality now (not appended):
 
-- **Run status** — `RUNNING` / current phase / `STOPPED`, plus a **RESUME PROTOCOL** line: literally what the next wake should do (e.g. *"dispatch a cheap probe; if OK, re-dispatch the N voided tasks listed in In-flight; salvaged partials already on disk = KEEP, do not re-run"*).
+- **Run status** — `RUNNING`, `PAUSED — reason: idle-frontier`, or `STOPPED`,
+  plus a **RESUME PROTOCOL** line. A pause also records empty in-flight/next-up
+  fields and `release-on-driver-exit`; the shared pause validator checks them.
 - **In flight** — a mirror of the run-ledger's in-flight table (§5). This is what lets the next iteration re-attach background results.
 - **Built inventory** — the artifacts produced *up to* `{{BUILD_CEILING}}`.
 - **Owed-lists** — work tracked-but-not-chased: items beyond the build ceiling, and escalation-gated residuals. (A *finite, enumerated* owed-list is legitimate to drain; an open-ended "find more" loop is not — see anti-placebo layer.)
@@ -151,6 +153,7 @@ Explicitly **not authoritative** (it points at where-to-look; the LOG holds verd
   `DECIDED` · `DECIDED-PROVISIONAL` (decided but `{{HARD_GATES}}`-gated for promotion/live) · `FORKED` · `FOLDED`/`MERGED` · `*-GATED` (expert/lawyer signoff) · `HUMAN-TIE-BREAK` · `SPIKE` · `DEFERRED` · `BUILD-ARTEFACT` · `UNRESOLVED`.
   The `DECIDED` vs `DECIDED-PROVISIONAL` split is driven by `{{HARD_GATES}}`: anything in a hard-gate area cannot be plain `DECIDED` until it has a panel pass + cross-family pass.
 - **Dependency-ordered tiers.** Tier-0 = the foundational one-way-doors that gate everything downstream. The **tiering mechanism** is fixed; the tier *contents* are domain instance data.
+- The queue contains exactly one `## Tiers (dependency-ordered; tier-0 = foundational one-way-doors)` section. Every tier uses the exact four-column table `Item | Status | Depends on | Scope / next evidence`. Repeat the header and separator under each tier heading. Queue entries outside that table schema are invalid; an empty table is an empty tier.
 - A **COUNT SUMMARY** that reconciles *every* item to exactly one disposition (decided / forked / folded / gated / spike / deferred / spawned-open) and asserts **"0 unresolved loose ends"** — verified by **ID-set diff against the LOG**, not by eyeballing.
 
 ### .orchestrator/runs.md — the crash-safety spine
@@ -238,7 +241,9 @@ The **ID-set diff (QUEUE ↔ LOG ↔ `adr/*.md`)** is the canary — it surfaces
 - **Continuation:** what does the next wake do first? (STATE's RESUME PROTOCOL / HANDOFF's TERMINAL PICKUP)
 - **Reasoning:** why is each open fork / `{{ESCALATION_GATES}}` residual still open? (traceable in ≤3 hops)
 
-**An empty queue is a trigger to re-enumerate + deepen, not to halt** (gotcha §10.5). Only `STATUS: STOP` halts.
+**An empty queue triggers one bounded re-enumeration pass.** If still dry, write
+an idle checkpoint and pause the operator. Only `STATUS: STOP` closes the
+mission.
 
 ---
 
@@ -254,7 +259,10 @@ A synthesis deliverable that **introduces no new decisions** — it consolidates
 2. **Transient-API-death recovery via resume.** Background workflows die mid-run on transient overload errors. Completed phases are *cached* and partial findings preserved verbatim to a file, then the run is **resumed (not restarted)** so only the killed phases re-run. Lesson: persist partial outputs verbatim *immediately*; resume, don't restart; cross-family/non-same-provider CLIs are immune to your provider's overload for the verification step.
 3. **Bounded-retry CONVERGENCE RULE: a 2nd fix that still fails → escalate, don't loop a 3rd.** When a gate-integrity fix was attempted twice and the 2nd still failed, the orchestrator stopped mechanically re-greening it and **escalated it as a promotion-gated item with the failing checklist as the spec** — finishing *with* an escalation residual rather than an infinite fix loop.
 4. **Firm-stop vs genuine-placebo PIERCE.** A firm-stop on open-ended harden loops normally holds, **but** a hard gate that cross-family review *proves* is decorative/placebo/vacuous (or a real correctness bug) **pierces** the firm-stop — a decorative gate cannot underwrite "thoroughly complete," so it must be fixed. Diminishing-returns coverage findings go to the owed-list instead. Distinguish genuine-placebo (pierces) from divergent-scope harden (held).
-5. **"Exhausted" was wrong once — re-enumerate before declaring done.** The orchestrator twice declared the frontier exhausted while genuine work remained (items wrongly parked "blocked", cross-cutting gaps with no ADR). **An empty queue is a trigger to re-enumerate + deepen, not to halt.** A periodic gap-re-enumeration pass keeps the deepening backlog honest.
+5. **"Exhausted" was wrong once — re-enumerate before pausing.** The
+orchestrator twice missed genuine work (items wrongly parked "blocked",
+cross-cutting gaps with no ADR). One bounded gap pass protects the frontier;
+when it stays dry, pause rather than manufacture work.
 6. **Ledgers drift — the integrity sweep is mandatory.** Append-by-convention means they *can* drift: unescaped pipe-chars breaking LOG column counts, a duplicate ID breaking the audit, a self-written ADR at a nested path. The ID-set diff (QUEUE ↔ LOG) is the canary; run it every reorg.
 7. **Write the in-flight row BEFORE launching; clear it only on RECONCILE.** Else a crash/compaction mid-flight loses the run→item link. (Compaction does *not* kill the background task — but the in-flight ledger is the only thing that lets the next iteration re-attach its result.)
 8. **A stale capstone is a finish-blocker.** A finishing audit returned *not-ready* chiefly because HANDOFF was stale (cited an old iteration's counts) and GOAL/STATE disagreed on finish-state. Make GOAL + STATE + HANDOFF all agree on the terminal truth before flipping `STATUS: STOP`.

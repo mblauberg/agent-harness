@@ -75,6 +75,7 @@ def _compile_receipt(case: dict[str, Any], fixture: dict[str, Any]) -> dict[str,
     """Compile static held-out fixture data without reading production profiles."""
     profile = case["profile"]
     risk = case["risk_tier"]
+    stochastic = case.get("stochastic", fixture["stochastic"])
     deterministic = list(fixture["deterministic_gates"])
     judgements = list(fixture["judgement_gates"])
     evidence = [_evidence(gate, "deterministic", gate) for gate in deterministic]
@@ -126,6 +127,7 @@ def _compile_receipt(case: dict[str, Any], fixture: dict[str, Any]) -> dict[str,
         if (surface, gate) in {
             ("source", "secrets-scan"), ("source", "sast"),
             ("destructive-boundary", "destructive-boundary-tests"),
+            ("iac-container-config", "policy-scan"),
             ("agent-tools", "permission-check"), ("agent-tools", "tool-boundary-tests"),
             ("agent-tools", "prompt-injection-tests"),
         }
@@ -163,7 +165,7 @@ def _compile_receipt(case: dict[str, Any], fixture: dict[str, Any]) -> dict[str,
         "artifacts": [
             {"id": "outcome", "path": "outcome.bin", "media_type": "application/octet-stream", "artifact_type": fixture["artifact_type"], "digest": DIGEST_A, "class": "canonical", "owner": "human-owner", "retention": "project-policy"},
             {"id": "evidence-bundle", "path": "evidence.json", "media_type": "application/json", "artifact_type": "evidence", "digest": DIGEST_B, "class": "evidence", "owner": "delivery-chair", "retention": "risk-policy"},
-            *([{"id": "evaluation-receipt", "path": "evaluation/EVALUATION.json", "media_type": "application/json", "artifact_type": "evidence", "digest": DIGEST_B, "class": "evidence", "owner": "evaluation-chair", "retention": "risk-policy"}] if fixture["stochastic"] else []),
+            *([{"id": "evaluation-receipt", "path": "evaluation/EVALUATION.json", "media_type": "application/json", "artifact_type": "evidence", "digest": DIGEST_B, "class": "evidence", "owner": "evaluation-chair", "retention": "risk-policy"}] if stochastic else []),
         ],
         "design": {
             "status": "approved", "artifact_id": "outcome", "digest": DIGEST_A,
@@ -184,8 +186,8 @@ def _compile_receipt(case: dict[str, Any], fixture: dict[str, Any]) -> dict[str,
             "trajectory": [{"id": fixture["trajectory_measure"], "status": "pass", "value": 1, "target": "pass", "aggregation": "held-out-case", "evidence_kind": "deterministic", "evidence_id": deterministic[0]}],
         },
         "assurance": {
-            "stochastic_required": fixture["stochastic"],
-            "reason": "held-out stochastic behaviour gate" if fixture["stochastic"] else "deterministic profile with independent review",
+            "stochastic_required": stochastic,
+            "reason": "held-out stochastic behaviour gate" if stochastic else "deterministic profile with independent review",
             "evaluations": ([{
                 "status": "complete", "anchored_at": "2026-07-10T00:02:30Z",
                 "evidence_id": first_judgement,
@@ -193,7 +195,7 @@ def _compile_receipt(case: dict[str, Any], fixture: dict[str, Any]) -> dict[str,
                 "evaluation_id": "EVAL-REFERENCE",
                 "evaluation_digest": DIGEST_B,
                 "plan_digest": DIGEST_B,
-            }] if fixture["stochastic"] else []),
+            }] if stochastic else []),
         },
         "reviews": [
             {"role": "native-review", "provider_family": "openai", "adapter": "native-subagent", "model": "held-out-model", "independent_of_authorship": True, "lenses": ["correctness"], "status": "pass", "evidence_id": judgement_ids["openai"][0], "reason": ""},
@@ -304,6 +306,8 @@ def _validate_dataset(data: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         repetitions = case.get("repetitions")
         if isinstance(repetitions, bool) or not isinstance(repetitions, int) or repetitions < 1:
             raise ValueError(f"case {case['id']} repetitions must be positive")
+        if "stochastic" in case and not isinstance(case["stochastic"], bool):
+            raise ValueError(f"case {case['id']} stochastic must be boolean")
         if case.get("tamper") is not None:
             tamper = case["tamper"]
             if not isinstance(tamper, dict) or set(tamper) != {"path", "append"}:

@@ -2,6 +2,7 @@ from collections import Counter
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import subprocess
 
 import pytest
@@ -172,6 +173,44 @@ def test_spec05_retained_real_fabric_routing_result_passes():
     module = load_spec05_evaluation()
     result = json.loads((SPEC05_EVIDENCE / "routing-result.json").read_text())
     module.validate_routing_result(result, ROOT, SPEC05_EVIDENCE)
+
+
+def test_spec05_canonical_raw_inventory_contains_only_current_receipt_artifacts():
+    module = load_spec05_evaluation()
+    result = json.loads((SPEC05_EVIDENCE / "routing-result.json").read_text())
+    module.validate_canonical_raw_inventory(result, SPEC05_EVIDENCE)
+
+
+@pytest.mark.parametrize(
+    "orphan_relative",
+    ("orphan-output.json", "orphan-output.json.bak", "nested/orphan-output.json"),
+)
+def test_spec05_routing_validator_rejects_orphan_canonical_raw_files(
+    tmp_path, orphan_relative
+):
+    module = load_spec05_evaluation()
+    evidence = tmp_path / "evidence"
+    shutil.copytree(SPEC05_EVIDENCE, evidence)
+    orphan = evidence / "raw" / orphan_relative
+    orphan.parent.mkdir(parents=True, exist_ok=True)
+    orphan.write_text("{}\n")
+    result = json.loads((evidence / "routing-result.json").read_text())
+
+    with pytest.raises(module.Invalid, match="canonical raw inventory"):
+        module.validate_routing_result(result, ROOT, evidence)
+
+
+def test_spec05_tdd_narrative_names_the_current_two_family_receipt():
+    narrative = " ".join(
+        (ROOT / "docs" / "evals" / "spec05-skill-alignment-tdd.md").read_text().split()
+    )
+    assert "spec05-skill-routing-20260714-v3" in narrative
+    assert "72/72 primary routes" in narrative
+    assert "68/72 exact companion routes" in narrative
+    assert "Anthropic" in narrative and "infrastructure" in narrative
+    assert "Original RED/GREEN date: 2026-07-12" in narrative
+    assert "Current receipt refresh: 2026-07-14" in narrative
+    assert "108/108 primary routes, 101/108 exact companion routes" not in narrative
 
 
 def test_spec05_adapter_absent_workflows_execute_and_match_retained_result(tmp_path):

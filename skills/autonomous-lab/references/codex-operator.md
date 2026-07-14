@@ -37,9 +37,10 @@ on Claude Code — edit `GOAL.md` directives, set `STATUS: STOP`.
 
 ```sh
 #!/bin/sh
-# lab-driver.sh — re-invoke one lab iteration until GOAL.md says STOP.
+# lab-driver.sh — re-invoke active iterations; exit on valid PAUSED or human STOP.
 LAB_DIR="${1:?usage: lab-driver.sh <LAB_DIR>}"
 LEASE_TOOL="${AGENTS_HOME:-$HOME/.agents}/skills/orchestrate/scripts/lease.py"
+PAUSE_VALIDATOR="${AGENTS_HOME:-$HOME/.agents}/skills/autonomous-lab/scripts/validate_idle_pause.py"
 LEASE="$LAB_DIR/LEASE.json"
 HOLDER="codex-driver-$$"
 python3 "$LEASE_TOOL" acquire "$LEASE" --holder "$HOLDER" --ttl "${LAB_LEASE_SECONDS:-900}" || exit 1
@@ -49,7 +50,7 @@ Read $LAB_DIR/OPERATING_MANUAL.md IN FULL first — it is your constitution.
 Then read GOAL.md, STATE.md, and the work-queue head. Run ONE iteration of the
 8-step loop (RECONCILE → READ → SELECT → DISPATCH → RECORD → PROPAGATE →
 REORG-if-due → STATE → WAKE/STOP), obeying: protect orchestrator context,
-provenance-before-promotion, record-before-launch, never self-halt. You are on the
+provenance-before-promotion, record-before-launch, never self-close the mission. You are on the
 Codex substrate: dispatch via native parallel subagent waves per
 references/codex-operator.md, NOT Claude workflow JavaScript. If GOAL
 STATUS==STOP, write a clean handoff and end. Otherwise end the turn when all
@@ -69,7 +70,16 @@ while ! grep -q '^STATUS: *STOP' "$LAB_DIR/GOAL.md"; do
   wait "$iteration_pid" || sleep 300                  # transient-failure backoff
   kill "$heartbeat_pid" 2>/dev/null || true
   wait "$heartbeat_pid" 2>/dev/null || true
-  sleep "${LAB_WAKE_SECONDS:-60}"                     # wake pacing between iterations
+  if grep -Eq '(^- \*\*Run status:\*\* .*PAUSED|^PAUSED([[:space:]]|$))' "$LAB_DIR/STATE.md"; then
+    if python3 "$PAUSE_VALIDATOR" "$LAB_DIR/STATE.md" \
+        --runs "$LAB_DIR/.orchestrator/runs.md" \
+        --queue "$LAB_DIR/DECISION_QUEUE.md"; then
+      python3 "$LEASE_TOOL" release "$LEASE" --holder "$HOLDER" >/dev/null || exit 1
+      trap - EXIT INT TERM HUP
+      break                                           # valid idle pause; mission stays RUN
+    fi                                                # invalid pause cannot stop re-invocation
+  fi
+  sleep "${LAB_WAKE_SECONDS:-60}"                     # active/in-flight pacing only
 done
 ```
 
@@ -78,11 +88,21 @@ Driver notes:
 - **One iteration per invocation.** The inner session must end its turn (not self-loop); the driver
   owns re-invocation, exactly as the Stop hook does on Claude Code. A driver re-fire after a "done"
   claim is the same over-claim signal as a Stop-hook re-fire (`recovery-and-cadence.md` §7).
+- **Idle is a pause, not completion.** After bounded re-enumeration finds no real
+  work, persist STATE `PAUSED — reason: idle-frontier`, an empty in-flight/next
+  frontier, `release-on-driver-exit`, and a structured external resume trigger:
+  `restart-on:` followed only by `human-directive`, `gate-answer`,
+  `external-completion`, `material-change`, or `explicit-restart`.
+  The validator also proves the canonical run-ledger has no in-flight row, the
+  decision queue has no selectable work, and the resume trigger uses that enum;
+  it rejects premature pauses before the driver releases its lease and exits. A
+  material change or explicit restart launches it again; only human
+  `STATUS: STOP` closes the mission.
 - **Crash-safety is unchanged**: record-before-launch + RECONCILE make a killed `codex exec`
   recoverable — the next invocation re-attaches from the ledger. Session continuity is a
   nice-to-have (`codex exec resume`), never a dependency.
-- Raise `LAB_WAKE_SECONDS` (~3600) when the queue is drained and the run is idling on gates —
-  same wake discipline as §6.
+- Use `LAB_WAKE_SECONDS` only while work is active or in flight. A dry frontier
+  exits through the durable PAUSED checkpoint instead of a long idle loop.
 - **Canonical STOP line**: the driver greps `^STATUS: *STOP` — the goal file must carry exactly
   `STATUS: STOP` at line start (that casing). Anything else does not halt the run.
 - **Supervise the driver.** The driver is the one process whose death stops re-invocation (state

@@ -30,9 +30,9 @@
 
 Produce the most thoroughly-reasoned result a team-equivalent could produce — by
 **fanning agents out over every decision**, **forking at hard branch points**,
-**judging adversarially**, and going deeper and broader **until the human writes
-`STATUS: STOP` in `GOAL.md`**. Token cost is not the constraint; correctness,
-coverage, and traceability are.
+**judging adversarially**, and preserving a resumable mission **until the human
+writes `STATUS: STOP` in `GOAL.md`**. A dry frontier pauses the operator; it does
+not close the mission. Correctness, coverage, and traceability outrank churn.
 
 ## 0a. Budget, concurrency & runaway caps
 
@@ -81,7 +81,7 @@ durable pointers, and retain the load-bearing synthesis/adjudication role.
 ## 2. The iteration loop (FIXED — do not reorder)
 
 ```
-LOOP until GOAL.md STATUS == STOP:
+RESUMABLE MISSION LOOP until GOAL.md STATUS == STOP (a dry frontier PAUSES it):
   0. RECONCILE   read the run-ledger (.orchestrator/runs.md) "in-flight" table.
                  For each row:
                  - completed   → ingest its output (RECORD), clear from in-flight
@@ -109,17 +109,18 @@ LOOP until GOAL.md STATUS == STOP:
   7. STATE       rewrite STATE.md: what just happened, what's in flight, what's
                  next, open forks, blockers, the §0a spend checkpoint.
   8. WAKE/STOP   if STOP in GOAL.md → write a clean handoff in STATE.md + refresh
-                 HANDOFF.md and halt. Else: if there is selectable work NOT
-                 blocked on an in-flight run, continue immediately. If EVERYTHING
-                 selectable is in-flight, do NOT busy-loop — schedule a wake with
-                 a delay matched to the work (a few minutes when polling a running
-                 job; a long wake [~3600s] if genuinely idle) and end the turn.
+                 HANDOFF.md and halt. Else: if selectable work remains, continue.
+                 If work is in flight, schedule a matched fallback wake and end
+                 the turn. If the queue is empty, run one bounded re-enumeration
+                 pass; if still dry, write STATE PAUSED with an idle checkpoint
+                 and structured `restart-on:` trigger, release the lease, and end without
+                 another self-wake. Only human STOP closes the mission.
 ```
 
-**Wake discipline (avoid burning iterations).** When all selectable work is
-in-flight, schedule your own next wake and exit the turn rather than re-reading
-"everything in flight" repeatedly. The harness also re-invokes on background-job
-completion, so the scheduled wake is a fallback, not the primary signal.
+**Wake discipline (avoid burning iterations).** In-flight work gets a fallback
+wake; completion notification remains primary. A genuinely dry frontier gets an
+idle checkpoint and no self-wake. A human directive, gate answer, external
+completion or explicit restart resumes the RUN mission.
 
 ## 3. Decision lifecycle (apply to every decision)
 

@@ -23,6 +23,18 @@ until productisation is actually pursued.
   affirmatively verified absent) — it protects a solo operator from their own
   agents.
 
+## Clarification — 14 July 2026
+
+Personal-first also governs skill evidence. A direct request for read-only local
+history analysis is sufficient authority to inspect the named histories in
+place; it does not need a research-grade receipt, redaction pass, retention date
+or small-cell suppression. Raw history is not committed or externally shared.
+A compact aggregate or paraphrased response to that human in the same session
+is local delivery and needs no second disclosure confirmation. The
+product-compatible seam is separate authority for a persistent shared artifact,
+raw cross-provider handoff, new audience or external destination, not an unused
+generic provider collector.
+
 ## Rejected
 
 - Personal-only (rejecting portability outright): forecloses cheap seams.

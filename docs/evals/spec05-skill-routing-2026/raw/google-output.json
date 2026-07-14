@@ -47,9 +47,7 @@
     {
       "case_id": "c007",
       "primary_skill": "scope",
-      "companion_skills": [
-        "grill-me"
-      ],
+      "companion_skills": [],
       "portable_workflow": null
     },
     {

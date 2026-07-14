@@ -15,22 +15,23 @@ Updated: <YYYY-MM-DDTHH:MM:SSZ>
 
 ## Heartbeat (OVERWRITE this block every iteration)
 
-- **Run status:** RUNNING | PAUSED | STOPPED  — one line on the live posture.
-- **Orchestrator lease:** <chair family/session · generation · acquired-at · heartbeat-at>
+- **Run status:** RUNNING | PAUSED — reason: idle-frontier | STOPPED  — one line on the live posture.
+- **Orchestrator lease:** <chair family/session · generation · acquired-at · heartbeat-at; use release-on-driver-exit for PAUSED>
   <!-- exactly one active loop driver; takeover increments generation after a persisted handoff -->
 - **Iteration:** <N>
 - **This iteration:** <one line: what just happened — the headline result>
-- **In flight:** <run-id · unit-id · what · launched-at · expected output path>
+- **In flight:** <run-id · unit-id · what · launched-at · expected output path; use (none) for PAUSED>
   <!-- one row per concurrent job; MUST match the .orchestrator run-ledger. Empty if idle. -->
-- **Next up:** <the next selectable unit(s) and why — respects Depends-on + §0a caps>
+- **Next up:** <the next selectable unit(s) and why; use (none — dry after bounded re-enumeration) for PAUSED>
 - **Open forks:** <Fxxx: branch question · status · kill-switch + deadline> (+ the warm waitlist)
 - **Blockers / escalations:** <gated items ({{ESCALATION_GATES}} class), cap hits,
   orphans found by the integrity sweep, anything needing the human>
 - **Spend checkpoint (§0a):** <jobs launched this iter · cumulative · any unit over
   the ~3-run budget>
-- **Resume protocol:** <the EXACT steps a fresh session takes on wake — e.g. "probe
-  for session-limit; if clear, re-dispatch tasks X/Y; salvaged partials on disk =
-  <paths> (KEEP, do not discard)". This is what makes the run crash-safe.>
+- **Resume protocol:** <for PAUSED, use exactly `restart-on:` plus a comma-separated
+  subset of `human-directive`, `gate-answer`, `external-completion`,
+  `material-change`, `explicit-restart`; for RUNNING, record the exact recovery
+  steps and retained partial paths. This is what makes the run crash-safe.>
 
 > **STOP handling:** when `GOAL.md` STATUS flips to STOP, the final heartbeat must
 > state the terminal truth (build-ceiling reached, the escalation-gated remainder,

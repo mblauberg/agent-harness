@@ -1,5 +1,5 @@
 schema_version: 1
-dataset_id: spec05-skill-routing-20260712-v1
+dataset_id: spec05-skill-routing-20260714-v3
 cases:
 - id: c001
   relation: positive

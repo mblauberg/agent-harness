@@ -1,52 +1,42 @@
 {
-  "schema_version": 1,
-  "contract": "skill-routing-regression-plan",
-  "evaluation_id": "skill-portfolio-routing-20260711-fabric-v2-opus",
-  "frozen_at": "2026-07-11T09:44:01Z",
-  "dataset": {
-    "path": "routing-holdout.yaml",
-    "sha256": "sha256:ccf946829c97f0972d144b1e1e07cc308833d7dc6cc20d20eed850e3d422b30d",
-    "cases": 15,
-    "split": "fresh-holdout"
-  },
   "catalogue": {
-    "sha256": "sha256:c869bc273dda712312add66639d0c248ed648f487a9a07132f709d1730008a94",
-    "characters": 7354
+    "characters": 7409,
+    "sha256": "sha256:9346760fbab26c585e87822f88c54f54b47a2ea0231935b2befc72798ba886cf"
   },
   "classifier": {
     "instruction": "You are a blind skill-routing classifier. For each prompt, choose one primary skill and zero or more companion skills from the complete catalogue. The primary is the most distinctive skill matching the requested task; companions apply only when the prompt genuinely composes another lifecycle, domain, tool, or presentation skill. Use null and no companions when no skill is warranted. Copy names exactly, classify each prompt once, and return only the schema output. Do not use tools or infer from case IDs.",
     "instruction_sha256": "sha256:8ff0f0d50114cbf542b86f0abcbdd67e6824e7e3eafb3b6b9e62107dfafb2318",
-    "packet_sha256": "sha256:cd6e98de0f6cc753ed65128e2ac2c6a76a2622aea888f5e424e39f166abdd1fb",
-    "runner_sha256": "sha256:193a72f733dd8d10f0e6ef4047c9d3b83784fdcf8192328800a491d473796984",
-    "output_schema_sha256": "sha256:faf1831b602103f2b0bdbcd1ec99b30985555930ac559baa57b0ea5e773049f6"
+    "output_schema_sha256": "sha256:6e99918a78aafd25c42d61e59d3bd0cb6bd269c7516b2747cbbc54f58bac6fb0",
+    "packet_sha256": "sha256:b5c73ea4e421a2ce864ea36ef9ee482a156ab79ea2f8fd68dcee80c2ed8cfaa7",
+    "provider_prompt_sha256": "sha256:5774d3732e42f4f1d546b1b8046297cb7033383cd0b70bec22de19f84e0798c7"
   },
+  "contract": "skill-routing-regression-plan",
+  "dataset": {
+    "cases": 18,
+    "path": "routing-holdout.yaml",
+    "sha256": "sha256:565b5c87e20fedca94a33ea473656204fdb9d5bab186288090e40714d5b90366",
+    "split": "fresh-holdout"
+  },
+  "evaluation_id": "skill-portfolio-routing-20260714-fabric-v5",
+  "frozen_at": "2026-07-14T01:40:53.206625Z",
+  "retention": "retain every terminal action, exact provider answer, and failed attempt",
+  "route": "generated MCP -> daemon -> task-bound ephemeral provider action",
   "rubric": {
-    "primary": "exact primary skill",
-    "companions": "all required companions present and no undeclared companion",
-    "primary_threshold": 1.0,
     "companion_threshold": 0.9,
-    "critical_case_failure_blocks_pass": true
+    "companions": "all required companions present and no undeclared companion",
+    "critical_case_failure_blocks_pass": true,
+    "primary": "exact primary skill",
+    "primary_threshold": 1.0
   },
   "schedule": {
-    "families": ["anthropic", "openai"],
-    "repetitions": 3,
     "attempts": 6,
-    "case_rows": 90,
+    "case_rows": 108,
+    "families": [
+      "google",
+      "xai"
+    ],
+    "repetitions": 3,
     "retry_policy": "none"
   },
-  "lineage": [
-    {
-      "family": "anthropic",
-      "requested_model": "fable",
-      "effective_model": "claude-opus-4-8",
-      "substitution_reason": "Fable returned HTTP 429 before generation; the live reviewer route selected Opus"
-    },
-    {
-      "family": "openai",
-      "requested_model": "gpt-5.6-sol",
-      "effective_model": "gpt-5.6-sol",
-      "substitution_reason": ""
-    }
-  ],
-  "retention": "retain every incomplete, tool-error, omitted, invalid, timed-out, and failed attempt with model lineage"
+  "schema_version": 1
 }

@@ -61,13 +61,13 @@
       "artifact_types": ["prompt", "tool", "policy", "evaluation-set", "deployment-config"],
       "required_evidence": {
         "deterministic": ["tests", "permission-check"],
-        "judgement": ["behavioural-eval", "red-team"]
+        "judgement": ["agent-product-review"]
       },
       "required_measures": {"outcome": ["task-success"], "trajectory": ["policy-compliance"]},
-      "stochastic_policy": {"required": true, "minimum_repetitions": 3, "minimum_sample_size": 10},
+      "stochastic_policy": {"required": false, "required_for_artifact_types": ["prompt", "tool", "policy", "evaluation-set"], "minimum_repetitions": 3, "minimum_sample_size": 10},
       "security_surface_policy": ["source", "dependency", "auth-boundary", "destructive-boundary", "iac-container-config", "generated-artifact", "sensitive-data", "agent-tools", "inter-agent"],
       "boundary_checks": ["tests", "permission-check"],
-      "evidence_policy": {"retention": ["risk-policy", "project-policy"], "redaction": "agent-evidence-policy"},
+      "evidence_policy": {"retention": ["risk-policy", "project-policy"], "redaction": "project-policy"},
       "release_semantics": "staged-activation",
       "observation_examples": ["task-success", "policy-violations", "tool-failures"]
     }

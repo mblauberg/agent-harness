@@ -23,9 +23,9 @@ Companion round-7 adoptions: decision packets in `/scope` for broad work
 (one-question-at-a-time retained for dependent choices, F-017);
 `architecture-review` skill promotion approved via the skill-authoring path,
 with implementation pending (D-008).
-Style policy: `$caveman` stays default for inter-agent/mechanical/status
-traffic; human-facing explanatory output is domain-appropriate, caveman on
-explicit request (F-025, partial).
+Style policy: terse output stays default for inter-agent/mechanical/status
+traffic; human-facing explanatory output is domain-appropriate. The `caveman`
+overlay loads only on explicit request, avoiding a duplicate skill load (F-025).
 
 ## Consequences
 

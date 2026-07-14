@@ -85,6 +85,16 @@ def _bind(target: ast.AST, value: ast.AST | None, aliases: dict[str, str]) -> No
             aliases.pop(name, None)
 
 
+def _pattern_bindings(pattern: ast.pattern) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(pattern):
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
+    return names
+
+
 def _scan_body(body: list[ast.stmt], aliases: dict[str, str], path: Path, findings: list[dict[str, object]]) -> None:
     """Scan lexical statement order so aliases exist only after their binding."""
     for node in body:
@@ -138,6 +148,15 @@ def _scan_body(body: list[ast.stmt], aliases: dict[str, str], path: Path, findin
                 if item.optional_vars:
                     _bind(item.optional_vars, None, branch)
             _scan_body(node.body, branch, path, findings)
+        elif isinstance(node, ast.Match):
+            _inspect(node.subject, aliases, path, findings)
+            for case in node.cases:
+                branch = dict(aliases)
+                bindings = _pattern_bindings(case.pattern)
+                for name in bindings:
+                    branch.pop(name, None)
+                _inspect(case.guard, branch, path, findings)
+                _scan_body(case.body, branch, path, findings)
         elif isinstance(node, (ast.Try, ast.TryStar)):
             _scan_body(node.body, dict(aliases), path, findings)
             for handler in node.handlers:

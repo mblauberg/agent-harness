@@ -56,5 +56,54 @@ def test_static_security_check_follows_legal_import_and_assignment_aliases_in_or
     ]
 
 
+def test_static_security_check_scans_definitions_nested_under_match_cases(tmp_path):
+    module = load_module()
+    path = tmp_path / "match_case.py"
+    path.write_text(
+        "import os\n"
+        "import subprocess\n"
+        "match {'kind': 'unsafe'}:\n"
+        "    case {'kind': 'unsafe'}:\n"
+        "        def nested():\n"
+        "            os.system('unsafe')\n"
+        "        class Runner:\n"
+        "            subprocess.run('unsafe', shell=True)\n"
+    )
+
+    assert [(item["rule"], item["line"]) for item in module.scan_file(path)] == [
+        ("dangerous-dynamic-call", 6),
+        ("subprocess-shell-true", 8),
+    ]
+
+
+def test_match_pattern_bindings_shadow_import_aliases(tmp_path):
+    module = load_module()
+    path = tmp_path / "match_shadow.py"
+    path.write_text(
+        "import os\n"
+        "match {'tool': object()}:\n"
+        "    case {'tool': os}:\n"
+        "        os.system('ordinary method')\n"
+    )
+
+    assert module.scan_file(path) == []
+
+
+def test_match_pattern_bindings_do_not_shadow_imports_after_match(tmp_path):
+    module = load_module()
+    path = tmp_path / "match_postlude.py"
+    path.write_text(
+        "import os\n"
+        "match {'other': object()}:\n"
+        "    case {'tool': os}:\n"
+        "        pass\n"
+        "os.system('unsafe')\n"
+    )
+
+    assert [(item["rule"], item["line"]) for item in module.scan_file(path)] == [
+        ("dangerous-dynamic-call", 5),
+    ]
+
+
 def test_repository_python_surface_passes_static_security_check():
     assert load_module().scan(ROOT) == []

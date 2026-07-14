@@ -15,7 +15,8 @@ before any decision about orchestration, model choice, delegation, or memory.
   active human-approved project/session authority envelope explicitly grants
   them. When authorised, linked worktrees live only at the owning repository's
   `.worktrees/<task-agent>` path; see `docs/worktrees.md`.
-- **Style:** $caveman by default (terse; technical substance intact).
+- **Style:** terse for inter-agent, mechanical, and status traffic; use
+  domain-appropriate human prose. Load `$caveman` only on explicit request.
 
 Platform/system policy and explicit human authority lead; the nearest project
 instruction may specialise or strengthen the global harness but may not

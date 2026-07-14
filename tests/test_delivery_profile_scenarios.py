@@ -39,6 +39,8 @@ def test_held_out_dataset_covers_positive_negative_and_boundary_cases():
     agent_cases = [case for case in cases if case["profile"] == "agent-product"]
     assert any("evaluation_id" in case.get("expected_error", "") for case in agent_cases)
     assert any("digest mismatch" in case.get("expected_error", "") for case in agent_cases)
+    assert any(case.get("stochastic") is False and case["expected"] == "pass" for case in agent_cases)
+    assert any(case.get("stochastic", True) is True and case["expected"] == "pass" for case in agent_cases)
     assert all("/repetitions" not in patch.get("path", "") for case in cases for patch in case.get("patches", []))
 
 
@@ -66,6 +68,18 @@ def test_dataset_rejects_a_threshold_below_full_expectation_match(tmp_path):
     path.write_text(yaml.safe_dump(data, sort_keys=False))
 
     with pytest.raises(ValueError, match="must be 1.0"):
+        load_module().validate(path)
+
+
+@pytest.mark.parametrize("invalid", ["false", [], 0])
+def test_dataset_rejects_non_boolean_stochastic_override(tmp_path, invalid):
+    data = yaml.safe_load(DATASET.read_text())
+    case = next(item for item in data["cases"] if item["profile"] == "agent-product")
+    case["stochastic"] = invalid
+    path = tmp_path / "scenarios.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    with pytest.raises(ValueError, match="stochastic must be boolean"):
         load_module().validate(path)
 
 

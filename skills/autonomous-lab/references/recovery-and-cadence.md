@@ -6,7 +6,7 @@ This layer assumes the loop, the filesystem-memory layout, and the workflow runt
 
 > **Worked reference instance (aside):** these mechanics were hardened on a multi-week, ~100-iteration design-lab run with a "scaffold + local/mocked only" build ceiling. Every domain-specific value below is shown as a `{{CONFIG_KNOB}}` you fill at bootstrap; the mechanics themselves are domain-agnostic. The reference examples are illustrative anchors, never load-bearing rules.
 
-> *Implemented by `templates/STATE.template.md` (the heartbeat/recover anchor) and the `/loop` kickoff prompt in `SKILL.md` (which wires the Stop hook and the wake scheduler).*
+> *Implemented by `templates/STATE.template.md` (the heartbeat/recover anchor), `templates/README.template.md` (the Claude `/loop` and pause gate), and `references/codex-operator.md` (the Codex external driver).*
 
 ---
 
@@ -106,33 +106,54 @@ The loop is driven by a self-pacing scheduler (`{{WAKE_SCHEDULER}}`), not a busy
 **Wake discipline:** when *all* selectable work is in-flight, do **not** busy-loop re-reading "everything in flight." Schedule the next wake and **end the turn.** Match the delay to the work:
 
 - **Short** (minutes) when actively polling a specific running job;
-- **Long** (`{{LONG_WAKE_SECONDS}}`, ~3600s) when genuinely idle, or backed off behind a hard limit.
+- **Long** (`{{LONG_WAKE_SECONDS}}`, ~3600s) while backed off behind a hard limit;
+  a genuinely dry frontier uses the validated idle pause and schedules no wake.
 
 **Completion-notify is the primary signal; the scheduled wake is a fallback.** The harness re-invokes the orchestrator *on background-job completion*. So set a **long** fallback and rely on the notify — short polling fallbacks just waste iterations re-reading an unchanged in-flight table. Where a delay is genuinely optional, prefer one that stays within the runtime's cache window rather than re-paying cold-start cost.
 
-**Steady-state cadence** (once all reachable work is genuinely complete): each wake =
+**Steady-state transition** (once all reachable work appears complete):
 
 1. reconcile any straggler,
 2. verify `{{STOP_CONDITION}}` (the goal file's `STATUS`),
-3. dispatch real work **only on a material change** — a fork resolving, an escalation answered, a genuine new sub-task — otherwise **long sleep**.
+3. run one bounded re-enumeration pass; if still dry, write a `PAUSED`
+   idle-frontier checkpoint with a resume trigger, release the lease and end the
+   driver without another self-wake.
 
-Do **not** fabricate busy-work, and do **not** re-run a pass that is already current. An idle steady state that loops is a bug.
+Do **not** fabricate busy-work, and do **not** re-run a pass that is already
+current. A material directive, gate answer, external completion or explicit
+restart resumes the mission. An idle steady state that loops is a bug.
 
 ---
 
 ## 7. The STOP-hook enforcement pattern
 
-Wire a **Stop hook** that re-invokes the loop on every attempted halt and only lets the run terminate when `{{STOP_CONDITION}}` is met — i.e. the goal file's `STATUS == STOP`. Generic wiring:
+Wire a **Stop hook** that preserves the human-only mission terminal but allows a
+durable idle pause. It re-invokes while selectable/in-flight work exists; a
+`STATE: PAUSED` idle-frontier checkpoint ends the driver without claiming the
+mission terminated. Only `{{STOP_CONDITION}}` closes the mission.
 
 - The orchestrator runs an iteration and tries to end its turn.
-- The Stop hook reads the goal file. If `STATUS != STOP`, it **re-invokes** the same loop instruction (one more iteration). If `STATUS == STOP`, it lets the process exit.
-- The human steers by editing the goal file; the *only* clean exit is `STATUS=STOP`.
+- The Stop hook reads GOAL and STATE. If work exists, it re-invokes one
+  iteration. Before accepting an idle pause it runs:
 
-**Substrate realisations of the same gate:** on Claude Code this is a literal Stop hook (+ `/loop`
-self-pacing). On a **Codex operator** there is no Stop hook — an **external loop driver** (a shell
-`while STATUS != STOP; do codex exec <one-iteration prompt>; sleep; done`, see
-`codex-operator.md`) plays the identical role: one iteration per invocation, re-invoke until the goal
-file says STOP, driver sleep = wake pacing. The gate semantics below apply to both verbatim.
+  ```sh
+  python3 "${AGENTS_HOME:-$HOME/.agents}/skills/autonomous-lab/scripts/validate_idle_pause.py" \
+    "{{LAB_DIR}}/STATE.md" \
+    --runs "{{LAB_DIR}}/.orchestrator/runs.md" \
+    --queue "{{LAB_DIR}}/DECISION_QUEUE.md"
+  ```
+
+  A non-zero result re-invokes one iteration; a passing result exits the driver
+  without closing the mission. If
+  `STATUS == STOP`, it performs terminal handoff and exits the mission.
+- The human steers by editing the goal file; the only terminal mission exit is
+  `STATUS=STOP`.
+
+**Substrate realisations of the same gate:** on Claude Code this is a literal
+Stop hook plus `/loop` self-pacing. On a **Codex operator**, the validated
+external driver in `codex-operator.md` runs one iteration per invocation,
+re-invokes only while work is active or in flight, and releases its lease after
+a valid idle-frontier pause. The gate semantics below apply to both.
 
 **Why it matters:** the hook catches premature "we're done" declarations. **A second hook-fire is itself the signal that the orchestrator over-claimed completion** — repeatedly observed, the orchestrator deferred a finite list of *still-buildable* work to an owed-list and called the run done; the hook re-firing was the (correct) course-correction. Treat a re-fire as evidence you over-claimed, **not** as noise to suppress. Do not declare done while buildable work sits deferred.
 
@@ -149,7 +170,7 @@ file says STOP, driver sleep = wake pacing. The gate semantics below apply to bo
 | `{{WAKE_SCHEDULER}}` | Self-pacing scheduler. Claude Code: completion-notify primary + ScheduleWakeup fallback. Codex: the external loop driver's sleep | — |
 | `{{PROCESS_CHECK}}` | OS-level liveness check (PID/process), independent of the task manager | — |
 | `{{CROSS_FAMILY_VERIFIER}}` | A different-model-family verifier; provider-overload-immune | — |
-| `{{LONG_WAKE_SECONDS}}` | Long backoff / idle wake delay | ~3600 |
+| `{{LONG_WAKE_SECONDS}}` | Long active-backoff wake delay | ~3600 |
 | `{{MAX_RETRY_ATTEMPTS}}` | Fix attempts before escalation (the convergence rule) | 2 |
 | `{{MAX_CONCURRENT_JOBS}}` | Concurrency ceiling for background jobs | tuned |
 | `{{STOP_CONDITION}}` | Single source of truth the Stop hook reads | goal-file `STATUS == STOP` |

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 export const IMPECCABLE_DIR = '.impeccable';
 export const LIVE_DIR = 'live';
@@ -73,8 +74,20 @@ export function readLiveServerInfo(cwd = process.cwd()) {
 
 export function writeLiveServerInfo(cwd = process.cwd(), info) {
   const filePath = getLiveServerPath(cwd);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(info));
+  const directory = path.dirname(filePath);
+  const payload = JSON.stringify(info);
+  const temporary = path.join(
+    directory,
+    `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  fs.mkdirSync(directory, { recursive: true });
+  try {
+    fs.writeFileSync(temporary, payload, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    fs.chmodSync(temporary, 0o600);
+    fs.renameSync(temporary, filePath);
+  } finally {
+    try { fs.unlinkSync(temporary); } catch {}
+  }
   return filePath;
 }
 

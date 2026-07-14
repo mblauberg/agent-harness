@@ -1,48 +1,43 @@
 # Skill portfolio evaluation appendix
 
-Evidence cut-off: 11 July 2026
-Delivery run: `SKILLS-20260711`
+Evidence cut-off: 14 July 2026
+Delivery run: `SKAUD-20260714`
 
-This appendix is the durable, redacted evidence index for the 2026 portfolio
-refactor. Raw prompts, provider events, stderr and usage remain run-owned local
-evidence rather than a public transcript archive.
+This appendix is the durable evidence index for the 2026 portfolio refactor.
+Detailed provider events and usage remain local run-owned evidence.
 
 ## Routing results
 
 | Dataset | Schedule | Result | Disposition |
 |---|---:|---|---|
-| [Canonical portfolio holdout](routing-holdout.yaml) | 15 cases x 2 families x 3 trials | 90/90 exact primary-plus-bounded-companion routes | Pass; human acceptance remains external. |
+| [Canonical portfolio holdout](routing-holdout.yaml) | 18 cases x 2 families x 3 trials | 108/108 exact primary-plus-bounded-companion routes | Pass; human acceptance remains external. |
 
 The holdout includes lifecycle, authority, presentation and specialist
 confusion boundaries, including material skill revision versus read-only audit,
-implementation ownership and the governing Caveman adaptive default. Its
-SHA-256 is
-`ccf946829c97f0972d144b1e1e07cc308833d7dc6cc20d20eed850e3d422b30d`.
+the action-owner-plus-audit companion rule, and explicit project-level Caveman
+invocation. Its SHA-256 is
+`565b5c87e20fedca94a33ea473656204fdb9d5bab186288090e40714d5b90366`.
 
 The [frozen protocol](routing-protocol.json) set primary accuracy to 1.00 and
 companion fidelity to 0.90 before generation. The current catalogue digest is
-`c869bc273dda712312add66639d0c248ed648f487a9a07132f709d1730008a94`.
+`9346760fbab26c585e87822f88c54f54b47a2ea0231935b2befc72798ba886cf`.
 
-The current Anthropic Fable route returned HTTP 429 before generation. The
-predeclared fallback selected `claude-opus-4-8`; the full 15-case schedule was
-rerun fresh alongside `gpt-5.6-sol`. All 90 rows passed, including the new
-Fabric-first provider-routing case. Infrastructure failure was retained and not
+Gemini 3.1 Pro High through `agy` and Grok 4.5 XHigh through `cursor-agent`
+each ran three fresh no-retry trials through Agent Fabric. All 108 rows passed.
+Anthropic was not scheduled after the separate Spec 05 SDK action terminated at
+provider authentication; that infrastructure failure was retained and not
 counted as semantic evidence.
 
 ## Retained non-passes
 
 | Attempt | Result | Reason | Receipt SHA-256 |
 |---|---|---|---|
-| current Fable route | incomplete; 45 OpenAI rows passed, 45 Anthropic rows were tool errors | HTTP 429 before generation; full schedule reran on predeclared Opus fallback | `0c69de105fe359fa1640f0b8f5a36416b350acf91f21b60a071e1884cf7dbad4` |
-| initial Fable route | incomplete; three tool errors | HTTP 429 before generation; OpenAI rows excluded from the semantic gate | `4c475850f95887541b09ea9a6587d7126b26961c545c6c90b7941bf58cf387ec` |
-| v2 | incomplete; zero model calls | preflight interpreter lacked `pytest` | `6fb081ea45d08bdf8d20f0b340d30882699030955c8787a706eb7029cc81964e` |
-| v3 | incomplete; zero model calls | plan had fewer than three repetitions | `0e534a369cec5a8e90aadf9ccba0bfc849152b3553f321e7f942b7db5aab3908` |
-| v4 | fail; 72/72 primary, 71/72 companions | undeclared but legitimate `work-map` companion | `696091cd34f9b20d8eebba075a608209991904371df016611fd3f0312732a36f` |
-| v5 | fail; 72/72 primary, 71/72 companions | undeclared but legitimate `engineering-writing` companion | `7b09dc603770038a1aed87605285350b577bba1c33f14f7ffa9c805cf8434647` |
-| unfrozen replacement attempt | cancelled; five outputs completed | protocol-free outputs excluded; raw artifacts retained locally | no receipt produced |
+| skill-audit v1 | fail | action-plus-audit rows gave primary ownership to `skill-audit` | `660422f2dd83f2dfc24435044e1ff0f4246c4373acb81c481e0353442b49eb15` |
+| portfolio v3 | fail; 106/108 primary, 102/108 companions | the external-send artifact and audit composition were underspecified | `45530970b7417d703f0a64cad04dce179281d6ba2c5890690e272df969792338` |
+| portfolio v4 | fail; 106/108 primary, 108/108 companions | two rows treated project-level Caveman wording as context, not invocation | `0f51749fa770797a135b3b6272f6fce6f1ef1010171e87a0f596e9adfffaf616` |
 
-These are historical evidence, not alternative live schemas or routing
-datasets. The supported public route is the single canonical holdout above.
+Earlier portfolio non-passes remain indexed in `summary.json`. They are
+historical evidence, not alternative live schemas or routing datasets.
 
 ## Caveman quality evidence
 
@@ -75,8 +70,8 @@ blind judge scored 256 items after deterministic checks.
 | Caveman arm receipt | `bc098ae63f98a2b433ee068beecd2821a9ad85b68861c9b3471517a27218714f` |
 | Caveman blind-judge receipt | `e9f86375bebf4c1537ff214a62a3ceba494ede5c3f68e932129e8449e189fbec` |
 | Caveman altitude-regression receipt | `4f9b9d4202a9cb8e2250fca1a7008adbdee578d774b1e3620eac256762d776e9` |
-| canonical routing protocol | `05989dcd9bf869b54a64f670a3a465ccefd040b045c0125fd8459d68a1ab49c5` |
-| canonical routing result | `f0284aff373da2bcc4af9933746fe81bfbd9e1d81bd264137be6e029cdae2cff` |
+| canonical routing protocol | `d36390ede2531d585341f37bc93488f07f01f2805eb233744cfcbb2acbf1a089` |
+| canonical routing result | `04ad85a546bef0cdb1d2c1d99cab56ba0d9985428619e1e85642b9a860ce19d1` |
 
 ## Interpretation limits
 

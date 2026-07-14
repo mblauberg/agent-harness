@@ -1,201 +1,66 @@
-# Cross-Family Review
+# Cross-family review in a persistent lab
 
-*Layer 4 of the autonomous-lab discipline. Realized through `orchestrate` and
-Agent Fabric, then wired into the judge-panel, build-spike and finishing-audit
-archetypes authored per run. Read this when no single model family may be the
-final word.*
+Use this reference only for the durable lab-state seam around an independently
+routed review. `orchestrate` owns provider routing, topology, the HARNESS risk
+ladder, reviewer selection, Agent Fabric transport, degradation and result
+contracts. Do not copy those policies into the lab.
 
-Cross-family coverage follows the HARNESS risk ladder. Substantial+ stages use
-the other primary; crucial/terminal stages attempt bonus families. A workflow's
-`crossFamily` flag is the execution marker for that tier decision, never an
-independent policy default. Capture external verdicts separately and adjudicate
-their evidence.
+All answer-bearing cross-family work goes through Agent Fabric under an
+`orchestrate` wave. Direct CLIs are preflight or an explicitly recorded degraded
+fallback. The lab adds persistence and recovery; it never invents a second
+routing policy.
 
----
+## Before dispatch
 
-## 1. Why a different family
+Record the bounded wave in `.orchestrator/runs.md` and `STATE.md` before launch:
 
-Two payoffs, both load-bearing:
+- work/decision ID and exact artifact digest or revision;
+- authority and disclosed paths;
+- review question and required evidence;
+- expected result and route-receipt paths;
+- expiry, timeout and recovery instruction.
 
-1. **Genuine independence.** A reviewer from a different training lineage fails differently, carries different priors, and is not anchored by the author's blind spots. Cross-family *agreement* materially raises confidence on a one-way-door; cross-family *disagreement* surfaces real risk you would otherwise ship. A same-family self-review systematically **over-passes** — it shares the author's mistakes.
-2. **Provider-failure immunity.** Fabric routes activated adapters to other
-   vendor endpoints, so one provider failure need not erase verification. The
-   failure, substitution and actual lineage stay explicit.
+The author/decider cannot certify its own surface. Let `orchestrate` determine
+which review legs load-bear for the current risk and which are advisory.
 
----
+## Capture
 
-## 2. The reviewer roster — config knob `{{EXTERNAL_FAMILIES}}`
+Persist the independent provider result verbatim at the declared review path,
+normally `adr/_reviews/<id>-<family>.md`, plus its Fabric route/result receipt.
+Then link both from the run ledger, the owning ADR/artifact and `STATE.md`. A
+worker's prose claim that another reviewer passed has no authority; the
+independent result and receipt are the source.
 
-The roster is **family-relative to the operator**: it is "families ≠ the
-operator's", never a fixed vendor list. A Claude Code operator uses Codex as
-the other primary; a Codex operator uses Claude. Same-family review cannot
-certify a hard gate.
+Every attempted leg remains visible as `pass`, `failed`, `unavailable` or
+`skipped` with actual lineage and reason. Never erase a failed attempt after a
+retry or silently substitute a same-family result.
 
-| Family | Fabric role | Strengths |
-|---|---|---|
-| **Codex** (OpenAI family) | load-bearing other primary when Claude leads | Adversarial correctness, test/gate inspection, debugging and alternatives. |
-| **Claude** (Anthropic family) | load-bearing other primary when Codex leads | Adversarial reasoning, specification and contradiction analysis. |
-| **Gemini/Agy and other families** | non-blocking bonus adapters | Long-context breadth, multimodal inspection and blind-spot discovery. |
+## Adjudicate and repair
 
-Record outcomes with the three statuses (shared vocabulary with the `orchestrate`
-skill): `cross_family_certified` (enforced/oauth-safe read-only route ran), `cross_family_advisory`
-(best-effort bonus route may scout, never certifies alone), `CROSS-FAMILY-NOT-RUN: <reason>`
-(recorded skip). Never silently downgrade or collapse them.
+The chair checks findings against live artifacts and objective oracles; it does
+not majority-vote model prose. For gate-class artifacts, ask the independent
+reviewer to rerun the highest-risk negative or mutation oracle. Route confirmed
+correctness defects through the enclosing lifecycle.
 
-**All answer-bearing cross-family work goes through Agent Fabric.**
-`orchestrate` creates a bounded provider-neutral task and authority envelope;
-Fabric selects an activated compatible adapter and records actual model family,
-actions, result and recovery. Missing other-primary coverage stops
-certification; missing bonus coverage does not. Use `cf_dispatch.sh` only for
-adapter/auth preflight or an explicitly recorded degraded fallback when Fabric
-is unavailable to the host.
+Use [anti-placebo-and-convergence.md](anti-placebo-and-convergence.md) for the
+PIERCE/owed distinction and [recovery-and-cadence.md](recovery-and-cadence.md)
+for the bounded repair ceiling. A failed review is evidence, not permission for
+an unbounded loop.
 
-**Reviewers are slow and agentic.** Budget a bounded `{{REVIEW_TIMEOUT}}`. Give
-each reviewer only authorised artifacts or excerpts. Preserve the provider
-result artifact and route receipt; supply context, never the verdict.
+## Recovery
 
----
+If dispatch or capture is interrupted, preserve the partial result and receipt,
+leave the run-ledger row in flight, and make the next action explicit in
+`STATE.md`. `RECONCILE` decides whether to attach, retry within the declared
+bound, or escalate. Never relaunch merely because the task tracker lost sight of
+a still-live provider run.
 
-## 3. Same-family panel vs cross-family — the routing rule (and how many reviewers)
+## Checklist
 
-Cross-family review is one of **two** independent-verification layers; the `{{MODEL_MATRIX}}` names which fires when (full policy: `references/model-effort-policy.md` §5):
-
-- **Same-family adversarial panel first** — a `judge-panel` of N **`flagship`** skeptics, fail-closed, is the **default** independence layer for every contestable claim, option, or decision. The cheap model may *feed* it breadth lenses; **only `flagship` sits on it** (no cheap-model judges, ever). This is always-on above the trivial.
-- **The other primary is load-bearing** for material and irreversible work:
-  Claude when Codex leads, OpenAI when Claude leads.
-- **Bonus families add optional lenses.** Gemini, xAI and other families can
-  research, scout or review at any useful angle. Run them in parallel for hard
-  gates when available, but quota/API failure never blocks progress and their
-  findings are advisory until a primary-family reviewer corroborates them.
-
-**How many external reviewers** — route the other primary and optional bonus
-families through Fabric:
-
-- **`codex`** is the load-bearing other primary when Claude operates. Its
-  failure is explicit and stops certification.
-- A Gemini bonus may run concurrently through Fabric. Reconcile evidence, not
-  votes. Its failure is recorded and ignored for gating; its finding blocks
-  only after primary-family reproduction or corroboration.
-- For the hardest terminal refutation, use a fresh flagship context, the other
-  primary and one or more opportunistic bonus families.
-
----
-
-## 4. The non-negotiable rule: never trust a self-reported external verdict
-
-> A build/worker agent that reports its own external review can overclaim. The
-> authoritative verdict is the independent Fabric result artifact and receipt,
-> not the build agent's summary.
-
-This is the layer's hardest-won lesson. Enforce a structural **independence boundary**: *the agent that builds/authors an artifact must never be the agent that reports its external verdict.* Architecturally:
-
-- **Build/author = one step.** Returns `buildReport` + `selfReview` (same-family, advisory only).
-- **Cross-family review = a separate Fabric task** owned by the external
-  reviewer. It returns `crossReview` plus its own route/result receipt.
-- **The orchestrator reads the `crossReview` schema field.** The build report's claims about the review are *narrative only* and carry **no authority**. If the build report says "codex passed" and the independent `crossReview` field says FAIL, **FAIL is the truth.**
-
-In the **build-spike archetype** this is why `crossReview` is a sibling of `buildReport`, never folded inside it — that separation *is* the independence boundary.
-
----
-
-## 5. Wiring into a verify phase
-
-Pattern (from the build/spike and finishing-audit workflows):
-
-```
-Build      → agent builds the artifact; returns buildReport            (one agent)
-Review     → selfReview (same-family, advisory)                        (same or new agent)
-           → IF crossFamily: crossReview = a SEPARATE Fabric task whose
-             result maps to the XCHECK schema                           (must be a different step)
-Synthesize → reconcile verdict(s); fold findings into gate decision    (orchestrator reads crossReview field)
-```
-
-**Typed verdict schema (`XCHECK`)** — tune the boolean dimensions and the `newIssues` severity enum to your domain (`additionalProperties:false`, all fields `required`):
-
-```
-{ family,                       // which external family produced this
-  coherent,                     // bool: internally consistent
-  traceable,                    // bool: claims trace to evidence/files
-  <domain-readiness booleans>,  // e.g. finishable, promotable, gate-non-vacuous
-  refutedFindings[],            // self-audit findings the reviewer DISPUTES
-  newIssues[ {issue, severity, file} ],  // what the self-audit MISSED
-  mostImportantForNextAgent,    // the single thing the next agent must not miss
-  verdict }                     // overall PASS | FAIL | PASS-WITH-CAVEATS
-```
-
-**Review-prompt template** — parameterize over `{{DOMAIN}}`, `{{MISSION}}`, `{{LOCKED_CONSTRAINTS}}`. Instruct the reviewer to:
-1. **State what it is auditing** and against what bar (the mission + the locked constraints it must check fidelity against).
-2. **Adversarially verify the self-audit DIGEST** — paste the compact self-audit digest and ask: which of its findings can you REFUTE? What NEW issue did it MISS?
-3. **Spot-check the highest-risk claims by reading the actual files**, not the summary.
-4. Return an **overall verdict** + **the single most important thing the next agent must not miss.**
-
-Keep the digest within the reviewer's context — **truncate explicitly** if large (a DIGEST builder produces the compact self-audit summary; note where it was clipped).
-
----
-
-## 6. The killer move: mutation / non-vacuity re-run
-
-A self-review that reports "all gates green, all negatives RED" is **not** evidence the gates work — they may pass *decoratively*. The strongest thing an external reviewer does is **re-run the artifact's own gates/tests under deliberate mutations** to prove they actually FAIL on bad input (non-vacuous) rather than passing on anything (placebo). **Ask for this explicitly** in the review prompt for any gate-class artifact. (See `anti-placebo-and-convergence.md` for the full RED-on-mutation / falsification-harness doctrine; the external reviewer is its independent enforcer.)
-
-Findings split into two classes with **different consequences** — the **PIERCE predicate**:
-
-- **Genuine-placebo + real-correctness** findings — a claimed-passing gate proven decorative (passes after the violation predicate is removed or a flip), or a real correctness contradiction introduced. These **PIERCE a firm-stop**: a decorative gate cannot underwrite a "thoroughly complete" / terminal claim, so they justify **one more targeted fix** (provided it is buildable within `{{BUILD_CEILING}}`).
-- **Diminishing-returns / coverage** findings — "you could also test X", broader-coverage suggestions. These go to an **owed-list**, *not* a fix loop. They do not pierce a firm-stop.
-
-Domain-tune what counts as "placebo" and what is "within build ceiling" for your problem.
-
----
-
-## 7. A FAIL verdict is the signal working — not a halt
-
-A FAIL from an external reviewer is **not bad and does not stop the loop** — it is the system catching what a self-review missed. Three obligations on every external verdict:
-
-1. **Persist it VERBATIM** to its cross-family sidecar `adr/_reviews/<id>-<family>.md` (e.g. `adr/_reviews/D003-codex.md`) **before** folding it. This is an **anti-poison** action — paraphrasing risks laundering a FAIL into a rosier PASS in your own memory. Record the reviewer's findings exactly as returned.
-2. **Fold its enumerated defects into the next *targeted* fix** and re-verify.
-3. **Correct any earlier over-rosy self-report** with the true independent verdict — overwriting a build agent's "PASS" with the independent "FAIL" is a *required* correction, not an optional one.
-
-Halt only at the genuine endpoint (`STATUS: STOP`), never on a FAIL.
-
----
-
-## 8. Bounded-retry CONVERGENCE RULE
-
-External review feeds **at most `N` fix rounds** (default **N = 2**, knob `{{MAX_RETRY_ATTEMPTS}}` — the same convergence cap defined in `recovery-and-cadence.md` and restated inside `{{RUNAWAY_CAPS}}` as `bounded-retry ~2`):
-
-> If the **2nd** targeted fix's re-verify **still** returns FAIL with new genuine defects, **STOP fixing and ESCALATE** the residual as a clearly-marked **promotion-gated item** (external-re-verify + human sign-off before promotion). Do **not** loop a 3rd build. The work finishes with that as an **escalation-gated residual** — never an infinite orchestrator loop.
-
-A fix attempt that **diverged or never executed** (e.g. resumed with no pinned target and built the wrong thing; killed by overload before producing output) **counts as a failed attempt** against the bound. Pre-declare the rule before fix #2 so escalation is principled, not improvised. The residual routes to the appropriate `{{ESCALATION_GATES}}` (the generic human / expert-signoff / judge-panel / spike / apply-time / promotion-gate taxonomy). This is what lets the loop terminate honestly: relentless on the mechanically fixable, hard-bounded on the irreducible.
-
----
-
-## 9. Resilience notes
-
-- **529-immune by design** — the external-family calls survive *your* provider's overload. But the orchestrator's *own* dispatch of the workflow can still 529. **Resume the run** (`resumeFromRunId`-style: re-runs only the killed phases) rather than relaunching from scratch.
-- **Pin the target on resume.** A resumed build/fix agent launched with **no target spec (`args=null`)** will self-select a *different* highest-leverage task and **diverge** — building an unrelated artifact instead of the intended fix. Always pin the exact target spec on resume.
-- **Verify liveness via the OS process, not the task tracker.** External reviews can run for a long time (minutes to hours) and may become **invisible to the task tracker** (e.g. after a context compaction). Confirm the run is alive via the OS process (PID), not just the tracker, before assuming it died and re-dispatching.
-
----
-
-## 10. Quick checklist
-
-- [ ] Is this call high-stakes / one-way-door / a hard gate? If not → `crossFamily: false`, skip.
-- [ ] Reviewer routed to a **different provider** than the orchestrator (not just another same-family agent)?
-- [ ] Build step and verdict-reporting step are **different agents** (independence boundary)?
-- [ ] Orchestrator reads the **`crossReview` schema field**, not the build report's prose?
-- [ ] Other-primary coverage is present; optional bonus output is reconciled as advisory evidence?
-- [ ] Mutation / non-vacuity re-run requested for gate-class artifacts?
-- [ ] Verdict persisted **verbatim** to a dated review file before folding?
-- [ ] PIERCE vs owed-list applied correctly to each finding?
-- [ ] Fix rounds bounded to `N=2`, then **escalate** (don't loop a 3rd)?
-- [ ] Target **pinned** on any resume?
-
----
-
-### Worked reference instance (illustrative only — not load-bearing)
-
-The patterns above were hardened on a regulated-fintech design lab, where `{{HARD_GATES}}` included money movement, ledger integrity, identity checks and tenant isolation, while `{{LOCKED_CONSTRAINTS}}` included data residency and regulatory compliance. Two episodes are textbook:
-
-- A build agent fixing infrastructure policy gates **self-reported "codex VERDICT FAIL → PASS"**; the workflow's **independent** codex cross-review said **FAIL**. The independent tool-result was authoritative; the build report's claim was laundering. (Read the `crossReview` field, not the build report.)
-- One iteration earlier, a self-review claimed dozens of property tests plus negative/mutation cases all RED (a point-in-time snapshot, not a running tally). The independent codex **re-ran the mutations** and proved several policy gates *vacuous* (they passed after the security predicate was removed or Allow/Deny flipped), plus a real residency bug (every region in a family treated as in-region). Those **genuine-placebo + real-correctness** findings PIERCED the firm-stop and earned one more targeted fix.
-
-After the 2nd fix round failed to execute (provider 529 twice, then an `args=null` divergence that self-built an unrelated spike), the **CONVERGENCE RULE** fired: the orchestrator escalated gate-integrity as a promotion-gated residual rather than looping a 3rd build. At finish, **both families confirmed independently** (codex ran the test suite, gemini ran the policy check), and every external verdict was persisted verbatim to its `adr/_reviews/<id>-<family>.md` sidecar. None of the AU-fintech specifics are load-bearing — they only make the abstract knobs concrete.
+- Exact target and authority recorded before launch.
+- Author and certifier are independent.
+- Fabric result and route receipt persisted separately from the build report.
+- Actual family/model/adapter and non-pass attempts retained.
+- High-risk finding checked against live evidence.
+- Repair bound and escalation path declared.
+- Ledger, ADR/artifact and STATE point to the same result.

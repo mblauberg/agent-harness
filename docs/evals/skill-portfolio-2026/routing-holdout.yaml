@@ -1,5 +1,5 @@
 schema_version: 1
-dataset_id: skill-portfolio-routing-holdout-20260711-v2
+dataset_id: skill-portfolio-routing-holdout-20260714-v5
 split: canonical-holdout
 cases:
   - id: m01
@@ -110,12 +110,13 @@ cases:
       required_companion_skills: []
       allowed_companion_skills: [evaluate, implement, skill-audit]
   - id: m14
-    category: governing-presentation-default
+    category: explicit-project-presentation-invocation
     critical: false
     prompt: >-
-      The governing project instructions set $caveman as the default. Return a
-      low-risk technical status update with exact test counts, the pending
-      state, and uncertainty preserved; no full or ultra mode was requested.
+      The governing project instruction for this exact status reply is
+      $caveman. Follow that invocation: return a low-risk technical update with
+      exact test counts, the pending state, and uncertainty preserved; no full
+      or ultra mode was requested.
     expected:
       primary_skill: caveman
       required_companion_skills: []
@@ -132,3 +133,35 @@ cases:
       primary_skill: orchestrate
       required_companion_skills: []
       allowed_companion_skills: [code-review, evaluate]
+  - id: m16
+    category: audit-then-approved-implementation
+    critical: true
+    prompt: >-
+      Audit these existing skills, then implement only the approved fixes
+      through deterministic verification and independent review.
+    expected:
+      primary_skill: implement
+      required_companion_skills: [skill-audit]
+      allowed_companion_skills: [code-review, skill-authoring, tdd]
+  - id: m17
+    category: audit-and-heldout-evaluation
+    critical: true
+    prompt: >-
+      Audit this existing skill, then compare its routing and task quality
+      against baseline with a versioned held-out benchmark and repeated model
+      trials.
+    expected:
+      primary_skill: evaluate
+      required_companion_skills: [skill-audit]
+      allowed_companion_skills: [orchestrate]
+  - id: m18
+    category: audit-and-approved-external-export
+    critical: true
+    prompt: >-
+      Audit the existing Agent Skills against my local Claude Code history,
+      then promote the resulting accepted raw-excerpt packet to a newly
+      approved external reviewer and retain proof of that authorised send.
+    expected:
+      primary_skill: release
+      required_companion_skills: [skill-audit]
+      allowed_companion_skills: []

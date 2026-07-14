@@ -1,6 +1,6 @@
 ---
 name: caveman
-description: "Use when the user invokes Caveman, requests aggressively compressed chat, or a governing harness/project instruction enables its adaptive default. Full and ultra remain user-explicit. Not for generic brevity or artifact condensation."
+description: "Use when the user invokes Caveman or requests aggressively compressed chat. Full and ultra remain user-explicit. Not for generic brevity, a governing terse default, or artifact condensation."
 ---
 
 # Caveman
@@ -18,10 +18,10 @@ updates or the user's output contract.
 - **ultra** (explicit): minimum viable wording for low-risk status, mechanical
   output or a format the user already understands.
 
-An explicit governing harness or project instruction may enable adaptive mode
-by default. Full and ultra remain user-explicit. Do not claim a level persists
-unless the host guarantees it. A new explicit level request supersedes the
-adaptive default; `normal mode` or `stop caveman` disables the overlay.
+Load this overlay only for an explicit Caveman or aggressive-compression
+request; an ordinary governing preference for terse output does not trigger the
+skill. Full and ultra remain user-explicit. Do not claim a level persists unless
+the host guarantees it. `Normal mode` or `stop caveman` disables the overlay.
 
 ## Exactness and clarity
 

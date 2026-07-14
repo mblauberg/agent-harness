@@ -9,4 +9,4 @@ cases:
   - {id: q204, relation: negative, prompt: "Write concise release notes for the next software version.", tags: [adjacent], expected: {primary_skill: engineering-writing, companion_skills: []}}
   - {id: q205, relation: boundary, prompt: "Implement the approved feature, obtain acceptance, then deploy only after the separate promotion gate.", tags: [composition], expected: {primary_skill: implement, companion_skills: [release]}}
   - {id: q206, relation: boundary, prompt: "Deliver the approved report through acceptance, then publish that pinned artifact to its audience.", tags: [composition], expected: {primary_skill: deliver, companion_skills: [release]}}
-  - {id: q207, relation: boundary, prompt: "Draft and source-check the court correspondence, then send the accepted version after explicit approval.", tags: [composition], expected: {primary_skill: release, companion_skills: [legal-writing]}}
+  - {id: q207, relation: boundary, prompt: "Draft and source-check the court correspondence, then send the accepted version after explicit approval.", tags: [composition], expected: {primary_skill: legal-writing, companion_skills: [release]}}

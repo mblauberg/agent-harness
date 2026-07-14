@@ -120,10 +120,11 @@ DOMAIN_INVARIANTS = {{DOMAIN_INVARIANTS}}
 
 {{MISSION}}
 
-The framing is **never declare "done."** An empty queue is a trigger to
-re-enumerate the next layer of now-visible work and to deepen + harden — never a
-reason to halt. The orchestrator may not end the run on its own; the only stop is
-`STATUS: STOP` in this file.
+The framing is **never declare "done" without human STOP.** An empty queue
+triggers one bounded re-enumeration pass. If the frontier remains dry, the
+operator writes an idle checkpoint and pauses dispatch until a material resume
+trigger. That pause is resumable; only `STATUS: STOP` in this file closes the
+mission.
 
 ## Traversal order (default — "Active directives" below override it)
 
@@ -135,10 +136,9 @@ reason to halt. The orchestrator may not end the run on its own; the only stop i
    units concurrently within the `{{RUNAWAY_CAPS}}` caps.
 3. As decisions settle, **build** the decided directions up to `{{BUILD_CEILING}}`
    (real, tested, isolated artifacts), promoting winning forks.
-4. **When the queue empties, DO NOT STOP.** Re-enumerate the next layer; deepen
-   and harden the artifacts; add detail (specs, diagrams, threat/failure models,
-   runbooks, stories); re-verify the `{{DOMAIN_INVARIANTS}}`; reorganize for
-   navigability. There is always more depth — go get it.
+4. **When the queue empties, re-enumerate once.** Check the next layer,
+   cross-cutting gaps and `{{DOMAIN_INVARIANTS}}`. If no real work appears,
+   persist an idle checkpoint and pause; never invent depth merely to stay busy.
 
 ## Definition of "good" for this run
 

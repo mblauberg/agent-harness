@@ -102,6 +102,36 @@ def test_live_entrypoint_does_not_execute_shell_syntax_from_server_state(
     assert not marker.exists()
 
 
+def test_live_server_record_is_atomically_replaced_with_private_permissions(
+    tmp_path: Path,
+) -> None:
+    live_dir = tmp_path / ".impeccable" / "live"
+    live_dir.mkdir(parents=True)
+    server_path = live_dir / "server.json"
+    server_path.write_text(json.dumps({"pid": 1, "port": 1, "token": "old"}))
+    server_path.chmod(0o644)
+    original_inode = server_path.stat().st_ino
+    module_url = (SCRIPTS / "impeccable-paths.mjs").as_uri()
+    script = (
+        f"import {{ writeLiveServerInfo }} from {json.dumps(module_url)};"
+        "writeLiveServerInfo(process.argv[1], {pid: 2, port: 8400, token: 'new'});"
+    )
+
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", script, str(tmp_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(server_path.read_text()) == {"pid": 2, "port": 8400, "token": "new"}
+    assert not list(live_dir.glob(".server.json.*.tmp"))
+    if os.name != "nt":
+        assert server_path.stat().st_mode & 0o777 == 0o600
+        assert server_path.stat().st_ino != original_inode
+
+
 @pytest.mark.parametrize("escaping_path", ["../outside.html", "/tmp/outside.html"])
 def test_live_inject_rejects_ancestor_and_absolute_targets_before_any_write(
     tmp_path: Path, escaping_path: str

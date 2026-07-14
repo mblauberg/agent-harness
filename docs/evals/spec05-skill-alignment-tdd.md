@@ -1,6 +1,8 @@
 # Spec 05 affected-skill TDD evidence
 
-Date: 2026-07-12
+Original RED/GREEN date: 2026-07-12
+
+Current receipt refresh: 2026-07-14
 
 ## RED
 
@@ -55,12 +57,16 @@ Fabric action evidence.
 
 Two real three-family semantic attempts were retained as non-passes rather than
 relabelled. They exposed one misowned adjacent fixture, two ambiguous prompts
-and an implicit companion boundary. After those inputs were corrected, a fresh
-Claude Opus, Cursor Grok 4.5 XHigh and Agy Gemini 3.1 Pro High run passed:
-108/108 primary routes, 101/108 exact companion routes and zero critical
-portability failures. The focused repository gate now returns `7 passed` and
-`scripts/check-harness` directly validates the frozen packet, executable probe
-and raw-answer-derived routing result.
+and an implicit companion boundary. A later v1 three-family pass is retained as
+superseded evidence because its catalogue and packet predate the current input.
+
+The current receipt is `spec05-skill-routing-20260714-v3`: Cursor Grok 4.5
+XHigh and Agy Gemini 3.1 Pro High produced 72/72 primary routes, 68/72 exact
+companion routes and zero critical portability failures. The attempted
+Anthropic refresh failed at provider authentication; that infrastructure
+failure remains run-owned evidence and was not relabelled or imported. The
+repository gate validates the current frozen packet, executable probe, exact
+raw inventory and raw-answer-derived routing result.
 
 `scripts/check-harness` initially stopped in `public_release_check.py` on a
 pre-existing absolute path in

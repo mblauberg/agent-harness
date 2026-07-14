@@ -135,7 +135,9 @@ product
 
 Register is either `brand` or `product` as a bare value. No prose, no commentary.
 
-Write to `PROJECT_ROOT/PRODUCT.md`. If `.impeccable.md` existed, the loader already renamed it; merge into that content rather than starting from scratch.
+Write to `PROJECT_ROOT/PRODUCT.md`. If `.impeccable.md` existed, use its content
+as input but leave the legacy file in place; migration is a separate authorised
+file edit.
 
 ## Step 5: Decide on DESIGN.md
 

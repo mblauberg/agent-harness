@@ -54,7 +54,15 @@ LOOP:
 
 ## Recovery commands
 
-The live helper persists an append-only journal under `.impeccable/live/sessions/`. Browser checkpoints are advisory but durable; the journal is canonical. This is local durable recovery state, not project source.
+The live helper persists an append-only journal under
+`.impeccable/live/sessions/`. Browser checkpoints are advisory but durable; the
+journal is canonical. This is local recovery state, not project source.
+`server.json` is transient bearer-token state and is replaced privately; remove
+it when the helper stops. Exclude `server.json`, `sessions/`, and `annotations/`
+from version control, together with the legacy `.impeccable-live*` paths. Retain
+session journals only while resume is useful or project policy requires them;
+annotations are ephemeral. Keep `.impeccable/live/config.json` outside that
+blanket ignore because it is durable project configuration.
 
 Use these commands when the chat was interrupted, polling was missed, the helper restarted, or the browser reloaded:
 

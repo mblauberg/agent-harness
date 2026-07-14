@@ -5,21 +5,19 @@ description: "Use for start, checkpoint, handoff, compaction, or end-of-session 
 
 # Session
 
-Durable continuity belongs in the project's canonical owner when artifact
-authority exists; otherwise return a proposed handoff/state delta in chat.
-Project variants override this protocol. Fallbacks, never competing owners: state
-`docs/STATE.md` (about 120 lines), handoffs `docs/handoffs/`, friction
-`docs/FRICTION.md`, archive `docs/archive/`.
-Instructions may override `STATE_FILE`, `HANDOFF_DIR`, `FRICTION_LOG` and
+Store durable continuity in the project's canonical owner; without write
+authority, return a proposed delta in chat. Project instructions override.
+Fallbacks:
+state `docs/STATE.md` (about 120 lines), handoffs `docs/handoffs/`, archive
+`docs/archive/`. Instructions may override `STATE_FILE`, `HANDOFF_DIR` and
 `ARCHIVE_DIR`.
 
 ## Start
 
-For substantial work, start a fresh session at the approved phase/slice and
-reopen disk state; never trust injected state. Resume from the digest-bound
-handoff, reading only relevant docs/open decisions. Human gates stay unanswered
-until decided by a human. Routine bounded work may continue with healthy
-context inside authority.
+For substantial work, start at the approved phase/slice and reopen disk state;
+never trust injected state. Resume from the digest-bound handoff, reading only
+relevant docs/open decisions. Human gates stay unanswered until decided.
+Routine bounded work may continue with context inside authority.
 
 ## Checkpoint
 
@@ -33,7 +31,8 @@ otherwise return it without writing. Use
 
 Keep at most one active handoff per effort/leg. A fresh session resumes from it.
 In the same update, archive a consumed handoff, mark it consumed/time-stamped
-and index it; never delete it. Update `work-map` for multi-session efforts.
+and index it; never delete it. Update `work-map` only when a multi-session
+effort changes leg, blocker, dependency, gate or next work.
 
 Before checkpoint load [context-hygiene.md](references/context-hygiene.md). Run
 its read-only audit when run directories, logs, handoffs or large agent-facing
@@ -57,8 +56,9 @@ expiry and ownership before reuse.
    time-sensitive memory against its owning source or mark it stale.
 3. **Handoff version control:** run project checks; report the exact diff.
    Commit only with human/project authority; never commit another actor's state.
-4. **Learn:** add skill/process friction to its log; fix a small issue or leave
-   an owned open row.
+4. **Signal:** capture only a compact friction pointer in the handoff/state when
+   it may recur. `retrospect` owns analysis and process changes after a completed
+   cycle; session closure does not start a mini-retrospective.
 
 Periodic hygiene is opt-in; record owner, cadence, scope, resource cap, last
 success and disable condition. It may audit/archive classified artifacts and

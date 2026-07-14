@@ -1,10 +1,17 @@
 # Adaptive agent harness lifecycle
 
-Status: Base implementation machine verified; v1.2 route-evidence amendment implementation and human acceptance pending
-Version: 1.2
-Date: 13 July 2026
+Status: Base implementation machine verified; v1.2 route-evidence and v1.3
+local-first evidence amendments implemented; final human acceptance pending
+Version: 1.3
+Date: 14 July 2026
 Chair: Codex
 Paired design peer: Claude Code, Fable 5 (Opus fallback)
+
+Version 1.3 makes a direct request sufficient authority for read-only analysis
+of local session history, retains a separate sharing/export gate and retires a
+collector that accepted only synthetic `skill_event` rows and had no
+provider-native adapter or producer. Unsupported or unattributable evidence
+remains `N/A`; it is never reported as zero.
 
 Version 1.2 registers route-evaluation payloads as artifacts behind conforming
 delivery evidence rows, freezes the evaluated route identity preimage, and uses
@@ -31,9 +38,9 @@ standard/provider interface materially changes, whichever occurs first.
 The repository has a mature agentic software loop but its top-level claim is
 broader. Non-code delivery has no shared executable contract, design approval
 can be unbound from a design artifact, continuous improvement is prose-only,
-and skill telemetry risks reading private transcripts more broadly than the
-task requires. Security, observation, installation reconciliation and trigger
-evaluation also need stronger machine evidence.
+and the skill-evidence policy treats requested local inspection like exported
+research telemetry. Security, observation, installation reconciliation and
+trigger evaluation also need stronger machine evidence.
 
 A large all-in-one workflow would increase context cost and couple every domain
 to Git. The target is a small stable kernel plus profiles and existing skills.
@@ -121,7 +128,7 @@ entrypoint is therefore selected. Evidence:
 | `research` | report, dataset, evidence map | source existence, citation/claim coverage, reproducible transforms | source quality, synthesis, uncertainty, dissent | share/publish/use decision |
 | `analysis` | report, model, table, visualisation | input manifest, calculation/recalculation, assumptions and sensitivity | interpretation, uncertainty and decision fit | share/use decision |
 | `document` | Markdown, DOCX, PDF, slides, sheet | schema, formulas, links, render/page checks | accuracy, readability, visual and audience fit | send/file/publish |
-| `agent-product` | prompts, tools, policies, eval sets, deployment config | unit/integration/security tests, version and permission checks | repeated behavioural evals, red team and policy review | staged activation and monitored operation |
+| `agent-product` | prompts, tools, policies, eval sets, deployment config | unit/integration/security tests, version and permission checks | independent product review; behavioural evaluation/red team when the changed behaviour requires it | staged activation and monitored operation |
 
 Projects may add a complete profile or strengthen a built-in profile through a
 digest-bound additive policy. The global registry loads first; a project policy
@@ -131,6 +138,14 @@ type requires an explicit global surface-metadata decision. Profiles declare
 artifact types, deterministic and judgement gates,
 outcome/trajectory measures, stochastic minima, permitted security surfaces,
 boundary checks, evidence retention/redaction and release semantics.
+
+An `agent-product` label does not itself make every change stochastic. Tests,
+permission checks and applicable security boundaries remain mandatory;
+prompt, tool, policy and evaluation-set artifacts require behavioural
+evaluation, while a deployment-config-only artifact may use the deterministic
+path. The validator derives that decision from canonical artifact types rather
+than trusting a free-form receipt claim. When selected, the profile's
+repeated-trial and sample-size minima still apply.
 
 High-stakes work is an orthogonal safeguard, not a file type: it adds source
 authority, privacy, qualified-domain review and explicit human-action gates to
@@ -261,25 +276,31 @@ before synthesis. The reducer adjudicates against evidence and records
 disagreement; no majority vote can override a deterministic failure or human
 authority.
 
-## 10. Privacy-safe skill telemetry
+## 10. Local skill evidence and shared exports
 
-`skill-audit` defaults to static skill analysis. Session analysis requires an
-explicitly named platform/root, time window, skill/task scope and disclosure
-destination. It must show the proposed scope before reading messages.
+`skill-audit` defaults to static analysis. A direct human request authorises
+read-only, in-place analysis of the named local session histories. When the
+provider roots and useful window are unambiguous from that request and the live
+environment, the agent proceeds without a second receipt, redaction pass,
+retention date or minimum-cell gate. Raw histories remain local, are never
+committed and do not become project truth.
 
-Default aggregate telemetry contains counts, hashes, timestamps rounded to day,
-skill names and classified outcomes. It excludes full prompts, assistant
-content, secrets, file bodies, project names and absolute paths. Evidence
-snippets require explicit opt-in, are redacted locally and stay in a run-owned
-private artifact. Public reports use synthetic or paraphrased examples.
+A compact aggregate or paraphrased report to the requesting human in the same
+authorised session is local delivery, not sharing/export, and requires no
+second disclosure confirmation. Run-owned local scratch is also allowed.
+Creating a persistent repository/shared artifact, sending raw excerpts to
+another provider, or disclosing to a new audience or external destination
+requires separate authority. Once authorised, the human confirms the audience,
+destination and whether excerpts are allowed; output excludes secrets and
+out-of-scope third-party private content.
 
-The deterministic collector provides `--dry-run-scope`, bounded inputs,
-aggregate-only output and machine-readable provenance. Collection requires a
-matching human-approved scope receipt; before-read tests prove dry-run and
-unsupported-schema failures do not inspect source bodies. Unsupported schemas
-fail as `unknown`; they are never silently interpreted. Exact collection bounds
-stay only in the private approval receipt; the portable aggregate emits day
-buckets.
+Invocation, correction and completion claims require structured attribution or
+human-reviewed, provenance-valid evidence. Loading a skill is not selection.
+Unsupported or unattributable evidence is `N/A`, never zero. The harness claims
+no generic native-provider history collector until real adapters and producers
+exist. History predating a skill may inform broad harness patterns but cannot
+score that skill; those cells remain `N/A`. The balanced local-history fixture
+is prospective contract coverage, not a measured production selection rate.
 
 ## 11. Measurable retrospective
 
@@ -397,9 +418,9 @@ Stochastic routing evals run multiple blind batch invocations on declared
 model/harness versions. Each invocation retains its input digest, actual model
 lineage and hash-bound parsed output; case selections reference that invocation.
 Report confidence intervals or raw numerator/denominator, not a single opaque
-score. Production/session examples enter a dataset only after privacy review,
-redaction and explicit approval. Capability cases and regression cases are
-labelled separately.
+score. Production/session examples enter a shared or exported dataset only
+after disclosure review and explicit approval. Capability cases and regression
+cases are labelled separately.
 
 ## 17. Implementation plan
 
@@ -413,9 +434,9 @@ labelled separately.
 
 ### Phase 1 — evidence foundations
 
-- Make `skill-audit` static-first and privacy-gated; add the aggregate validator
-  and privacy contract tests, then the bounded scanner before declaring the
-  telemetry subleg complete.
+- Make `skill-audit` static-first with separate local and shared/export evidence
+  modes. Use a deterministic contract and routing fixture; do not claim native
+  provider telemetry without real adapters and producers.
 - Add `skills/retrospect/templates/RETROSPECT.template.json`, a validator and pass/fail fixtures.
 - Record the research baseline and this specification.
 
@@ -469,8 +490,9 @@ The refactor is complete when:
 2. `implement` uses the canonical software profile and `release` consumes only
    accepted canonical delivery receipts.
 3. Design approval without artifact/digest/approver fails.
-4. Transcript access without explicit scoped authority fails before content is
-   read; aggregate-only telemetry passes.
+4. Requested local-history analysis proceeds read-only without a second privacy
+   gate; shared/export output requires destination and content authority;
+   unsupported attribution remains `N/A`.
 5. A retrospective without baseline/comparator reasons, evidence-linked root
    causes or recurrence state fails.
 6. Crucial software and agent-product runs cannot close without applicable
@@ -491,7 +513,7 @@ The refactor is complete when:
 | Criterion | Evidence |
 |---|---|
 | 1–3 | `config/delivery-profiles.json`, `skills/deliver/`, `tests/test_delivery_contract.py` |
-| 4 | `collect_telemetry.py`, `test_skill_telemetry_collector.py`, privacy validator tests |
+| 4 | `skills/skill-audit/SKILL.md`, `references/method.md`, local-history routing fixture and `test_skill_audit_contract.py` |
 | 5 | `skills/retrospect/templates/RETROSPECT.template.json`, `validate_retrospect.py`, adversarial receipt tests |
 | 6 | `config/security-evidence.json`, security selector and crucial-gate tests |
 | 7 | typed observation contract and strengthened `RELEASE.json` observation gate |
@@ -508,7 +530,7 @@ The refactor is complete when:
 | Kernel becomes a bloated mega-skill | Stable state machine only; profiles and references hold depth; word-budget test. |
 | Generic gates weaken domain requirements | Profiles may strengthen only; high-stakes release is always human action. |
 | Receipt ceremony overwhelms small tasks | Risk threshold; routine one-shot work may use an ephemeral receipt or none. |
-| Telemetry leaks private work | Static-first, explicit roots/windows, aggregate default, local redaction and public-release checks. |
+| Local history escapes its requested scope | Read in place, never commit raw history and keep sharing/export behind explicit destination and content authority. |
 | Evals optimise to their own fixtures | Held-out cases, repeated trials, mixed graders and human calibration. |
 | Multi-agent cost exceeds value | Decomposability gate, one writer and proportional lanes. |
 | Concurrent agent-fabric work conflicts | Unique files in Phase 1; shared entrypoints deferred until fabric ownership closes. |
@@ -519,8 +541,8 @@ The refactor is complete when:
 The held-out baseline justifies `deliver`; the instruction to implement this
 approved specification entirely selects that named entrypoint. Non-trivial
 neutral runs persist receipts; tiny routine one-shot work remains exempt.
-Private telemetry collection has no implicit retention period: every approved
-scope names its own expiry.
+Requested local history is read in place and not retained as project truth.
+Sharing or exporting derived evidence remains a separate human decision.
 
 Final lifecycle acceptance remains pending. Runtime activation, live
 installation, provider login, push and release remain separate human decisions.

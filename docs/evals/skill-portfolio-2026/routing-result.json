@@ -1,65 +1,69 @@
 {
-  "schema_version": 1,
-  "contract": "skill-routing-regression",
-  "evaluation_id": "skill-portfolio-routing-20260711-fabric-v2-opus",
-  "generated_at": "2026-07-11T09:45:04.941816+00:00",
-  "plan": {
-    "path": "routing-protocol.json",
-    "sha256": "sha256:05989dcd9bf869b54a64f670a3a465ccefd040b045c0125fd8459d68a1ab49c5"
-  },
-  "dataset": {
-    "path": "routing-holdout.yaml",
-    "sha256": "sha256:ccf946829c97f0972d144b1e1e07cc308833d7dc6cc20d20eed850e3d422b30d",
-    "cases": 15
-  },
   "catalogue": {
-    "sha256": "sha256:c869bc273dda712312add66639d0c248ed648f487a9a07132f709d1730008a94",
-    "characters": 7354
+    "characters": 7409,
+    "sha256": "sha256:9346760fbab26c585e87822f88c54f54b47a2ea0231935b2befc72798ba886cf"
   },
-  "schedule": {
-    "families": ["anthropic", "openai"],
-    "repetitions": 3,
-    "attempts": 6,
-    "case_rows": 90
+  "contract": "skill-routing-regression",
+  "dataset": {
+    "cases": 18,
+    "path": "routing-holdout.yaml",
+    "sha256": "sha256:565b5c87e20fedca94a33ea473656204fdb9d5bab186288090e40714d5b90366"
   },
+  "evaluation_id": "skill-portfolio-routing-20260714-fabric-v5",
+  "generated_at": "2026-07-14T01:44:31.369947+00:00",
+  "human_acceptance": "external",
   "lineage": [
     {
-      "family": "anthropic",
-      "requested_model": "fable",
-      "actual_model": "claude-opus-4-8",
-      "substitution_reason": "Fable returned HTTP 429 before generation; the live reviewer route selected Opus"
+      "actual_model": "Gemini 3.1 Pro (High)",
+      "family": "google",
+      "requested_model": "Gemini 3.1 Pro (High)",
+      "substitution_reason": ""
     },
     {
-      "family": "openai",
-      "requested_model": "gpt-5.6-sol",
-      "actual_model": "gpt-5.6-sol",
+      "actual_model": "grok-4.5-xhigh",
+      "family": "xai",
+      "requested_model": "grok-4.5-xhigh",
       "substitution_reason": ""
     }
   ],
   "metrics": {
-    "primary_accuracy": {
-      "numerator": 90,
-      "denominator": 90,
-      "value": 1.0,
-      "threshold": 1.0,
-      "passed": true
-    },
     "companion_fidelity": {
-      "numerator": 90,
-      "denominator": 90,
-      "value": 1.0,
+      "denominator": 108,
+      "numerator": 108,
+      "passed": true,
       "threshold": 0.9,
-      "passed": true
+      "value": 1.0
     },
-    "critical_case_failures": 0
+    "critical_case_failures": 0,
+    "primary_accuracy": {
+      "denominator": 108,
+      "numerator": 108,
+      "passed": true,
+      "threshold": 1.0,
+      "value": 1.0
+    }
+  },
+  "plan": {
+    "path": "routing-protocol.json",
+    "sha256": "sha256:d36390ede2531d585341f37bc93488f07f01f2805eb233744cfcbb2acbf1a089"
   },
   "raw_receipt": {
-    "evaluation_id": "candidate-routing-preauthor-v1",
-    "run_owned_path": ".agent-run/ADDY-HARNESS-20260711/evaluation/routing-fabric-v2-opus/receipt.json",
-    "sha256": "sha256:fa4a1c536ace37fcec2fcb9c3b6ce27d9638f353496ac11f9a351997bb50505e",
-    "packet_sha256": "sha256:cd6e98de0f6cc753ed65128e2ac2c6a76a2622aea888f5e424e39f166abdd1fb",
     "attempts": 6,
-    "case_rows": 90
+    "case_rows": 108,
+    "evaluation_id": "skill-portfolio-routing-20260714-fabric-v5",
+    "packet_sha256": "sha256:b5c73ea4e421a2ce864ea36ef9ee482a156ab79ea2f8fd68dcee80c2ed8cfaa7",
+    "run_owned_path": ".agent-run/SKAUD-20260714/evaluation/portfolio-v5/receipt.json",
+    "sha256": "sha256:f3f1829bd5a4f860db43cefb7d39a540d1dde722c12332be89df471216fcf8f5"
   },
-  "human_acceptance": "external"
+  "schedule": {
+    "attempts": 6,
+    "case_rows": 108,
+    "families": [
+      "google",
+      "xai"
+    ],
+    "repetitions": 3
+  },
+  "schema_version": 1,
+  "status": "pass"
 }

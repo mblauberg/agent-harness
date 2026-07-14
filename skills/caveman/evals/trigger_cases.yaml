@@ -1,7 +1,7 @@
 schema_version: 1
 target_skill: caveman
 cases:
-  - {id: q028, relation: positive, prompt: "This repo's AGENTS.md says '$caveman by default'. Apply its adaptive mode to this low-risk progress reply.", tags: [governing-default], expected: {primary_skill: caveman, companion_skills: []}}
+  - {id: q028, relation: positive, prompt: "This project's AGENTS.md explicitly invokes $caveman for status replies; apply its adaptive mode without losing technical detail.", tags: [explicit-project-invocation], expected: {primary_skill: caveman, companion_skills: []}}
   - {id: q029, relation: positive, prompt: "Answer this status update in explicit caveman full mode, preserving every number.", tags: [direct], expected: {primary_skill: caveman, companion_skills: []}}
   - {id: q030, relation: positive, prompt: "Give me an aggressively compressed chat answer; fragments are fine but do not lose conditions.", tags: [direct], expected: {primary_skill: caveman, companion_skills: []}}
   - {id: q031, relation: negative, prompt: "Be brief: what is two plus two?", tags: [no-skill], expected: {primary_skill: null, companion_skills: []}}

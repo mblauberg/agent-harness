@@ -396,8 +396,9 @@ EXPERT_AUTHORITIES = {{EXPERT_AUTHORITIES}}
 
 {{MISSION}}
 
-The framing is **never declare done — run until STOP.** An empty queue is a
-trigger to re-enumerate and deepen, never to halt.
+The framing is **never self-close the mission.** An empty queue triggers one
+bounded re-enumeration pass. If still dry, write an idle checkpoint and pause
+dispatch until a material resume trigger; only human STOP closes the mission.
 
 ## Traversal order
 
@@ -468,12 +469,14 @@ RAM and can be compacted; the filesystem is the recovery record.
    launched, expected-output} to the run-ledger AND STATE BEFORE launching any
    background job. Every iteration begins (step 0) by reconciling the in-flight
    table. Clear an in-flight row ONLY on reconcile.
-4. **Never self-halt.** Only \`GOAL\` \`STATUS == STOP\` halts. An empty queue means
-   re-enumerate + deepen.
+4. **Never self-close the mission.** An empty queue gets one bounded
+   re-enumeration pass; if still dry, write STATE PAUSED with an idle checkpoint
+   and resume trigger, release the lease and end without another self-wake.
+   Only human \`GOAL\` \`STATUS == STOP\` closes the mission.
 5. **Never trust a self-reported verdict.** On {{HARD_GATES}}, an INDEPENDENT
    cross-family review is authoritative over any worker's self-claim.
 
-## §2 — The 8-step loop (run until STATUS == STOP)
+## §2 — The resumable 8-step mission loop (dry frontier pauses; STOP closes)
 
 ```
 RECONCILE  re-attach completed/dead in-flight runs (crash-safety; step 0)
@@ -484,7 +487,7 @@ RECORD     write returned output VERBATIM to disk; update LOG/QUEUE; clear in-fl
 PROPAGATE  add newly-surfaced work to the QUEUE with dependencies
 REORG      if a cadence trigger fired (run the integrity sweep)
 STATE      rewrite STATE.md to current truth (in-flight, next, forks, blockers)
-WAKE/STOP  STOP -> clean handoff + HALT; else self-wake matched to work, end turn
+WAKE/STOP  STOP -> clean handoff + HALT; active work -> matched wake; dry frontier -> PAUSED idle checkpoint, no self-wake
 ```
 
 ## §3 — The file set (roles separated by authority + mutability)
@@ -606,6 +609,14 @@ Updated: <YYYY-MM-DDTHH:MM:SSZ>
 
   SELF-CHECK each rewrite: "Does every durable conclusion trace to verified
   source artifacts, and is the accountable stage owner clear?"
+
+  A PAUSED idle-frontier state must record: reason idle-frontier, an empty
+  in-flight ledger, no selectable DECISION_QUEUE work, a dry next-up frontier,
+  release-on-driver-exit, and `restart-on:` followed only by one or more of
+  `human-directive`, `gate-answer`, `external-completion`, `material-change`,
+  or `explicit-restart`. The shared
+  validate_idle_pause.py checks both this section format and the template
+  heartbeat format.
 -->
 
 ## Run status
@@ -703,10 +714,12 @@ gen_decision_queue() {
 
 ### Tier 0 — foundational one-way-doors
 <!-- gate everything downstream; decide first -->
-(none yet)
+| Item | Status | Depends on | Scope / next evidence |
+|---|---|---|---|
 
 ### Tier 1+
-(none yet)
+| Item | Status | Depends on | Scope / next evidence |
+|---|---|---|---|
 
 ## COUNT SUMMARY
 <!--
@@ -931,8 +944,8 @@ job to a traceable, human-gated finish.
 > **Mission:** {{MISSION}}
 > **Domain:** {{DOMAIN}}
 
-The framing is **never declare done — run until STOP**. See OPERATING_MANUAL.md
-for the orchestrator's constitution and references/ for the full doctrine.
+The mission remains open until human STOP. A dry frontier creates a resumable
+idle checkpoint instead of endless dispatch. See OPERATING_MANUAL.md.
 
 ## Status & what's waiting on you
 
@@ -961,7 +974,13 @@ for the orchestrator's constitution and references/ for the full doctrine.
 - **Run / resume (Claude):** open a session in this lab at high/ultracode effort and paste:
   > /loop — You are the orchestrator for the autonomous lab at {{LAB_DIR}}. Read
   > OPERATING_MANUAL.md, then GOAL.md, then STATE.md, then DECISION_QUEUE.md, and
-  > run the 8-step loop until GOAL STATUS == STOP.
+  > run one 8-step iteration; preserve the RUN mission until human STOP, and
+  > pause on a dry frontier using the OPERATING_MANUAL idle checkpoint. Before
+  > accepting PAUSED, run `python3
+  > "${AGENTS_HOME:-$HOME/.agents}/skills/autonomous-lab/scripts/validate_idle_pause.py"
+  > "{{LAB_DIR}}/STATE.md" --runs "{{LAB_DIR}}/.orchestrator/runs.md" --queue
+  > "{{LAB_DIR}}/DECISION_QUEUE.md"`; a non-zero result means re-invoke one
+  > iteration and do not exit the driver.
 - **Steer:** edit the `Active directives` block in GOAL.md.
 - **Stop:** set `STATUS: STOP` in GOAL.md (GOAL + STATE + HANDOFF must agree on
   the terminal truth first).

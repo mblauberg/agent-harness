@@ -24,11 +24,10 @@ disclosure, external-action and decision ceilings. Otherwise use
 
 1. Run `scripts/bootstrap-lab.sh <LAB_DIR>`, fill every CONFIG KNOB in
    `GOAL.md`, then rerun it to materialise/validate.
-2. Preflight Agent Fabric with `scripts/agent-fabric status --json --project
-   "$PWD"` and `scripts/agent-fabric doctor --json`, then dispatch external
-   review tasks through `orchestrate`. Missing or unresolved other-primary
-   lineage reaches a human gate; bonus-family failure is recorded and
-   non-blocking. A direct CLI is an explicit degraded fallback, never primary.
+2. Use `orchestrate` for every bounded wave. It owns topology, provider routing,
+   Agent Fabric transport, the review ladder and degradation; the lab owns durable
+   queue, lease, recovery and STOP state. Record the returned route/result
+   receipts rather than restating that policy locally.
 3. Operate one iteration at a time after reading `OPERATING_MANUAL.md`,
    `GOAL.md`, `STATE.md` and queue head. Keep one orchestrator lease.
 4. Interactive labs use Herdr and record owned panes. External-driver-only
@@ -45,8 +44,10 @@ Run `RECONCILE -> READ -> SELECT -> DISPATCH -> RECORD -> PROPAGATE ->
 REORG-if-due -> STATE -> WAKE/STOP`. Journal run and work unit before launch.
 Delegate deep work; fan out independent contexts and serialise shared state.
 Fork only one-way doors with convergence, deadline and kill switch. Bound
-retries; escalate stalls with evidence. An empty queue triggers re-enumeration;
-only human STOP ends the run. See
+retries; escalate stalls with evidence. An empty queue triggers one bounded
+re-enumeration pass. If the frontier remains dry, write an idle checkpoint,
+release the lease and pause dispatch until a material resume trigger; only human
+STOP closes the lab. See
 [operating-loop.md](references/operating-loop.md) and
 [recovery-and-cadence.md](references/recovery-and-cadence.md).
 
