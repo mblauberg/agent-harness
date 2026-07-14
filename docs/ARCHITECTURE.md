@@ -373,7 +373,7 @@ Provider bootstraps remain small and share the same precedence sentence.
 
 ## Project Fabric Console
 
-The Spec 05 Console remains a projection-only executable over the public
+The Console remains a projection-only executable over the public
 Fabric protocol. Its terminal layer uses Node 24 with a project-owned
 responsive cell-grid renderer and bounded keyboard/SGR parser, selected through the
 [terminal-runtime decision](research/project-fabric-console-terminal-runtime.md).

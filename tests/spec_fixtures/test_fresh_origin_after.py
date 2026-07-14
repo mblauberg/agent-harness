@@ -4,7 +4,7 @@
 This fixture is intentionally self-contained and Python-stdlib only.  It models
 the council-selected fresh-origin batch discriminator and the durable scope
 admission outbox as executable SQLite constraints.  It is not production DDL;
-it is a right-reason oracle for the normative Spec 01/04 edits.
+it is a right-reason oracle for the normative lifecycle and hardening edits.
 
 Stable output is one case ID per passing case followed by a fixed summary.
 """

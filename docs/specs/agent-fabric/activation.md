@@ -1,17 +1,10 @@
-# Agent fabric activation and operations
+# Agent Fabric activation and operations
 
-Status: Base activation implemented; v1.2 capability/effective-route amendment implementation and final human acceptance pending
-Version: 1.2
-Date: 13 July 2026
+Status: Base activation implemented; final human acceptance pending
 Decision owner: Human maintainer
 Approval: Direct instruction to implement, activate and provider-smoke all listed capabilities, with quota use authorised
 
-Version 1.2 closes effective-configuration identity, subject lineage and
-permission semantics across activation, smoke and provider actions. It permits
-authorised write-capable generic work while retaining enforced read-only as a
-hard certifying-review requirement. Version 1.1 requires every active adapter to publish the shared versioned
-capability snapshot and effective launch configuration, and makes requested,
-actual or honestly unknown route identity part of activation evidence.
+The current contract closes effective-configuration identity, subject lineage and permission semantics across activation, smoke and provider actions. It permits authorised write-capable generic work while retaining enforced read-only as a hard certifying-review requirement. Every active adapter publishes the shared capability snapshot and effective launch configuration, with requested, actual or honestly unknown route identity in its activation evidence.
 
 ## Outcome
 
@@ -65,11 +58,11 @@ Restore `activeAdapters: []`, restart the visible daemon, retain journals and se
 - Expiry warning and explicit coordinated rotation tests pass.
 - Fresh native and Fable reviews report no unresolved P0–P2 findings.
 
-## Capability and effective-route evidence amendment
+## Capability and effective-route evidence
 
 Activation now requires the exact shared `adapterCapabilitySnapshotV1`,
 `deployedRouteAdmissionV1` and `deployedRouteObservationV1` codecs owned by
-Spec 01 section 32.21. This section
+the [provider actions and adapters contract](provider-actions-and-adapters.md). This specification
 adds no competing schema.
 
 An adapter may enter `activeAdapters` only when its current `kind: available`
@@ -149,7 +142,7 @@ Host-global settings remain user-owned. Fabric generates only a minimal
 per-run overlay inside existing authority, records every unsupported field and
 does not silently persist global defaults or hooks. Smoke/action rows record
 their effective view and never update either the activation row or global host
-configuration. Spec 04 owns the generated schema, immutable persistence,
+configuration. the operational-hardening contract owns the generated schema, immutable persistence,
 registered evidence and cross-row constraints; this specification owns the
 activation/evidence semantics.
 

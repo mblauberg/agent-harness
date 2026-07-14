@@ -3,7 +3,7 @@
 
 This intentionally transcribes only the keys, checks, deferrals, and trigger
 predicates needed to prove the repaired preparation/apply graph. It is not a
-substitute for the complete normative DDL in Spec 04.
+substitute for the complete normative DDL in the hardening specifications.
 """
 
 from __future__ import annotations

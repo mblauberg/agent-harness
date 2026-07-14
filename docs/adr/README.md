@@ -18,5 +18,5 @@ later, on 2026-07-15.
 | [0006](0006-backlog-schema-first-store-pluggable.md) | Backlog: schema-first, store-pluggable; queue controller deferred | Accepted |
 | [0007](0007-retention-classes-then-governed-deletion.md) | Retention classes now, governed deletion later | Accepted (amended 2026-07-15) |
 | [0008](0008-review-pressure-risk-and-oracle-adjusted.md) | Risk/oracle-adjusted certifying review | Accepted (spec amendment pending) |
-| [0009](0009-spec-families-unnumbered-durable-modules.md) | Specification families are unnumbered durable topic modules | Accepted |
+| [0009](0009-standalone-semantic-specifications.md) | Standalone semantic specifications | Accepted |
 | [0010](0010-lifecycle-receipt-authority-distinct-trust-boundary.md) | Lifecycle receipt authority is a trust boundary distinct from provider authority compilation | Accepted |

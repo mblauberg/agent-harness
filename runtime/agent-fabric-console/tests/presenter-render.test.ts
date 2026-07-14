@@ -655,7 +655,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
       throw new Error("project fixture unavailable");
     }
     const acceptedScopeRef = {
-      path: "docs/specs/05-project-fabric-console.md" as never,
+      path: "docs/specs/console/acceptance.md" as never,
       digest: digestB,
     };
     const scopedDataset: FabricConsoleDataset = {

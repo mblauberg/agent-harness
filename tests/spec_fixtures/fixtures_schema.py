@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Executable SQLite fixtures proving six substantiated spec defects are
-accepted by the current DDL in docs/specs/04-agent-fabric-operational-hardening.md
-(commit d7f3536), anchors: SS9.13, SS9.22, SS9.23.
+accepted by the current DDL in docs/specs/agent-fabric/persistence.md
+(commit d7f3536), now owned by the workspace-trust, lifecycle-custody and
+observability modules.
 
 Each defect gets its own fresh in-memory sqlite3 connection with
 PRAGMA foreign_keys=ON. Column sets, PRIMARY KEY, UNIQUE and FOREIGN KEY

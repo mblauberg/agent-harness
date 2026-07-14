@@ -24,7 +24,7 @@ The production writers overlap, so the first four slices integrate serially. Fix
 - `src/project-session/launch-custody.ts:935,1308,3299,3917`
 - `src/integrations/herdr-fabric-ports.ts:556`
 
-There are also 28 positional/direct fixture inserts across nine test files. The repair must implement the Spec 04 ordering contract, not merely synthesize a parent row: canonical preflight precedes route/config inspection, while config, receipt, reservations, action and route commit atomically.
+There are also 28 positional/direct fixture inserts across nine test files. The repair must implement the provider-custody ordering contract, not merely synthesize a parent row: canonical preflight precedes route/config inspection, while config, receipt, reservations, action and route commit atomically.
 
 Sharp repros:
 
@@ -39,7 +39,7 @@ npm exec --workspace=@local/agent-fabric -- vitest run \
 
 ## B — lifecycle runtime/schema divergence
 
-Current DDL uses `custody_id`, provider-action pair identity and current custody states, but runtime still queries predecessor `action_id`/`unreconciled` shapes in `src/core/fabric.ts:1540`, `:4687`, `:6906`, `:6952`, `:6985`, `:7095`. Frozen Spec 04 §9.22 supersedes both with plural `lifecycle_rotation_custodies`, append-only revisions and exact heads. Do not restore old columns or treat this as a rename.
+Current DDL uses `custody_id`, provider-action pair identity and current custody states, but runtime still queries predecessor `action_id`/`unreconciled` shapes in `src/core/fabric.ts:1540`, `:4687`, `:6906`, `:6952`, `:6985`, `:7095`. The frozen [persistence and cutover contract](../specs/agent-fabric/persistence.md) supersedes both with plural `lifecycle_rotation_custodies`, append-only revisions and exact heads. Do not restore old columns or treat this as a rename.
 
 Sharp gate:
 

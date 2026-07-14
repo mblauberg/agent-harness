@@ -5,8 +5,8 @@ Status: awaiting final human acceptance
 
 ## Destination
 
-Implement and verify Stages 1–5 of the accepted [agent fabric
-specification](../specs/01-agent-fabric.md), then stop at final human
+Implement and verify Stages 1–5 of the accepted [Agent Fabric
+contract](../specs/agent-fabric/scope-and-invariants.md), then stop at final human
 acceptance. The human subsequently authorised a coordination-only daemon and
 global MCP registration for the five configured clients. Provider-adapter
 activation, provider quota use, release and Git publication remain outside it.
@@ -26,7 +26,7 @@ activation, provider quota use, release and Git publication remain outside it.
 
 - Real provider adapters and the optional automatic Herdr event-to-pane bridge
   remain disabled/unimplemented.
-- Spec 02 implementation is committed. The human assigned ownership of the
+- The harness lifecycle implementation is committed. The human assigned ownership of the
   remaining directory state and authorised a scoped fabric integration commit.
 - AFAB-001 uses the canonical `delivery-run` v1 receipt. Its validator hashes
   declared artifacts directly and does not depend on a clean Git index or the
@@ -60,7 +60,7 @@ activation, provider quota use, release and Git publication remain outside it.
   evaluation 13/13, load 1/1 and zero production dependency vulnerabilities.
 - 11 July 2026 router integration: made fabric adapter activation the default
   route gate for Claude, Codex, Agy, Cursor, Kiro and Pi; direct CLI executors
-  opt in explicitly while retaining family/pattern checks. Added spec 02 to the
+  opt in explicitly while retaining family/pattern checks. Added the harness lifecycle contract to the
   specification index and reconciled the full harness suite.
 - 11 July 2026 reliability sweep: extended the default activation gate to the
   Claude and Codex fabric adapters, retained rejected route receipts, and
