@@ -212,6 +212,20 @@ built.
   referencing the not-yet-materialized after revision; its same-prepare batch
   binds the exact after tuple to the linked effect, and the review binding
   equality-copies that tuple and defers its apply FK.
+- Lead 4 — apply equality-copies the batch transition/apply arm and uses non-null
+  handoff/loss sentinels, so no nullable composite FK can collapse
+  terminal-fresh to terminal or cross a fresh loss arm. Terminal-fresh keeps its
+  terminal mutation plan distinct from the fresh-creation plan.
+- Lead 5 — intent owner/kind now equality-binds the exact same-batch typed
+  effect; exact generated trigger DDL
+  (`lifecycle_completion_effect_set_exact` plus the three typed closure guards)
+  proves declared membership/cardinality and fences every effect table against
+  extras. Public fixtures extract and execute those definitions.
+- Lead 6 — exact `lifecycle_apply_post_state_complete` generated trigger DDL
+  requires the arm-specific materialized revision/head, review binding,
+  retirement result and/or fresh commit before accepting the immutable apply
+  marker; child-to-apply FKs are deferred and the public fixture executes every
+  incomplete arm family.
 
 **Pending structural repair (needed before freeze; codex-certified):** these
 close only with multi-part DDL changes, not one-line additions, so they are
@@ -221,11 +235,6 @@ deliberately not half-applied —
 - Lead 2 (remaining) — evidence-carry columns (admission / transition-proof /
   mutation-plan / finalized-terminal-evidence / retirement-evidence) bound
   through plan → effect → result. (FK-mismatch part done above.)
-- Lead 4 — carry `transition_kind` into the apply; non-null sentinels so the
-  fresh-arm composite FK cannot be null-skipped (do NOT add plan equality).
-- Lead 5 — kind↔owner CHECK + intent→effect identity FKs + declared
-  membership/anti-extra.
-- Lead 6 — arm-specific post-state completeness trigger/marker on the apply.
 - Lead 7 — systemic head parity: restructure scope/loss/custody heads to
   canonical pointers or non-null sentinels so the fuller FKs cannot be
   null-vacuous; give `review_slot_heads` a real FK; publish
