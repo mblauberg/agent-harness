@@ -1834,19 +1834,47 @@ function guidedWorkflowActions(): readonly PresentedAction[] {
 type PresentedRows = Readonly<{
   masterRows: readonly PresentedRow[];
   topAttention: PresentedRow | null;
+  selectedRow: ConsoleRow | null;
 }>;
 
 type PresentedRowsCache = Readonly<{
-  dataset: FabricConsoleDataset;
-  activeRows: readonly ConsoleRow[];
-  selected: ConsoleControllerState["selectionByView"][FabricView];
-  value: PresentedRows;
+  masterRows: readonly PresentedRow[];
+  indexByStableId: ReadonlyMap<string, number>;
 }>;
 
-const presentedRowsByController = new WeakMap<
-  ConsoleControllerState,
-  PresentedRowsCache
+const presentedRowsByDataset = new WeakMap<
+  FabricConsoleDataset,
+  WeakMap<readonly ConsoleRow[], PresentedRowsCache>
 >();
+
+function invariantRows(
+  dataset: FabricConsoleDataset,
+  activeRows: readonly ConsoleRow[],
+): PresentedRowsCache {
+  let byRows = presentedRowsByDataset.get(dataset);
+  if (byRows === undefined) {
+    byRows = new WeakMap();
+    presentedRowsByDataset.set(dataset, byRows);
+  }
+  const cached = byRows.get(activeRows);
+  if (cached !== undefined) return cached;
+
+  const canMutate = dataset.canMutate && dataset.connection.state === "live";
+  const value = {
+    masterRows: activeRows.map((candidate) =>
+      presentRow(candidate, false, canMutate, dataset)
+    ),
+    indexByStableId: new Map(
+      activeRows.map((candidate, index) => [candidate.stableId, index]),
+    ),
+  } satisfies PresentedRowsCache;
+  byRows.set(activeRows, value);
+  return value;
+}
+
+function selectPresentedRow(row: PresentedRow, selected: boolean): PresentedRow {
+  return row.selected === selected ? row : { ...row, selected };
+}
 
 function presentRows(
   dataset: FabricConsoleDataset,
@@ -1854,43 +1882,34 @@ function presentRows(
   activeRows: readonly ConsoleRow[],
   selected: ConsoleControllerState["selectionByView"][FabricView],
 ): PresentedRows {
-  const cached = presentedRowsByController.get(controller);
-  if (
-    cached?.dataset === dataset &&
-    cached.activeRows === activeRows &&
-    cached.selected === selected
-  ) {
-    return cached.value;
-  }
-  const canMutate = dataset.canMutate && dataset.connection.state === "live";
+  const invariant = invariantRows(dataset, activeRows);
+  const selectedIndex = selected === null
+    ? undefined
+    : invariant.indexByStableId.get(selected.stableId);
+  const selectedRow = selectedIndex === undefined ? undefined : activeRows[selectedIndex];
+  const selectedPresentation = selectedIndex === undefined
+    ? undefined
+    : invariant.masterRows[selectedIndex];
+  const masterRows = selectedIndex === undefined || selectedPresentation === undefined
+    ? invariant.masterRows
+    : invariant.masterRows.with(
+        selectedIndex,
+        selectPresentedRow(selectedPresentation, true),
+      );
   const firstAttention = dataset.pages.attention.rows[0];
-  const value = {
-    masterRows: activeRows.map((candidate) =>
-      presentRow(
-        candidate,
-        candidate.stableId === selected?.stableId,
-        canMutate,
+  const topAttention = firstAttention === undefined
+    ? null
+    : presentRow(
+        firstAttention,
+        controller.selectionByView.attention?.stableId === firstAttention.stableId,
+        dataset.canMutate && dataset.connection.state === "live",
         dataset,
-      )
-    ),
-    topAttention:
-      firstAttention === undefined
-        ? null
-        : presentRow(
-            firstAttention,
-            controller.selectionByView.attention?.stableId ===
-              firstAttention.stableId,
-            canMutate,
-            dataset,
-          ),
-  } satisfies PresentedRows;
-  presentedRowsByController.set(controller, {
-    dataset,
-    activeRows,
-    selected,
-    value,
-  });
-  return value;
+      );
+  return {
+    masterRows,
+    selectedRow: selectedRow ?? null,
+    topAttention,
+  };
 }
 
 export function presentFabricConsole(
@@ -1901,11 +1920,8 @@ export function presentFabricConsole(
 ): FabricConsolePresentation {
   const activeRows = dataset.pages[controller.activeView].rows;
   const selected = controller.selectionByView[controller.activeView];
-  const selectedRow =
-    selected === null
-      ? null
-      : activeRows.find((candidate) => candidate.stableId === selected.stableId) ?? null;
   const presentedRows = presentRows(dataset, controller, activeRows, selected);
+  const selectedRow = presentedRows.selectedRow;
   const review = controller.review;
   const workflowReview = review === null ? ui.workflowReview : null;
   const actions = review === null && workflowReview === null && ui.guidedWorkflow !== null
