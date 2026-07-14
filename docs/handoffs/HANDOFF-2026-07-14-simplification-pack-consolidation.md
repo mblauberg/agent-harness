@@ -73,18 +73,26 @@ files under 1,000 lines each.
   DecisionRequest subcontracts (§10–11, trailing sections renumbered to
   §12–14); `09` gained PR-topology selection + WP6 pointer.
 
-### In flight at handoff (verify before proceeding)
+- **consolidate-comprehensive** (Opus) finished its writes: pack `24/25/26`
+  created; `10/15/17` edited; all 5 inbound links repointed (verified: a
+  repo-wide grep over `docs/adr`, `docs/efforts`, `docs/handoffs`, `skills/`,
+  `HARNESS.md`, `AGENTS.md` now returns no reference to either deletion-slated
+  directory). The uncommitted `SPEC05-APPLICABILITY.md` modification is
+  captured in pack `17` ("Spec-freeze precondition"). The agent itself died on
+  a session limit during its final self-check; the chair verified its output
+  instead.
+- **Pack index + manifest** regenerated (`00_START_HERE.md`,
+  `20_PACK_MANIFEST.md`).
 
-- **consolidate-comprehensive** (Opus subagent): writing pack
-  `24_AUTONOMOUS_CHARTER.md`, `25_AUTHORITY_V2_AND_CONTAINMENT.md`,
-  `26_IMPLEMENTATION_SEEDS.md`, edits to `10/15/17`, and repointing the 5
-  inbound links (ADR-0002, adr/README, EFFORT-capability-profiles, two
-  2026-07-13 handoffs). Its instructions are recorded verbatim in
-  `review/native-mine-comprehensive.md` — if it did not finish, re-dispatch
-  with the same scope. It must capture the uncommitted
-  SPEC05-APPLICABILITY.md diff before anything is deleted.
-- **pair-codex pane** `w5:p16`: findings consumed; close the pane
-  deliberately (created by this session).
+Commits so far on `main`: `826b7ee` (pack + review artifacts + chair fixes),
+`8a0ae00` (consolidation + repoints), `c2b6a22` (index + manifest).
+
+### Still live
+
+- **pair-codex pane** `w5:p16` (Herdr, cwd `/Users/user/.agents`): findings
+  delivered and consumed; the pane is idle and **intentionally left open** for
+  the successor to reuse as the cross-family reviewer. Reuse it rather than
+  starting a new one.
 
 `FABRIC-ROUNDTRIP-UNAVAILABLE` recorded for the whole run; collection is by
 named artifact files plus bounded `herdr agent get/read` for status only.
@@ -102,12 +110,7 @@ See `review/ADJUDICATION.md` "Open questions for the human":
 
 ## Remaining work packages (execute in order)
 
-### H1 — verify consolidation and close the review round
-
-1. Verify consolidate-comprehensive output (files 24/25/26, edits 10/15/17,
-   5 repoints, SPEC05 uncommitted-diff capture) against
-   `review/native-mine-comprehensive.md`.
-2. Close pane `w5:p16`.
+### H1 — DONE (consolidation verified, review round closed)
 
 ### H2b — apply the adjudicated pack repairs (all accepted; see ADJUDICATION)
 
@@ -136,16 +139,18 @@ Text edits to the pack, one commit:
 - codex #9 residual: add PS/ADR accept-reject entries for DecisionRequest,
   conflict keys, PR strategy, store identity in `15` (pending human Q4).
 
-### H2 — finish pack integration
+### H2 — DONE (pack integration, index and manifest committed)
 
-1. Verify the two consolidation agents' outputs (files exist, faithful to the
-   mining reports, no scope overruns).
-2. Update `00_START_HERE.md` file table with 21–26 + `schemas/` +
-   `templates/` + `review/`.
-3. Regenerate `20_PACK_MANIFEST.md` hashes:
-   `cd docs/provenant_simplification_implementation_pack_2026-07-14 && find . -type f ! -name 20_PACK_MANIFEST.md | sort | xargs shasum -a 256`
-   (keep the manifest's own-hash exclusion rule).
-4. Commit: `docs(pack): fold review corrections and legacy extractions`.
+Regenerate the manifest again after any further pack edit:
+
+```sh
+cd docs/provenant_simplification_implementation_pack_2026-07-14
+find . -type f \( -name '*.md' -o -name '*.json' \) \
+  ! -path './docs/provenant-simplification/20_PACK_MANIFEST.md' \
+  | sed 's|^\./||' | sort | while read -r f; do
+    printf '| `%s` | `%s` |\n' "$f" "$(shasum -a 256 "$f" | cut -d' ' -f1)"
+  done
+```
 
 ### H3 — specs fold + split (largest package)
 
@@ -249,6 +254,27 @@ Gates, all required before `rm`:
   handoff `Consumed-at`, and report: findings summary, open human decision
   (D-021 carry-over), deletion confirmation, spec-split verification results.
 
+## Cross-family routing for the successor
+
+The pack repairs (H2b) and the spec split (H3) are both substantial+, so the
+other primary is load-bearing (`HARNESS.md` coverage ladder).
+
+- **Reuse pane `w5:p16` (`pair-codex`)** — do not start a fresh pane.
+- **Route down, not up.** Round 1 ran gpt-5.6-sol at `xhigh` for open-ended
+  architectural review; that work is done. The remaining legs are bounded and
+  checkable, so prefer **sol at low effort** for verification passes (does this
+  repair actually satisfy finding N?) and **luna at xhigh** for the spec-split
+  span/coverage checks. Reserve `max` for a single isolated adjudication call —
+  never inside a loop.
+- **Known degradation:** the Codex collaboration interface exposed no per-agent
+  model selector or receipt, so subagent model family inside the codex pane
+  cannot be attested. Record substitutions; do not claim Luna coverage without
+  a receipt.
+- Steering that expects no answer:
+  `printf '%s' '<prompt>' | skills/orchestrate/scripts/herdr_prompt.sh pair-codex --fire-and-forget --task-ref <id>`.
+  Answer-bearing work goes to a named artifact file under
+  `docs/provenant_simplification_implementation_pack_2026-07-14/review/`.
+
 ## Run receipt (state at handoff)
 
 - Risk tier: substantial (docs-only, but normative governance surfaces).
@@ -260,7 +286,42 @@ Gates, all required before `rm`:
   mine-re-review (Sonnet 5), consolidate-re-review (Opus 4.8),
   consolidate-comprehensive (Opus 4.8) — all read-only except their named
   artifact/write scopes; no overlapping writers.
-- Write scopes used so far: pack files 04/05/08 (chair), pack review/ dir,
-  pack 03/09/21/22/23/schemas/templates (agent), pack 10/15/17/24/25/26 +
+- Write scopes used so far: pack files 04/05/08/00/20 (chair), pack review/
+  dir, pack 03/09/21/22/23/schemas/templates (agent), pack 10/15/17/24/25/26 +
   ADR-0002/adr-README/effort/handoff repoints (agent), this handoff.
 - No branches, worktrees, releases, external effects. No source-code changes.
+- Degradations: `FABRIC-ROUNDTRIP-UNAVAILABLE`; codex subagent model family
+  unattested; one Opus consolidation worker terminated on a session limit
+  after completing its writes (output chair-verified instead of self-verified).
+
+## Resume prompt (paste into a fresh session)
+
+```text
+Continue the Provenant simplification consolidation. Read
+docs/handoffs/HANDOFF-2026-07-14-simplification-pack-consolidation.md and
+docs/provenant_simplification_implementation_pack_2026-07-14/review/ADJUDICATION.md
+first — they carry all state, rulings and open questions.
+
+Work on main. Commit as you go. Never touch .worktrees/ (five agents are
+active there) and never run git checkout/restore/stash on shared state.
+
+Do, in order:
+1. H2b — apply the ten adjudicated pack repairs (codex findings 1,2,4,5,6,7,9,10
+   plus the native P2s). All are already accepted; do not re-litigate them.
+2. H3 — the spec fold+split: repair/freeze semantics, then family manifests +
+   <=999-line modules per the binding map in the handoff, plus a tested
+   scripts/check_spec_families.py wired into scripts/check-harness.
+3. H4 — commit the untracked re-review dir once (for recoverability), then
+   delete both superseded review directories. All deletion gates except H2b/H3
+   are already green.
+
+Use subagents (Opus 4.8 / Sonnet 5). Reuse the existing idle Herdr pane
+pair-codex (w5:p16) as the cross-family reviewer — sol at low effort for
+bounded verification, luna xhigh for span/coverage checks; do not open a new
+pane. Answer-bearing peer work goes to a named artifact under the pack's
+review/ directory.
+
+The four open human decisions in ADJUDICATION.md are mine to answer — ask me
+when one actually blocks you; otherwise apply the conservative reading and
+keep going.
+```
