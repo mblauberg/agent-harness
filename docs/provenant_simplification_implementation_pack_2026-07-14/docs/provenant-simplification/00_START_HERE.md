@@ -40,6 +40,18 @@ The target is not a smaller system at any cost. It is a system with a smaller **
 | `17_BASELINE_OBSERVATIONS.md` | Review-baseline observations to verify on current head |
 | `18_IMPLEMENTATION_STATUS_TEMPLATE.md` | Work-package status and evidence template |
 | `19_GLOSSARY.md` | Canonical terminology |
+| `21_DECISION_DELEGATION.md` | Who resolves a decision: chair/council/human; Class A/B/C scope deltas; DecisionRequest |
+| `22_DOCUMENT_GOVERNANCE.md` | Canonical owners, frontmatter/`canonical_keys`, spec-family layout, `check-docs` |
+| `23_SKILL_DELTAS.md` | Per-skill delta checklist for WP6 |
+| `24_AUTONOMOUS_CHARTER.md` | Preserved D-021 authority envelope and safety boundaries — **open human decision** |
+| `25_AUTHORITY_V2_AND_CONTAINMENT.md` | `AuthorityEnvelopeV2` schema, delivery mapping, file plan, containment-spike matrix |
+| `26_IMPLEMENTATION_SEEDS.md` | Advisory seeds: Fabric module map, security-evidence taxonomy, config split, stop-states |
+| `schemas/`, `templates/` | Draft JSON Schemas (work-item, decision-request/delegation, frontmatter) and document templates |
+
+The pack's own review record lives in `../../review/`: cross-family findings
+(`pair-codex-findings.md`), native verification and extraction mines, and the
+chair's `ADJUDICATION.md`. Read `ADJUDICATION.md` before implementing — it
+lists accepted repairs still to apply and the open human decisions.
 
 ## How to use the pack
 
