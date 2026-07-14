@@ -51,3 +51,8 @@ reference_invariants:
   - "ultracode"
   - "paired-primary.md"
   - "FABRIC-ROUNDTRIP-UNAVAILABLE"
+  - "herdr-panes.md"
+  - "HERDR-NOT-USED"
+  - "dispatched-unconfirmed"
+  - "task-ref-unverified"
+  - "Herdr then wakes or focuses the peer; it is not the transport of record"
