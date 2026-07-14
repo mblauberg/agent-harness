@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Executable Lead 8 after-repair SQLite race oracle.
 
-This is an isolated transliteration of the Spec 04 recovery-issue source-head
-shape.  It intentionally uses a file-backed database and separate connections
-for writer races.  Every writer starts with ``BEGIN IMMEDIATE``; the second
-writer must observe the first committed winner before its trigger/FK checks.
+The source-head table and every Lead 8 trigger are extracted from Spec 04.
+Only unrelated issue, handoff and revocation columns are reduced to stubs.  The
+oracle intentionally uses a file-backed database and separate connections for
+writer races.  Every writer starts with ``BEGIN IMMEDIATE``; the second writer
+must observe the first committed winner before its trigger/FK checks.
 
 Run:
     python3 tests/spec_fixtures/test_lead8_after.py
@@ -25,6 +26,12 @@ ISSUE_REVOKED = "LIFECYCLE_RECOVERY_ISSUE_REVOKED"
 ISSUE_EXPIRED = "LIFECYCLE_RECOVERY_ISSUE_EXPIRED"
 ISSUE_COMMIT_PENDING = "LIFECYCLE_RECOVERY_ISSUE_COMMIT_PENDING"
 HEAD_DELETE_DENIED = "LIFECYCLE_RECOVERY_SOURCE_HEAD_DELETE_DENIED"
+HEAD_REINSERT_DENIED = "LIFECYCLE_RECOVERY_SOURCE_HEAD_REINSERT_DENIED"
+ISSUE_IMMUTABLE = "LIFECYCLE_RECOVERY_ISSUE_IMMUTABLE"
+HANDOFF_IMMUTABLE = "LIFECYCLE_RECOVERY_HANDOFF_IMMUTABLE"
+HANDOFF_REINSERT_DENIED = "LIFECYCLE_RECOVERY_HANDOFF_REINSERT_DENIED"
+REVOCATION_IMMUTABLE = "LIFECYCLE_RECOVERY_REVOCATION_IMMUTABLE"
+REVOCATION_REINSERT_DENIED = "LIFECYCLE_RECOVERY_REVOCATION_REINSERT_DENIED"
 
 PS = "project-session-1"
 RUN = "run-1"
@@ -41,7 +48,41 @@ T20 = "2026-07-14T00:00:20.000Z"
 T30 = "2026-07-14T00:00:30.000Z"
 
 
-SCHEMA_SQL = f"""
+ROOT = Path(__file__).resolve().parents[2]
+SPEC_04 = (ROOT / "docs/specs/04-agent-fabric-operational-hardening.md").read_text()
+
+
+def ddl_block(text: str, table: str) -> str:
+    start = text.index(f"\n{table}(") + 1
+    end = text.index("\n)\n", start) + 2
+    return text[start:end]
+
+
+def trigger_sql(text: str, name: str) -> str:
+    start = text.index(f"CREATE TRIGGER {name}\n")
+    end = text.index("\nEND;", start) + len("\nEND;")
+    return text[start:end]
+
+
+LEAD8_TRIGGERS = (
+    "lifecycle_recovery_issue_claim_source",
+    "lifecycle_recovery_source_head_reinsert_denied",
+    "lifecycle_recovery_source_head_update_guard",
+    "lifecycle_recovery_source_head_delete_guard",
+    "lifecycle_recovery_handoff_guard",
+    "lifecycle_recovery_handoff_reinsert_denied",
+    "lifecycle_recovery_revocation_guard",
+    "lifecycle_recovery_revocation_reinsert_denied",
+    "lifecycle_recovery_issue_update_denied",
+    "lifecycle_recovery_issue_delete_denied",
+    "lifecycle_recovery_handoff_update_denied",
+    "lifecycle_recovery_handoff_delete_denied",
+    "lifecycle_recovery_revocation_update_denied",
+    "lifecycle_recovery_revocation_delete_denied",
+)
+
+
+FIXTURE_SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE agent_lifecycle_recovery_capability_issues(
@@ -60,27 +101,6 @@ CREATE TABLE agent_lifecycle_recovery_capability_issues(
   UNIQUE(issue_id,project_session_id,run_id,agent_id,recovery_source_kind,
     recovery_source_ref_digest,source_journal_digest),
   CHECK(issued_at < expires_at)
-) STRICT;
-
-CREATE TABLE agent_lifecycle_recovery_source_heads(
-  project_session_id TEXT NOT NULL,
-  run_id TEXT NOT NULL,
-  agent_id TEXT NOT NULL,
-  recovery_source_kind TEXT NOT NULL CHECK(
-    recovery_source_kind IN ('custody','generation-loss')),
-  recovery_source_ref_digest TEXT NOT NULL,
-  issue_id TEXT NOT NULL UNIQUE,
-  source_journal_digest TEXT NOT NULL,
-  head_revision INTEGER NOT NULL CHECK(head_revision >= 1),
-  PRIMARY KEY(project_session_id,run_id,agent_id,recovery_source_kind,
-    recovery_source_ref_digest),
-  UNIQUE(issue_id,project_session_id,run_id,agent_id,recovery_source_kind,
-    recovery_source_ref_digest,source_journal_digest),
-  FOREIGN KEY(issue_id,project_session_id,run_id,agent_id,recovery_source_kind,
-      recovery_source_ref_digest,source_journal_digest)
-    REFERENCES agent_lifecycle_recovery_capability_issues(
-      issue_id,project_session_id,run_id,agent_id,recovery_source_kind,
-      recovery_source_ref_digest,source_journal_digest)
 ) STRICT;
 
 CREATE TABLE lifecycle_fresh_recovery_handoffs(
@@ -102,151 +122,22 @@ CREATE TABLE agent_lifecycle_recovery_issue_revocations(
   FOREIGN KEY(issue_id)
     REFERENCES agent_lifecycle_recovery_capability_issues(issue_id)
 ) STRICT;
-
-CREATE TRIGGER lifecycle_recovery_issue_claim_source
-AFTER INSERT ON agent_lifecycle_recovery_capability_issues
-BEGIN
-  INSERT INTO agent_lifecycle_recovery_source_heads(
-    project_session_id,run_id,agent_id,recovery_source_kind,
-    recovery_source_ref_digest,issue_id,source_journal_digest,head_revision)
-  VALUES(
-    NEW.project_session_id,NEW.run_id,NEW.agent_id,NEW.recovery_source_kind,
-    NEW.recovery_source_ref_digest,NEW.issue_id,NEW.source_journal_digest,1)
-  ON CONFLICT(project_session_id,run_id,agent_id,recovery_source_kind,
-      recovery_source_ref_digest)
-  DO UPDATE SET
-    issue_id=excluded.issue_id,
-    source_journal_digest=excluded.source_journal_digest,
-    head_revision=agent_lifecycle_recovery_source_heads.head_revision+1
-  WHERE NOT EXISTS (
-      SELECT 1 FROM lifecycle_fresh_recovery_handoffs AS handoff
-      WHERE handoff.issue_id=
-        agent_lifecycle_recovery_source_heads.issue_id)
-    AND (
-      EXISTS (
-        SELECT 1 FROM agent_lifecycle_recovery_issue_revocations AS revocation
-        WHERE revocation.issue_id=
-          agent_lifecycle_recovery_source_heads.issue_id)
-      OR EXISTS (
-        SELECT 1
-        FROM agent_lifecycle_recovery_capability_issues AS old_issue
-        WHERE old_issue.issue_id=
-            agent_lifecycle_recovery_source_heads.issue_id
-          AND old_issue.expires_at<=NEW.issued_at));
-
-  SELECT CASE WHEN NOT EXISTS (
-    SELECT 1 FROM agent_lifecycle_recovery_source_heads AS head
-    WHERE head.project_session_id=NEW.project_session_id
-      AND head.run_id=NEW.run_id
-      AND head.agent_id=NEW.agent_id
-      AND head.recovery_source_kind=NEW.recovery_source_kind
-      AND head.recovery_source_ref_digest=NEW.recovery_source_ref_digest
-      AND head.issue_id=NEW.issue_id)
-  THEN RAISE(ABORT,'{SOURCE_BUSY}') END;
-END;
-
-CREATE TRIGGER lifecycle_recovery_source_head_update_guard
-BEFORE UPDATE ON agent_lifecycle_recovery_source_heads
-WHEN NEW.project_session_id<>OLD.project_session_id
-  OR NEW.run_id<>OLD.run_id
-  OR NEW.agent_id<>OLD.agent_id
-  OR NEW.recovery_source_kind<>OLD.recovery_source_kind
-  OR NEW.recovery_source_ref_digest<>OLD.recovery_source_ref_digest
-  OR NEW.issue_id=OLD.issue_id
-  OR NEW.head_revision<>OLD.head_revision+1
-  OR EXISTS (
-    SELECT 1 FROM lifecycle_fresh_recovery_handoffs AS handoff
-    WHERE handoff.issue_id=OLD.issue_id)
-  OR NOT EXISTS (
-    SELECT 1
-    FROM agent_lifecycle_recovery_capability_issues AS new_issue
-    WHERE new_issue.issue_id=NEW.issue_id
-      AND new_issue.project_session_id=NEW.project_session_id
-      AND new_issue.run_id=NEW.run_id
-      AND new_issue.agent_id=NEW.agent_id
-      AND new_issue.recovery_source_kind=NEW.recovery_source_kind
-      AND new_issue.recovery_source_ref_digest=NEW.recovery_source_ref_digest
-      AND new_issue.source_journal_digest=NEW.source_journal_digest)
-  OR NOT EXISTS (
-    SELECT 1
-    FROM agent_lifecycle_recovery_capability_issues AS old_issue
-    JOIN agent_lifecycle_recovery_capability_issues AS new_issue
-      ON new_issue.issue_id=NEW.issue_id
-    WHERE old_issue.issue_id=OLD.issue_id
-      AND (new_issue.issued_at>old_issue.issued_at
-        OR (new_issue.issued_at=old_issue.issued_at
-          AND new_issue.issue_id>old_issue.issue_id)))
-  OR EXISTS (
-    SELECT 1
-    FROM agent_lifecycle_recovery_capability_issues AS later_issue
-    JOIN agent_lifecycle_recovery_capability_issues AS new_issue
-      ON new_issue.issue_id=NEW.issue_id
-    WHERE later_issue.project_session_id=NEW.project_session_id
-      AND later_issue.run_id=NEW.run_id
-      AND later_issue.agent_id=NEW.agent_id
-      AND later_issue.recovery_source_kind=NEW.recovery_source_kind
-      AND later_issue.recovery_source_ref_digest=
-        NEW.recovery_source_ref_digest
-      AND (later_issue.issued_at>new_issue.issued_at
-        OR (later_issue.issued_at=new_issue.issued_at
-          AND later_issue.issue_id>new_issue.issue_id)))
-  OR NOT (
-    EXISTS (
-      SELECT 1 FROM agent_lifecycle_recovery_issue_revocations AS revocation
-      WHERE revocation.issue_id=OLD.issue_id)
-    OR EXISTS (
-      SELECT 1
-      FROM agent_lifecycle_recovery_capability_issues AS old_issue
-      JOIN agent_lifecycle_recovery_capability_issues AS new_issue
-        ON new_issue.issue_id=NEW.issue_id
-      WHERE old_issue.issue_id=OLD.issue_id
-        AND old_issue.expires_at<=new_issue.issued_at))
-BEGIN
-  SELECT RAISE(ABORT,'{SOURCE_BUSY}');
-END;
-
-CREATE TRIGGER lifecycle_recovery_source_head_delete_guard
-BEFORE DELETE ON agent_lifecycle_recovery_source_heads
-BEGIN
-  SELECT RAISE(ABORT,'{HEAD_DELETE_DENIED}');
-END;
-
-CREATE TRIGGER lifecycle_recovery_handoff_guard
-BEFORE INSERT ON lifecycle_fresh_recovery_handoffs
-BEGIN
-  SELECT CASE WHEN EXISTS (
-    SELECT 1 FROM agent_lifecycle_recovery_issue_revocations AS revocation
-    WHERE revocation.issue_id=NEW.issue_id)
-  THEN RAISE(ABORT,'{ISSUE_REVOKED}') END;
-
-  SELECT CASE WHEN EXISTS (
-    SELECT 1 FROM agent_lifecycle_recovery_capability_issues AS issue
-    WHERE issue.issue_id=NEW.issue_id
-      AND issue.expires_at<=NEW.created_at)
-  THEN RAISE(ABORT,'{ISSUE_EXPIRED}') END;
-END;
-
-CREATE TRIGGER lifecycle_recovery_revocation_guard
-BEFORE INSERT ON agent_lifecycle_recovery_issue_revocations
-BEGIN
-  SELECT CASE WHEN EXISTS (
-    SELECT 1 FROM lifecycle_fresh_recovery_handoffs AS handoff
-    WHERE handoff.issue_id=NEW.issue_id)
-  THEN RAISE(ABORT,'{ISSUE_COMMIT_PENDING}') END;
-END;
-
-CREATE TRIGGER lifecycle_recovery_issue_update_denied
-BEFORE UPDATE ON agent_lifecycle_recovery_capability_issues
-BEGIN
-  SELECT RAISE(ABORT,'LIFECYCLE_RECOVERY_ISSUE_IMMUTABLE');
-END;
-
-CREATE TRIGGER lifecycle_recovery_issue_delete_denied
-BEFORE DELETE ON agent_lifecycle_recovery_capability_issues
-BEGIN
-  SELECT RAISE(ABORT,'LIFECYCLE_RECOVERY_ISSUE_IMMUTABLE');
-END;
 """
+
+
+SCHEMA_SQL = "\n\n".join(
+    (
+        FIXTURE_SCHEMA_SQL.split(
+            "CREATE TABLE lifecycle_fresh_recovery_handoffs", maxsplit=1
+        )[0],
+        f"CREATE TABLE {ddl_block(SPEC_04, 'agent_lifecycle_recovery_source_heads')};",
+        "CREATE TABLE lifecycle_fresh_recovery_handoffs"
+        + FIXTURE_SCHEMA_SQL.split(
+            "CREATE TABLE lifecycle_fresh_recovery_handoffs", maxsplit=1
+        )[1],
+        *(trigger_sql(SPEC_04, name) for name in LEAD8_TRIGGERS),
+    )
+)
 
 
 def insert_issue(
@@ -321,6 +212,10 @@ class Lead8AfterRepairTests(unittest.TestCase):
         )
         connection = self.connect()
         try:
+            connection.execute("PRAGMA recursive_triggers=OFF")
+            self.assertEqual(
+                connection.execute("PRAGMA recursive_triggers").fetchone(), (0,)
+            )
             connection.executescript(SCHEMA_SQL)
         finally:
             connection.close()
@@ -513,6 +408,29 @@ class Lead8AfterRepairTests(unittest.TestCase):
         )
 
         self.assert_integrity_error(error, ISSUE_REVOKED)
+        for statement in (
+            "UPDATE agent_lifecycle_recovery_issue_revocations "
+            "SET evidence_digest='sha256:forged' WHERE issue_id='issue-1'",
+            "DELETE FROM agent_lifecycle_recovery_issue_revocations "
+            "WHERE issue_id='issue-1'",
+        ):
+            with self.assertRaisesRegex(
+                sqlite3.IntegrityError, f"^{REVOCATION_IMMUTABLE}$"
+            ):
+                self.write(lambda connection, sql=statement: connection.execute(sql))
+        with self.assertRaisesRegex(
+            sqlite3.IntegrityError, f"^{REVOCATION_REINSERT_DENIED}$"
+        ):
+            self.write(
+                lambda connection: connection.execute(
+                    """
+                    INSERT OR REPLACE INTO agent_lifecycle_recovery_issue_revocations(
+                      issue_id,revocation_kind,evidence_digest,revoked_at)
+                    VALUES('issue-1','operator-revoked','sha256:replaced',?)
+                    """,
+                    (T6,),
+                )
+            )
         self.assert_foreign_keys_clean()
 
     def test_handoff_then_revocation_serializes_to_commit_pending_error(self) -> None:
@@ -526,6 +444,30 @@ class Lead8AfterRepairTests(unittest.TestCase):
         )
 
         self.assert_integrity_error(error, ISSUE_COMMIT_PENDING)
+        for statement in (
+            "UPDATE lifecycle_fresh_recovery_handoffs "
+            "SET created_at='2026-07-14T00:00:07.000Z' "
+            "WHERE issue_id='issue-1'",
+            "DELETE FROM lifecycle_fresh_recovery_handoffs "
+            "WHERE issue_id='issue-1'",
+        ):
+            with self.assertRaisesRegex(
+                sqlite3.IntegrityError, f"^{HANDOFF_IMMUTABLE}$"
+            ):
+                self.write(lambda connection, sql=statement: connection.execute(sql))
+        with self.assertRaisesRegex(
+            sqlite3.IntegrityError, f"^{HANDOFF_REINSERT_DENIED}$"
+        ):
+            self.write(
+                lambda connection: connection.execute(
+                    """
+                    INSERT OR REPLACE INTO lifecycle_fresh_recovery_handoffs(
+                      handoff_id,issue_id,created_at)
+                    VALUES('handoff-replaced','issue-1',?)
+                    """,
+                    (T6,),
+                )
+            )
         self.assert_foreign_keys_clean()
 
     def test_active_source_reissue_has_stable_busy_error(self) -> None:
@@ -539,6 +481,17 @@ class Lead8AfterRepairTests(unittest.TestCase):
             )
 
         self.assertEqual(self.current_head(), ("issue-1", "sha256:journal-1", 1))
+        for statement in (
+            "UPDATE agent_lifecycle_recovery_capability_issues "
+            "SET expires_at='2026-07-14T00:00:30.000Z' "
+            "WHERE issue_id='issue-1'",
+            "DELETE FROM agent_lifecycle_recovery_capability_issues "
+            "WHERE issue_id='issue-1'",
+        ):
+            with self.assertRaisesRegex(
+                sqlite3.IntegrityError, f"^{ISSUE_IMMUTABLE}$"
+            ):
+                self.write(lambda connection, sql=statement: connection.execute(sql))
 
     def test_handoff_at_expiry_boundary_has_stable_expired_error(self) -> None:
         self.seed_issue(expires_at=T10)
@@ -607,6 +560,29 @@ class Lead8AfterRepairTests(unittest.TestCase):
             self.write(
                 lambda connection: connection.execute(
                     "DELETE FROM agent_lifecycle_recovery_source_heads"
+                )
+            )
+        with self.assertRaisesRegex(
+            sqlite3.IntegrityError, f"^{HEAD_REINSERT_DENIED}$"
+        ):
+            self.write(
+                lambda connection: connection.execute(
+                    """
+                    INSERT OR REPLACE INTO agent_lifecycle_recovery_source_heads(
+                      project_session_id,run_id,agent_id,recovery_source_kind,
+                      recovery_source_ref_digest,issue_id,source_journal_digest,
+                      head_revision)
+                    VALUES(?,?,?,?,?,?,?,99)
+                    """,
+                    (
+                        PS,
+                        RUN,
+                        AGENT,
+                        SOURCE_KIND,
+                        SOURCE_REF,
+                        "issue-1",
+                        "sha256:journal-1",
+                    ),
                 )
             )
 

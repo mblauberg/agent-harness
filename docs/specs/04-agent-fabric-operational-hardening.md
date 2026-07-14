@@ -7364,7 +7364,8 @@ lifecycle_fresh_rotation_preparations(
 
 lifecycle_fresh_recovery_handoffs(
   handoff_id PRIMARY KEY, preparation_id UNIQUE, attempt_id UNIQUE,
-  preparation_digest, issue_id UNIQUE, project_session_id, run_id, agent_id,
+  preparation_digest, issue_id NOT NULL UNIQUE, project_session_id, run_id,
+  agent_id,
   source_mode CHECK(source_mode IN ('terminalize-nonfinal-custody',
     'reuse-final-custody','open-generation-loss')),
   recovery_source_kind CHECK(
@@ -7444,6 +7445,8 @@ lifecycle_fresh_recovery_handoffs(
     source_journal_digest,preparation_digest,fresh_apply_plan_digest,
     handoff_digest),
   UNIQUE(provider_action_adapter_id,provider_action_id),
+  FOREIGN KEY(issue_id)
+    REFERENCES agent_lifecycle_recovery_source_heads(issue_id),
   FOREIGN KEY(preparation_id,attempt_id,issue_id,project_session_id,run_id,
       agent_id,recovery_source_kind,recovery_source_ref_digest,
       source_journal_digest,preparation_digest)
@@ -7920,6 +7923,27 @@ agent_lifecycle_recovery_capability_issues(
       source_ref_digest,journal_digest)
 )
 
+agent_lifecycle_recovery_source_heads(
+  project_session_id NOT NULL, run_id NOT NULL, agent_id NOT NULL,
+  recovery_source_kind NOT NULL CHECK(
+    recovery_source_kind IN ('custody','generation-loss')),
+  recovery_source_ref_digest NOT NULL, issue_id NOT NULL,
+  source_journal_digest NOT NULL,
+  head_revision NOT NULL CHECK(head_revision >= 1),
+  PRIMARY KEY(project_session_id,run_id,agent_id,recovery_source_kind,
+    recovery_source_ref_digest),
+  UNIQUE(project_session_id,run_id,agent_id,recovery_source_kind,
+    recovery_source_ref_digest,issue_id,source_journal_digest),
+  UNIQUE(issue_id),
+  FOREIGN KEY(issue_id,project_session_id,run_id,agent_id,
+      recovery_source_kind,recovery_source_ref_digest,
+      source_journal_digest)
+    REFERENCES agent_lifecycle_recovery_capability_issues(
+      issue_id,project_session_id,run_id,agent_id,
+      recovery_source_kind,recovery_source_ref_digest,
+      source_journal_digest)
+)
+
 agent_lifecycle_recovery_issue_revocations(
   issue_id PRIMARY KEY, revocation_kind CHECK(
     revocation_kind IN ('operator-revoked','source-stale')),
@@ -7927,6 +7951,239 @@ agent_lifecycle_recovery_issue_revocations(
   FOREIGN KEY(issue_id)
     REFERENCES agent_lifecycle_recovery_capability_issues(issue_id)
 )
+
+CREATE TRIGGER lifecycle_recovery_issue_claim_source
+AFTER INSERT ON agent_lifecycle_recovery_capability_issues
+BEGIN
+  INSERT INTO agent_lifecycle_recovery_source_heads(
+    project_session_id,run_id,agent_id,recovery_source_kind,
+    recovery_source_ref_digest,issue_id,source_journal_digest,head_revision)
+  SELECT
+    NEW.project_session_id,NEW.run_id,NEW.agent_id,NEW.recovery_source_kind,
+    NEW.recovery_source_ref_digest,NEW.issue_id,NEW.source_journal_digest,1
+  WHERE NOT EXISTS (
+    SELECT 1 FROM agent_lifecycle_recovery_source_heads AS head
+    WHERE head.project_session_id=NEW.project_session_id
+      AND head.run_id=NEW.run_id
+      AND head.agent_id=NEW.agent_id
+      AND head.recovery_source_kind=NEW.recovery_source_kind
+      AND head.recovery_source_ref_digest=NEW.recovery_source_ref_digest);
+
+  UPDATE agent_lifecycle_recovery_source_heads
+  SET
+    issue_id=NEW.issue_id,
+    source_journal_digest=NEW.source_journal_digest,
+    head_revision=agent_lifecycle_recovery_source_heads.head_revision+1
+  WHERE project_session_id=NEW.project_session_id
+    AND run_id=NEW.run_id
+    AND agent_id=NEW.agent_id
+    AND recovery_source_kind=NEW.recovery_source_kind
+    AND recovery_source_ref_digest=NEW.recovery_source_ref_digest
+    AND issue_id<>NEW.issue_id
+    AND NOT EXISTS (
+      SELECT 1 FROM lifecycle_fresh_recovery_handoffs AS handoff
+      WHERE handoff.issue_id=
+        agent_lifecycle_recovery_source_heads.issue_id)
+    AND (
+      EXISTS (
+        SELECT 1 FROM agent_lifecycle_recovery_issue_revocations AS revocation
+        WHERE revocation.issue_id=
+          agent_lifecycle_recovery_source_heads.issue_id)
+      OR EXISTS (
+        SELECT 1
+        FROM agent_lifecycle_recovery_capability_issues AS old_issue
+        WHERE old_issue.issue_id=
+            agent_lifecycle_recovery_source_heads.issue_id
+          AND old_issue.expires_at<=NEW.issued_at));
+
+  SELECT CASE WHEN NOT EXISTS (
+    SELECT 1 FROM agent_lifecycle_recovery_source_heads AS head
+    WHERE head.project_session_id=NEW.project_session_id
+      AND head.run_id=NEW.run_id
+      AND head.agent_id=NEW.agent_id
+      AND head.recovery_source_kind=NEW.recovery_source_kind
+      AND head.recovery_source_ref_digest=NEW.recovery_source_ref_digest
+      AND head.issue_id=NEW.issue_id)
+  THEN RAISE(ABORT,'LIFECYCLE_RECOVERY_SOURCE_BUSY') END;
+END;
+
+CREATE TRIGGER lifecycle_recovery_source_head_reinsert_denied
+BEFORE INSERT ON agent_lifecycle_recovery_source_heads
+WHEN EXISTS (
+    SELECT 1 FROM agent_lifecycle_recovery_source_heads AS head
+    WHERE (head.project_session_id=NEW.project_session_id
+        AND head.run_id=NEW.run_id
+        AND head.agent_id=NEW.agent_id
+        AND head.recovery_source_kind=NEW.recovery_source_kind
+        AND head.recovery_source_ref_digest=NEW.recovery_source_ref_digest)
+      OR head.issue_id=NEW.issue_id)
+BEGIN
+  SELECT RAISE(ABORT,'LIFECYCLE_RECOVERY_SOURCE_HEAD_REINSERT_DENIED');
+END;
+
+CREATE TRIGGER lifecycle_recovery_source_head_update_guard
+BEFORE UPDATE ON agent_lifecycle_recovery_source_heads
+WHEN NEW.project_session_id<>OLD.project_session_id
+  OR NEW.run_id<>OLD.run_id
+  OR NEW.agent_id<>OLD.agent_id
+  OR NEW.recovery_source_kind<>OLD.recovery_source_kind
+  OR NEW.recovery_source_ref_digest<>OLD.recovery_source_ref_digest
+  OR NEW.issue_id=OLD.issue_id
+  OR NEW.head_revision<>OLD.head_revision+1
+  OR EXISTS (
+    SELECT 1 FROM lifecycle_fresh_recovery_handoffs AS handoff
+    WHERE handoff.issue_id=OLD.issue_id)
+  OR NOT EXISTS (
+    SELECT 1
+    FROM agent_lifecycle_recovery_capability_issues AS new_issue
+    WHERE new_issue.issue_id=NEW.issue_id
+      AND new_issue.project_session_id=NEW.project_session_id
+      AND new_issue.run_id=NEW.run_id
+      AND new_issue.agent_id=NEW.agent_id
+      AND new_issue.recovery_source_kind=NEW.recovery_source_kind
+      AND new_issue.recovery_source_ref_digest=NEW.recovery_source_ref_digest
+      AND new_issue.source_journal_digest=NEW.source_journal_digest)
+  OR NOT EXISTS (
+    SELECT 1
+    FROM agent_lifecycle_recovery_capability_issues AS old_issue
+    JOIN agent_lifecycle_recovery_capability_issues AS new_issue
+      ON new_issue.issue_id=NEW.issue_id
+    WHERE old_issue.issue_id=OLD.issue_id
+      AND (new_issue.issued_at>old_issue.issued_at
+        OR (new_issue.issued_at=old_issue.issued_at
+          AND new_issue.issue_id>old_issue.issue_id)))
+  OR EXISTS (
+    SELECT 1
+    FROM agent_lifecycle_recovery_capability_issues AS later_issue
+    JOIN agent_lifecycle_recovery_capability_issues AS new_issue
+      ON new_issue.issue_id=NEW.issue_id
+    WHERE later_issue.project_session_id=NEW.project_session_id
+      AND later_issue.run_id=NEW.run_id
+      AND later_issue.agent_id=NEW.agent_id
+      AND later_issue.recovery_source_kind=NEW.recovery_source_kind
+      AND later_issue.recovery_source_ref_digest=
+        NEW.recovery_source_ref_digest
+      AND (later_issue.issued_at>new_issue.issued_at
+        OR (later_issue.issued_at=new_issue.issued_at
+          AND later_issue.issue_id>new_issue.issue_id)))
+  OR NOT (
+    EXISTS (
+      SELECT 1 FROM agent_lifecycle_recovery_issue_revocations AS revocation
+      WHERE revocation.issue_id=OLD.issue_id)
+    OR EXISTS (
+      SELECT 1
+      FROM agent_lifecycle_recovery_capability_issues AS old_issue
+      JOIN agent_lifecycle_recovery_capability_issues AS new_issue
+        ON new_issue.issue_id=NEW.issue_id
+      WHERE old_issue.issue_id=OLD.issue_id
+        AND old_issue.expires_at<=new_issue.issued_at))
+BEGIN
+  SELECT RAISE(ABORT,'LIFECYCLE_RECOVERY_SOURCE_BUSY');
+END;
+
+CREATE TRIGGER lifecycle_recovery_source_head_delete_guard
+BEFORE DELETE ON agent_lifecycle_recovery_source_heads
+BEGIN
+  SELECT RAISE(ABORT,'LIFECYCLE_RECOVERY_SOURCE_HEAD_DELETE_DENIED');
+END;
+
+CREATE TRIGGER lifecycle_recovery_handoff_guard
+BEFORE INSERT ON lifecycle_fresh_recovery_handoffs
+BEGIN
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM agent_lifecycle_recovery_issue_revocations AS revocation
+    WHERE revocation.issue_id=NEW.issue_id)
+  THEN RAISE(ABORT,'LIFECYCLE_RECOVERY_ISSUE_REVOKED') END;
+
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM agent_lifecycle_recovery_capability_issues AS issue
+    WHERE issue.issue_id=NEW.issue_id
+      AND issue.expires_at<=NEW.created_at)
+  THEN RAISE(ABORT,'LIFECYCLE_RECOVERY_ISSUE_EXPIRED') END;
+END;
+
+CREATE TRIGGER lifecycle_recovery_handoff_reinsert_denied
+BEFORE INSERT ON lifecycle_fresh_recovery_handoffs
+WHEN EXISTS (
+  SELECT 1 FROM lifecycle_fresh_recovery_handoffs AS handoff
+  WHERE handoff.handoff_id=NEW.handoff_id OR handoff.issue_id=NEW.issue_id)
+BEGIN
+  SELECT RAISE(ABORT,'LIFECYCLE_RECOVERY_HANDOFF_REINSERT_DENIED');
+END;
+
+CREATE TRIGGER lifecycle_recovery_revocation_guard
+BEFORE INSERT ON agent_lifecycle_recovery_issue_revocations
+BEGIN
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM lifecycle_fresh_recovery_handoffs AS handoff
+    WHERE handoff.issue_id=NEW.issue_id)
+  THEN RAISE(ABORT,'LIFECYCLE_RECOVERY_ISSUE_COMMIT_PENDING') END;
+END;
+
+CREATE TRIGGER lifecycle_recovery_revocation_reinsert_denied
+BEFORE INSERT ON agent_lifecycle_recovery_issue_revocations
+WHEN EXISTS (
+  SELECT 1 FROM agent_lifecycle_recovery_issue_revocations AS revocation
+  WHERE revocation.issue_id=NEW.issue_id)
+BEGIN
+  SELECT RAISE(ABORT,'LIFECYCLE_RECOVERY_REVOCATION_REINSERT_DENIED');
+END;
+
+CREATE TRIGGER lifecycle_recovery_issue_update_denied
+BEFORE UPDATE ON agent_lifecycle_recovery_capability_issues
+BEGIN
+  SELECT RAISE(ABORT,'LIFECYCLE_RECOVERY_ISSUE_IMMUTABLE');
+END;
+
+CREATE TRIGGER lifecycle_recovery_issue_delete_denied
+BEFORE DELETE ON agent_lifecycle_recovery_capability_issues
+BEGIN
+  SELECT RAISE(ABORT,'LIFECYCLE_RECOVERY_ISSUE_IMMUTABLE');
+END;
+
+CREATE TRIGGER lifecycle_recovery_handoff_update_denied
+BEFORE UPDATE ON lifecycle_fresh_recovery_handoffs
+BEGIN
+  SELECT RAISE(ABORT,'LIFECYCLE_RECOVERY_HANDOFF_IMMUTABLE');
+END;
+
+CREATE TRIGGER lifecycle_recovery_handoff_delete_denied
+BEFORE DELETE ON lifecycle_fresh_recovery_handoffs
+BEGIN
+  SELECT RAISE(ABORT,'LIFECYCLE_RECOVERY_HANDOFF_IMMUTABLE');
+END;
+
+CREATE TRIGGER lifecycle_recovery_revocation_update_denied
+BEFORE UPDATE ON agent_lifecycle_recovery_issue_revocations
+BEGIN
+  SELECT RAISE(ABORT,'LIFECYCLE_RECOVERY_REVOCATION_IMMUTABLE');
+END;
+
+CREATE TRIGGER lifecycle_recovery_revocation_delete_denied
+BEFORE DELETE ON agent_lifecycle_recovery_issue_revocations
+BEGIN
+  SELECT RAISE(ABORT,'LIFECYCLE_RECOVERY_REVOCATION_IMMUTABLE');
+END;
+
+The source-head row is the sole current-issue pointer for one immutable
+`(project_session_id,run_id,agent_id,recovery_source_kind,
+recovery_source_ref_digest)` source. It does not copy issue clocks. A replacement
+may advance the head only when the current issue has no handoff and is revoked,
+or its authoritative `expires_at` is at or before the replacement's `issued_at`.
+The new issue's canonical `(issued_at,issue_id)` tuple must be strictly greater
+than the current tuple, and `head_revision` advances by exactly one. Handoffs
+reference `agent_lifecycle_recovery_source_heads(issue_id)`, so an old issue
+cannot commit after replacement. Issue, handoff, revocation and source-head rows
+are immutable except for that guarded monotonic head advance.
+Issue claim uses a plain insert-if-absent followed by the guarded monotonic
+`UPDATE`; it never uses UPSERT or `INSERT OR REPLACE`. Existing source heads,
+handoffs and revocations reject every colliding insert before SQLite can apply
+replacement semantics, independently of `recursive_triggers`.
+
+Every issue, handoff and revocation writer uses `BEGIN IMMEDIATE` before its
+first read or write and retains the writer transaction through commit. This
+makes the claim, replacement, handoff and revocation guards observe the prior
+committed winner rather than independently accepting crossed decisions.
 
 agent_lifecycle_recovery_retirements(
   retirement_id NOT NULL PRIMARY KEY, project_session_id NOT NULL,

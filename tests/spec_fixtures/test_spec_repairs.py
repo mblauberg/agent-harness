@@ -1854,18 +1854,100 @@ class SpecRepairTests(unittest.TestCase):
         handoff = ddl_block(SPEC_04, "lifecycle_fresh_recovery_handoffs")
         self.assertNotIn("issued_at", source_head)
         self.assertNotIn("expires_at", source_head)
-        self.assertIn("issue_id NOT NULL UNIQUE", source_head)
         self.assertIn(
-            "FOREIGN KEY(issue_id)\n"
-            "    REFERENCES agent_lifecycle_recovery_source_heads(issue_id)",
+            "PRIMARY KEY(project_session_id,run_id,agent_id,"
+            "recovery_source_kind,\n    recovery_source_ref_digest)",
+            source_head,
+        )
+        self.assertIn(
+            "UNIQUE(project_session_id,run_id,agent_id,recovery_source_kind,\n"
+            "    recovery_source_ref_digest,issue_id,source_journal_digest)",
+            source_head,
+        )
+        self.assertIn("UNIQUE(issue_id)", source_head)
+        self.assertIn(
+            "FOREIGN KEY(issue_id,project_session_id,run_id,agent_id,\n"
+            "      recovery_source_kind,recovery_source_ref_digest,\n"
+            "      source_journal_digest)\n"
+            "    REFERENCES agent_lifecycle_recovery_capability_issues(\n"
+            "      issue_id,project_session_id,run_id,agent_id,\n"
+            "      recovery_source_kind,recovery_source_ref_digest,\n"
+            "      source_journal_digest)",
+            source_head,
+        )
+        self.assertIn(
+            "issue_id NOT NULL UNIQUE",
             handoff,
         )
+        self.assertIn(
+            "FOREIGN KEY(issue_id)\n"
+            "    REFERENCES agent_lifecycle_recovery_source_heads(issue_id)", handoff
+        )
+        trigger_names = (
+            "lifecycle_recovery_issue_claim_source",
+            "lifecycle_recovery_source_head_reinsert_denied",
+            "lifecycle_recovery_source_head_update_guard",
+            "lifecycle_recovery_source_head_delete_guard",
+            "lifecycle_recovery_handoff_guard",
+            "lifecycle_recovery_handoff_reinsert_denied",
+            "lifecycle_recovery_revocation_guard",
+            "lifecycle_recovery_revocation_reinsert_denied",
+            "lifecycle_recovery_issue_update_denied",
+            "lifecycle_recovery_issue_delete_denied",
+            "lifecycle_recovery_handoff_update_denied",
+            "lifecycle_recovery_handoff_delete_denied",
+            "lifecycle_recovery_revocation_update_denied",
+            "lifecycle_recovery_revocation_delete_denied",
+        )
+        triggers = {name: trigger_sql(SPEC_04, name) for name in trigger_names}
+        self.assertIn(
+            "head_revision=agent_lifecycle_recovery_source_heads."
+            "head_revision+1",
+            triggers["lifecycle_recovery_issue_claim_source"],
+        )
+        self.assertIn(
+            "new_issue.issued_at>old_issue.issued_at",
+            triggers["lifecycle_recovery_source_head_update_guard"],
+        )
+        self.assertIn(
+            "FROM agent_lifecycle_recovery_issue_revocations AS revocation",
+            triggers["lifecycle_recovery_handoff_guard"],
+        )
+        self.assertIn(
+            "FROM lifecycle_fresh_recovery_handoffs AS handoff",
+            triggers["lifecycle_recovery_revocation_guard"],
+        )
+        self.assertIn(
+            "LIFECYCLE_RECOVERY_SOURCE_HEAD_REINSERT_DENIED",
+            triggers["lifecycle_recovery_source_head_reinsert_denied"],
+        )
+        self.assertIn(
+            "LIFECYCLE_RECOVERY_HANDOFF_REINSERT_DENIED",
+            triggers["lifecycle_recovery_handoff_reinsert_denied"],
+        )
+        self.assertIn(
+            "LIFECYCLE_RECOVERY_REVOCATION_REINSERT_DENIED",
+            triggers["lifecycle_recovery_revocation_reinsert_denied"],
+        )
+        for name in trigger_names:
+            with self.subTest(trigger=name):
+                self.assertEqual(SPEC_04.count(f"CREATE TRIGGER {name}\n"), 1)
         self.assertIn("LIFECYCLE_RECOVERY_SOURCE_BUSY", SPEC_04)
         self.assertIn("LIFECYCLE_RECOVERY_ISSUE_REVOKED", SPEC_04)
         self.assertIn("LIFECYCLE_RECOVERY_ISSUE_COMMIT_PENDING", SPEC_04)
         self.assertIn(
             "Every issue, handoff and revocation writer uses "
             "`BEGIN IMMEDIATE`",
+            " ".join(SPEC_04.split()),
+        )
+        self.assertIn(
+            "Issue claim uses a plain insert-if-absent followed by the guarded "
+            "monotonic `UPDATE`; it never uses UPSERT or `INSERT OR REPLACE`",
+            " ".join(SPEC_04.split()),
+        )
+        self.assertIn(
+            "Existing source heads, handoffs and revocations reject every "
+            "colliding insert before SQLite can apply replacement semantics",
             " ".join(SPEC_04.split()),
         )
         self.assertIn(

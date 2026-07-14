@@ -252,6 +252,13 @@ built.
   retirement result and/or fresh commit before accepting the immutable apply
   marker; child-to-apply FKs are deferred and the public fixture executes every
   incomplete arm family.
+- Lead 8 — `agent_lifecycle_recovery_source_heads` now owns the immutable
+  current-issue pointer, monotonic reissue and current-head handoff FK; exact
+  issue/handoff/revocation triggers close both race orders and all three
+  `INSERT OR REPLACE` collision paths under the required `BEGIN IMMEDIATE`
+  writer rule. Issue claim is plain insert-if-absent plus guarded update, not an
+  upsert. The public ten-case fixture extracts and executes the normative table
+  and all fourteen trigger definitions.
 
 **Pending structural repair (needed before freeze; codex-certified):** these
 close only with multi-part DDL changes, not one-line additions, so they are
@@ -260,8 +267,6 @@ deliberately not half-applied —
   canonical pointers or non-null sentinels so the fuller FKs cannot be
   null-vacuous; give `review_slot_heads` a real FK; publish
   `provider_review_evidence` DDL (unifies with MF01-2).
-- Lead 8 — source single-flight (needs a derived-state column or trigger, since
-  the issues table has no state column) + reciprocal revocation/handoff guards.
 - MF04-3 (partial) — discriminator CHECK for triple nullability + adapter/kind on
   the FK; MF04-4 (context-pressure vs rotation); MF04-5 (§9.23/§9.24 admission
   order); MF04-6 (dispatch/observation route-admission binding).
