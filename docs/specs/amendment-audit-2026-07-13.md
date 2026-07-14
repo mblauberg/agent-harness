@@ -270,6 +270,20 @@ built.
   configuration identity/revision/digest, adapter contract and executable
   identity. Executable fixtures reject null/partial parents and adapter, kind,
   digest, contract and executable-identity crossings.
+- MF04-5 — route admission is now parent-first under the immediate foreign
+  keys: the pre-router finding-capacity row retains its null attempt, admission
+  attaches its positive attempt, all remaining authority/budget parents and
+  the provider action are inserted, and the route is inserted last. The
+  route keeps the stable reservation identity while an insert guard requires
+  the parent to be attached, so terminal settlement remains legal. The
+  candidate resolver receipt remains output only; no admitted-compilation
+  persistence row was invented.
+- MF04-6 — `provider_action_routes` now publishes the exact pair/admission and
+  full immutable-admission candidate keys. Dispatch foreign-keys the complete
+  admitted body/configuration/permission/surface tuple while allowing only a
+  same-body snapshot-instance refresh, and observation foreign-keys the exact
+  action-pair/admission digest. Executable fixtures reject every crossed child
+  component and finish with an empty `foreign_key_check`.
 
 **Pending structural repair (needed before freeze; codex-certified):** these
 close only with multi-part DDL changes, not one-line additions, so they are
@@ -278,8 +292,7 @@ deliberately not half-applied —
   canonical pointers or non-null sentinels so the fuller FKs cannot be
   null-vacuous; give `review_slot_heads` a real FK; publish
   `provider_review_evidence` DDL (unifies with MF01-2).
-- MF04-4 (context-pressure vs rotation); MF04-5 (§9.23/§9.24 admission
-  order); MF04-6 (dispatch/observation route-admission binding).
+- MF04-4 (context-pressure vs rotation).
 - MF01-1 (§32.21/§32.22 requirement IDs; new IDs start FR-077/NFR-034/AC-056);
   MF01-4 (generic-route recovery owner cross-reference).
 - Newly found — `lifecycleMutationPlanV1`'s closed relation enum omits

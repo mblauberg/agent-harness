@@ -5440,8 +5440,8 @@ admission transaction then rechecks effort
 applicability, target/artifact/source currency, slot-head generation,
 active chair binding/adapter contract and resolved adapter/family/model/effort
 against the profile and provider payload. Resolved adapter must equal requested
-action adapter and slot adapter. It inserts route/action/reservation/command
-atomically.
+action adapter and slot adapter. It attaches the existing reservation, inserts
+the action and command parents, and inserts the route last, atomically.
 
 For certifying dispatch, the authenticated principal must be the current target
 chair at the active binding's principal/lease/provider-session/bridge
@@ -9184,6 +9184,7 @@ adapter_effective_configurations(
   requested_configuration_digest,
   effective_configuration_digest, permission_profile_digest,
   discovery_surface_evidence_id, discovery_surface_evidence_revision,
+  discovery_surface_digest,
   evidence_id, evidence_revision,
   configuration_json, configuration_digest, created_at,
   PRIMARY KEY(configuration_id, configuration_revision),
@@ -9197,6 +9198,11 @@ adapter_effective_configurations(
     adapter_contract_digest,configuration_id,configuration_revision,
     configuration_digest,effective_configuration_digest,
     executable_identity_digest),
+  UNIQUE(subject_action_adapter_id, subject_action_id,
+    configuration_id, configuration_revision, configuration_digest,
+    capability_body_digest, permission_profile_digest,
+    discovery_surface_evidence_id, discovery_surface_evidence_revision,
+    discovery_surface_digest),
   FOREIGN KEY(evidence_id, evidence_revision)
     REFERENCES artifacts(artifact_id, revision),
   FOREIGN KEY(adapter_id, capability_snapshot_generation,
@@ -9205,8 +9211,9 @@ adapter_effective_configurations(
       adapter_id, snapshot_generation, snapshot_digest,
       capability_body_digest),
   FOREIGN KEY(discovery_surface_evidence_id,
-      discovery_surface_evidence_revision)
-    REFERENCES discovery_surface_manifests(evidence_id, evidence_revision),
+      discovery_surface_evidence_revision, discovery_surface_digest)
+    REFERENCES discovery_surface_manifests(
+      evidence_id, evidence_revision, manifest_digest),
   FOREIGN KEY(adapter_id, subject_activation_id, subject_activation_revision)
     REFERENCES adapter_activation_subjects(
       adapter_id, activation_id, activation_revision),
@@ -9323,16 +9330,29 @@ provider_action_routes(
   requested_configuration_digest, effective_route_configuration_digest,
   discovery_surface_evidence_id, discovery_surface_evidence_revision,
   discovery_surface_digest,
-  ...new admission columns...,
+  deployed_route_admission_digest,
+  ...remaining admission columns...,
+  UNIQUE(adapter_id, action_id, deployed_route_admission_digest),
+  UNIQUE(adapter_id, action_id, deployed_route_admission_digest,
+    capability_body_digest, effective_configuration_id,
+    effective_configuration_revision, effective_configuration_ref_digest,
+    permission_profile_digest, discovery_surface_evidence_id,
+    discovery_surface_evidence_revision, discovery_surface_digest),
   FOREIGN KEY(adapter_id, capability_snapshot_generation,
     capability_snapshot_digest, capability_body_digest)
     REFERENCES adapter_capability_snapshots(
       adapter_id, snapshot_generation, snapshot_digest,
       capability_body_digest),
-  FOREIGN KEY(effective_configuration_id, effective_configuration_revision,
-      effective_configuration_ref_digest)
+  FOREIGN KEY(adapter_id, action_id, effective_configuration_id,
+      effective_configuration_revision, effective_configuration_ref_digest,
+      capability_body_digest, permission_profile_digest,
+      discovery_surface_evidence_id, discovery_surface_evidence_revision,
+      discovery_surface_digest)
     REFERENCES adapter_effective_configurations(
-      configuration_id, configuration_revision, configuration_digest),
+      subject_action_adapter_id, subject_action_id, configuration_id,
+      configuration_revision, configuration_digest, capability_body_digest,
+      permission_profile_digest, discovery_surface_evidence_id,
+      discovery_surface_evidence_revision, discovery_surface_digest),
   FOREIGN KEY(discovery_surface_evidence_id,
       discovery_surface_evidence_revision, discovery_surface_digest)
     REFERENCES discovery_surface_manifests(
@@ -9365,11 +9385,20 @@ provider_action_route_dispatches(
   effective_configuration_id, effective_configuration_revision,
   effective_configuration_ref_digest, permission_profile_digest,
   discovery_surface_evidence_id, discovery_surface_evidence_revision,
-  dispatched_at, dispatch_json, dispatch_digest,
+  discovery_surface_digest, dispatched_at, dispatch_json, dispatch_digest,
   PRIMARY KEY(adapter_id, action_id, dispatch_ordinal),
   UNIQUE(dispatch_digest),
-  FOREIGN KEY(adapter_id, action_id)
-    REFERENCES provider_action_routes(adapter_id, action_id),
+  FOREIGN KEY(adapter_id, action_id, admission_digest,
+      capability_body_digest, effective_configuration_id,
+      effective_configuration_revision, effective_configuration_ref_digest,
+      permission_profile_digest, discovery_surface_evidence_id,
+      discovery_surface_evidence_revision, discovery_surface_digest)
+    REFERENCES provider_action_routes(
+      adapter_id, action_id, deployed_route_admission_digest,
+      capability_body_digest, effective_configuration_id,
+      effective_configuration_revision, effective_configuration_ref_digest,
+      permission_profile_digest, discovery_surface_evidence_id,
+      discovery_surface_evidence_revision, discovery_surface_digest),
   FOREIGN KEY(adapter_id, capability_snapshot_generation,
       capability_snapshot_digest, capability_body_digest)
     REFERENCES adapter_capability_snapshots(
@@ -9380,8 +9409,9 @@ provider_action_route_dispatches(
     REFERENCES adapter_effective_configurations(
       configuration_id, configuration_revision, configuration_digest),
   FOREIGN KEY(discovery_surface_evidence_id,
-      discovery_surface_evidence_revision)
-    REFERENCES discovery_surface_manifests(evidence_id, evidence_revision)
+      discovery_surface_evidence_revision, discovery_surface_digest)
+    REFERENCES discovery_surface_manifests(
+      evidence_id, evidence_revision, manifest_digest)
 )
 ```
 
@@ -9400,8 +9430,9 @@ provider_action_route_observations(
   adapter_id, action_id, admission_digest,
   observation_json, observation_digest, observed_at,
   PRIMARY KEY(adapter_id, action_id), UNIQUE(observation_digest),
-  FOREIGN KEY(adapter_id, action_id)
-    REFERENCES provider_action_routes(adapter_id, action_id)
+  FOREIGN KEY(adapter_id, action_id, admission_digest)
+    REFERENCES provider_action_routes(
+      adapter_id, action_id, deployed_route_admission_digest)
 )
 ```
 
@@ -9425,21 +9456,28 @@ Admission and dispatch use this order:
 
 1. classify exact command/action-pair replay and create/attach the canonical pair
    preflight before any route/config subject;
-2. run the bounded pure resolver against explicit pinned inputs;
-3. in one transaction validate authority/budget plus the current unexpired
+2. for certifying work, reserve finding capacity before router I/O by inserting
+   the finding-capacity row in `preflight`; the pre-router finding-capacity
+   reservation keeps its attempt generation null until that admission
+   transaction;
+3. run the bounded pure resolver against explicit pinned inputs; its output is
+   only the candidate receipt;
+4. in one transaction validate authority/budget plus the current unexpired
    capability instance/body, adapter contract/host, model, raw effort, raw
    native mode, per-action effective configuration, permission profile,
    context-policy revision/digest and
-   harness revision/digest plus discovery-surface registration/digest, then insert
-   the provider-action effective configuration followed by its route/action/
-   reservations in that order;
-4. immediately before initial provider I/O or a permitted no-effect retry, read
+   harness revision/digest plus discovery-surface registration/digest; insert
+   the provider-action effective configuration; for certifying work, attach the
+   existing finding-capacity reservation by assigning its positive attempt
+   generation; insert every remaining authority and budget parent; insert the
+   canonical provider action; insert its route last;
+5. immediately before initial provider I/O or a permitted no-effect retry, read
    the current unexpired snapshot, require admitted body/contract/host/model/
    effort/mode plus fixed effective-configuration/permission/harness/context/
    surface/route equality, and
    append the exact dispatch snapshot row; an instance-only refresh with equal
    body proceeds;
-5. on body/permission/surface or other pre-effect drift, terminalise/supersede
+6. on body/permission/surface or other pre-effect drift, terminalise/supersede
    the zero-effect action and resolve
    afresh under a new action pair. After ambiguous effect, retain the original
    route and invoke only its existing pair-keyed recovery owner.
@@ -9711,6 +9749,25 @@ provider_action_routes(
       attempt_generation IS NULL AND reservation_digest IS NULL)
   )
 )
+
+CREATE TRIGGER provider_action_route_reservation_attached_guard
+BEFORE INSERT ON provider_action_routes
+WHEN NEW.reservation_digest IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM review_finding_capacity_reservations AS reservation
+    WHERE reservation.adapter_id = NEW.adapter_id
+      AND reservation.action_id = NEW.action_id
+      AND reservation.run_id = NEW.run_id
+      AND reservation.target_generation = NEW.target_generation
+      AND reservation.slot = NEW.slot
+      AND reservation.attempt_generation = NEW.attempt_generation
+      AND reservation.reservation_digest = NEW.reservation_digest
+      AND reservation.state = 'attached'
+  )
+BEGIN
+  SELECT RAISE(ABORT,'provider-action-route-reservation-not-attached');
+END;
 ~~~
 
 Task-bound answer-bearing action admission increments the run high water,
@@ -9728,6 +9785,10 @@ missing/integrity recovery and therefore remains the list membership owner.
 Task-bound provider-action rows cannot be deleted and their run, task, ordinal
 and `route_listed_at` fields are immutable; current-baseline triggers abort
 either mutation.
+The stable seven-column route foreign key retains reservation identity after
+terminal settlement. The insert guard separately requires that exact
+reservation to be `attached` at route admission; later `attached -> settled`
+does not rewrite the immutable route or invalidate its foreign key.
 Every route, dispatch, observation or recovery-state advance also increments
 that action's existing `journal_revision`; the read wrapper exposes it as
 `routeRevision`. No route bytes or freshness label is copied into another

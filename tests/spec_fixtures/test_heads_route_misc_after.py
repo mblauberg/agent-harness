@@ -194,16 +194,19 @@ CREATE TABLE review_finding_capacity_reservations(
   target_generation INTEGER NOT NULL CHECK(target_generation>=1),
   slot TEXT NOT NULL CHECK(slot IN
     ('native','other-primary','cursor-grok','agy-gemini')),
-  attempt_generation INTEGER NOT NULL CHECK(attempt_generation>=1),
+  attempt_generation INTEGER CHECK(
+    attempt_generation IS NULL OR attempt_generation>=1),
   reservation_digest TEXT NOT NULL,
-  state TEXT NOT NULL CHECK(state IN ('preflight','attached','settled')),
+  state TEXT NOT NULL CHECK(
+    state IN ('preflight','attached','released','settled')),
   PRIMARY KEY(adapter_id,action_id),
   UNIQUE(adapter_id,action_id,run_id,target_generation,slot,
     attempt_generation,reservation_digest),
-  UNIQUE(adapter_id,action_id,run_id,target_generation,slot,
-    attempt_generation,reservation_digest,state),
   FOREIGN KEY(adapter_id,action_id)
-    REFERENCES provider_action_pair_preflights(adapter_id,action_id)
+    REFERENCES provider_action_pair_preflights(adapter_id,action_id),
+  CHECK(
+    (state IN ('preflight','released') AND attempt_generation IS NULL) OR
+    (state IN ('attached','settled') AND attempt_generation IS NOT NULL))
 ) STRICT;
 
 CREATE TABLE adapter_capability_snapshots(
@@ -347,7 +350,6 @@ CREATE TABLE provider_action_routes(
   slot TEXT,
   attempt_generation INTEGER,
   reservation_digest TEXT,
-  reservation_state TEXT,
   route_receipt_digest TEXT NOT NULL,
   deployed_route_admission_digest TEXT NOT NULL,
   capability_snapshot_generation INTEGER NOT NULL,
@@ -371,18 +373,17 @@ CREATE TABLE provider_action_routes(
     discovery_surface_evidence_revision,discovery_surface_digest),
   CHECK(
     (route_kind='generic' AND target_generation IS NULL AND slot IS NULL AND
-      attempt_generation IS NULL AND reservation_digest IS NULL AND
-      reservation_state IS NULL) OR
+      attempt_generation IS NULL AND reservation_digest IS NULL) OR
     (route_kind='certifying' AND target_generation IS NOT NULL AND
       slot IS NOT NULL AND attempt_generation IS NOT NULL AND
-      reservation_digest IS NOT NULL AND reservation_state='attached')),
+      reservation_digest IS NOT NULL)),
   FOREIGN KEY(adapter_id,action_id,run_id)
     REFERENCES provider_actions(adapter_id,action_id,run_id),
   FOREIGN KEY(adapter_id,action_id,run_id,target_generation,slot,
-      attempt_generation,reservation_digest,reservation_state)
+      attempt_generation,reservation_digest)
     REFERENCES review_finding_capacity_reservations(
       adapter_id,action_id,run_id,target_generation,slot,
-      attempt_generation,reservation_digest,state),
+      attempt_generation,reservation_digest),
   FOREIGN KEY(adapter_id,capability_snapshot_generation,
       capability_snapshot_digest,capability_body_digest)
     REFERENCES adapter_capability_snapshots(
@@ -402,6 +403,25 @@ CREATE TABLE provider_action_routes(
     REFERENCES discovery_surface_manifests(
       evidence_id,evidence_revision,manifest_digest)
 ) STRICT;
+
+CREATE TRIGGER provider_action_route_reservation_attached_guard
+BEFORE INSERT ON provider_action_routes
+WHEN NEW.reservation_digest IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM review_finding_capacity_reservations AS reservation
+    WHERE reservation.adapter_id=NEW.adapter_id
+      AND reservation.action_id=NEW.action_id
+      AND reservation.run_id=NEW.run_id
+      AND reservation.target_generation=NEW.target_generation
+      AND reservation.slot=NEW.slot
+      AND reservation.attempt_generation=NEW.attempt_generation
+      AND reservation.reservation_digest=NEW.reservation_digest
+      AND reservation.state='attached'
+  )
+BEGIN
+  SELECT RAISE(ABORT,'provider-action-route-reservation-not-attached');
+END;
 
 CREATE TABLE provider_action_route_dispatches(
   adapter_id TEXT NOT NULL,
@@ -966,7 +986,7 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
         run: str = "run-1",
         target: int = 1,
         slot: str = "native",
-        attempt: int = 1,
+        attempt: int | None = 1,
         state: str = "attached",
     ) -> None:
         self.db.execute(
@@ -1018,7 +1038,6 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
             slot if cert else None,
             attempt if cert else None,
             f"reservation-{action}" if cert else None,
-            "attached" if cert else None,
             f"route-receipt-{action}",
             f"admission-{action}",
             1,
@@ -1035,7 +1054,7 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
 
     def insert_route(self, values: Sequence[Any]) -> None:
         self.db.execute(
-            "INSERT INTO provider_action_routes VALUES(" + ",".join("?" * 21) + ")",
+            "INSERT INTO provider_action_routes VALUES(" + ",".join("?" * 20) + ")",
             values,
         )
 
@@ -1495,7 +1514,9 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
             CREATE TABLE discovery_surface_manifests(
               evidence_id TEXT NOT NULL,
               evidence_revision INTEGER NOT NULL,
-              PRIMARY KEY(evidence_id,evidence_revision)
+              manifest_digest TEXT,
+              PRIMARY KEY(evidence_id,evidence_revision),
+              UNIQUE(evidence_id,evidence_revision,manifest_digest)
             );
             CREATE TABLE adapter_activation_subjects(
               adapter_id TEXT NOT NULL,
@@ -1800,7 +1821,7 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
             "adapter-a", "generic-before-action", kind="generic"
         )
         self.reject(
-            "INSERT INTO provider_action_routes VALUES(" + ",".join("?" * 21) + ")",
+            "INSERT INTO provider_action_routes VALUES(" + ",".join("?" * 20) + ")",
             self.route_values("adapter-a", "generic-before-action"),
         )
 
@@ -1809,16 +1830,40 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
         )
         self.insert_action("adapter-a", "cert-before-reservation", ordinal=2)
         self.reject(
-            "INSERT INTO provider_action_routes VALUES(" + ",".join("?" * 21) + ")",
+            "INSERT INTO provider_action_routes VALUES(" + ",".join("?" * 20) + ")",
             self.route_values(
                 "adapter-a", "cert-before-reservation", kind="certifying"
             ),
         )
         self.insert_reservation(
-            "adapter-a", "cert-before-reservation", state="preflight"
+            "adapter-a",
+            "cert-before-reservation",
+            attempt=None,
+            state="preflight",
         )
         self.reject(
-            "INSERT INTO provider_action_routes VALUES(" + ",".join("?" * 21) + ")",
+            "INSERT INTO provider_action_routes VALUES(" + ",".join("?" * 20) + ")",
+            self.route_values(
+                "adapter-a", "cert-before-reservation", kind="certifying"
+            ),
+        )
+        self.db.execute(
+            """UPDATE review_finding_capacity_reservations
+               SET attempt_generation=1, state='settled'
+               WHERE adapter_id='adapter-a'
+                 AND action_id='cert-before-reservation'"""
+        )
+        self.assertEqual(
+            self.db.execute(
+                """SELECT attempt_generation,state
+                   FROM review_finding_capacity_reservations
+                   WHERE adapter_id='adapter-a'
+                     AND action_id='cert-before-reservation'"""
+            ).fetchone(),
+            (1, "settled"),
+        )
+        self.reject(
+            "INSERT INTO provider_action_routes VALUES(" + ",".join("?" * 20) + ")",
             self.route_values(
                 "adapter-a", "cert-before-reservation", kind="certifying"
             ),
@@ -1828,10 +1873,19 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
             "adapter-a", "canonical-cert", kind="certifying"
         )
         self.db.execute("BEGIN IMMEDIATE")
-        self.insert_reservation("adapter-a", "canonical-cert", state="preflight")
+        self.insert_reservation(
+            "adapter-a", "canonical-cert", attempt=None, state="preflight"
+        )
+        self.assertIsNone(
+            self.db.execute(
+                """SELECT attempt_generation
+                   FROM review_finding_capacity_reservations
+                   WHERE adapter_id='adapter-a' AND action_id='canonical-cert'"""
+            ).fetchone()[0]
+        )
         self.db.execute(
             """UPDATE review_finding_capacity_reservations
-               SET state='attached'
+               SET attempt_generation=1, state='attached'
                WHERE adapter_id='adapter-a' AND action_id='canonical-cert'"""
         )
         self.insert_action("adapter-a", "canonical-cert", ordinal=3)
@@ -1840,6 +1894,11 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
         )
         self.db.execute("COMMIT")
         mark_case()
+        self.accept(
+            """UPDATE review_finding_capacity_reservations
+               SET state='settled'
+               WHERE adapter_id='adapter-a' AND action_id='canonical-cert'"""
+        )
         self.assert_foreign_keys_clean()
 
     def test_dispatch_and_observation_bind_full_route_closure(self) -> None:

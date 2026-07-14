@@ -1700,9 +1700,30 @@ class SpecRepairTests(unittest.TestCase):
         )
 
     def test_route_children_bind_the_exact_admission(self) -> None:
+        configuration = ddl_block(SPEC_04, "adapter_effective_configurations")
         route = ddl_block(SPEC_04, "provider_action_routes")
         dispatch = ddl_block(SPEC_04, "provider_action_route_dispatches")
         observation = ddl_block(SPEC_04, "provider_action_route_observations")
+        attached_guard = trigger_sql(
+            SPEC_04, "provider_action_route_reservation_attached_guard"
+        )
+        self.assertIn(
+            "FROM review_finding_capacity_reservations AS reservation",
+            attached_guard,
+        )
+        self.assertIn("AND NOT EXISTS (", attached_guard)
+        self.assertIn(
+            "reservation.state = 'attached'",
+            attached_guard,
+        )
+        self.assertIn(
+            "UNIQUE(subject_action_adapter_id, subject_action_id,\n"
+            "    configuration_id, configuration_revision, configuration_digest,\n"
+            "    capability_body_digest, permission_profile_digest,\n"
+            "    discovery_surface_evidence_id, discovery_surface_evidence_revision,\n"
+            "    discovery_surface_digest)",
+            configuration,
+        )
         self.assertIn(
             "UNIQUE(adapter_id, action_id, deployed_route_admission_digest)",
             route,
@@ -1732,17 +1753,20 @@ class SpecRepairTests(unittest.TestCase):
         section_start = SPEC_04.index("Admission and dispatch use this order:")
         section_end = SPEC_04.index("Topology waves use one append-only store", section_start)
         section = SPEC_04[section_start:section_end]
+        normalized = " ".join(section.split())
         self.assertIn(
-            "insert the admitted compilation receipt; insert or attach every "
-            "authority/budget reservation parent; insert the canonical provider "
-            "action with its receipt foreign key; insert its route last",
-            " ".join(section.split()),
+            "attach the existing finding-capacity reservation by assigning its "
+            "positive attempt generation; insert every remaining authority and "
+            "budget parent; insert the canonical provider action; insert its "
+            "route last",
+            normalized,
         )
         self.assertIn(
-            "insert the preflight finding-capacity reservation before router "
-            "I/O",
-            " ".join(section.split()),
+            "the pre-router finding-capacity reservation keeps its attempt "
+            "generation null until that admission transaction",
+            normalized,
         )
+        self.assertNotIn("admitted compilation receipt", normalized)
 
     def test_rotation_clears_current_pressure_before_binding_change(self) -> None:
         section = " ".join(SPEC_04.split())
