@@ -9,10 +9,11 @@ reconciliation remain pending. The authority cutover continues in
 [issue #21](https://github.com/mblauberg/provenant/issues/21).
 
 The document-structure work is resolved by ADR 0009's standalone semantic
-specifications. Git owns history and integrity; the generic spec gate checks
-only size, ownership IDs, local links, complete discovery-index coverage,
-exact `docs/specs/<domain>/<topic>.md` depth with root and deeper paths
-rejected, and semantic filenames.
+specifications. Git owns history and integrity; the permanent gate checks only
+the file limits, duplicate normative IDs, local links and fragments, complete
+discovery-index coverage, exact `docs/specs/<domain>/<topic>.md` depth with
+root and deeper paths rejected, and rejected positional or continuation
+filenames.
 
 ## Destination
 
