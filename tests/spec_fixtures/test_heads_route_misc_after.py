@@ -661,10 +661,11 @@ CREATE TABLE provider_context_pressure_current(
 ) STRICT;
 
 CREATE TRIGGER binding_update_requires_pressure_clear
-BEFORE UPDATE ON agent_adapter_bindings
-WHEN EXISTS (
+BEFORE UPDATE OF adapter_id ON agent_adapter_bindings
+WHEN OLD.adapter_id IS NOT NEW.adapter_id AND EXISTS (
   SELECT 1 FROM provider_context_pressure_current p
-  WHERE p.run_id=OLD.run_id AND p.agent_id=OLD.agent_id)
+  WHERE p.run_id=OLD.run_id AND p.agent_id=OLD.agent_id
+    AND p.adapter_id=OLD.adapter_id)
 BEGIN
   SELECT RAISE(ABORT,'provider-context-pressure-not-cleared');
 END;
@@ -673,7 +674,8 @@ CREATE TRIGGER binding_delete_requires_pressure_clear
 BEFORE DELETE ON agent_adapter_bindings
 WHEN EXISTS (
   SELECT 1 FROM provider_context_pressure_current p
-  WHERE p.run_id=OLD.run_id AND p.agent_id=OLD.agent_id)
+  WHERE p.run_id=OLD.run_id AND p.agent_id=OLD.agent_id
+    AND p.adapter_id=OLD.adapter_id)
 BEGIN
   SELECT RAISE(ABORT,'provider-context-pressure-not-cleared');
 END;
@@ -1235,12 +1237,13 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
 
     def adopt_binding(
         self,
-        expected: tuple[Any, ...] | None,
         *,
         fault: str | None = None,
+        cross_before_clear: bool = False,
     ) -> None:
         self.db.execute("BEGIN IMMEDIATE")
         try:
+            expected = self.capture_pressure()
             if fault == "before-clear":
                 raise RuntimeError(fault)
             if expected is None:
@@ -1251,6 +1254,12 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
                 if present is not None:
                     raise sqlite3.IntegrityError("pressure-present-after-absent-capture")
             else:
+                if cross_before_clear:
+                    self.db.execute(
+                        """UPDATE provider_context_pressure_current
+                           SET revision=revision+1
+                           WHERE run_id='run-1' AND agent_id='agent-1'"""
+                    )
                 predicate = " AND ".join(f"{column} IS ?" for column in PRESSURE_COLUMNS)
                 cursor = self.db.execute(
                     f"DELETE FROM provider_context_pressure_current WHERE {predicate}",
@@ -2132,15 +2141,23 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
         before = self.capture_pressure()
         self.assertIsNotNone(before)
 
-        self.reject(
+        self.accept(
             """UPDATE agent_adapter_bindings SET revision=revision+1
+               WHERE run_id='run-1' AND agent_id='agent-1'"""
+        )
+        self.reject(
+            """UPDATE agent_adapter_bindings SET adapter_id='adapter-crossed'
+               WHERE run_id='run-1' AND agent_id='agent-1'"""
+        )
+        self.reject(
+            """DELETE FROM agent_adapter_bindings
                WHERE run_id='run-1' AND agent_id='agent-1'"""
         )
 
         for fault in ("before-clear", "after-clear", "after-binding-update"):
             with self.subTest(fault=fault):
                 with self.assertRaises(RuntimeError):
-                    self.adopt_binding(before, fault=fault)
+                    self.adopt_binding(fault=fault)
                 self.assertEqual(self.capture_pressure(), before)
                 self.assertEqual(
                     self.db.execute(
@@ -2148,18 +2165,16 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
                            FROM agent_adapter_bindings
                            WHERE run_id='run-1' AND agent_id='agent-1'"""
                     ).fetchone(),
-                    ("adapter-old", 1, 1),
+                    ("adapter-old", 1, 2),
                 )
                 mark_case()
 
-        crossed = list(before or ())
-        crossed[14] = "crossed-evidence"
         with self.assertRaises(sqlite3.IntegrityError):
-            self.adopt_binding(tuple(crossed))
+            self.adopt_binding(cross_before_clear=True)
         self.assertEqual(self.capture_pressure(), before)
         mark_case()
 
-        self.adopt_binding(before)
+        self.adopt_binding()
         self.assertIsNone(self.capture_pressure())
         self.assertEqual(
             self.db.execute(
@@ -2167,7 +2182,7 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
                    FROM agent_adapter_bindings
                    WHERE run_id='run-1' AND agent_id='agent-1'"""
             ).fetchone(),
-            ("adapter-new", 2, 1, 2),
+            ("adapter-new", 2, 1, 3),
         )
         mark_case()
 
@@ -2190,7 +2205,7 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
         self.db.execute(
             "DELETE FROM provider_context_pressure_current WHERE run_id='run-1' AND agent_id='agent-1'"
         )
-        self.adopt_binding(None)
+        self.adopt_binding()
         self.assertEqual(
             self.db.execute(
                 """SELECT adapter_id,provider_generation,revision

@@ -1778,8 +1778,33 @@ class SpecRepairTests(unittest.TestCase):
         )
         self.assertIn("compare-and-deletes that exact row", section)
         self.assertIn(
-            "binding UPDATE or DELETE aborts while any current pressure row "
-            "remains",
+            "adapter-identity UPDATE or binding DELETE aborts while its current "
+            "pressure row remains",
+            section,
+        )
+        update_guard = trigger_sql(
+            SPEC_04, "binding_update_requires_pressure_clear"
+        )
+        delete_guard = trigger_sql(
+            SPEC_04, "binding_delete_requires_pressure_clear"
+        )
+        self.assertIn(
+            "BEFORE UPDATE OF adapter_id ON agent_adapter_bindings",
+            update_guard,
+        )
+        self.assertIn("OLD.adapter_id IS NOT NEW.adapter_id", update_guard)
+        self.assertIn("p.adapter_id=OLD.adapter_id", update_guard)
+        self.assertNotIn("BEFORE UPDATE ON agent_adapter_bindings", update_guard)
+        self.assertIn("BEFORE DELETE ON agent_adapter_bindings", delete_guard)
+        self.assertIn("p.adapter_id=OLD.adapter_id", delete_guard)
+        self.assertIn(
+            "Provider-generation, context-revision and binding-revision advances "
+            "that retain the adapter identity do not invoke the update guard",
+            section,
+        )
+        self.assertIn(
+            "It creates no pressure history, re-keyed pressure row or synthetic "
+            "unknown observation",
             section,
         )
 

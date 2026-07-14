@@ -9619,6 +9619,26 @@ provider_context_pressure_current(
        used_tokens + remaining_tokens = window_tokens)))),
   CHECK(confidence != 'unknown' OR pressure='unknown')
 )
+
+CREATE TRIGGER binding_update_requires_pressure_clear
+BEFORE UPDATE OF adapter_id ON agent_adapter_bindings
+WHEN OLD.adapter_id IS NOT NEW.adapter_id AND EXISTS (
+  SELECT 1 FROM provider_context_pressure_current AS p
+  WHERE p.run_id=OLD.run_id AND p.agent_id=OLD.agent_id
+    AND p.adapter_id=OLD.adapter_id)
+BEGIN
+  SELECT RAISE(ABORT,'provider-context-pressure-not-cleared');
+END;
+
+CREATE TRIGGER binding_delete_requires_pressure_clear
+BEFORE DELETE ON agent_adapter_bindings
+WHEN EXISTS (
+  SELECT 1 FROM provider_context_pressure_current AS p
+  WHERE p.run_id=OLD.run_id AND p.agent_id=OLD.agent_id
+    AND p.adapter_id=OLD.adapter_id)
+BEGIN
+  SELECT RAISE(ABORT,'provider-context-pressure-not-cleared');
+END;
 ```
 
 Token fields are nullable nonnegative integers and satisfy the displayed closed
@@ -9629,6 +9649,23 @@ consumes or releases provider budget. Observation update CASes the same
 provider-generation/context-revision ordering already owned by lifecycle;
 lower/reordered input is audit-only and cannot regress the projection or infer
 principal/bridge generations.
+
+Adapter adoption starts the `BEGIN IMMEDIATE` adoption transaction before
+reading the current binding or pressure projection. It captures the complete
+current pressure row, including its provider generation, context revision,
+evidence digest and projection revision. When a row was captured, the daemon
+compare-and-deletes that exact row and requires exactly one deletion; when no
+row was captured, it requires the row to remain absent. Only then may the same
+transaction change the binding's adapter identity. A mismatch or crossed row
+aborts the transaction, and rollback after either the clear or binding update
+restores the prior binding and pressure row together.
+
+The displayed narrow guards make direct writes fail closed: an
+adapter-identity UPDATE or binding DELETE aborts while its current pressure row
+remains. Provider-generation, context-revision and binding-revision advances
+that retain the adapter identity do not invoke the update guard. This adoption
+step removes only the obsolete current projection. It creates no pressure
+history, re-keyed pressure row or synthetic unknown observation.
 
 `fabric.v1.provider-context-pressure.read` and the negotiated scoped operator
 System projection map this row exactly to Spec 01

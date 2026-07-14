@@ -284,6 +284,12 @@ built.
   same-body snapshot-instance refresh, and observation foreign-keys the exact
   action-pair/admission digest. Executable fixtures reject every crossed child
   component and finish with an empty `foreign_key_check`.
+- MF04-4 — adapter rotation now compare-deletes the exact current pressure row
+  inside the same `BEGIN IMMEDIATE` adoption transaction before changing the
+  adapter identity. Narrow guards reject adapter-identity updates or binding
+  deletion while pressure remains but do not block same-adapter telemetry or
+  binding-revision advances. Crash/crossing fixtures prove rollback and exact
+  deletion without pressure history, re-keying or synthetic observations.
 
 **Pending structural repair (needed before freeze; codex-certified):** these
 close only with multi-part DDL changes, not one-line additions, so they are
@@ -292,7 +298,6 @@ deliberately not half-applied —
   canonical pointers or non-null sentinels so the fuller FKs cannot be
   null-vacuous; give `review_slot_heads` a real FK; publish
   `provider_review_evidence` DDL (unifies with MF01-2).
-- MF04-4 (context-pressure vs rotation).
 - MF01-1 (§32.21/§32.22 requirement IDs; new IDs start FR-077/NFR-034/AC-056);
   MF01-4 (generic-route recovery owner cross-reference).
 - Newly found — `lifecycleMutationPlanV1`'s closed relation enum omits
