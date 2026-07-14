@@ -32,6 +32,7 @@ import {
   type OperatorEffectOutcome,
   type OperatorActionStatePort,
   type OperatorLaunchCustodyPort,
+  type OperatorLifecycleRecoveryCustodyPort,
 } from "../../src/operator/action-store.ts";
 import { OperatorProjectionStore } from "../../src/operator/projection-store.ts";
 import { OperatorStore } from "../../src/operator/store.ts";
@@ -147,7 +148,7 @@ function setupProjection(): {
     kind: "session",
     projectSessionId: "session_01",
     sessionGeneration: 1,
-    actions: ["read", "decide", "pause", "resume", "cancel", "steer", "drain", "stop", "git", "external-effect"],
+    actions: ["read", "decide", "pause", "resume", "cancel", "steer", "drain", "stop", "git", "agent-lifecycle-recovery-issue", "external-effect"],
   });
   operatorStore.issueCapability(grant, "session-secret");
   return {
@@ -1883,6 +1884,438 @@ describe("operator action store", () => {
     })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
   });
 });
+
+describe("operator lifecycle recovery action store", () => {
+  it("previews one exact lifecycle recovery without preparing or dispatching it", async () => {
+    const fixture = setupProjection();
+    const intent = lifecycleRecoveryIntent();
+    const recoveryDigest = parseSha256Digest(digest, "test.lifecycleRecoveryDigest");
+    let reads = 0;
+    let inspections = 0;
+    let preparations = 0;
+    let dispatches = 0;
+    const statusPairs: string[][] = [];
+    const reconcilePairs: string[][] = [];
+    const lifecycleRecoveryCustody: OperatorLifecycleRecoveryCustodyPort = {
+      readLifecycleRecoveryCurrentState: async () => {
+        reads += 1;
+        return lifecycleRecoveryCurrentState(intent);
+      },
+      inspectLifecycleRecovery: async () => {
+        inspections += 1;
+        return { intent, inspectionDigest: recoveryDigest };
+      },
+      prepareLifecycleFreshRotateInTransaction: () => {
+        preparations += 1;
+        return {
+          status: "pending", recoveryId: "recovery_01", path: "fresh-rotate", evidenceDigest: recoveryDigest,
+        };
+      },
+      prepareLifecycleAbandonInTransaction: () => {
+        throw new Error("not expected");
+      },
+      lifecycleRecoveryStatus: (operatorId: string, commandId: string) => {
+        statusPairs.push([operatorId, commandId]);
+        return {
+          status: "pending" as const,
+          recoveryId: "recovery_01",
+          path: "fresh-rotate" as const,
+          evidenceDigest: recoveryDigest,
+        };
+      },
+      reconcileLifecycleRecovery: async (operatorId: string, commandId: string) => {
+        reconcilePairs.push([operatorId, commandId]);
+        return {
+          status: "committed" as const,
+          recoveryId: "recovery_01",
+          path: "fresh-rotate" as const,
+          evidenceDigest: recoveryDigest,
+        };
+      },
+    };
+    const actions = new OperatorActionStore({
+      database: fixture.database,
+      operatorStore: fixture.operatorStore,
+      statePort: { read: async () => { throw new Error("generic state port not expected"); } },
+      effectPort: {
+        dispatch: async () => {
+          dispatches += 1;
+          throw new Error("provider dispatch not expected");
+        },
+        observe: async () => { throw new Error("provider observe not expected"); },
+      },
+      lifecycleRecoveryCustody,
+      clock: () => now,
+    });
+
+    const preview = await actions.preview(fixture.context, lifecycleRecoveryPreviewRequest(fixture, intent));
+
+    expect(preview).toMatchObject({
+      intent,
+      consequenceClass: "consequential",
+      gateIds: ["recovery_gate_01"],
+    });
+    expect({ reads, preparations, dispatches }).toEqual({ reads: 1, preparations: 0, dispatches: 0 });
+
+    const commitRequest: OperatorActionCommitRequest = {
+      command: {
+        ...lifecycleRecoveryPreviewRequest(fixture, intent).command,
+        commandId: identifier<"CommandId">("commit_lifecycle_recovery_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_01"),
+          inputEventId: "input_commit_lifecycle_recovery_01",
+        },
+      },
+      projectId: identifier<"ProjectId">("project_01"),
+      previewId: preview.previewId,
+      expectedPreviewRevision: preview.previewRevision,
+      previewDigest: preview.previewDigest,
+      expectedIntentDigest: preview.intentDigest,
+      confirmation: { kind: "explicit", confirmationId: "confirm_lifecycle_recovery_01" },
+    };
+    const receipt = await actions.commit(fixture.context, commitRequest);
+    expect(await actions.commit(fixture.context, commitRequest)).toEqual(receipt);
+    expect({ reads, inspections, preparations, dispatches }).toEqual({
+      reads: 2,
+      inspections: 1,
+      preparations: 1,
+      dispatches: 0,
+    });
+    await expect(actions.commit(fixture.context, {
+      ...commitRequest,
+      confirmation: { kind: "explicit", confirmationId: "changed-confirmation" },
+    })).rejects.toMatchObject({ code: "DEDUPE_CONFLICT" });
+
+    expect(actions.status({
+      credential: fixture.credential,
+      projectId: identifier<"ProjectId">("project_01"),
+      commandId: receipt.commandId,
+    })).toMatchObject({ status: "pending", commandId: receipt.commandId });
+    expect(statusPairs).toEqual([["operator_01", "commit_lifecycle_recovery_01"]]);
+
+    const reconciled = await actions.reconcile(fixture.context, {
+      command: {
+        ...commitRequest.command,
+        commandId: identifier<"CommandId">("reconcile_lifecycle_recovery_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_01"),
+          inputEventId: "input_reconcile_lifecycle_recovery_01",
+        },
+      },
+      projectId: commitRequest.projectId,
+      targetCommandId: receipt.commandId,
+      expectedStatus: "pending",
+      expectedAttemptGeneration: 1,
+      mode: "observe-only",
+    });
+    expect(reconciled).toMatchObject({ status: "committed", commandId: receipt.commandId });
+    expect(reconcilePairs).toEqual([["operator_01", "commit_lifecycle_recovery_01"]]);
+  });
+
+  it("fails closed before generic state or effect ports when lifecycle recovery custody is missing", async () => {
+    const fixture = setupProjection();
+    const intent = lifecycleRecoveryIntent();
+    let genericReads = 0;
+    const actions = new OperatorActionStore({
+      database: fixture.database,
+      operatorStore: fixture.operatorStore,
+      statePort: {
+        read: async () => {
+          genericReads += 1;
+          throw new Error("generic state port not expected");
+        },
+      },
+      effectPort: {
+        dispatch: async () => { throw new Error("generic effect port not expected"); },
+        observe: async () => { throw new Error("generic effect port not expected"); },
+      },
+      clock: () => now,
+    });
+
+    await expect(actions.preview(
+      fixture.context,
+      lifecycleRecoveryPreviewRequest(fixture, intent),
+    )).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    expect(genericReads).toBe(0);
+  });
+
+  it.each([
+    ["session generation", (state: ReturnType<typeof lifecycleRecoveryCurrentState>) => ({
+      ...state,
+      sessionGeneration: state.sessionGeneration + 1,
+    }), "STALE_GENERATION"],
+    ["exact source", (state: ReturnType<typeof lifecycleRecoveryCurrentState>) => ({
+      ...state,
+      sourceRevision: state.sourceRevision + 1,
+    }), "STALE_GENERATION"],
+    ["gate", (state: ReturnType<typeof lifecycleRecoveryCurrentState>) => ({
+      ...state,
+      gate: { ...state.gate, revision: state.gate.revision + 1 },
+    }), "GATE_BLOCKED"],
+    ["recovery capability", (state: ReturnType<typeof lifecycleRecoveryCurrentState>) => ({
+      ...state,
+      recoveryCapability: state.recoveryCapability === null ? null : {
+        ...state.recoveryCapability,
+        revision: state.recoveryCapability.revision + 1,
+      },
+    }), "STALE_REVISION"],
+    ["checkpoint", (state: ReturnType<typeof lifecycleRecoveryCurrentState>) => ({
+      ...state,
+      checkpoint: state.checkpoint === null ? null : { ...state.checkpoint, digest: `sha256:${"b".repeat(64)}` },
+    }), "STALE_REVISION"],
+  ] as const)("rejects a stale lifecycle recovery %s binding", async (_name, change, code) => {
+    const fixture = setupProjection();
+    const intent = lifecycleRecoveryIntent();
+    const recoveryDigest = parseSha256Digest(digest, "test.lifecycleRecoveryValidationDigest");
+    const lifecycleRecoveryCustody: OperatorLifecycleRecoveryCustodyPort = {
+      readLifecycleRecoveryCurrentState: async () => change(lifecycleRecoveryCurrentState(intent)),
+      inspectLifecycleRecovery: async () => ({ intent, inspectionDigest: recoveryDigest }),
+      prepareLifecycleFreshRotateInTransaction: () => { throw new Error("not expected"); },
+      prepareLifecycleAbandonInTransaction: () => { throw new Error("not expected"); },
+      lifecycleRecoveryStatus: () => { throw new Error("not expected"); },
+      reconcileLifecycleRecovery: async () => { throw new Error("not expected"); },
+    };
+    const actions = new OperatorActionStore({
+      database: fixture.database,
+      operatorStore: fixture.operatorStore,
+      statePort: { read: async () => { throw new Error("not expected"); } },
+      effectPort: {
+        dispatch: async () => { throw new Error("not expected"); },
+        observe: async () => { throw new Error("not expected"); },
+      },
+      lifecycleRecoveryCustody,
+      clock: () => now,
+    });
+
+    await expect(actions.preview(
+      fixture.context,
+      lifecycleRecoveryPreviewRequest(fixture, intent),
+    )).rejects.toMatchObject({ code });
+  });
+
+  it("commits confirmed abandonment through its preparation port without provider I/O", async () => {
+    const fixture = setupProjection();
+    const freshIntent = lifecycleRecoveryIntent();
+    const {
+      recoveryCapabilityId: _recoveryCapabilityId,
+      expectedRecoveryCapabilityRevision: _expectedRecoveryCapabilityRevision,
+      recoveryCapabilityHash: _recoveryCapabilityHash,
+      replacementAdapterId: _replacementAdapterId,
+      replacementContractDigest: _replacementContractDigest,
+      replacementActionRef: _replacementActionRef,
+      checkpointRef: _checkpointRef,
+      checkpointDigest: _checkpointDigest,
+      checkpointValidationReceiptDigest: _checkpointValidationReceiptDigest,
+      ...common
+    } = freshIntent;
+    const intent: Extract<
+      Extract<OperatorActionIntent, { kind: "agent-lifecycle-recovery" }>,
+      { path: "abandon" }
+    > = {
+      ...common,
+      path: "abandon",
+      reason: "Human confirmed unrecoverable context.",
+      directInputAttestationId: "direct_input_01",
+      destructiveConfirmationDigest: digest,
+    };
+    let abandonPreparations = 0;
+    let dispatches = 0;
+    const recoveryDigest = parseSha256Digest(digest, "test.lifecycleAbandonDigest");
+    const actions = new OperatorActionStore({
+      database: fixture.database,
+      operatorStore: fixture.operatorStore,
+      statePort: { read: async () => { throw new Error("generic state port not expected"); } },
+      effectPort: {
+        dispatch: async () => {
+          dispatches += 1;
+          throw new Error("provider dispatch not expected");
+        },
+        observe: async () => { throw new Error("provider observe not expected"); },
+      },
+      lifecycleRecoveryCustody: {
+        readLifecycleRecoveryCurrentState: async () => ({
+          ...lifecycleRecoveryCurrentState(freshIntent),
+          recoveryCapability: null,
+          checkpoint: null,
+        }),
+        inspectLifecycleRecovery: async () => ({ intent, inspectionDigest: recoveryDigest }),
+        prepareLifecycleFreshRotateInTransaction: () => { throw new Error("fresh rotate not expected"); },
+        prepareLifecycleAbandonInTransaction: () => {
+          abandonPreparations += 1;
+          return {
+            status: "committed",
+            recoveryId: "abandon_01",
+            path: "abandon",
+            evidenceDigest: recoveryDigest,
+          };
+        },
+        lifecycleRecoveryStatus: () => ({
+          status: "committed",
+          recoveryId: "abandon_01",
+          path: "abandon",
+          evidenceDigest: recoveryDigest,
+        }),
+        reconcileLifecycleRecovery: async () => ({
+          status: "committed",
+          recoveryId: "abandon_01",
+          path: "abandon",
+          evidenceDigest: recoveryDigest,
+        }),
+      },
+      clock: () => now,
+    });
+    const previewRequest = lifecycleRecoveryPreviewRequest(fixture, intent);
+    const preview = await actions.preview(fixture.context, previewRequest);
+    expect(preview).toMatchObject({ consequenceClass: "destructive", gateIds: ["recovery_gate_01"] });
+
+    const receipt = await actions.commit(fixture.context, {
+      command: {
+        ...previewRequest.command,
+        commandId: identifier<"CommandId">("commit_lifecycle_abandon_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_01"),
+          inputEventId: "input_commit_lifecycle_abandon_01",
+        },
+      },
+      projectId: previewRequest.projectId,
+      previewId: preview.previewId,
+      expectedPreviewRevision: preview.previewRevision,
+      previewDigest: preview.previewDigest,
+      expectedIntentDigest: preview.intentDigest,
+      confirmation: { kind: "explicit", confirmationId: "confirm_lifecycle_abandon_01" },
+    });
+    expect(actions.status({
+      credential: fixture.credential,
+      projectId: previewRequest.projectId,
+      commandId: receipt.commandId,
+    })).toEqual({ status: "committed", commandId: receipt.commandId, receipt });
+    expect({ abandonPreparations, dispatches }).toEqual({ abandonPreparations: 1, dispatches: 0 });
+  });
+});
+
+function lifecycleRecoveryIntent(): Extract<
+  Extract<OperatorActionIntent, { kind: "agent-lifecycle-recovery" }>,
+  { path: "fresh-rotate" }
+> {
+  return {
+    kind: "agent-lifecycle-recovery",
+    schemaVersion: 1,
+    path: "fresh-rotate",
+    projectSessionId: "session_01",
+    coordinationRunId: "run_01",
+    agentId: "chair_01",
+    source: {
+      kind: "generation-loss",
+      oldCustodyRef: null,
+      generationLossRef: {
+        schemaVersion: 1,
+        runId: "run_01",
+        agentId: "chair_01",
+        generationLossId: "loss_01",
+        generationLossRevision: 2,
+      },
+      lossKind: "generation-advance",
+      oldProviderSessionRef: "provider_session_01",
+      newProviderSessionRef: "provider_session_02",
+      oldProviderGeneration: 2,
+      newProviderGeneration: 3,
+      oldContextRevision: 5,
+      newContextRevision: 6,
+      sourceBridgeRef: { bridgeId: "run_01:chair_01", bridgeRevision: 4 },
+      sourceCapabilityHash: digest,
+      checkpointState: "last-validated",
+      checkpointRef: { checkpointId: "checkpoint_01", checkpointRevision: 7 },
+      checkpointDigest: digest,
+      lossEvidenceDigest: digest,
+    },
+    expectedSessionRevision: 2,
+    expectedSessionGeneration: 1,
+    expectedRunRevision: 4,
+    expectedAgentRevision: 3,
+    expectedSourceRevision: 2,
+    expectedPrincipalGeneration: 1,
+    expectedProviderGeneration: 3,
+    expectedBridgeGeneration: 4,
+    expectedContextRevision: 6,
+    bridgeOwnerKind: "chair",
+    expectedChairLeaseGeneration: 1,
+    gateId: "recovery_gate_01",
+    expectedGateRevision: 5,
+    expectedGateStatus: "approved",
+    recoveryCapabilityId: "recovery_capability_01",
+    expectedRecoveryCapabilityRevision: 6,
+    recoveryCapabilityHash: digest,
+    replacementAdapterId: "replacement_adapter",
+    replacementContractDigest: digest,
+    replacementActionRef: { adapterId: "replacement_adapter", actionId: "replacement_action_01" },
+    checkpointRef: { checkpointId: "checkpoint_01", checkpointRevision: 7 },
+    checkpointDigest: digest,
+    checkpointValidationReceiptDigest: null,
+  };
+}
+
+function lifecycleRecoveryCurrentState(
+  intent: ReturnType<typeof lifecycleRecoveryIntent>,
+) {
+  return {
+    revision: intent.expectedAgentRevision,
+    projectSessionId: intent.projectSessionId,
+    coordinationRunId: intent.coordinationRunId,
+    agentId: intent.agentId,
+    sessionRevision: intent.expectedSessionRevision,
+    sessionGeneration: intent.expectedSessionGeneration,
+    runRevision: intent.expectedRunRevision,
+    agentRevision: intent.expectedAgentRevision,
+    source: intent.source,
+    sourceRevision: intent.expectedSourceRevision,
+    principalGeneration: intent.expectedPrincipalGeneration,
+    providerGeneration: intent.expectedProviderGeneration,
+    bridgeGeneration: intent.expectedBridgeGeneration,
+    contextRevision: intent.expectedContextRevision,
+    bridgeOwnerKind: intent.bridgeOwnerKind,
+    chairLeaseGeneration: intent.expectedChairLeaseGeneration,
+    gate: {
+      gateId: intent.gateId,
+      revision: intent.expectedGateRevision,
+      status: intent.expectedGateStatus,
+    },
+    recoveryCapability: {
+      capabilityId: intent.recoveryCapabilityId,
+      revision: intent.expectedRecoveryCapabilityRevision,
+      capabilityHash: intent.recoveryCapabilityHash,
+    },
+    checkpoint: {
+      ref: intent.checkpointRef,
+      digest: intent.checkpointDigest,
+      validationReceiptDigest: intent.checkpointValidationReceiptDigest,
+    },
+  } as const;
+}
+
+function lifecycleRecoveryPreviewRequest(
+  fixture: ReturnType<typeof setupProjection>,
+  intent: Extract<OperatorActionIntent, { kind: "agent-lifecycle-recovery" }>,
+): OperatorActionPreviewRequest {
+  return {
+    command: {
+      credential: fixture.credential,
+      commandId: identifier<"CommandId">("preview_lifecycle_recovery_01"),
+      expectedRevision: intent.expectedAgentRevision,
+      actor: identifier<"OperatorId">("operator_01"),
+      provenance: {
+        kind: "console-direct-input",
+        clientId: identifier<"OperatorClientId">("console_01"),
+        inputEventId: "input_preview_lifecycle_recovery_01",
+      },
+      evidenceRefs: [],
+    },
+    projectId: identifier<"ProjectId">("project_01"),
+    intent,
+  };
+}
 
 async function expectValidPreview(
   intent: OperatorActionIntent,

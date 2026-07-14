@@ -87,10 +87,17 @@ export function parseAgentBridgeCapability(value: unknown): AgentBridgeCapabilit
   };
 }
 
+export type AgentLifecycleAttestationBinding = Readonly<{
+  custodyId: string;
+  checkpointDigest: string;
+  challengeDigest: string;
+}>;
+
 export type AgentBridgeHandoff = {
   capability: string;
   socketPath: string;
   expectedPrincipal: AgentFabricPrincipalBinding;
+  lifecycleAttestation?: AgentLifecycleAttestationBinding & { challenge: string };
 };
 
 export function takeAgentBridgeHandoff(environment: NodeJS.ProcessEnv): AgentBridgeHandoff | undefined {
@@ -101,6 +108,10 @@ export function takeAgentBridgeHandoff(environment: NodeJS.ProcessEnv): AgentBri
   const projectSessionId = environment.AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID;
   const runId = environment.AGENT_FABRIC_EXPECTED_RUN_ID;
   const principalGenerationValue = environment.AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION;
+  const challenge = environment.AGENT_FABRIC_ATTESTATION_CHALLENGE;
+  const challengeDigest = environment.AGENT_FABRIC_ATTESTATION_CHALLENGE_DIGEST;
+  const custodyId = environment.AGENT_FABRIC_LIFECYCLE_CUSTODY_ID;
+  const checkpointDigest = environment.AGENT_FABRIC_LIFECYCLE_CHECKPOINT_DIGEST;
   delete environment.AGENT_FABRIC_HANDOFF_KIND;
   delete environment.AGENT_FABRIC_CAPABILITY;
   delete environment.AGENT_FABRIC_SOCKET_PATH;
@@ -108,6 +119,10 @@ export function takeAgentBridgeHandoff(environment: NodeJS.ProcessEnv): AgentBri
   delete environment.AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID;
   delete environment.AGENT_FABRIC_EXPECTED_RUN_ID;
   delete environment.AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION;
+  delete environment.AGENT_FABRIC_ATTESTATION_CHALLENGE;
+  delete environment.AGENT_FABRIC_ATTESTATION_CHALLENGE_DIGEST;
+  delete environment.AGENT_FABRIC_LIFECYCLE_CUSTODY_ID;
+  delete environment.AGENT_FABRIC_LIFECYCLE_CHECKPOINT_DIGEST;
   const principalGeneration = Number(principalGenerationValue);
   if (
     typeof capability !== "string" || capability.length === 0 ||
@@ -115,7 +130,13 @@ export function takeAgentBridgeHandoff(environment: NodeJS.ProcessEnv): AgentBri
     !isBoundedProviderEvidenceRef(agentId) ||
     !isBoundedProviderEvidenceRef(projectSessionId) ||
     !isBoundedProviderEvidenceRef(runId) ||
-    !Number.isSafeInteger(principalGeneration) || principalGeneration < 1
+    !Number.isSafeInteger(principalGeneration) || principalGeneration < 1 ||
+    ([challenge, challengeDigest, custodyId, checkpointDigest].some((value) => value !== undefined) &&
+      (!/^[0-9a-f]{64}$/u.test(challenge ?? "") ||
+       !/^sha256:[0-9a-f]{64}$/u.test(challengeDigest ?? "") ||
+       chairLaunchChallengeDigest(challenge ?? "") !== challengeDigest ||
+       !isBoundedProviderEvidenceRef(custodyId) ||
+       !/^sha256:[0-9a-f]{64}$/u.test(checkpointDigest ?? "")))
   ) {
     throw new ProviderAdapterError("PRIVATE_HANDOFF_INVALID", "agent bridge private handoff is incomplete");
   }
@@ -123,6 +144,10 @@ export function takeAgentBridgeHandoff(environment: NodeJS.ProcessEnv): AgentBri
     capability,
     socketPath,
     expectedPrincipal: { agentId, projectSessionId, runId, principalGeneration },
+    ...(challenge === undefined ? {} : {
+      lifecycleAttestation: { challenge, challengeDigest: challengeDigest as string,
+        custodyId: custodyId as string, checkpointDigest: checkpointDigest as string },
+    }),
   };
 }
 
@@ -141,8 +166,27 @@ export type AgentProvisionBoundaryInput = {
   environment: {
     AGENT_FABRIC_CAPABILITY: string;
     AGENT_FABRIC_SOCKET_PATH: string;
+    AGENT_FABRIC_ATTESTATION_CHALLENGE?: string;
+    AGENT_FABRIC_ATTESTATION_CHALLENGE_DIGEST?: string;
+    AGENT_FABRIC_LIFECYCLE_CUSTODY_ID?: string;
+    AGENT_FABRIC_LIFECYCLE_CHECKPOINT_DIGEST?: string;
   };
 };
+
+export type AgentLifecycleLaunchAttestation = Readonly<{
+  schemaVersion: 1;
+  kind: "provider-session-lifecycle-attestation";
+  custodyId: string;
+  actionId: string;
+  checkpointDigest: string;
+  challengeDigest: string;
+  providerSessionRef: string;
+  providerSessionGeneration: number;
+  bridgeGeneration: number;
+  providerTurnRef: string;
+  providerInvocationRef: string;
+  attestationDigest: string;
+}>;
 
 export type AgentProvisionProviderResult = {
   schemaVersion: 1;
@@ -154,7 +198,26 @@ export type AgentProvisionProviderResult = {
   bridgeGeneration: number;
   bridgeContractDigest: string;
   activationEvidenceDigest: string;
+  lifecycleAttestation?: AgentLifecycleLaunchAttestation;
 };
+
+export function agentLifecycleAttestationDigest(
+  value: Omit<AgentLifecycleLaunchAttestation, "attestationDigest">,
+): string {
+  return `sha256:${createHash("sha256").update(JSON.stringify({
+    schemaVersion: value.schemaVersion,
+    kind: value.kind,
+    custodyId: value.custodyId,
+    actionId: value.actionId,
+    checkpointDigest: value.checkpointDigest,
+    challengeDigest: value.challengeDigest,
+    providerSessionRef: value.providerSessionRef,
+    providerSessionGeneration: value.providerSessionGeneration,
+    bridgeGeneration: value.bridgeGeneration,
+    providerTurnRef: value.providerTurnRef,
+    providerInvocationRef: value.providerInvocationRef,
+  })).digest("hex")}`;
+}
 
 export function parseAgentProvisionProviderResult(
   value: unknown,
@@ -164,11 +227,12 @@ export function parseAgentProvisionProviderResult(
     targetAgentId: string;
     bridgeGeneration: number;
     bridgeContractDigest: string;
+    lifecycleAttestation?: AgentLifecycleAttestationBinding;
   },
 ): AgentProvisionProviderResult {
   if (
     !isRecord(value) ||
-    Object.keys(value).length !== 9 ||
+    Object.keys(value).length !== (expected.lifecycleAttestation === undefined ? 9 : 10) ||
     value.schemaVersion !== 1 ||
     value.adapterId !== expected.adapterId ||
     value.actionId !== expected.actionId ||
@@ -180,12 +244,40 @@ export function parseAgentProvisionProviderResult(
     value.bridgeGeneration !== expected.bridgeGeneration ||
     value.bridgeContractDigest !== expected.bridgeContractDigest ||
     typeof value.activationEvidenceDigest !== "string" ||
-    !/^sha256:[0-9a-f]{64}$/u.test(value.activationEvidenceDigest)
+    !/^sha256:[0-9a-f]{64}$/u.test(value.activationEvidenceDigest) ||
+    (expected.lifecycleAttestation === undefined) !== !Object.hasOwn(value, "lifecycleAttestation")
   ) {
     throw new ProviderAdapterError(
       "PROVIDER_RESPONSE_INVALID",
       "agent bridge result does not match its exact generation-bound contract",
     );
+  }
+  let lifecycleAttestation: AgentLifecycleLaunchAttestation | undefined;
+  if (expected.lifecycleAttestation !== undefined) {
+    const attestation = value.lifecycleAttestation;
+    if (
+      !isRecord(attestation) || Object.keys(attestation).length !== 12 ||
+      attestation.schemaVersion !== 1 || attestation.kind !== "provider-session-lifecycle-attestation" ||
+      attestation.custodyId !== expected.lifecycleAttestation.custodyId ||
+      attestation.actionId !== expected.actionId ||
+      attestation.checkpointDigest !== expected.lifecycleAttestation.checkpointDigest ||
+      attestation.challengeDigest !== expected.lifecycleAttestation.challengeDigest ||
+      attestation.providerSessionRef !== value.providerSessionRef ||
+      attestation.providerSessionGeneration !== value.providerSessionGeneration ||
+      attestation.bridgeGeneration !== expected.bridgeGeneration ||
+      !isBoundedProviderEvidenceRef(attestation.providerTurnRef) ||
+      !isBoundedProviderEvidenceRef(attestation.providerInvocationRef) ||
+      typeof attestation.attestationDigest !== "string"
+    ) throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "agent lifecycle attestation crossed its reserved binding");
+    const unsigned = { ...attestation } as Record<string, unknown>;
+    delete unsigned.attestationDigest;
+    if (attestation.attestationDigest !== agentLifecycleAttestationDigest(unsigned as Omit<AgentLifecycleLaunchAttestation, "attestationDigest">)) {
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "agent lifecycle attestation digest is invalid");
+    }
+    lifecycleAttestation = attestation as AgentLifecycleLaunchAttestation;
+    if (value.activationEvidenceDigest !== lifecycleAttestation.attestationDigest) {
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "agent activation evidence is not the lifecycle attestation");
+    }
   }
   return {
     schemaVersion: 1,
@@ -197,6 +289,7 @@ export function parseAgentProvisionProviderResult(
     bridgeGeneration: expected.bridgeGeneration,
     bridgeContractDigest: expected.bridgeContractDigest,
     activationEvidenceDigest: value.activationEvidenceDigest,
+    ...(lifecycleAttestation === undefined ? {} : { lifecycleAttestation }),
   };
 }
 

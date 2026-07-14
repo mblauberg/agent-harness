@@ -159,7 +159,18 @@ describe("daemon adapter composition", () => {
           adapterId: "fake",
           actionId: "daemon-ephemeral-review:spawn",
           operation: "spawn",
+          taskId: "daemon-ephemeral-review",
           authorityId: reviewAuthority.authorityId,
+          routeRequest: {
+            schemaVersion: 1,
+            adapterAlias: "fake",
+            modelAlias: "fake-reviewer-v1",
+            explicitModel: null,
+            role: "reviewer",
+            leadFamily: "fake",
+            requireDistinct: false,
+            providerEffort: null,
+          },
           payload: {
             taskId: "daemon-ephemeral-review",
             model: "fake-reviewer-v1",
@@ -168,13 +179,14 @@ describe("daemon adapter composition", () => {
             cwd: "src",
           },
           commandId: "daemon-ephemeral-review:dispatch",
+          certifyingReview: null,
         };
         const dispatchStartedAt = Date.now();
         const outcome = await callTool(chairProxy.client, "fabric_provider_action_dispatch", dispatchInput);
         expect(outcome.isError, outcome.text).toBe(false);
         expect(Date.now() - dispatchStartedAt).toBeLessThan(750);
         expect(outcome.structured).toMatchObject({
-          actionId: "daemon-ephemeral-review:spawn",
+          actionRef: { adapterId: "fake", actionId: "daemon-ephemeral-review:spawn" },
           status: "prepared",
           executionCount: 0,
           effectCount: 0,
@@ -191,7 +203,9 @@ describe("daemon adapter composition", () => {
         expect(changedAction.isError).toBe(true);
         expect(changedAction.structured).toMatchObject({ code: "DEDUPE_CONFLICT" });
         const liveReconcile = await callTool(chairProxy.client, "fabric_provider_action_reconcile", {
+          adapterId: "fake",
           actionId: "daemon-ephemeral-review:spawn",
+          expectedActionKind: "non-review",
           commandId: "daemon-ephemeral-review:live-reconcile",
         });
         expect(liveReconcile.isError, liveReconcile.text).toBe(false);
@@ -207,7 +221,9 @@ describe("daemon adapter composition", () => {
         let terminal: Awaited<ReturnType<typeof callTool>> | undefined;
         for (let attempt = 0; attempt < 160; attempt += 1) {
           const observed = await callTool(chairProxy.client, "fabric_provider_action_read", {
+            adapterId: "fake",
             actionId: "daemon-ephemeral-review:spawn",
+            expectedActionKind: "non-review",
           });
           expect(observed.isError, observed.text).toBe(false);
           if (observed.structured.status === "terminal") {
@@ -217,7 +233,7 @@ describe("daemon adapter composition", () => {
           await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
         }
         expect(terminal?.structured).toMatchObject({
-          actionId: "daemon-ephemeral-review:spawn",
+          actionRef: { adapterId: "fake", actionId: "daemon-ephemeral-review:spawn" },
           status: "terminal",
           executionCount: 1,
           effectCount: 1,

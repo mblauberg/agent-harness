@@ -31,7 +31,7 @@ describe("AC-011 crash after provider acceptance", () => {
       const chair = fabric.connect(run.chairCapability);
       const ambiguous = await chair.dispatchProviderAction({ adapterId: "crash", actionId: "crash-action-1", operation: "steer", payload: { instruction: "once" }, commandId: "crash:dispatch" });
       expect(ambiguous).toMatchObject({ status: "ambiguous", executionCount: 1 });
-      const reconciled = await chair.reconcileProviderAction({ actionId: "crash-action-1", commandId: "crash:reconcile" });
+      const reconciled = await chair.reconcileProviderAction({ adapterId: "crash", actionId: "crash-action-1", commandId: "crash:reconcile" });
       expect(reconciled).toMatchObject({ status: "terminal", effectCount: 1, result: { acceptedBeforeCrash: true } });
       expect(JSON.parse(await readFile(journalPath, "utf8"))).toEqual({ actionId: "crash-action-1", dispatchCount: 1 });
     } finally {

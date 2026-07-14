@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 
 import { applyMigrations } from "../../src/core/migrations.ts";
 import { canonicalJson, digest } from "../../src/project-session/store-support.ts";
+import {
+  admitProviderActionFixture,
+  insertProviderActionPreflightParent,
+} from "../support/provider-action-fixture.ts";
 
 const SHA_A = `sha256:${"a".repeat(64)}`;
 const EMPTY_FINDING_SET_JSON = '{"findingCount":0,"pages":[],"schemaVersion":1}';
@@ -256,29 +260,27 @@ function seedGenerationLossRecovery(database: Database.Database): void {
     "[]", "fresh rotate", "[]", "[]", "fabric", "operator", "operator",
     "{}", "approved", 1, null, 1, 1, 1,
   );
-  database.prepare(`
-    INSERT INTO provider_action_pair_preflights(
-      adapter_id,action_id,run_id,owner_digest,actor_principal_digest,
-      input_digest,state,created_at,updated_at
-    ) VALUES (?,?,?,?,?,?,?,?,?)
-  `).run(
-    "adapter", "source-action", "run", "lifecycle-owner", "principal",
-    "lifecycle-input", "admitted", 1, 1,
-  );
-  database.prepare(`
-    INSERT INTO provider_actions(
-      run_id,action_id,adapter_id,operation,target_agent_id,
-      provider_session_generation,identity_hash,payload_hash,payload_json,
-      status,history_json,execution_count,effect_count,idempotency_proven,
-      result_json,updated_at
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-  `).run(
-    "run", "source-action", "adapter", "lifecycle-source", "chair", 1,
-    "identity", "payload", "{}", "terminal", "[]", 1, 1, 1, "{}", 1,
-  );
+  admitProviderActionFixture(database, {
+    runId: "run",
+    actionId: "source-action",
+    adapterId: "adapter",
+    operation: "lifecycle-source",
+    targetAgentId: "chair",
+    providerSessionGeneration: 1,
+    identityHash: "identity",
+    payloadHash: "payload",
+    payloadJson: "{}",
+    status: "terminal",
+    historyJson: "[]",
+    executionCount: 1,
+    effectCount: 1,
+    idempotencyProven: true,
+    resultJson: "{}",
+    updatedAt: 1,
+  });
   database.prepare(`
     INSERT INTO lifecycle_generation_losses(
-      run_id,agent_id,generation_loss_id,loss_kind,state,revision,
+      project_session_id,run_id,agent_id,generation_loss_id,loss_kind,
       old_provider_session_ref,new_provider_session_ref,
       old_provider_generation,new_provider_generation,
       old_context_revision,new_context_revision,
@@ -287,41 +289,86 @@ function seedGenerationLossRecovery(database: Database.Database): void {
       source_bridge_row_id,source_bridge_revision,source_capability_hash,
       source_project_session_generation,source_run_generation,
       source_chair_lease_generation,checkpoint_state,checkpoint_ref,
-      checkpoint_digest,loss_evidence_digest
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      checkpoint_digest,loss_evidence_digest,creation_json,creation_digest,created_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
-    "run", "chair", "loss", "generation-advance", "open", 1,
+    "session", "run", "chair", "loss", "generation-advance",
     "provider-session-1", "provider-session-2", 1, 2, 0, 0,
     "source-action", "adapter", SHA_A, 1, 1, "chair", "bridge-row", 1,
     "source-capability", 1, 1, 1, "last-validated", "checkpoint", SHA_A, SHA_A,
+    "{}", "loss-creation", 1,
+  );
+  database.prepare(`
+    INSERT INTO lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,revision,
+      prior_revision,prior_journal_digest,state,abandon_kind_code,
+      recovery_action_adapter_id,recovery_action_id,active_recovery_custody_id,
+      terminal_evidence_digest,semantic_json,semantic_digest,source_ref_digest,
+      origin_fresh_apply_id,origin_fresh_apply_digest,receipt_batch_id,
+      receipt_apply_id,receipt_apply_digest,journal_json,journal_digest,recorded_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    "session", "run", "chair", "loss", 1, null, null, "open", "none",
+    null, null, null, null, "{}", "loss-semantic", "loss-source-ref",
+    null, null, null, null, null, "{}", "loss-journal", 1,
+  );
+  database.prepare(`
+    INSERT INTO lifecycle_generation_loss_heads(
+      project_session_id,run_id,agent_id,generation_loss_id,current_revision,
+      state,abandon_kind_code,semantic_digest,source_ref_digest,journal_digest,
+      terminal,head_revision
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    "session", "run", "chair", "loss", 1, "open", "none",
+    "loss-semantic", "loss-source-ref", "loss-journal", 0, 1,
   );
 }
 
 function insertGenerationLossRecoveryIssue(
   database: Database.Database,
-  sourceBridgeRevision = 1,
+  generationLossRevision = 1,
   issuedAt = RECOVERY_ISSUED_AT,
   expiresAt = RECOVERY_EXPIRES_AT,
 ): void {
   database.prepare(`
     INSERT INTO agent_lifecycle_recovery_capability_issues(
-      issue_id,capability_hash,operator_id,project_id,session_id,run_id,agent_id,
+      issue_id,capability_hash,operator_id,project_id,project_session_id,run_id,agent_id,
       session_revision,session_generation,run_revision,recovery_source_kind,
-      generation_loss_id,generation_loss_revision,checkpoint_digest,
+      old_custody_id,old_action_adapter_id,old_action_id,old_custody_revision,
+      generation_loss_id,generation_loss_revision,recovery_source_ref_digest,
+      source_journal_digest,checkpoint_digest,
       source_provider_session_ref,source_capability_hash,source_custody_action_id,
       source_adapter_id,source_adapter_contract_digest,source_bridge_row_id,
       source_bridge_revision,source_provider_generation,source_principal_generation,
       source_bridge_generation,source_project_session_generation,source_run_generation,
       source_chair_lease_generation,bridge_owner_kind,parent_capability_id,
-      consequential_gate_id,path,status,issued_at,expires_at
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      consequential_gate_id,path,issuance_json,issuance_digest,issued_at,expires_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     "issue", "c".repeat(64), "operator", "project", "session", "run", "chair",
-    1, 1, 1, "generation-loss", "loss", 1, SHA_A,
+    1, 1, 1, "generation-loss", null, null, null, null,
+    "loss", generationLossRevision, "loss-source-ref", "loss-journal", SHA_A,
     "provider-session-1", "source-capability", "source-action", "adapter", SHA_A,
-    "bridge-row", sourceBridgeRevision, 1, 1, 1, 1, 1, 1, "chair",
-    "parent-capability", "recovery-gate", "fresh-rotate", "active", issuedAt, expiresAt,
+    "bridge-row", 1, 1, 1, 1, 1, 1, 1, "chair",
+    "parent-capability", "recovery-gate", "fresh-rotate", "{}", "issue-digest",
+    issuedAt, expiresAt,
   );
+}
+
+function currentGenerationLossRecoveryIssues(database: Database.Database, now: number): unknown[] {
+  return database.prepare(`
+    SELECT head.issue_id
+      FROM agent_lifecycle_recovery_source_heads head
+      JOIN agent_lifecycle_recovery_capability_issues issue
+        ON issue.issue_id=head.issue_id
+      LEFT JOIN agent_lifecycle_recovery_issue_revocations revocation
+        ON revocation.issue_id=issue.issue_id
+      LEFT JOIN lifecycle_fresh_recovery_handoffs handoff
+        ON handoff.issue_id=issue.issue_id
+     WHERE issue.expires_at>? AND revocation.issue_id IS NULL
+       AND handoff.issue_id IS NULL
+     ORDER BY head.issue_id
+  `).all(now);
 }
 
 function safeFinding(): Readonly<{ digest: string; json: string }> {
@@ -381,33 +428,102 @@ function insertProviderAction(
   adapterId: string,
   actionId = "shared-action",
 ): void {
-  database.prepare(`
-    INSERT INTO provider_action_pair_preflights(
-      adapter_id,action_id,run_id,owner_digest,actor_principal_digest,
-      input_digest,state,created_at,updated_at
-    ) VALUES (?,?,?,?,?,?,?,?,?)
-  `).run(
-    adapterId, actionId, "run", `owner-${adapterId}`, "principal",
-    `input-${adapterId}`, "admitted", 1, 1,
-  );
-  database.prepare(`
-    INSERT INTO provider_actions(
-      run_id,action_id,adapter_id,operation,target_agent_id,
-      provider_session_generation,identity_hash,payload_hash,payload_json,
-      status,history_json,execution_count,effect_count,idempotency_proven,
-      result_json,updated_at
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-  `).run(
-    "run", actionId, adapterId, "turn", "chair", 1,
-    `identity-${adapterId}`, `payload-${adapterId}`, "{}", "terminal", "[]",
-    1, 1, 1, "{}", 1,
-  );
+  admitProviderActionFixture(database, {
+    runId: "run",
+    actionId,
+    adapterId,
+    operation: "turn",
+    targetAgentId: "chair",
+    providerSessionGeneration: 1,
+    identityHash: `identity-${adapterId}`,
+    payloadHash: `payload-${adapterId}`,
+    payloadJson: "{}",
+    status: "terminal",
+    historyJson: "[]",
+    executionCount: 1,
+    effectCount: 1,
+    idempotencyProven: true,
+    resultJson: "{}",
+    updatedAt: 1,
+  });
 }
 
 describe("current database baseline invariants", () => {
+  it("installs the complete strict lifecycle rotation persistence graph", () => {
+    const database = openDatabase();
+    const lifecycleTables = [
+      "agent_lifecycle_bridge_high_water",
+      "agent_lifecycle_context_high_water",
+      "agent_lifecycle_identity_high_water",
+      "agent_lifecycle_recovery_capability_issues",
+      "agent_lifecycle_recovery_issue_revocations",
+      "agent_lifecycle_recovery_retirements",
+      "agent_lifecycle_recovery_source_heads",
+      "lifecycle_admitted_run_scopes",
+      "lifecycle_authority_receipts",
+      "lifecycle_custody_adoption_deliveries",
+      "lifecycle_fresh_recovery_handoffs",
+      "lifecycle_fresh_rotation_commits",
+      "lifecycle_fresh_rotation_preparations",
+      "lifecycle_generation_loss_heads",
+      "lifecycle_generation_loss_revisions",
+      "lifecycle_generation_losses",
+      "lifecycle_receipt_batch_authorizations",
+      "lifecycle_receipt_batch_completions",
+      "lifecycle_receipt_batches",
+      "lifecycle_receipt_custody_effects",
+      "lifecycle_receipt_fresh_origin_effects",
+      "lifecycle_receipt_generation_loss_effects",
+      "lifecycle_receipt_intents",
+      "lifecycle_receipt_namespace_checkpoints",
+      "lifecycle_receipt_namespace_heads",
+      "lifecycle_receipt_namespace_members",
+      "lifecycle_receipt_recovery_retirement_effects",
+      "lifecycle_receipt_scope_checkpoints",
+      "lifecycle_receipt_scope_heads",
+      "lifecycle_recovery_retirement_plans",
+      "lifecycle_review_adoption_reservations",
+      "lifecycle_review_authority_bindings",
+      "lifecycle_rotation_custodies",
+      "lifecycle_rotation_custody_heads",
+      "lifecycle_rotation_custody_revisions",
+      "lifecycle_scope_admission_outbox",
+      "lifecycle_scope_admission_resolutions",
+      "lifecycle_transition_applies",
+      "provider_context_observation_audit",
+    ] as const;
+    const installed = new Map((database.prepare(`
+      SELECT name,sql FROM sqlite_schema WHERE type='table'
+    `).all() as { name: string; sql: string }[]).map((row) => [row.name, row.sql]));
+
+    expect(lifecycleTables.filter((table) => !installed.has(table))).toEqual([]);
+    for (const table of lifecycleTables) {
+      expect(installed.get(table)?.trimEnd().endsWith("STRICT"), table).toBe(true);
+    }
+
+    const custodyForeignKeys = foreignKeySignatures(database, "lifecycle_rotation_custody_revisions");
+    expect(custodyForeignKeys).toEqual(expect.arrayContaining([
+      "lifecycle_receipt_custody_effects:receipt_batch_id->batch_id,receipt_apply_id->planned_apply_id,project_session_id->project_session_id,run_id->run_id,agent_id->agent_id,custody_id->custody_id,revision->final_revision,semantic_digest->final_semantic_digest,source_ref_digest->final_source_ref_digest",
+      "lifecycle_transition_applies:receipt_apply_id->apply_id,receipt_apply_digest->apply_digest,receipt_batch_id->receipt_batch_id",
+    ]));
+    expect(database.prepare(`
+      SELECT name FROM sqlite_schema
+       WHERE type='index' AND name='one_nonfinal_lifecycle_custody_per_agent'
+    `).get()).toEqual({ name: "one_nonfinal_lifecycle_custody_per_agent" });
+    expect(database.prepare(`
+      SELECT name FROM sqlite_schema
+       WHERE type='index' AND name='one_nonterminal_generation_loss_per_agent'
+    `).get()).toEqual({ name: "one_nonterminal_generation_loss_per_agent" });
+
+    database.close();
+  });
+
   it("equality-binds preflight, action, route, reservation, and evidence to one exact run", () => {
     const database = openDatabase();
 
+    expect(foreignKeySignatures(database, "provider_action_pair_preflights")).toContain(
+      "runs:run_id->run_id",
+    );
     expect(foreignKeySignatures(database, "provider_actions")).toContain(
       "provider_action_pair_preflights:run_id->run_id,adapter_id->adapter_id,action_id->action_id",
     );
@@ -424,6 +540,25 @@ describe("current database baseline invariants", () => {
     expect(foreignKeySignatures(database, "provider_review_evidence")).toContain(
       "review_finding_capacity_reservations:run_id->run_id,adapter_id->adapter_id,action_id->action_id,reservation_digest->reservation_digest",
     );
+
+    database.close();
+  });
+
+  it("requires every run-action preflight to reference a run while provider smoke remains unscoped", () => {
+    const database = openDatabase();
+
+    expect(() => database.prepare(`
+      INSERT INTO provider_action_pair_preflights(
+        adapter_id,action_id,scope_kind,run_id,owner_digest,actor_principal_digest,
+        input_digest,state,created_at,updated_at
+      ) VALUES ('adapter','missing-run-action','run-action','missing-run','owner','principal','input','resolving',1,1)
+    `).run()).toThrow("FOREIGN KEY constraint failed");
+    expect(() => database.prepare(`
+      INSERT INTO provider_action_pair_preflights(
+        adapter_id,action_id,scope_kind,run_id,owner_digest,actor_principal_digest,
+        input_digest,state,created_at,updated_at
+      ) VALUES ('adapter','provider-smoke','provider-smoke',NULL,'smoke-owner','smoke-principal','smoke-input','resolving',1,1)
+    `).run()).not.toThrow();
 
     database.close();
   });
@@ -464,13 +599,12 @@ describe("current database baseline invariants", () => {
     database.prepare(`
       INSERT INTO agents(run_id,agent_id,authority_id,lifecycle) VALUES (?,?,?,?)
     `).run("other-run", "other-chair", "other-authority", "ready");
-    database.prepare(`
-      INSERT INTO provider_action_pair_preflights(
-        adapter_id,action_id,run_id,owner_digest,actor_principal_digest,
-        input_digest,state,created_at,updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?)
-    `).run("adapter", "action", "run", "owner", "principal", "input", "resolving", 1, 1);
-
+    insertProviderActionPreflightParent(database, {
+      runId: "run",
+      adapterId: "adapter",
+      actionId: "action",
+      state: "resolving",
+    });
     expect(() => database.prepare(`
       INSERT INTO provider_actions(
         run_id,action_id,adapter_id,operation,target_agent_id,
@@ -518,43 +652,42 @@ describe("current database baseline invariants", () => {
       Buffer.byteLength(EMPTY_FINDING_SET_JSON),
       1,
     );
-    database.prepare(`
-      INSERT INTO provider_action_pair_preflights(
-        adapter_id,action_id,run_id,owner_digest,actor_principal_digest,
-        input_digest,state,created_at,updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?)
-    `).run("adapter", "action", "run", "owner", "principal", "input", "resolving", 1, 1);
-    database.prepare(`
-      INSERT INTO review_finding_capacity_reservations(
-        adapter_id,action_id,run_id,target_generation,slot,owner_digest,
-        finding_window_mode,prior_open_finding_set_digest,
-        maximum_new_findings,maximum_new_finding_bytes,reservation_digest,
-        state,created_at,updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `).run(
-      "adapter", "action", "run", 1, "native", "owner", "normal",
-      EMPTY_FINDING_SET_DIGEST, 32, 65_536, `sha256:${"b".repeat(64)}`,
-      "preflight", 1, 1,
-    );
+    const reservationDigest = `sha256:${"b".repeat(64)}`;
 
-    expect(() => database.prepare(`
-      UPDATE review_finding_capacity_reservations
-         SET state='settled',updated_at=2
-       WHERE adapter_id='adapter' AND action_id='action'
-    `).run()).toThrow("INVARIANT_review_finding_capacity_reservation_state");
-
-    database.prepare(`
-      INSERT INTO provider_actions(
-        run_id,action_id,adapter_id,operation,target_agent_id,
-        provider_session_generation,identity_hash,payload_hash,payload_json,
-        status,history_json,execution_count,effect_count,idempotency_proven,
-        result_json,updated_at,finding_capacity_reservation_digest
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `).run(
-      "run", "action", "adapter", "turn", "chair", 1,
-      "identity", "payload", "{}", "prepared", "[]", 0, 0, 0,
-      null, 1, `sha256:${"b".repeat(64)}`,
-    );
+    admitProviderActionFixture(database, {
+      runId: "run",
+      actionId: "action",
+      adapterId: "adapter",
+      operation: "turn",
+      targetAgentId: "chair",
+      providerSessionGeneration: 1,
+      identityHash: "identity",
+      payloadHash: "payload",
+      payloadJson: "{}",
+      status: "prepared",
+      historyJson: "[]",
+      executionCount: 0,
+      updatedAt: 1,
+      findingCapacityReservationDigest: reservationDigest,
+    }, undefined, (ticket) => {
+      database.prepare(`
+        INSERT INTO review_finding_capacity_reservations(
+          adapter_id,action_id,run_id,target_generation,slot,owner_digest,
+          finding_window_mode,prior_open_finding_set_digest,
+          maximum_new_findings,maximum_new_finding_bytes,reservation_digest,
+          state,created_at,updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        "adapter", "action", "run", 1, "native", ticket.ownerDigest, "normal",
+        EMPTY_FINDING_SET_DIGEST, 32, 65_536, reservationDigest,
+        "preflight", 1, 1,
+      );
+      expect(() => database.prepare(`
+        UPDATE review_finding_capacity_reservations
+           SET state='settled',updated_at=2
+         WHERE adapter_id='adapter' AND action_id='action'
+      `).run()).toThrow("INVARIANT_review_finding_capacity_reservation_state");
+    });
     database.prepare(`
       UPDATE review_finding_capacity_reservations
          SET state='attached',updated_at=2
@@ -891,50 +1024,67 @@ describe("current database baseline invariants", () => {
     database.close();
   });
 
-  it("rejects a recovery capability issue with invented source and authority bindings", () => {
+  it("rejects a recovery capability issue whose immutable source identity does not exist", () => {
     const database = openDatabase();
     seedRun(database);
 
     expect(() => database.prepare(`
       INSERT INTO agent_lifecycle_recovery_capability_issues(
-        issue_id,capability_hash,operator_id,project_id,session_id,run_id,agent_id,
+        issue_id,capability_hash,operator_id,project_id,project_session_id,run_id,agent_id,
         session_revision,session_generation,run_revision,recovery_source_kind,
-        generation_loss_id,generation_loss_revision,checkpoint_digest,
+        old_custody_id,old_action_adapter_id,old_action_id,old_custody_revision,
+        generation_loss_id,generation_loss_revision,recovery_source_ref_digest,
+        source_journal_digest,checkpoint_digest,
         source_provider_session_ref,source_capability_hash,source_custody_action_id,
         source_adapter_id,source_adapter_contract_digest,source_bridge_row_id,
         source_bridge_revision,source_provider_generation,source_principal_generation,
         source_bridge_generation,source_project_session_generation,source_run_generation,
         source_chair_lease_generation,bridge_owner_kind,parent_capability_id,
-        consequential_gate_id,path,status,issued_at,expires_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        consequential_gate_id,path,issuance_json,issuance_digest,issued_at,expires_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       "issue", "capability-hash", "operator", "forged-project", "forged-session",
-      "run", "chair", 999, 999, 999, "generation-loss", "missing-loss", 999,
-      SHA_A, "forged-provider-session", "forged-source-capability", "forged-action",
+      "run", "chair", 999, 999, 999, "generation-loss", null, null, null, null,
+      "missing-loss", 999, "forged-source-ref", "forged-journal", SHA_A,
+      "forged-provider-session", "forged-source-capability", "forged-action",
       "forged-adapter", SHA_A, "forged-bridge", 999, 999, 999, 999,
       999, 999, 999, "chair", "missing-parent", "missing-gate",
-      "fresh-rotate", "active", RECOVERY_ISSUED_AT, RECOVERY_EXPIRES_AT,
-    )).toThrow("INVARIANT_agent_lifecycle_recovery_issue_binding");
+      "fresh-rotate", "{}", "forged-issue-digest", RECOVERY_ISSUED_AT,
+      RECOVERY_EXPIRES_AT,
+    )).toThrow("FOREIGN KEY constraint failed");
 
     database.close();
   });
 
-  it("binds a recovery capability to one exact loss and one terminal status transition", () => {
+  it("binds an immutable recovery issue to one exact loss and one revocation", () => {
     const database = openDatabase();
     seedRun(database);
     seedGenerationLossRecovery(database);
 
     expect(() => insertGenerationLossRecoveryIssue(database, 2))
-      .toThrow("INVARIANT_agent_lifecycle_recovery_issue_binding");
+      .toThrow("FOREIGN KEY constraint failed");
     insertGenerationLossRecoveryIssue(database);
-    database.prepare(`
-      UPDATE agent_lifecycle_recovery_capability_issues SET status='consumed'
-       WHERE issue_id='issue'
-    `).run();
+    expect(database.prepare(`
+      SELECT issue_id,head_revision FROM agent_lifecycle_recovery_source_heads
+    `).get()).toEqual({ issue_id: "issue", head_revision: 1 });
     expect(() => database.prepare(`
-      UPDATE agent_lifecycle_recovery_capability_issues SET status='revoked'
+      UPDATE agent_lifecycle_recovery_capability_issues SET expires_at=expires_at+1
        WHERE issue_id='issue'
-    `).run()).toThrow("INVARIANT_agent_lifecycle_recovery_issue_status");
+    `).run()).toThrow("lifecycle-immutable-row");
+    database.prepare(`
+      INSERT INTO agent_lifecycle_recovery_issue_revocations(
+        issue_id,revocation_kind,evidence_digest,revoked_at
+      ) VALUES ('issue','operator-revoked',?,?)
+    `).run(SHA_A, RECOVERY_NOW);
+    expect(() => database.prepare(`
+      INSERT INTO agent_lifecycle_recovery_issue_revocations(
+        issue_id,revocation_kind,evidence_digest,revoked_at
+      ) VALUES ('issue','source-stale',?,?)
+    `).run(SHA_A, RECOVERY_NOW + 1)).toThrow("UNIQUE constraint failed");
+    expect(() => database.prepare(`
+      UPDATE agent_lifecycle_recovery_issue_revocations SET revoked_at=revoked_at+1
+       WHERE issue_id='issue'
+    `).run()).toThrow("lifecycle-immutable-row");
 
     database.close();
   });
@@ -945,17 +1095,15 @@ describe("current database baseline invariants", () => {
     seedGenerationLossRecovery(database);
     insertGenerationLossRecoveryIssue(database);
 
-    expect(database.prepare(`
-      SELECT issue_id FROM agent_lifecycle_recovery_capability_issue_current
-    `).all()).toEqual([{ issue_id: "issue" }]);
+    expect(currentGenerationLossRecoveryIssues(database, RECOVERY_NOW))
+      .toEqual([{ issue_id: "issue" }]);
 
     database.prepare(`
-      UPDATE agent_lifecycle_recovery_capability_issues SET status='revoked'
-       WHERE issue_id='issue'
-    `).run();
-    expect(database.prepare(`
-      SELECT issue_id FROM agent_lifecycle_recovery_capability_issue_current
-    `).all()).toEqual([]);
+      INSERT INTO agent_lifecycle_recovery_issue_revocations(
+        issue_id,revocation_kind,evidence_digest,revoked_at
+      ) VALUES ('issue','operator-revoked',?,?)
+    `).run(SHA_A, RECOVERY_NOW);
+    expect(currentGenerationLossRecoveryIssues(database, RECOVERY_NOW)).toEqual([]);
 
     database.close();
 
@@ -969,18 +1117,16 @@ describe("current database baseline invariants", () => {
       RECOVERY_NOW - 60_000,
     );
 
-    expect(expiredDatabase.prepare(`
-      SELECT issue_id FROM agent_lifecycle_recovery_capability_issue_current
-    `).all()).toEqual([]);
+    expect(currentGenerationLossRecoveryIssues(expiredDatabase, RECOVERY_NOW)).toEqual([]);
     expect(() => expiredDatabase.prepare(`
-      UPDATE agent_lifecycle_recovery_capability_issues SET status='consumed'
-       WHERE issue_id='issue'
-    `).run()).toThrow("INVARIANT_agent_lifecycle_recovery_issue_status");
+      INSERT INTO lifecycle_fresh_recovery_handoffs(issue_id,created_at)
+      VALUES ('issue',?)
+    `).run(RECOVERY_NOW)).toThrow("LIFECYCLE_RECOVERY_ISSUE_NOT_CURRENT");
 
     expiredDatabase.close();
   });
 
-  it("refuses to consume a recovery issue after its parent capability is revoked", () => {
+  it("refuses to consume a recovery issue after its parent capability and issue are revoked", () => {
     const database = openDatabase();
     seedRun(database);
     seedGenerationLossRecovery(database);
@@ -989,11 +1135,16 @@ describe("current database baseline invariants", () => {
       UPDATE operator_capabilities SET revoked_at=11
        WHERE capability_id='parent-capability'
     `).run();
+    database.prepare(`
+      INSERT INTO agent_lifecycle_recovery_issue_revocations(
+        issue_id,revocation_kind,evidence_digest,revoked_at
+      ) VALUES ('issue','operator-revoked',?,11)
+    `).run(SHA_A);
 
     expect(() => database.prepare(`
-      UPDATE agent_lifecycle_recovery_capability_issues SET status='consumed'
-       WHERE issue_id='issue'
-    `).run()).toThrow("INVARIANT_agent_lifecycle_recovery_issue_status");
+      INSERT INTO lifecycle_fresh_recovery_handoffs(issue_id,created_at)
+      VALUES ('issue',12)
+    `).run()).toThrow("LIFECYCLE_RECOVERY_ISSUE_NOT_CURRENT");
 
     database.close();
   });
@@ -1029,11 +1180,16 @@ describe("current database baseline invariants", () => {
          SET provider_generation=11,revision=2
        WHERE run_id='run' AND agent_id='chair'
     `).run();
-    expect(() => database.prepare(`
+    database.prepare(`
       UPDATE agent_lifecycle_identity_high_water
          SET provider_generation=13,revision=3
        WHERE run_id='run' AND agent_id='chair'
-    `).run()).toThrow("INVARIANT_agent_lifecycle_identity_high_water_cas");
+    `).run();
+    expect(database.prepare(`
+      SELECT provider_generation,revision
+        FROM agent_lifecycle_identity_high_water
+       WHERE run_id='run' AND agent_id='chair'
+    `).get()).toEqual({ provider_generation: 13, revision: 3 });
 
     database.prepare(`
       INSERT INTO agent_lifecycle_bridge_high_water(
@@ -1265,9 +1421,9 @@ describe("current database baseline invariants", () => {
     `).run(incompleteSet, 1, 1, 1, 1);
     database.prepare(`
       INSERT INTO provider_action_pair_preflights(
-        adapter_id,action_id,run_id,owner_digest,actor_principal_digest,
+        adapter_id,action_id,scope_kind,run_id,owner_digest,actor_principal_digest,
         input_digest,state,created_at,updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?)
+      ) VALUES (?,?,'run-action',?,?,?,?,?,?,?)
     `).run(
       "adapter", "action", "run", "owner", "principal", "input",
       "resolving", 1, 1,

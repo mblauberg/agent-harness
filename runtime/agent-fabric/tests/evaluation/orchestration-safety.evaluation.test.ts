@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -214,21 +215,27 @@ describe("AFAB-001 Stage 5 orchestration safety evaluation", () => {
   });
 
   it("fences writes after unannounced provider compaction", async () => {
-    const fixture = await createLifecycleFixture();
+    const fixture = await createLifecycleFixture({ retainedAgents: true });
     try {
       await fixture.chair.reportProviderState({
+        sourceEventId: "evaluation:compaction:g1",
+        providerSessionRef: fixture.providerSessionMarker,
+        evidenceDigest: `sha256:${createHash("sha256").update("evaluation:compaction:g1").digest("hex")}`,
         agentId: "leader",
         providerSessionGeneration: 1,
-        contextRevision: "evaluation-context-1",
+        contextRevision: 0,
         commandId: "evaluation:compaction:g1",
       });
       const state = await fixture.chair.reportProviderState({
+        sourceEventId: "evaluation:compaction:g2",
+        providerSessionRef: `${fixture.providerSessionMarker}:g2`,
+        evidenceDigest: `sha256:${createHash("sha256").update("evaluation:compaction:g2").digest("hex")}`,
         agentId: "leader",
         providerSessionGeneration: 2,
-        contextRevision: "evaluation-context-2-unannounced",
+        contextRevision: 2,
         commandId: "evaluation:compaction:g2",
       });
-      expect(state).toMatchObject({ lifecycle: "context-unreconciled" });
+      expect(state).toMatchObject({ lifecycle: "suspended" });
       await expect(fixture.leader.acquireWriteLease({
         scope: ["src/leader"],
         ttlMs: 60_000,
@@ -390,6 +397,7 @@ describe("AFAB-001 Stage 5 orchestration safety evaluation", () => {
         commandId: "evaluation:ambiguous:dispatch",
       });
       const reconciled = await fixture.chair.reconcileProviderAction({
+        adapterId: "fake-lifecycle",
         actionId: ambiguous.actionId,
         commandId: "evaluation:ambiguous:reconcile",
       });

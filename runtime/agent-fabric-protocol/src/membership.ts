@@ -29,7 +29,7 @@ export type ProjectSessionMember = MembershipDisposition & (
   | { kind: "workstream"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; workstreamId: WorkstreamId }
   | { kind: "task"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; taskId: TaskId }
   | { kind: "lease"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; leaseId: LeaseId }
-  | { kind: "provider-action"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; providerActionId: ProviderActionId }
+  | { kind: "provider-action"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; providerAdapterId: string; providerActionId: ProviderActionId }
   | { kind: "required-message"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; messageId: MessageId }
   | { kind: "artifact-obligation"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; artifactObligationId: ArtifactObligationId }
   | { kind: "gate"; membershipId: MembershipId; coordinationRunId: CoordinationRunId; gateId: GateId }
@@ -83,6 +83,7 @@ function parseProjectSessionMember(value: unknown, index: number): ProjectSessio
     "membershipId",
     "coordinationRunId",
     identityField,
+    ...(memberKind === "provider-action" ? ["providerAdapterId"] : []),
     "state",
     ...(state === "abandoned" ? ["reason"] : []),
   ];
@@ -99,6 +100,14 @@ function parseProjectSessionMember(value: unknown, index: number): ProjectSessio
       `membershipBind.members[${String(index)}].coordinationRunId`,
     ),
     [identityField]: identity,
+    ...(memberKind === "provider-action"
+      ? {
+          providerAdapterId: parseIdentifier<"ProviderAdapterId">(
+            record.providerAdapterId,
+            `membershipBind.members[${String(index)}].providerAdapterId`,
+          ),
+        }
+      : {}),
   };
   if (state === "active" || state === "terminal") {
     return { ...common, state } as ProjectSessionMember;

@@ -25,6 +25,7 @@ import {
   workerContext,
   workerTwoContext,
 } from "./restart-recovery-fixtures.ts";
+import { admitProviderActionFixture } from "../../support/provider-action-fixture.ts";
 
 const databases: Database.Database[] = [];
 const directories: string[] = [];
@@ -171,22 +172,29 @@ describe("result-delivery restart recovery", () => {
     const providerPayload = JSON.stringify({
       fabricResultDelivery: resultDeliveryProviderActionBinding(claimed),
     });
-    database.prepare(`
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, updated_at
-      ) VALUES (
-        'run_01', 'provider_action_result', 'adapter', 'inject', 'chair_01',
-        1, 1, 'identity', 'payload', ?, 'accepted', '[]', 1, 0, 1, 1
-      )
-    `).run(providerPayload);
+    admitProviderActionFixture(database, {
+      runId: "run_01",
+      actionId: "provider_action_result",
+      adapterId: "adapter",
+      operation: "inject",
+      targetAgentId: "chair_01",
+      providerSessionGeneration: 1,
+      turnLeaseGeneration: 1,
+      identityHash: "identity",
+      payloadHash: "payload",
+      payloadJson: providerPayload,
+      status: "accepted",
+      historyJson: "[]",
+      executionCount: 1,
+      idempotencyProven: true,
+      updatedAt: 1,
+    });
     store.providerAccept(integrationContext, {
       commandId: "accept_command",
       resultDeliveryId,
       expectedRevision: 2,
       claimGeneration: 1,
+      providerAdapterId: "adapter",
       providerActionId: "provider_action_result",
     } as unknown as ResultDeliveryProviderAcceptRequest);
 

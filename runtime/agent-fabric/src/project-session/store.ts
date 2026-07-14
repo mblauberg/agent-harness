@@ -553,7 +553,8 @@ export class ProjectSessionStore {
           UPDATE project_session_memberships
              SET state=?, revision=revision+1, abandoned_reason=?, updated_at=?
            WHERE project_session_id=? AND coordination_run_id=?
-             AND member_kind=? AND member_id=? AND required=1 AND state='active'
+             AND member_kind=? AND member_id=? AND member_adapter_id=?
+             AND required=1 AND state='active'
         `).run(
           disposition,
           member.state === "abandoned" ? member.reason : null,
@@ -562,6 +563,7 @@ export class ProjectSessionStore {
           request.coordinationRunId,
           member.kind,
           this.#memberId(member),
+          this.#memberAdapterId(member),
         );
         if (settled.changes !== 1) {
           throw new ProjectFabricCoreError(
@@ -572,10 +574,10 @@ export class ProjectSessionStore {
       } else {
         this.#database.prepare(`
           INSERT INTO project_session_memberships(
-            project_session_id, coordination_run_id, member_kind, member_id,
+            project_session_id, coordination_run_id, member_kind, member_id, member_adapter_id,
             required, state, revision, abandoned_reason, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, 1, ?, 1, ?, ?, ?)
-          ON CONFLICT(project_session_id, coordination_run_id, member_kind, member_id)
+          ) VALUES (?, ?, ?, ?, ?, 1, ?, 1, ?, ?, ?)
+          ON CONFLICT(project_session_id, coordination_run_id, member_kind, member_id, member_adapter_id)
           DO UPDATE SET state=excluded.state,
                         revision=project_session_memberships.revision+1,
                         abandoned_reason=excluded.abandoned_reason,
@@ -585,6 +587,7 @@ export class ProjectSessionStore {
           request.coordinationRunId,
           member.kind,
           this.#memberId(member),
+          this.#memberAdapterId(member),
           disposition,
           member.state === "abandoned" ? member.reason : null,
           timestamp,
@@ -1693,7 +1696,14 @@ export class ProjectSessionStore {
     member: ProjectSessionMember,
   ): void {
     try {
-      membershipSourceDisposition(this.#database, projectSessionId, runId, member.kind, this.#memberId(member));
+      membershipSourceDisposition(
+        this.#database,
+        projectSessionId,
+        runId,
+        member.kind,
+        this.#memberId(member),
+        this.#memberAdapterId(member),
+      );
     } catch (error: unknown) {
       if (
         (error instanceof ProjectFabricCoreError && error.code === "NOT_FOUND") ||
@@ -1716,6 +1726,7 @@ export class ProjectSessionStore {
       runId,
       member.kind,
       this.#memberId(member),
+      this.#memberAdapterId(member),
     );
     const expected = member.state === "terminal" ? "reconciled" : member.state;
     if (source.state === expected) return;
@@ -1737,5 +1748,9 @@ export class ProjectSessionStore {
       case "gate": return member.gateId;
       case "scoped-barrier": return member.barrierId;
     }
+  }
+
+  #memberAdapterId(member: ProjectSessionMember): string {
+    return member.kind === "provider-action" ? member.providerAdapterId : "";
   }
 }

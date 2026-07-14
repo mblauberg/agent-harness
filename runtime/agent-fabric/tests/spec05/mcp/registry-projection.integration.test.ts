@@ -107,7 +107,9 @@ describe("registry-owned MCP projection", () => {
       structured: { code: "MCP_INPUT_INVALID" },
     });
     const missing = await callTool(fixture.chairProxy.client, "fabric_provider_action_read", {
+      adapterId: "fake",
       actionId: "missing-action",
+      expectedActionKind: "non-review",
     });
     expect(missing).toMatchObject({ isError: true, structured: { code: "NOT_FOUND" } });
 

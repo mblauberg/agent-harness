@@ -155,6 +155,9 @@ export function createProviderAdapter(options: {
         targetAgentId,
         bridgeGeneration,
         bridgeContractDigest,
+        ...(agentBridgeHandoff.lifecycleAttestation === undefined ? {} : {
+          lifecycleAttestation: agentBridgeHandoff.lifecycleAttestation,
+        }),
       });
       const live = liveAgentSessionByAction.get(actionId);
       if (
@@ -171,7 +174,12 @@ export function createProviderAdapter(options: {
     }
     const handoff = agentBridgeHandoff;
     agentBridgeHandoff = undefined;
-    if (containsPrivateValue(publicPayload, [handoff.capability, handoff.socketPath])) {
+    const privateHandoffValues = [
+      handoff.capability,
+      handoff.socketPath,
+      ...(handoff.lifecycleAttestation === undefined ? [] : [handoff.lifecycleAttestation.challenge]),
+    ];
+    if (containsPrivateValue(publicPayload, privateHandoffValues)) {
       throw new ProviderAdapterError("PRIVATE_HANDOFF_DISCLOSED", "agent provision payload contains private handoff material");
     }
     options.journal.markDispatched(actionId);
@@ -191,6 +199,12 @@ export function createProviderAdapter(options: {
         environment: {
           AGENT_FABRIC_CAPABILITY: handoff.capability,
           AGENT_FABRIC_SOCKET_PATH: handoff.socketPath,
+          ...(handoff.lifecycleAttestation === undefined ? {} : {
+            AGENT_FABRIC_ATTESTATION_CHALLENGE: handoff.lifecycleAttestation.challenge,
+            AGENT_FABRIC_ATTESTATION_CHALLENGE_DIGEST: handoff.lifecycleAttestation.challengeDigest,
+            AGENT_FABRIC_LIFECYCLE_CUSTODY_ID: handoff.lifecycleAttestation.custodyId,
+            AGENT_FABRIC_LIFECYCLE_CHECKPOINT_DIGEST: handoff.lifecycleAttestation.checkpointDigest,
+          }),
         },
       }), {
         adapterId: capabilities.adapterId,
@@ -198,8 +212,11 @@ export function createProviderAdapter(options: {
         targetAgentId,
         bridgeGeneration,
         bridgeContractDigest,
+        ...(handoff.lifecycleAttestation === undefined ? {} : {
+          lifecycleAttestation: handoff.lifecycleAttestation,
+        }),
       });
-      if (containsPrivateValue(result, [handoff.capability, handoff.socketPath])) {
+      if (containsPrivateValue(result, privateHandoffValues)) {
         throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "agent provision result contains private handoff material");
       }
       options.journal.markAccepted(actionId);
@@ -213,6 +230,12 @@ export function createProviderAdapter(options: {
       return result;
     } catch (error: unknown) {
       if (options.journal.get(actionId).status === "dispatched") options.journal.markAmbiguous(actionId);
+      if (containsPrivateErrorValue(error, privateHandoffValues)) {
+        throw new ProviderAdapterError(
+          "PROVIDER_RESPONSE_INVALID",
+          "agent provision provider error contained private handoff material",
+        );
+      }
       throw error;
     }
   }
@@ -253,6 +276,22 @@ export function createProviderAdapter(options: {
     if (typeof value === "string") return privateValues.some((candidate) => value.includes(candidate));
     if (Array.isArray(value)) return value.some((entry) => containsPrivateValue(entry, privateValues));
     return isRecord(value) && Object.values(value).some((entry) => containsPrivateValue(entry, privateValues));
+  }
+
+  function containsPrivateErrorValue(
+    value: unknown,
+    privateValues: readonly string[],
+    seen = new Set<object>(),
+  ): boolean {
+    if (typeof value === "string") return privateValues.some((candidate) => value.includes(candidate));
+    if (typeof value !== "object" || value === null || seen.has(value)) return false;
+    seen.add(value);
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    return Reflect.ownKeys(descriptors).some((key) => {
+      const descriptor = descriptors[key as keyof typeof descriptors];
+      return descriptor !== undefined && "value" in descriptor &&
+        containsPrivateErrorValue(descriptor.value, privateValues, seen);
+    });
   }
 
   async function launchChair(params: Record<string, unknown>): Promise<Record<string, unknown>> {

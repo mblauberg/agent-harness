@@ -33,7 +33,9 @@ describe("current schema baseline", () => {
       "agent_lifecycle_context_high_water",
       "agent_lifecycle_identity_high_water",
       "agent_lifecycle_recovery_capability_issues",
+      "agent_lifecycle_recovery_issue_revocations",
       "agent_lifecycle_recovery_retirements",
+      "agent_lifecycle_recovery_source_heads",
       "artifact_publication_lineage",
       "coordination_policy_current",
       "coordination_policy_revisions",
@@ -43,9 +45,37 @@ describe("current schema baseline", () => {
       "delivery_run_starts",
       "discovery_surface_manifests",
       "implementation_delivery_manifests",
+      "lifecycle_admitted_run_scopes",
+      "lifecycle_authority_receipts",
       "lifecycle_custody_adoption_deliveries",
+      "lifecycle_fresh_recovery_handoffs",
+      "lifecycle_fresh_rotation_commits",
+      "lifecycle_fresh_rotation_preparations",
+      "lifecycle_generation_loss_heads",
+      "lifecycle_generation_loss_revisions",
       "lifecycle_generation_losses",
-      "lifecycle_rotation_custody",
+      "lifecycle_receipt_batch_authorizations",
+      "lifecycle_receipt_batch_completions",
+      "lifecycle_receipt_batches",
+      "lifecycle_receipt_custody_effects",
+      "lifecycle_receipt_fresh_origin_effects",
+      "lifecycle_receipt_generation_loss_effects",
+      "lifecycle_receipt_intents",
+      "lifecycle_receipt_namespace_checkpoints",
+      "lifecycle_receipt_namespace_heads",
+      "lifecycle_receipt_namespace_members",
+      "lifecycle_receipt_recovery_retirement_effects",
+      "lifecycle_receipt_scope_checkpoints",
+      "lifecycle_receipt_scope_heads",
+      "lifecycle_recovery_retirement_plans",
+      "lifecycle_review_adoption_reservations",
+      "lifecycle_review_authority_bindings",
+      "lifecycle_rotation_custodies",
+      "lifecycle_rotation_custody_heads",
+      "lifecycle_rotation_custody_revisions",
+      "lifecycle_scope_admission_outbox",
+      "lifecycle_scope_admission_resolutions",
+      "lifecycle_transition_applies",
       "provider_action_pair_preflights",
       "provider_action_route_dispatches",
       "provider_action_route_observations",
@@ -131,11 +161,17 @@ describe("current schema baseline", () => {
     for (const table of [
       "adapter_capability_snapshots",
       "adapter_effective_configurations",
+      "agent_lifecycle_recovery_capability_issues",
+      "agent_lifecycle_recovery_issue_revocations",
       "artifact_publication_lineage",
       "coordination_policy_revisions",
       "coordination_gate_snapshots",
       "discovery_surface_manifests",
       "implementation_delivery_manifests",
+      "lifecycle_generation_loss_revisions",
+      "lifecycle_generation_losses",
+      "lifecycle_rotation_custodies",
+      "lifecycle_rotation_custody_revisions",
       "provider_action_route_dispatches",
       "provider_action_route_observations",
       "provider_action_routes",
@@ -186,21 +222,28 @@ describe("current schema baseline", () => {
     );
   });
 
-  it("stores the complete lifecycle terminal and generation-loss evidence arms", () => {
+  it("stores the complete immutable lifecycle terminal and generation-loss evidence arms", () => {
     const database = openDatabase();
     applyMigrations(database);
     const tableSql = (table: string): string => (database.prepare(`
       SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?
     `).pluck().get(table) as string).replaceAll(/\s+/gu, "");
-    expect(tableSql("lifecycle_rotation_custody")).toContain(
+    expect(tableSql("lifecycle_rotation_custody_revisions")).toContain(
       "'awaiting-boundary','prepared','dispatched','accepted','ambiguous','provider-terminal','committing','finalized'",
     );
-    const lossColumns = database.prepare(`
+    const lossRevisionColumns = database.prepare(`
+      SELECT name, "notnull" AS is_not_null
+        FROM pragma_table_info('lifecycle_generation_loss_revisions')
+    `).all() as { name: string; is_not_null: 0 | 1 }[];
+    expect(lossRevisionColumns).toContainEqual({ name: "terminal_evidence_digest", is_not_null: 0 });
+    expect(tableSql("lifecycle_generation_loss_revisions")).toContain(
+      "'open','recovery-in-progress','recovered-adopted','abandoned'",
+    );
+    const lossIdentityColumns = database.prepare(`
       SELECT name, "notnull" AS is_not_null
         FROM pragma_table_info('lifecycle_generation_losses')
     `).all() as { name: string; is_not_null: 0 | 1 }[];
-    expect(lossColumns).toContainEqual({ name: "terminal_evidence_digest", is_not_null: 0 });
-    expect(lossColumns).toContainEqual({ name: "old_context_revision", is_not_null: 0 });
+    expect(lossIdentityColumns).toContainEqual({ name: "old_context_revision", is_not_null: 0 });
   });
 
   it("closes route-integrity reason and terminal-disposition vocabularies", () => {

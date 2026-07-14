@@ -167,6 +167,36 @@ describe("run-correlated project-session membership", () => {
     } as const;
     expect(parseOperationResult(FABRIC_OPERATIONS.membershipBind, result)).toStrictEqual(result);
   });
+
+  it("requires and round-trips the provider adapter with a provider-action member", () => {
+    const providerMember = {
+      kind: "provider-action",
+      membershipId: "membership_action_01",
+      coordinationRunId: "run_01",
+      providerAdapterId: "adapter_01",
+      providerActionId: "action_01",
+      state: "active",
+    } as const;
+    const request = { ...membershipBind, members: [providerMember] };
+    expect(parseOperationInput(FABRIC_OPERATIONS.membershipBind, request)).toStrictEqual(request);
+    expect(() => parseOperationInput(FABRIC_OPERATIONS.membershipBind, {
+      ...request,
+      members: [{
+        kind: "provider-action",
+        membershipId: "membership_action_01",
+        coordinationRunId: "run_01",
+        providerActionId: "action_01",
+        state: "active",
+      }],
+    })).toThrowError(/providerAdapterId/iu);
+    const result = {
+      projectSessionId: "ps_01",
+      coordinationRunId: "run_01",
+      membershipRevision: 4,
+      members: [providerMember],
+    } as const;
+    expect(parseOperationResult(FABRIC_OPERATIONS.membershipBind, result)).toStrictEqual(result);
+  });
 });
 
 const intakeDraftCreate = {

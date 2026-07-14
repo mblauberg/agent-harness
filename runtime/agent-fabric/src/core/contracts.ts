@@ -1,4 +1,8 @@
 import type { AuthorityInput } from "../domain/types.js";
+import type {
+  LifecycleAcceptedSuspendedV1,
+  LifecycleCurrentStateV1,
+} from "@local/agent-fabric-protocol";
 
 export type CurrentMcpSeatBinding = {
   seat: string;
@@ -85,12 +89,7 @@ export type LifecycleCheckpoint = {
   nextAction: string;
   providerResumeReference: string;
 };
-export type LifecycleResult = {
-  agentId: string;
-  lifecycle: string;
-  providerSessionGeneration: number;
-  rotation?: { kind: "in-place" | "replacement-session"; priorResumeReference: string };
-};
+export type LifecycleResult = LifecycleAcceptedSuspendedV1 | LifecycleCurrentStateV1;
 export type ProviderActionResult = {
   actionId: string;
   status: "prepared" | "dispatched" | "accepted" | "terminal" | "ambiguous" | "quarantined";

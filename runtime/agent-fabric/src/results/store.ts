@@ -466,8 +466,12 @@ export class AtomicDeliveryStore {
         throw new ProjectFabricCoreError("STALE_GENERATION", "result claim is not current");
       }
       const action = row(this.#database.prepare(`
-        SELECT * FROM provider_actions WHERE run_id=? AND action_id=?
-      `).get(context.coordinationRunId, request.providerActionId), "provider action");
+        SELECT * FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?
+      `).get(
+        context.coordinationRunId,
+        request.providerAdapterId,
+        request.providerActionId,
+      ), "provider action");
       if (text(action, "status") !== "accepted" && text(action, "status") !== "terminal") {
         throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "provider action has not accepted the callback");
       }
@@ -493,9 +497,10 @@ export class AtomicDeliveryStore {
       this.#database.prepare(`
         UPDATE result_deliveries
            SET state='provider-accepted', revision=revision+1,
-               provider_action_id=?, provider_accepted_at=?, updated_at=?
+               provider_adapter_id=?, provider_action_id=?, provider_accepted_at=?, updated_at=?
          WHERE result_delivery_id=? AND revision=? AND state='claimed'
       `).run(
+        request.providerAdapterId,
         request.providerActionId,
         this.#clock(),
         this.#clock(),
@@ -686,8 +691,14 @@ export class AtomicDeliveryStore {
         isRow(latestEpoch) ? integer(latestEpoch, "instance_generation") : 1,
       );
       const expiredClaims = this.#database.prepare(`
-        SELECT result_delivery_id FROM result_deliveries
-         WHERE state='claimed' AND claim_deadline IS NOT NULL AND claim_deadline<=?
+        SELECT delivery.result_delivery_id FROM result_deliveries delivery
+         WHERE delivery.state='claimed' AND delivery.claim_deadline IS NOT NULL
+           AND delivery.claim_deadline<=?
+           AND NOT EXISTS (
+             SELECT 1 FROM lifecycle_custody_adoption_deliveries ownership
+            WHERE ownership.delivery_id=delivery.result_delivery_id
+              AND ownership.active_owner=1
+           )
       `).all(now).filter(isRow);
       let returnedClaims = 0;
       for (const delivery of expiredClaims) {
@@ -697,6 +708,11 @@ export class AtomicDeliveryStore {
                  claimed_by=NULL, claim_deadline=NULL,
                  overdue_at=NULL, updated_at=?
            WHERE result_delivery_id=? AND state='claimed'
+             AND NOT EXISTS (
+               SELECT 1 FROM lifecycle_custody_adoption_deliveries ownership
+              WHERE ownership.delivery_id=result_deliveries.result_delivery_id
+                AND ownership.active_owner=1
+             )
         `).run(
           now,
           text(delivery, "result_delivery_id"),
@@ -719,10 +735,15 @@ export class AtomicDeliveryStore {
   ): Omit<ResultDeadlinePassResult, "daemonInstanceGeneration" | "passGeneration"> {
     const touchedRequestIds = new Set<string>();
     const dueDeliveries = this.#database.prepare(`
-      SELECT result_delivery_id, request_id, state, claim_generation
-        FROM result_deliveries
-       WHERE state IN ('pending','claimed') AND response_deadline<=?
-       ORDER BY result_delivery_id
+      SELECT delivery.result_delivery_id,delivery.request_id,delivery.state,delivery.claim_generation
+        FROM result_deliveries delivery
+       WHERE delivery.state IN ('pending','claimed') AND delivery.response_deadline<=?
+         AND NOT EXISTS (
+           SELECT 1 FROM lifecycle_custody_adoption_deliveries ownership
+          WHERE ownership.delivery_id=delivery.result_delivery_id
+            AND ownership.active_owner=1
+         )
+       ORDER BY delivery.result_delivery_id
     `).all(now).filter(isRow);
     let overdueDeliveries = 0;
     for (const delivery of dueDeliveries) {
@@ -736,6 +757,11 @@ export class AtomicDeliveryStore {
                    overdue_at=?, updated_at=?
              WHERE result_delivery_id=? AND state='claimed'
                AND claim_generation=? AND response_deadline<=?
+               AND NOT EXISTS (
+                 SELECT 1 FROM lifecycle_custody_adoption_deliveries ownership
+                WHERE ownership.delivery_id=result_deliveries.result_delivery_id
+                  AND ownership.active_owner=1
+               )
           `).run(
             now,
             now,
@@ -747,6 +773,11 @@ export class AtomicDeliveryStore {
             UPDATE result_deliveries
                SET state='overdue', revision=revision+1, overdue_at=?, updated_at=?
              WHERE result_delivery_id=? AND state='pending' AND response_deadline<=?
+               AND NOT EXISTS (
+                 SELECT 1 FROM lifecycle_custody_adoption_deliveries ownership
+                WHERE ownership.delivery_id=result_deliveries.result_delivery_id
+                  AND ownership.active_owner=1
+               )
           `).run(now, now, text(delivery, "result_delivery_id"), now);
       if (changed.changes === 1) {
         overdueDeliveries += 1;
@@ -992,6 +1023,7 @@ export class AtomicDeliveryStore {
         return parseResultDelivery(JSON.parse(text(existing, "detail_json"))) as Result;
       }
       const delivery = this.#deliveryRow(deliveryId);
+      this.#assertLifecycleTransitionAllowed(deliveryId, transition);
       assertTaskOperationAdmitted(this.#database, text(delivery, "run_id"), text(delivery, "task_id"));
       const result = mutate();
       this.#database.prepare(`
@@ -1174,5 +1206,27 @@ export class AtomicDeliveryStore {
     return row(this.#database.prepare(`
       SELECT * FROM result_deliveries WHERE result_delivery_id=?
     `).get(resultDeliveryId), "result delivery");
+  }
+
+  #assertLifecycleTransitionAllowed(resultDeliveryId: string, transition: string): void {
+    const owned = this.#database.prepare(`
+      SELECT CASE WHEN EXISTS (
+               SELECT 1 FROM lifecycle_receipt_custody_effects effect
+                WHERE effect.run_id=ownership.run_id AND effect.agent_id=ownership.agent_id
+                  AND effect.custody_id=ownership.custody_id
+             ) THEN 1 ELSE 0 END AS prepared
+        FROM lifecycle_custody_adoption_deliveries ownership
+        JOIN lifecycle_rotation_custody_heads head
+          ON head.run_id=ownership.run_id AND head.agent_id=ownership.agent_id
+         AND head.custody_id=ownership.custody_id
+       WHERE ownership.delivery_id=? AND ownership.active_owner=1 AND head.terminal=0
+       LIMIT 1
+    `).get(resultDeliveryId);
+    if (isRow(owned) && (transition !== "provider-accept" || integer(owned, "prepared") === 1)) {
+      throw new ProjectFabricCoreError(
+        "RECOVERY_REQUIRED",
+        "result delivery is owned by an active lifecycle rotation",
+      );
+    }
   }
 }

@@ -2,6 +2,11 @@ import { Fabric, type FabricRuntimeOpenOptions } from "./core/fabric.js";
 
 export { Fabric, FabricClient } from "./core/fabric.js";
 export type { FabricOperatorActionPorts, FabricRuntimeOpenOptions } from "./core/fabric.js";
+export type {
+  LifecycleIntegrityReceiptAuthorityPort,
+  LifecycleAuthenticatedReceipt,
+  LifecycleAuthenticatedScopeCheckpoint,
+} from "./lifecycle/receipt-authority.js";
 export type { TeamCreateInput, TeamResult } from "./core/contracts.js";
 export {
   connectFabricDaemon,

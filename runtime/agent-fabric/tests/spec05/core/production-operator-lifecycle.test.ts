@@ -4,12 +4,16 @@ import { parseSha256Digest } from "@local/agent-fabric-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { applyMigrations } from "../../../src/core/migrations.ts";
+import { ProviderActionAdmissionCoordinator } from "../../../src/application/provider-action-admission.ts";
 import {
   assertOperatorTaskRunnable,
   assertRunAcceptingWork,
   createProductionOperatorActionPorts,
 } from "../../../src/operator/production-action-ports.ts";
 import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
+import {
+  admitProviderActionFixture,
+} from "../../support/provider-action-fixture.ts";
 
 const databases: Database.Database[] = [];
 const digest = `sha256:${"a".repeat(64)}`;
@@ -38,11 +42,14 @@ function scopedEffectRequest(
   } as const;
 }
 
-function fixture(adapter: Parameters<typeof createProductionOperatorActionPorts>[0]["adapter"] = {
-  capabilities: async () => { throw new Error("idle control must not inspect an adapter"); },
-  dispatch: async () => { throw new Error("idle control must not dispatch an adapter effect"); },
-  lookup: async () => { throw new Error("idle control must not look up an adapter effect"); },
-}): {
+function fixture(
+  adapter: Parameters<typeof createProductionOperatorActionPorts>[0]["adapter"] = {
+    capabilities: async () => { throw new Error("idle control must not inspect an adapter"); },
+    dispatch: async () => { throw new Error("idle control must not dispatch an adapter effect"); },
+    lookup: async () => { throw new Error("idle control must not look up an adapter effect"); },
+  },
+  configureAdmission?: (coordinator: ProviderActionAdmissionCoordinator) => void,
+): {
   database: Database.Database;
   ports: ReturnType<typeof createProductionOperatorActionPorts>;
 } {
@@ -52,6 +59,13 @@ function fixture(adapter: Parameters<typeof createProductionOperatorActionPorts>
   database.exec(`
     INSERT INTO projects(project_id, canonical_root, trust_record_digest, revision, authority_generation, created_at, updated_at)
     VALUES ('project_01', '/project/one', '${digest}', 1, 1, ${now}, ${now});
+    INSERT INTO operator_principals(
+      operator_id, project_id, project_session_id, authenticated_subject_hash,
+      project_authority_generation, principal_generation, state, created_at, updated_at
+    ) VALUES (
+      'operator_direct_test', 'project_01', NULL, 'direct-test-subject',
+      1, 1, 'active', ${now}, ${now}
+    );
     INSERT INTO project_sessions(
       project_session_id, project_id, mode, state, revision, generation, authority_ref,
       budget_ref, launch_packet_path, launch_packet_digest, membership_revision,
@@ -84,14 +98,53 @@ function fixture(adapter: Parameters<typeof createProductionOperatorActionPorts>
       'chair_01', 3, 1, 'chair_01'
     );
   `);
+  const providerActionAdmission = new ProviderActionAdmissionCoordinator({ database, clock: () => now });
+  configureAdmission?.(providerActionAdmission);
   return {
     database,
     ports: createProductionOperatorActionPorts({
       database,
       clock: () => now,
+      providerActionAdmission,
       adapter,
     }),
   };
+}
+
+function seedProviderAction(
+  database: Database.Database,
+  input: Readonly<{
+    actionId: string;
+    adapterId?: string;
+    targetAgentId?: string;
+    providerSessionGeneration?: number;
+    turnLeaseGeneration?: number;
+    payloadJson: string;
+    status: "prepared" | "dispatched" | "accepted" | "terminal";
+    historyJson: string;
+    executionCount?: number;
+    effectCount?: number;
+    resultJson?: string;
+  }>,
+): void {
+  admitProviderActionFixture(database, {
+    runId: "run_01",
+    actionId: input.actionId,
+    adapterId: input.adapterId ?? "fake",
+    operation: "send_turn",
+    targetAgentId: input.targetAgentId ?? "chair_01",
+    providerSessionGeneration: input.providerSessionGeneration ?? 2,
+    turnLeaseGeneration: input.turnLeaseGeneration ?? 1,
+    identityHash: "c".repeat(64),
+    payloadHash: "d".repeat(64),
+    payloadJson: input.payloadJson,
+    status: input.status,
+    historyJson: input.historyJson,
+    executionCount: input.executionCount ?? 1,
+    effectCount: input.effectCount ?? 0,
+    resultJson: input.resultJson ?? null,
+    updatedAt: now,
+  });
 }
 
 afterEach(() => {
@@ -173,6 +226,7 @@ describe("production operator lifecycle ports", () => {
     const crashing = createProductionOperatorActionPorts({
       database,
       clock: () => now,
+      providerActionAdmission: new ProviderActionAdmissionCoordinator({ database, clock: () => now }),
       adapter: {
         capabilities: async () => { throw new Error("local control must not inspect an adapter"); },
         dispatch: async () => { throw new Error("local control must not dispatch an adapter"); },
@@ -185,6 +239,7 @@ describe("production operator lifecycle ports", () => {
     const recovered = createProductionOperatorActionPorts({
       database,
       clock: () => now,
+      providerActionAdmission: new ProviderActionAdmissionCoordinator({ database, clock: () => now }),
       adapter: {
         capabilities: async () => { throw new Error("recovery must not inspect an adapter"); },
         dispatch: async () => { throw new Error("recovery must not dispatch an adapter"); },
@@ -256,21 +311,18 @@ describe("production operator lifecycle ports", () => {
         };
       },
     });
+    seedProviderAction(database, {
+      actionId: "turn_01",
+      payloadJson: '{"taskId":"task_01"}',
+      status: "dispatched",
+      historyJson: '["prepared","dispatched"]',
+      resultJson: '{"turnId":"native_turn_01"}',
+    });
     database.exec(`
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, result_json, updated_at
-      ) VALUES (
-        'run_01', 'turn_01', 'fake', 'send_turn', 'chair_01', 2, 1,
-        '${"c".repeat(64)}', '${"d".repeat(64)}', '{"taskId":"task_01"}', 'dispatched',
-        '["prepared","dispatched"]', 1, 0, 0, '{"turnId":"native_turn_01"}', ${now}
-      );
       INSERT INTO provider_session_turn_leases(
-        run_id, agent_id, provider_session_generation, turn_lease_generation,
+        run_id, adapter_id, agent_id, provider_session_generation, turn_lease_generation,
         action_id, status, created_at, updated_at
-      ) VALUES ('run_01', 'chair_01', 2, 1, 'turn_01', 'active', ${now}, ${now});
+      ) VALUES ('run_01', 'fake', 'chair_01', 2, 1, 'turn_01', 'active', ${now}, ${now});
     `);
     const pause = {
       kind: "control" as const,
@@ -320,6 +372,13 @@ describe("production operator lifecycle ports", () => {
       dispatch: async () => { adapterCalls += 1; return {}; },
       lookup: async () => { adapterCalls += 1; return {}; },
     });
+    seedProviderAction(database, {
+      actionId: "turn_sibling",
+      payloadJson: '{"taskId":"task_02"}',
+      status: "dispatched",
+      historyJson: '["prepared","dispatched"]',
+      resultJson: '{"turnId":"native_sibling"}',
+    });
     database.exec(`
       INSERT INTO tasks(
         run_id, task_id, authority_id, objective, base_revision, state,
@@ -328,20 +387,10 @@ describe("production operator lifecycle ports", () => {
         'run_01', 'task_02', 'authority_01', 'Unrelated live turn', 'base_02', 'active',
         'chair_01', 7, 1, 'chair_01'
       );
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, result_json, updated_at
-      ) VALUES (
-        'run_01', 'turn_sibling', 'fake', 'send_turn', 'chair_01', 2, 1,
-        '${"c".repeat(64)}', '${"d".repeat(64)}', '{"taskId":"task_02"}', 'dispatched',
-        '["prepared","dispatched"]', 1, 0, 0, '{"turnId":"native_sibling"}', ${now}
-      );
       INSERT INTO provider_session_turn_leases(
-        run_id, agent_id, provider_session_generation, turn_lease_generation,
+        run_id, adapter_id, agent_id, provider_session_generation, turn_lease_generation,
         action_id, status, created_at, updated_at
-      ) VALUES ('run_01', 'chair_01', 2, 1, 'turn_sibling', 'active', ${now}, ${now});
+      ) VALUES ('run_01', 'fake', 'chair_01', 2, 1, 'turn_sibling', 'active', ${now}, ${now});
     `);
     const pause = {
       kind: "control" as const,
@@ -401,21 +450,22 @@ describe("production operator lifecycle ports", () => {
       VALUES ('run_01', 'worker_01', 'fake', ${now});
       INSERT INTO task_participants(run_id, task_id, agent_id)
       VALUES ('run_01', 'task_01', 'worker_01');
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, result_json, updated_at
-      ) VALUES (
-        'run_01', 'participant_turn_source', 'fake', 'send_turn', 'worker_01', 3, 1,
-        '${"c".repeat(64)}', '${"d".repeat(64)}', '{"taskId":"task_01"}', 'accepted',
-        '["prepared","dispatched","accepted"]', 1, 1, 0,
-        '{"turnId":"participant_turn_01"}', ${now}
-      );
+    `);
+    seedProviderAction(database, {
+      actionId: "participant_turn_source",
+      targetAgentId: "worker_01",
+      providerSessionGeneration: 3,
+      payloadJson: '{"taskId":"task_01"}',
+      status: "accepted",
+      historyJson: '["prepared","dispatched","accepted"]',
+      effectCount: 1,
+      resultJson: '{"turnId":"participant_turn_01"}',
+    });
+    database.exec(`
       INSERT INTO provider_session_turn_leases(
-        run_id, agent_id, provider_session_generation, turn_lease_generation,
+        run_id, adapter_id, agent_id, provider_session_generation, turn_lease_generation,
         action_id, status, created_at, updated_at
-      ) VALUES ('run_01', 'worker_01', 3, 1, 'participant_turn_source', 'active', ${now}, ${now});
+      ) VALUES ('run_01', 'fake', 'worker_01', 3, 1, 'participant_turn_source', 'active', ${now}, ${now});
     `);
     const intent = {
       kind: "control" as const,
@@ -445,15 +495,49 @@ describe("production operator lifecycle ports", () => {
       .toEqual({ state: "paused" });
   });
 
-  it("rejects a multi-agent pause before persisting any action when one adapter lacks custody", async () => {
+  it("keeps unresolved pairs retryable when a multi-agent capability check throws once", async () => {
     let dispatches = 0;
+    let secondAdapterReady = false;
+    const releasedDispositions: string[] = [];
     const { database, ports } = fixture({
-      capabilities: async (adapterId) => ({
-        actionJournal: true,
-        operations: adapterId === "fake_bad" ? ["lookup_action"] : ["interrupt", "lookup_action"],
-      }),
-      dispatch: async () => { dispatches += 1; return {}; },
+      capabilities: async (adapterId) => {
+        if (adapterId === "fake_bad" && !secondAdapterReady) {
+          throw new Error("transient capability discovery failure");
+        }
+        return { actionJournal: true, operations: ["interrupt", "lookup_action"] };
+      },
+      dispatch: async (_adapterId, input) => {
+        dispatches += 1;
+        return {
+          actionId: input.actionId,
+          operation: input.operation,
+          payloadHash: sha256(canonicalJson(input.payload)),
+          status: "terminal",
+          history: ["prepared", "dispatched", "accepted", "terminal"],
+          executionCount: 1,
+          effectCount: 1,
+          result: {
+            interrupted: true,
+            resumeReference: input.payload.resumeReference,
+            turnId: input.payload.turnId,
+          },
+        };
+      },
       lookup: async () => { throw new Error("rejected preflight must not perform lookup"); },
+    }, (coordinator) => {
+      const preflight = coordinator.preflight.bind(coordinator);
+      let exposeOneAdmittedTicket = true;
+      coordinator.preflight = ((request: Parameters<typeof preflight>[0]) => {
+        const ticket = preflight(request);
+        if (!exposeOneAdmittedTicket) return ticket;
+        exposeOneAdmittedTicket = false;
+        return { ...ticket, disposition: "admitted" };
+      }) as typeof coordinator.preflight;
+      const release = coordinator.release.bind(coordinator);
+      coordinator.release = ((ticket, failure) => {
+        releasedDispositions.push(ticket.disposition);
+        release(ticket, failure);
+      }) as typeof coordinator.release;
     });
     database.exec(`
       INSERT INTO agents(run_id, agent_id, authority_id, provider_session_ref, lifecycle)
@@ -469,24 +553,31 @@ describe("production operator lifecycle ports", () => {
         'run_01', 'task_02', 'authority_01', 'Second live turn', 'base_02', 'active',
         'worker_02', 7, 1, 'chair_01'
       );
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, updated_at
-      ) VALUES
-        ('run_01', 'turn_chair', 'fake', 'send_turn', 'chair_01', 2, 1,
-          '${"c".repeat(64)}', '${"d".repeat(64)}', '{"taskId":"task_01"}', 'accepted',
-          '["prepared","dispatched","accepted"]', 1, 0, 0, ${now}),
-        ('run_01', 'turn_worker', 'fake_bad', 'send_turn', 'worker_02', 3, 1,
-          '${"e".repeat(64)}', '${"f".repeat(64)}', '{"taskId":"task_02"}', 'accepted',
-          '["prepared","dispatched","accepted"]', 1, 0, 0, ${now});
+    `);
+    seedProviderAction(database, {
+      actionId: "turn_chair",
+      payloadJson: '{"taskId":"task_01"}',
+      status: "accepted",
+      historyJson: '["prepared","dispatched","accepted"]',
+      resultJson: '{"turnId":"turn_chair_native"}',
+    });
+    seedProviderAction(database, {
+      actionId: "turn_worker",
+      adapterId: "fake_bad",
+      targetAgentId: "worker_02",
+      providerSessionGeneration: 3,
+      payloadJson: '{"taskId":"task_02"}',
+      status: "accepted",
+      historyJson: '["prepared","dispatched","accepted"]',
+      resultJson: '{"turnId":"turn_worker_native"}',
+    });
+    database.exec(`
       INSERT INTO provider_session_turn_leases(
-        run_id, agent_id, provider_session_generation, turn_lease_generation,
+        run_id, adapter_id, agent_id, provider_session_generation, turn_lease_generation,
         action_id, status, created_at, updated_at
       ) VALUES
-        ('run_01', 'chair_01', 2, 1, 'turn_chair', 'active', ${now}, ${now}),
-        ('run_01', 'worker_02', 3, 1, 'turn_worker', 'active', ${now}, ${now});
+        ('run_01', 'fake', 'chair_01', 2, 1, 'turn_chair', 'active', ${now}, ${now}),
+        ('run_01', 'fake_bad', 'worker_02', 3, 1, 'turn_worker', 'active', ${now}, ${now});
     `);
 
     await expect(ports.effectPort.dispatch({
@@ -504,10 +595,43 @@ describe("production operator lifecycle ports", () => {
       intentDigest: digest as never,
       beforeStateDigest: digest as never,
       attemptGeneration: 1,
-    })).resolves.toMatchObject({ status: "rejected" });
+    })).rejects.toThrow("transient capability discovery failure");
     expect(dispatches).toBe(0);
     expect(database.prepare("SELECT COUNT(*) AS count FROM provider_actions WHERE operation='interrupt'").get())
       .toEqual({ count: 0 });
+    expect(database.prepare(`
+      SELECT state, COUNT(*) AS count
+        FROM provider_action_pair_preflights
+       WHERE action_id GLOB 'operator-*'
+       GROUP BY state
+    `).all()).toEqual([{ state: "resolving", count: 2 }]);
+    expect(releasedDispositions).toEqual([]);
+
+    secondAdapterReady = true;
+    await expect(ports.effectPort.dispatch({
+      commandId: "pause_run_preflight_retry_01",
+      intent: {
+        kind: "control",
+        action: "pause",
+        target: {
+          kind: "run",
+          projectSessionId: "session_01" as never,
+          coordinationRunId: "run_01" as never,
+          expectedRevision: 4,
+        },
+      },
+      intentDigest: digest as never,
+      beforeStateDigest: digest as never,
+      attemptGeneration: 1,
+    })).resolves.toMatchObject({ status: "committed" });
+    expect(dispatches).toBe(2);
+    expect(database.prepare(`
+      SELECT state, COUNT(*) AS count
+        FROM provider_action_pair_preflights
+       WHERE adapter_id IN ('fake','fake_bad')
+         AND action_id GLOB 'operator-*'
+       GROUP BY state
+    `).all()).toEqual([{ state: "admitted", count: 2 }]);
   });
 
   it("does not claim pause from a terminal adapter row with the wrong operation or replay count", async () => {
@@ -528,21 +652,18 @@ describe("production operator lifecycle ports", () => {
         result: { interrupted: true },
       }),
     });
+    seedProviderAction(database, {
+      actionId: "turn_unproved",
+      payloadJson: '{"taskId":"task_01"}',
+      status: "dispatched",
+      historyJson: '["prepared","dispatched"]',
+      resultJson: '{"turnId":"native_unproved"}',
+    });
     database.exec(`
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, result_json, updated_at
-      ) VALUES (
-        'run_01', 'turn_unproved', 'fake', 'send_turn', 'chair_01', 2, 1,
-        '${"c".repeat(64)}', '${"d".repeat(64)}', '{"taskId":"task_01"}', 'dispatched',
-        '["prepared","dispatched"]', 1, 0, 0, '{"turnId":"native_unproved"}', ${now}
-      );
       INSERT INTO provider_session_turn_leases(
-        run_id, agent_id, provider_session_generation, turn_lease_generation,
+        run_id, adapter_id, agent_id, provider_session_generation, turn_lease_generation,
         action_id, status, created_at, updated_at
-      ) VALUES ('run_01', 'chair_01', 2, 1, 'turn_unproved', 'active', ${now}, ${now});
+      ) VALUES ('run_01', 'fake', 'chair_01', 2, 1, 'turn_unproved', 'active', ${now}, ${now});
     `);
     const request = {
       commandId: "pause_unproved_01",
@@ -594,21 +715,19 @@ describe("production operator lifecycle ports", () => {
       },
       lookup: async () => { throw new Error("terminal steer must not be looked up"); },
     });
+    seedProviderAction(database, {
+      actionId: "turn_steer",
+      payloadJson: '{"taskId":"task_01"}',
+      status: "accepted",
+      historyJson: '["prepared","dispatched","accepted"]',
+      effectCount: 1,
+      resultJson: '{"turnId":"turn_provider_01"}',
+    });
     database.exec(`
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, result_json, updated_at
-      ) VALUES (
-        'run_01', 'turn_steer', 'fake', 'send_turn', 'chair_01', 2, 1,
-        '${"c".repeat(64)}', '${"d".repeat(64)}', '{"taskId":"task_01"}', 'accepted',
-        '["prepared","dispatched","accepted"]', 1, 1, 0, '{"turnId":"turn_provider_01"}', ${now}
-      );
       INSERT INTO provider_session_turn_leases(
-        run_id, agent_id, provider_session_generation, turn_lease_generation,
+        run_id, adapter_id, agent_id, provider_session_generation, turn_lease_generation,
         action_id, status, created_at, updated_at
-      ) VALUES ('run_01', 'chair_01', 2, 1, 'turn_steer', 'active', ${now}, ${now});
+      ) VALUES ('run_01', 'fake', 'chair_01', 2, 1, 'turn_steer', 'active', ${now}, ${now});
     `);
 
     await expect(ports.effectPort.dispatch({
@@ -638,6 +757,102 @@ describe("production operator lifecycle ports", () => {
       providerSessionGeneration: 2,
       turnLeaseGeneration: 1,
     })]);
+  });
+
+  it("joins fresh-command steer replay and skips capabilities after restart", async () => {
+    let capabilityCalls = 0;
+    let dispatchCalls = 0;
+    const adapter = {
+      capabilities: async () => {
+        capabilityCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return { actionJournal: true, operations: ["steer", "lookup_action"] };
+      },
+      dispatch: async (_adapterId: string, input: { actionId: string; operation: "interrupt" | "steer"; payload: Record<string, unknown> }) => {
+        dispatchCalls += 1;
+        return {
+          actionId: input.actionId,
+          operation: input.operation,
+          payloadHash: sha256(canonicalJson(input.payload)),
+          status: "terminal",
+          history: ["prepared", "dispatched", "accepted", "terminal"],
+          executionCount: 1,
+          effectCount: 1,
+          result: {
+            steered: true,
+            resumeReference: "provider_session_01",
+            turnId: "turn_provider_pair",
+          },
+        };
+      },
+      lookup: async () => { throw new Error("terminal steer must not be looked up"); },
+    };
+    const { database, ports } = fixture(adapter);
+    admitProviderActionFixture(database, {
+      runId: "run_01",
+      actionId: "turn_steer_pair",
+      adapterId: "fake",
+      operation: "send_turn",
+      targetAgentId: "chair_01",
+      providerSessionGeneration: 2,
+      turnLeaseGeneration: 1,
+      identityHash: "c".repeat(64),
+      payloadHash: "d".repeat(64),
+      payloadJson: '{"taskId":"task_01"}',
+      status: "accepted",
+      historyJson: '["prepared","dispatched","accepted"]',
+      executionCount: 1,
+      effectCount: 1,
+      resultJson: '{"turnId":"turn_provider_pair"}',
+      updatedAt: now,
+    });
+    database.prepare(`
+      INSERT INTO provider_session_turn_leases(
+        run_id, adapter_id, agent_id, provider_session_generation, turn_lease_generation,
+        action_id, status, created_at, updated_at
+      ) VALUES ('run_01', 'fake', 'chair_01', 2, 1, 'turn_steer_pair', 'active', ?, ?)
+    `).run(now, now);
+    const intent = {
+      kind: "control" as const,
+      action: "steer" as const,
+      target: {
+        kind: "task" as const,
+        projectSessionId: "session_01" as never,
+        coordinationRunId: "run_01" as never,
+        taskId: "task_01" as never,
+        expectedRevision: 3,
+      },
+      instruction: "Keep this semantic steer single-flight.",
+      evidenceRefs: [],
+    };
+    const request = (commandId: string) => ({
+      commandId,
+      intent,
+      intentDigest: digest as never,
+      beforeStateDigest: digest as never,
+      attemptGeneration: 1,
+    });
+
+    const [first, second] = await Promise.all([
+      ports.effectPort.dispatch(request("steer_pair_first")),
+      ports.effectPort.dispatch(request("steer_pair_second")),
+    ]);
+    expect(first).toEqual(second);
+    expect(first).toMatchObject({ status: "committed", afterState: { steered: true } });
+    expect(capabilityCalls).toBe(1);
+    expect(dispatchCalls).toBe(1);
+
+    const reopened = createProductionOperatorActionPorts({
+      database,
+      clock: () => now,
+      providerActionAdmission: new ProviderActionAdmissionCoordinator({ database, clock: () => now }),
+      adapter: {
+        capabilities: async () => { throw new Error("admitted replay must not inspect capabilities"); },
+        dispatch: async () => { throw new Error("admitted replay must not redispatch"); },
+        lookup: async () => { throw new Error("terminal replay must not look up"); },
+      },
+    });
+    await expect(reopened.effectPort.dispatch(request("steer_pair_after_restart"))).resolves.toEqual(first);
   });
 
   it("cancels only the exact task scope and advances its revision", async () => {
@@ -925,6 +1140,44 @@ describe("production operator lifecycle ports", () => {
     })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it("binds operator effects to the live principal generation", async () => {
+    const { database, ports } = fixture();
+    database.prepare(`
+      INSERT INTO operator_principals(
+        operator_id, project_id, project_session_id, authenticated_subject_hash,
+        project_authority_generation, principal_generation, state, created_at, updated_at
+      ) VALUES ('operator_01','project_01','session_01','operator-subject',1,3,'active',?,?)
+    `).run(now, now);
+    const intent = {
+      kind: "control" as const,
+      action: "pause" as const,
+      target: {
+        kind: "task" as const,
+        projectSessionId: "session_01" as never,
+        coordinationRunId: "run_01" as never,
+        taskId: "task_01" as never,
+        expectedRevision: 3,
+      },
+    };
+    const before = await ports.statePort.read(intent);
+    await expect(ports.effectPort.dispatch(scopedEffectRequest(
+      "pause_stale_principal_01",
+      intent,
+      stateDigest(before),
+    ))).rejects.toMatchObject({ code: "STALE_PRINCIPAL_GENERATION" });
+
+    const { principalGeneration: _omitted, ...liveRequest } = scopedEffectRequest(
+      "pause_live_principal_01",
+      intent,
+      stateDigest(before),
+    );
+    await expect(ports.effectPort.dispatch(liveRequest)).resolves.toMatchObject({ status: "committed" });
+    expect(database.prepare(`
+      SELECT principal_generation FROM operator_effect_custody
+       WHERE command_id='pause_live_principal_01'
+    `).get()).toEqual({ principal_generation: 3 });
+  });
+
   it("binds a prepared subtree control to its exact descendants and dependency/membership revisions", async () => {
     const { database, ports } = fixture();
     const intent = {
@@ -981,21 +1234,19 @@ describe("production operator lifecycle ports", () => {
       dispatch: async () => { adapterCalls += 1; return {}; },
       lookup: async () => { adapterCalls += 1; return {}; },
     });
+    seedProviderAction(database, {
+      actionId: "turn_before",
+      payloadJson: '{"taskId":"task_01"}',
+      status: "accepted",
+      historyJson: '["prepared","dispatched","accepted"]',
+      effectCount: 1,
+      resultJson: '{"turnId":"native_before"}',
+    });
     database.exec(`
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, result_json, updated_at
-      ) VALUES (
-        'run_01', 'turn_before', 'fake', 'send_turn', 'chair_01', 2, 1,
-        '${"c".repeat(64)}', '${"d".repeat(64)}', '{"taskId":"task_01"}', 'accepted',
-        '["prepared","dispatched","accepted"]', 1, 1, 0, '{"turnId":"native_before"}', ${now}
-      );
       INSERT INTO provider_session_turn_leases(
-        run_id, agent_id, provider_session_generation, turn_lease_generation,
+        run_id, adapter_id, agent_id, provider_session_generation, turn_lease_generation,
         action_id, status, created_at, updated_at
-      ) VALUES ('run_01', 'chair_01', 2, 1, 'turn_before', 'active', ${now}, ${now});
+      ) VALUES ('run_01', 'fake', 'chair_01', 2, 1, 'turn_before', 'active', ${now}, ${now});
     `);
     const intent = {
       kind: "control" as const,
@@ -1012,22 +1263,21 @@ describe("production operator lifecycle ports", () => {
     expect(before).toMatchObject({ binding: { turns: [{ sourceActionId: "turn_before", turnId: "native_before" }] } });
     const request = scopedEffectRequest("pause_turn_race_01", intent, stateDigest(before));
     ports.effectPort.prepare?.(request);
+    database.prepare("UPDATE provider_session_turn_leases SET status='released' WHERE action_id='turn_before'").run();
+    seedProviderAction(database, {
+      actionId: "turn_after",
+      turnLeaseGeneration: 2,
+      payloadJson: '{"taskId":"task_01"}',
+      status: "accepted",
+      historyJson: '["prepared","dispatched","accepted"]',
+      effectCount: 1,
+      resultJson: '{"turnId":"native_after"}',
+    });
     database.exec(`
-      UPDATE provider_session_turn_leases SET status='released' WHERE action_id='turn_before';
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, result_json, updated_at
-      ) VALUES (
-        'run_01', 'turn_after', 'fake', 'send_turn', 'chair_01', 2, 2,
-        '${"e".repeat(64)}', '${"f".repeat(64)}', '{"taskId":"task_01"}', 'accepted',
-        '["prepared","dispatched","accepted"]', 1, 1, 0, '{"turnId":"native_after"}', ${now}
-      );
       INSERT INTO provider_session_turn_leases(
-        run_id, agent_id, provider_session_generation, turn_lease_generation,
+        run_id, adapter_id, agent_id, provider_session_generation, turn_lease_generation,
         action_id, status, created_at, updated_at
-      ) VALUES ('run_01', 'chair_01', 2, 2, 'turn_after', 'active', ${now}, ${now});
+      ) VALUES ('run_01', 'fake', 'chair_01', 2, 2, 'turn_after', 'active', ${now}, ${now});
     `);
 
     await expect(ports.effectPort.dispatch(request)).resolves.toMatchObject({ status: "rejected", code: "state-changed" });
@@ -1316,6 +1566,7 @@ describe("production operator lifecycle ports", () => {
     const crashingStop = createProductionOperatorActionPorts({
       database,
       clock: () => now,
+      providerActionAdmission: new ProviderActionAdmissionCoordinator({ database, clock: () => now }),
       adapter: {
         capabilities: async () => { throw new Error("project stop must not inspect an adapter"); },
         dispatch: async () => { throw new Error("project stop must not dispatch an adapter"); },
@@ -1378,6 +1629,7 @@ describe("production operator lifecycle ports", () => {
     const restarted = createProductionOperatorActionPorts({
       database,
       clock: () => now + 1,
+      providerActionAdmission: new ProviderActionAdmissionCoordinator({ database, clock: () => now + 1 }),
       adapter: {
         capabilities: async () => { throw new Error("project drain has no adapter effect"); },
         dispatch: async () => { throw new Error("project drain has no adapter effect"); },
@@ -1487,6 +1739,7 @@ describe("production operator lifecycle ports", () => {
     const ports = createProductionOperatorActionPorts({
       database,
       clock: () => now,
+      providerActionAdmission: new ProviderActionAdmissionCoordinator({ database, clock: () => now }),
       adapter: {
         capabilities: async () => { throw new Error("daemon lifecycle has no adapter effect"); },
         dispatch: async () => { throw new Error("daemon lifecycle has no adapter effect"); },

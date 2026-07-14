@@ -6573,6 +6573,7 @@
                     "membershipId",
                     "coordinationRunId",
                     "providerActionId",
+                    "providerAdapterId",
                     "state"
                   ],
                   "properties": {
@@ -6586,6 +6587,9 @@
                       "$ref": "#/$defs/generated_1"
                     },
                     "providerActionId": {
+                      "$ref": "#/$defs/generated_1"
+                    },
+                    "providerAdapterId": {
                       "$ref": "#/$defs/generated_1"
                     },
                     "state": {
@@ -6601,6 +6605,7 @@
                     "membershipId",
                     "coordinationRunId",
                     "providerActionId",
+                    "providerAdapterId",
                     "state"
                   ],
                   "properties": {
@@ -6616,6 +6621,9 @@
                     "providerActionId": {
                       "$ref": "#/$defs/generated_1"
                     },
+                    "providerAdapterId": {
+                      "$ref": "#/$defs/generated_1"
+                    },
                     "state": {
                       "const": "terminal"
                     }
@@ -6629,6 +6637,7 @@
                     "membershipId",
                     "coordinationRunId",
                     "providerActionId",
+                    "providerAdapterId",
                     "state",
                     "reason"
                   ],
@@ -6643,6 +6652,9 @@
                       "$ref": "#/$defs/generated_1"
                     },
                     "providerActionId": {
+                      "$ref": "#/$defs/generated_1"
+                    },
+                    "providerAdapterId": {
                       "$ref": "#/$defs/generated_1"
                     },
                     "state": {
@@ -7442,6 +7454,7 @@
                     "membershipId",
                     "coordinationRunId",
                     "providerActionId",
+                    "providerAdapterId",
                     "state"
                   ],
                   "properties": {
@@ -7455,6 +7468,9 @@
                       "$ref": "#/$defs/generated_1"
                     },
                     "providerActionId": {
+                      "$ref": "#/$defs/generated_1"
+                    },
+                    "providerAdapterId": {
                       "$ref": "#/$defs/generated_1"
                     },
                     "state": {
@@ -7470,6 +7486,7 @@
                     "membershipId",
                     "coordinationRunId",
                     "providerActionId",
+                    "providerAdapterId",
                     "state"
                   ],
                   "properties": {
@@ -7485,6 +7502,9 @@
                     "providerActionId": {
                       "$ref": "#/$defs/generated_1"
                     },
+                    "providerAdapterId": {
+                      "$ref": "#/$defs/generated_1"
+                    },
                     "state": {
                       "const": "terminal"
                     }
@@ -7498,6 +7518,7 @@
                     "membershipId",
                     "coordinationRunId",
                     "providerActionId",
+                    "providerAdapterId",
                     "state",
                     "reason"
                   ],
@@ -7512,6 +7533,9 @@
                       "$ref": "#/$defs/generated_1"
                     },
                     "providerActionId": {
+                      "$ref": "#/$defs/generated_1"
+                    },
+                    "providerAdapterId": {
                       "$ref": "#/$defs/generated_1"
                     },
                     "state": {
@@ -7911,8 +7935,8 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:702bb8e4f2d9d905d919e65762e4c56d28d28cab82d23d73b676d2180e77a761",
-      "outputCodecDigest": "sha256:71a1b49f1412d2b758cacb396e2fdc0f78c5861061c776d468999778c79f67b5"
+      "inputCodecDigest": "sha256:4233a6375f46a2b449fe895c780295f43739451e692c0c914367960d952dc921",
+      "outputCodecDigest": "sha256:8174c8e9ced13fdf159fa2a3b8c0c0f193316397a46117037019396a5f6b1ffd"
     },
     {
       "operation": "fabric.v1.provider-action.dispatch",
@@ -13012,13 +13036,19 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "agentId",
+          "sourceEventId",
+          "providerSessionRef",
           "providerSessionGeneration",
           "contextRevision",
+          "evidenceDigest",
+          "agentId",
           "commandId"
         ],
         "properties": {
-          "agentId": {
+          "sourceEventId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "providerSessionRef": {
             "$ref": "#/$defs/generated_1"
           },
           "providerSessionGeneration": {
@@ -13028,6 +13058,13 @@
           "contextRevision": {
             "type": "integer",
             "minimum": 0
+          },
+          "evidenceDigest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "agentId": {
+            "$ref": "#/$defs/generated_1"
           },
           "commandId": {
             "$ref": "#/$defs/generated_1"
@@ -14042,7 +14079,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:859b7bd0551501205b164087fb34d7cb4640092a808632cb30bca388f0946435",
+      "inputCodecDigest": "sha256:40e9f8898b36e2d8709fd26d6332ce9ac8cd7d431ec677264dc73a145e82dfbf",
       "outputCodecDigest": "sha256:4ba84f2b9dfc10d845e9f873141723ec4ece6634d5ef42869c895085685c5aa4"
     },
     {

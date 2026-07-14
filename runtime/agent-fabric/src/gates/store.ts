@@ -526,7 +526,7 @@ export class ScopedGateStore {
         project_session_id, coordination_run_id, member_kind, member_id,
         required, state, revision, created_at, updated_at
       ) VALUES (?, ?, 'gate', ?, 1, 'active', 1, ?, ?)
-      ON CONFLICT(project_session_id, coordination_run_id, member_kind, member_id) DO NOTHING
+      ON CONFLICT(project_session_id, coordination_run_id, member_kind, member_id, member_adapter_id) DO NOTHING
     `).run(intent.projectSessionId, intent.coordinationRunId, gateId, now, now);
     if (membership.changes !== 1) {
       throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "new gate membership was not inserted");

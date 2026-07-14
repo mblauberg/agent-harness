@@ -731,6 +731,9 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
   }
 
   async provisionAgent(input: AgentProvisionBoundaryInput): Promise<AgentProvisionProviderResult> {
+    const providerSessionGeneration = typeof input.payload.generation === "number" &&
+      Number.isSafeInteger(input.payload.generation) && input.payload.generation > 0
+      ? input.payload.generation : 1;
     const bridge = await this.#agentBridgeFactory({
       providerAdapterId: "claude-agent-sdk",
       providerActionId: input.actionId,
@@ -740,10 +743,18 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
       bridgeContractDigest: input.bridgeContractDigest,
       capability: input.environment.AGENT_FABRIC_CAPABILITY,
       socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
+      ...(input.environment.AGENT_FABRIC_ATTESTATION_CHALLENGE === undefined ? {} : {
+        lifecycleAttestation: {
+          challenge: input.environment.AGENT_FABRIC_ATTESTATION_CHALLENGE,
+          challengeDigest: input.environment.AGENT_FABRIC_ATTESTATION_CHALLENGE_DIGEST as string,
+          custodyId: input.environment.AGENT_FABRIC_LIFECYCLE_CUSTODY_ID as string,
+          checkpointDigest: input.environment.AGENT_FABRIC_LIFECYCLE_CHECKPOINT_DIGEST as string,
+        },
+      }),
     });
     const session: ClaudeChairSession = {
       bridge,
-      providerSessionGeneration: 1,
+      providerSessionGeneration,
       bridgeGeneration: input.bridgeGeneration,
       nativeFabricInvocations: [],
       seenNativeFabricInvocationKeys: new Set(),
@@ -754,7 +765,9 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
     try {
       const resume = input.operation === "attach" ? input.providerSessionRef : undefined;
       const requestedPrompt = input.payload.prompt ?? input.payload.initialPrompt ?? input.payload.instruction;
-      const activationPrompt = `Invoke ${mcp.attestationToolName} exactly once with {} before continuing. ${
+      const activationArgs = bridge.challengeResponse === undefined
+        ? "{}" : `{"challengeResponse":"${bridge.challengeResponse}"}`;
+      const activationPrompt = `Invoke ${mcp.attestationToolName} exactly once with ${activationArgs} before continuing. ${
         typeof requestedPrompt === "string" && requestedPrompt.length > 0
           ? requestedPrompt
           : "Establish the retained Agent Fabric bridge."
@@ -764,7 +777,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
         options: claudeChairOptions(input.payload, this.#executable, resume, mcp),
       }), (sessionId) => {
         session.providerSessionRef = sessionId;
-        bridge.bindProviderSession(sessionId, 1);
+        bridge.bindProviderSession(sessionId, providerSessionGeneration);
       }, (message) => observeClaudeFabricToolUses(session, message, mcp));
       const result = bridge.result();
       this.#chairSessions.set(completed.resumeReference, session);

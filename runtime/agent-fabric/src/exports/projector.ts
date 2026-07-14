@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import type Database from "better-sqlite3";
 
-import { canonicalFabricReceipt, isJsonValue, type JsonValue } from "./canonical.js";
+import { canonicalFabricReceipt, type JsonValue } from "./canonical.js";
 
 type Row = Record<string, unknown>;
 
@@ -110,41 +110,8 @@ export function projectFabricReceipt(database: Database.Database, runId: string)
       priorResumeReferenceSha256: hashOptional(item.prior_resume_reference), replacementResumeReferenceSha256: hashOptional(item.replacement_resume_reference), observedAt: observedAt(item.created_at),
     };
   });
-  const modelRoutingReceipts = database.prepare(`
-    SELECT evidence_id, action_id, relative_path, sha256, receipt_json, created_at
-      FROM model_routing_evidence WHERE run_id = ? ORDER BY created_at, evidence_id
-  `).all(runId).map((value) => {
-    const item = row(value);
-    const receipt: unknown = JSON.parse(string(item.receipt_json));
-    if (!isJsonValue(receipt) || typeof receipt !== "object" || receipt === null || Array.isArray(receipt)) {
-      throw new Error("stored model routing receipt is invalid");
-    }
-    return {
-      evidenceId: string(item.evidence_id),
-      actionId: string(item.action_id),
-      relativePath: string(item.relative_path),
-      sha256: string(item.sha256),
-      receipt,
-      observedAt: observedAt(item.created_at),
-    };
-  });
-  const crossFamilyReviews = database.prepare(`
-    SELECT evidence_id, reviewer_agent_id, provider_family, status, independent,
-           relative_path, sha256, created_at
-      FROM cross_family_review_evidence WHERE run_id = ? ORDER BY created_at, evidence_id
-  `).all(runId).map((value) => {
-    const item = row(value);
-    return {
-      evidenceId: string(item.evidence_id),
-      reviewerAgentId: string(item.reviewer_agent_id),
-      providerFamily: string(item.provider_family),
-      status: string(item.status),
-      independent: number(item.independent) === 1,
-      relativePath: string(item.relative_path),
-      sha256: string(item.sha256),
-      observedAt: observedAt(item.created_at),
-    };
-  });
+  const modelRoutingReceipts: JsonValue[] = [];
+  const crossFamilyReviews: JsonValue[] = [];
   const metadata = database.prepare("SELECT execution_profile FROM run_metadata WHERE run_id = ?").get(runId);
   const watermarkValue = database.prepare(
     "SELECT event_id, created_at FROM events WHERE run_id = ? ORDER BY created_at DESC, event_id DESC LIMIT 1",

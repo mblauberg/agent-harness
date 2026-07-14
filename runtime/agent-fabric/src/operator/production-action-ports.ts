@@ -37,6 +37,11 @@ import {
   type ActiveTurn,
   type ResolvedControlTarget,
 } from "./control-eligibility.js";
+import {
+  ProviderActionAdmissionCoordinator,
+  ProviderActionAdmissionTransactionError,
+  type ProviderActionTicket,
+} from "../application/provider-action-admission.js";
 
 type Row = Record<string, unknown>;
 
@@ -177,6 +182,19 @@ type StoredControlAction = {
   turnId: string;
 };
 
+type PlannedControlAction = {
+  runId: string;
+  agentId: string;
+  sourceActionId: string;
+  turnLeaseGeneration: number;
+  providerSessionGeneration: number;
+  adapterId: string;
+  actionId: string;
+  identityHash: string;
+  payloadJson: string;
+  ticket: ProviderActionTicket;
+};
+
 function isRow(value: unknown): value is Row {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -222,6 +240,7 @@ class ProductionOperatorActions {
   readonly #database: Database.Database;
   readonly #clock: () => number;
   readonly #adapter: ProductionOperatorAdapterPort;
+  readonly #providerActionAdmission: ProviderActionAdmissionCoordinator;
   readonly #daemonStop: ProductionDaemonStopPort | undefined;
   readonly #externalEffects: ExternalEffectService | undefined;
   readonly #typedGit: TypedGitService | undefined;
@@ -233,6 +252,7 @@ class ProductionOperatorActions {
     database: Database.Database;
     clock: () => number;
     adapter: ProductionOperatorAdapterPort;
+    providerActionAdmission: ProviderActionAdmissionCoordinator;
     daemonStop?: ProductionDaemonStopPort;
     externalEffects?: ExternalEffectService;
     typedGit?: TypedGitService;
@@ -242,6 +262,7 @@ class ProductionOperatorActions {
     this.#database = options.database;
     this.#clock = options.clock;
     this.#adapter = options.adapter;
+    this.#providerActionAdmission = options.providerActionAdmission;
     this.#daemonStop = options.daemonStop;
     this.#externalEffects = options.externalEffects;
     this.#typedGit = options.typedGit;
@@ -338,18 +359,40 @@ class ProductionOperatorActions {
       }
     }
     const session = row(this.#database.prepare(`
-      SELECT project_id FROM project_sessions WHERE project_session_id=?
+      SELECT session.project_id, project.authority_generation
+        FROM project_sessions session
+        JOIN projects project ON project.project_id=session.project_id
+       WHERE session.project_session_id=?
     `).get(projectSessionId), "operator effect authority session");
     const projectId = request.projectId ?? text(session, "project_id");
     if (projectId !== text(session, "project_id")) {
       throw new ProjectFabricCoreError("WRONG_PROJECT", "operator effect scope is bound to another project");
     }
-    const principalGeneration = request.principalGeneration ?? 1;
-    if (!Number.isSafeInteger(principalGeneration) || principalGeneration < 1) {
-      throw new ProjectFabricCoreError("STALE_GENERATION", "operator effect principal generation is invalid");
+    const operatorId = request.operatorId ?? "operator_direct_test";
+    const livePrincipal = this.#database.prepare(`
+      SELECT project_authority_generation, principal_generation, state
+        FROM operator_principals
+       WHERE operator_id=? AND project_id=?
+    `).get(operatorId, projectId);
+    let principalGeneration = request.principalGeneration;
+    if (isRow(livePrincipal)) {
+      if (text(livePrincipal, "state") !== "active") {
+        throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator principal is not active");
+      }
+      if (integer(livePrincipal, "project_authority_generation") !== integer(session, "authority_generation")) {
+        throw new ProjectFabricCoreError("STALE_GENERATION", "operator project authority generation changed");
+      }
+      const liveGeneration = integer(livePrincipal, "principal_generation");
+      if (principalGeneration !== undefined && principalGeneration !== liveGeneration) {
+        throw new ProjectFabricCoreError("STALE_PRINCIPAL_GENERATION", "operator principal generation changed");
+      }
+      principalGeneration = liveGeneration;
+    }
+    if (typeof principalGeneration !== "number" || !Number.isSafeInteger(principalGeneration) || principalGeneration < 1) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator effect has no live principal generation");
     }
     return {
-      operatorId: request.operatorId ?? "operator_direct_test",
+      operatorId,
       projectId,
       projectSessionId,
       principalGeneration,
@@ -1055,22 +1098,23 @@ class ProductionOperatorActions {
     turns: readonly ActiveTurn[],
     operation: "interrupt" | "steer",
   ): Promise<OperatorEffectOutcome> {
+    return await this.#dispatchExternalControlOwned(request, turns, operation);
+  }
+
+  async #dispatchExternalControlOwned(
+    request: OperatorEffectRequest,
+    turns: readonly ActiveTurn[],
+    operation: "interrupt" | "steer",
+  ): Promise<OperatorEffectOutcome> {
     if (turns.some((turn) => turn.turnId === null)) {
       return { status: "rejected", code: "state-changed", evidenceRefs: [] };
     }
-    const planned: Array<{
-      runId: string;
-      agentId: string;
-      sourceActionId: string;
-      turnLeaseGeneration: number;
-      providerSessionGeneration: number;
-      adapterId: string;
-      actionId: string;
-      identityHash: string;
-      payloadJson: string;
-    }> = [];
+    const planned: PlannedControlAction[] = [];
     const scope = this.#effectScope(request);
-    const custodyId = this.#custodyId(scope, request.commandId);
+    const custodyId = this.#controlCustodyId(scope, request);
+    const projectAuthorityGeneration = integer(row(this.#database.prepare(`
+      SELECT authority_generation FROM projects WHERE project_id=?
+    `).get(scope.projectId), "operator control project"), "authority_generation");
     for (const turn of turns) {
       const target = row(this.#database.prepare(`
         SELECT a.provider_session_ref, b.adapter_id,
@@ -1079,23 +1123,14 @@ class ProductionOperatorActions {
           FROM agents a
           JOIN agent_adapter_bindings b ON b.run_id=a.run_id AND b.agent_id=a.agent_id
           LEFT JOIN provider_state p ON p.run_id=a.run_id AND p.agent_id=a.agent_id
-          JOIN provider_actions action ON action.run_id=a.run_id AND action.action_id=?
+          JOIN provider_actions action
+            ON action.run_id=a.run_id AND action.adapter_id=b.adapter_id AND action.action_id=?
          WHERE a.run_id=? AND a.agent_id=?
       `).get(turn.actionId, turn.runId, turn.agentId), "operator provider target");
       const adapterId = text(target, "adapter_id");
-      const capabilities = await this.#adapter.capabilities(adapterId);
-      if (
-        !isRow(capabilities) || capabilities.actionJournal !== true ||
-        !Array.isArray(capabilities.operations) ||
-        !capabilities.operations.includes(operation) ||
-        !capabilities.operations.includes("lookup_action")
-      ) {
-        return { status: "rejected", code: "state-changed", evidenceRefs: [] };
-      }
       const turnId = turn.turnId;
       if (turnId === null) throw new Error("operator provider turn ID changed after preflight");
       const payload = {
-        operatorCommandId: request.commandId,
         operatorCustodyId: custodyId,
         operatorId: scope.operatorId,
         projectId: scope.projectId,
@@ -1114,8 +1149,11 @@ class ProductionOperatorActions {
           : {}),
       };
       const actionId = `operator-${sha256(canonicalJson({
-        commandId: request.commandId,
-        custodyId,
+        schemaVersion: 1,
+        operatorId: scope.operatorId,
+        projectId: scope.projectId,
+        projectSessionId: scope.projectSessionId,
+        intentDigest: request.intentDigest,
         adapterId,
         runId: turn.runId,
         agentId: turn.agentId,
@@ -1127,6 +1165,51 @@ class ProductionOperatorActions {
       })).slice(0, 48)}`;
       const identityHash = sha256(canonicalJson({ adapterId, actionId, operation, payload }));
       const payloadJson = canonicalJson(payload);
+      const ticket = this.#providerActionAdmission.preflight({
+        actionRef: { adapterId, actionId },
+        scope: { kind: "run-action", runId: turn.runId },
+        principal: {
+          operatorId: scope.operatorId,
+          projectId: scope.projectId,
+          projectAuthorityGeneration,
+          principalGeneration: scope.principalGeneration,
+        },
+        canonicalInput: {
+          schemaVersion: 1,
+          scope: { kind: "run-action", runId: turn.runId },
+          actionRef: { adapterId, actionId },
+          operation,
+          intent: request.intent,
+          intentDigest: request.intentDigest,
+          beforeStateDigest: request.beforeStateDigest,
+          source: {
+            actionId: turn.actionId,
+            payloadHash: turn.sourcePayloadHash,
+            agentId: turn.agentId,
+            resumeReference: payload.resumeReference,
+            providerSessionGeneration: payload.providerSessionGeneration,
+            turnLeaseGeneration: turn.turnLeaseGeneration,
+            turnId,
+          },
+          providerPayload: {
+            operatorId: scope.operatorId,
+            projectId: scope.projectId,
+            projectSessionId: scope.projectSessionId,
+            operatorIntentDigest: request.intentDigest,
+            sourceActionId: turn.actionId,
+            sourcePayloadHash: turn.sourcePayloadHash,
+            agentId: turn.agentId,
+            resumeReference: payload.resumeReference,
+            providerSessionGeneration: payload.providerSessionGeneration,
+            turnLeaseGeneration: turn.turnLeaseGeneration,
+            turnId,
+            expectedTurnId: turnId,
+            ...(request.intent.kind === "control" && request.intent.action === "steer"
+              ? { instruction: request.intent.instruction, prompt: request.intent.instruction }
+              : {}),
+          },
+        },
+      });
       planned.push({
         runId: turn.runId,
         agentId: turn.agentId,
@@ -1137,21 +1220,60 @@ class ProductionOperatorActions {
         actionId,
         identityHash,
         payloadJson,
+        ticket,
       });
     }
-    const rebound = await this.#read(request.intent);
-    if (digestValue(rebound, "operatorControl.preDispatchState") !== request.beforeStateDigest) {
+    const anchor = planned[0];
+    if (anchor === undefined) {
       return { status: "rejected", code: "state-changed", evidenceRefs: [] };
     }
-    this.#database.transaction(() => {
-      for (const plan of planned) {
+    return (await this.#providerActionAdmission.join(
+      anchor.ticket,
+      async () => await this.#dispatchExternalControlPairOwned(request, planned, operation),
+    )).value;
+  }
+
+  async #dispatchExternalControlPairOwned(
+    request: OperatorEffectRequest,
+    planned: readonly PlannedControlAction[],
+    operation: "interrupt" | "steer",
+  ): Promise<OperatorEffectOutcome> {
+    for (const plan of planned) {
+      if (plan.ticket.disposition === "admitted") continue;
+      const capabilities = await this.#adapter.capabilities(plan.adapterId);
+      if (
+        !isRow(capabilities) || capabilities.actionJournal !== true ||
+        !Array.isArray(capabilities.operations) ||
+        !capabilities.operations.includes(operation) ||
+        !capabilities.operations.includes("lookup_action")
+      ) {
+        // Capability discovery is mutable provider state. Keep exact unresolved
+        // pairs retryable instead of turning a transient observation into a
+        // terminal replayed admission failure.
+        return { status: "rejected", code: "state-changed", evidenceRefs: [] };
+      }
+    }
+    const hasFreshAdmission = planned.some((plan) => plan.ticket.disposition === "resolving");
+    if (hasFreshAdmission) {
+      const rebound = await this.#read(request.intent);
+      if (digestValue(rebound, "operatorControl.preDispatchState") !== request.beforeStateDigest) {
+        const failure = new ProjectFabricCoreError("STALE_REVISION", "operator control state changed after preflight");
+        for (const plan of planned) {
+          if (plan.ticket.disposition === "resolving") this.#providerActionAdmission.release(plan.ticket, failure);
+        }
+        return { status: "rejected", code: "state-changed", evidenceRefs: [] };
+      }
+      try {
+        this.#database.transaction(() => {
+        for (const plan of planned) {
         const current = this.#database.prepare(`
           SELECT lease.action_id, lease.turn_lease_generation,
                  COALESCE(state.provider_session_generation, 1) AS provider_session_generation
             FROM provider_session_turn_leases lease
             LEFT JOIN provider_state state ON state.run_id=lease.run_id AND state.agent_id=lease.agent_id
-           WHERE lease.run_id=? AND lease.agent_id=? AND lease.action_id=? AND lease.status='active'
-        `).get(plan.runId, plan.agentId, plan.sourceActionId);
+           WHERE lease.run_id=? AND lease.agent_id=? AND lease.adapter_id=?
+             AND lease.action_id=? AND lease.status='active'
+        `).get(plan.runId, plan.agentId, plan.adapterId, plan.sourceActionId);
         if (
           !isRow(current) || current.action_id !== plan.sourceActionId ||
           current.turn_lease_generation !== plan.turnLeaseGeneration ||
@@ -1161,8 +1283,8 @@ class ProductionOperatorActions {
         }
         const existing = this.#database.prepare(`
           SELECT adapter_id, operation, identity_hash FROM provider_actions
-           WHERE run_id=? AND action_id=?
-        `).get(plan.runId, plan.actionId);
+           WHERE run_id=? AND adapter_id=? AND action_id=?
+        `).get(plan.runId, plan.adapterId, plan.actionId);
         if (isRow(existing)) {
           if (
             existing.adapter_id !== plan.adapterId || existing.operation !== operation ||
@@ -1172,28 +1294,33 @@ class ProductionOperatorActions {
           }
           continue;
         }
-        this.#database.prepare(`
-          INSERT INTO provider_actions(
-            run_id, action_id, adapter_id, operation, target_agent_id,
-            provider_session_generation, turn_lease_generation, identity_hash,
-            payload_hash, payload_json, status, history_json, execution_count,
-            effect_count, idempotency_proven, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', '["prepared"]', 0, 0, 0, ?)
-        `).run(
-          plan.runId,
-          plan.actionId,
-          plan.adapterId,
+        this.#providerActionAdmission.admitUnroutedInCurrentTransaction(plan.ticket, {
+          runId: plan.runId,
+          actionId: plan.actionId,
+          adapterId: plan.adapterId,
           operation,
-          plan.agentId,
-          plan.providerSessionGeneration,
-          plan.turnLeaseGeneration,
-          plan.identityHash,
-          sha256(plan.payloadJson),
-          plan.payloadJson,
-          this.#clock(),
-        );
+          targetAgentId: plan.agentId,
+          providerSessionGeneration: plan.providerSessionGeneration,
+          turnLeaseGeneration: plan.turnLeaseGeneration,
+          identityHash: plan.identityHash,
+          payloadHash: sha256(plan.payloadJson),
+          payloadJson: plan.payloadJson,
+          status: "prepared",
+          historyJson: '["prepared"]',
+          executionCount: 0,
+          updatedAt: this.#clock(),
+        });
+        }
+        }).immediate();
+      } catch (error: unknown) {
+        if (!(error instanceof ProviderActionAdmissionTransactionError)) {
+          for (const plan of planned) {
+            if (plan.ticket.disposition === "resolving") this.#providerActionAdmission.release(plan.ticket, error);
+          }
+        }
+        throw error;
       }
-    })();
+    }
 
     for (const action of this.#controlActions(request)) {
       if (action.status !== "prepared") continue;
@@ -1201,11 +1328,12 @@ class ProductionOperatorActions {
         UPDATE provider_actions
            SET status='dispatched', history_json='["prepared","dispatched"]',
                execution_count=1, journal_revision=journal_revision+1, updated_at=?
-         WHERE run_id=? AND action_id=? AND status='prepared'
-      `).run(this.#clock(), action.runId, action.actionId);
+         WHERE run_id=? AND adapter_id=? AND action_id=? AND status='prepared'
+      `).run(this.#clock(), action.runId, action.adapterId, action.actionId);
       try {
-        const stored = row(this.#database.prepare("SELECT payload_json FROM provider_actions WHERE run_id=? AND action_id=?")
-          .get(action.runId, action.actionId), "operator provider payload");
+        const stored = row(this.#database.prepare(`
+          SELECT payload_json FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?
+        `).get(action.runId, action.adapterId, action.actionId), "operator provider payload");
         const payload: unknown = JSON.parse(text(stored, "payload_json"));
         if (!isRow(payload)) throw new Error("operator provider payload is invalid");
         const result = await this.#adapter.dispatch(action.adapterId, {
@@ -1219,8 +1347,8 @@ class ProductionOperatorActions {
           UPDATE provider_actions
              SET status='ambiguous', history_json='["prepared","dispatched","ambiguous"]',
                  journal_revision=journal_revision+1, updated_at=?
-           WHERE run_id=? AND action_id=?
-        `).run(this.#clock(), action.runId, action.actionId);
+           WHERE run_id=? AND adapter_id=? AND action_id=?
+        `).run(this.#clock(), action.runId, action.adapterId, action.actionId);
       }
     }
     const completed = this.#controlActions(request);
@@ -1238,7 +1366,7 @@ class ProductionOperatorActions {
   }
 
   #controlActions(request: OperatorEffectRequest): StoredControlAction[] {
-    const custodyId = this.#custodyId(this.#effectScope(request), request.commandId);
+    const custodyId = this.#controlCustodyId(this.#effectScope(request), request);
     return this.#database.prepare(`
       SELECT run_id, action_id, adapter_id, operation, status, payload_hash, payload_json
         FROM provider_actions
@@ -1275,11 +1403,24 @@ class ProductionOperatorActions {
   }
 
   #effectRef(request: OperatorEffectRequest, actions: readonly StoredControlAction[]): ArtifactRef {
-    const custodyId = this.#custodyId(this.#effectScope(request), request.commandId);
+    const custodyId = this.#controlCustodyId(this.#effectScope(request), request);
     return parseArtifactRef({
       path: `.agent-fabric/operator-effects/${custodyId}.json`,
       digest: `sha256:${sha256(canonicalJson(actions))}`,
     }, "productionOperatorAction.effectRef");
+  }
+
+  #controlCustodyId(
+    scope: EffectScope,
+    request: OperatorEffectRequest,
+  ): string {
+    return `operator-control:${sha256(canonicalJson({
+      schemaVersion: 1,
+      operatorId: scope.operatorId,
+      projectId: scope.projectId,
+      projectSessionId: scope.projectSessionId,
+      intentDigest: request.intentDigest,
+    }))}`;
   }
 
   #persistAdapterResult(action: StoredControlAction, result: unknown): void {
@@ -1318,7 +1459,7 @@ class ProductionOperatorActions {
         UPDATE provider_actions
            SET status=?, history_json=?, execution_count=?, effect_count=?, result_json=?,
                journal_revision=journal_revision+1, updated_at=?
-         WHERE run_id=? AND action_id=?
+         WHERE run_id=? AND adapter_id=? AND action_id=?
       `).run(
         status,
         canonicalJson(result.history),
@@ -1327,6 +1468,7 @@ class ProductionOperatorActions {
         result.result === undefined ? null : canonicalJson(result.result),
         this.#clock(),
         action.runId,
+        action.adapterId,
         action.actionId,
       );
       if (status === "terminal" && action.operation === "interrupt") {
@@ -1343,7 +1485,8 @@ class ProductionOperatorActions {
              agent.provider_session_ref, binding.adapter_id AS bound_adapter_id,
              COALESCE(provider.provider_session_generation, 1) AS current_provider_generation
         FROM provider_session_turn_leases lease
-        JOIN provider_actions source ON source.run_id=lease.run_id AND source.action_id=lease.action_id
+        JOIN provider_actions source
+          ON source.run_id=lease.run_id AND source.adapter_id=lease.adapter_id AND source.action_id=lease.action_id
         JOIN agents agent ON agent.run_id=lease.run_id AND agent.agent_id=lease.agent_id
         JOIN agent_adapter_bindings binding ON binding.run_id=agent.run_id AND binding.agent_id=agent.agent_id
         LEFT JOIN provider_state provider ON provider.run_id=agent.run_id AND provider.agent_id=agent.agent_id
@@ -1369,8 +1512,9 @@ class ProductionOperatorActions {
 
   #settleInterruptedSource(action: StoredControlAction): void {
     const source = row(this.#database.prepare(`
-      SELECT history_json, result_json FROM provider_actions WHERE run_id=? AND action_id=?
-    `).get(action.runId, action.sourceActionId), "interrupted source action");
+      SELECT history_json, result_json FROM provider_actions
+       WHERE run_id=? AND adapter_id=? AND action_id=?
+    `).get(action.runId, action.adapterId, action.sourceActionId), "interrupted source action");
     const historyValue: unknown = JSON.parse(text(source, "history_json"));
     if (!Array.isArray(historyValue) || !historyValue.every((item) => typeof item === "string")) {
       throw new Error("interrupted source action history is invalid");
@@ -1403,19 +1547,21 @@ class ProductionOperatorActions {
       UPDATE provider_actions
          SET status='terminal', history_json=?, effect_count=1, idempotency_proven=1,
              result_json=?, journal_revision=journal_revision+1, updated_at=?
-       WHERE run_id=? AND action_id=? AND status<>'terminal'
+       WHERE run_id=? AND adapter_id=? AND action_id=? AND status<>'terminal'
     `).run(
       canonicalJson([...historyValue, "terminal"]),
       canonicalJson(sourceOutcome),
       this.#clock(),
       action.runId,
+      action.adapterId,
       action.sourceActionId,
     );
     const membership = this.#database.prepare(`
       UPDATE project_session_memberships
          SET state='reconciled', revision=revision+1, updated_at=?
-       WHERE coordination_run_id=? AND member_kind='provider-action' AND member_id=? AND state='active'
-    `).run(this.#clock(), action.runId, action.sourceActionId);
+       WHERE coordination_run_id=? AND member_kind='provider-action'
+         AND member_adapter_id=? AND member_id=? AND state='active'
+    `).run(this.#clock(), action.runId, action.adapterId, action.sourceActionId);
     touchProjectSessionMembershipRevisionForRun(
       this.#database,
       action.runId,
@@ -1428,8 +1574,8 @@ class ProductionOperatorActions {
     this.#database.prepare(`
       UPDATE provider_actions
          SET status='quarantined', journal_revision=journal_revision+1, updated_at=?
-       WHERE run_id=? AND action_id=?
-    `).run(this.#clock(), action.runId, action.actionId);
+       WHERE run_id=? AND adapter_id=? AND action_id=?
+    `).run(this.#clock(), action.runId, action.adapterId, action.actionId);
   }
 
   #freeze(
@@ -1602,7 +1748,7 @@ class ProductionOperatorActions {
     }
 
     const providerRows = this.#database.prepare(`
-      SELECT action_id, status, execution_count FROM provider_actions
+      SELECT adapter_id, action_id, status, execution_count FROM provider_actions
        WHERE run_id=? AND json_extract(payload_json, '$.taskId')=?
          AND status IN ('prepared','dispatched','accepted','ambiguous','quarantined')
     `).all(task.runId, task.taskId).filter(isRow);
@@ -1611,28 +1757,30 @@ class ProductionOperatorActions {
     }
     for (const action of providerRows) {
       const actionId = text(action, "action_id");
+      const adapterId = text(action, "adapter_id");
       this.#database.prepare(`
         UPDATE provider_actions
            SET status='terminal', history_json='["prepared","terminal"]',
                effect_count=0, idempotency_proven=1, result_json=?,
                journal_revision=journal_revision+1, updated_at=?
-         WHERE run_id=? AND action_id=? AND status='prepared' AND execution_count=0
+         WHERE run_id=? AND adapter_id=? AND action_id=? AND status='prepared' AND execution_count=0
       `).run(
         canonicalJson({ cancelled: true, reason, commandId, provedNoEffect: true }),
         this.#clock(),
         task.runId,
+        adapterId,
         actionId,
       );
       this.#database.prepare(`
         UPDATE provider_session_turn_leases SET status='released', updated_at=?
-         WHERE run_id=? AND action_id=? AND status='active'
-      `).run(this.#clock(), task.runId, actionId);
+         WHERE run_id=? AND adapter_id=? AND action_id=? AND status='active'
+      `).run(this.#clock(), task.runId, adapterId, actionId);
       this.#database.prepare(`
         UPDATE project_session_memberships
            SET state='abandoned', abandoned_reason=?, revision=revision+1, updated_at=?
          WHERE project_session_id=? AND coordination_run_id=?
-           AND member_kind='provider-action' AND member_id=? AND state='active'
-      `).run(reason, this.#clock(), projectSessionId, task.runId, actionId);
+           AND member_kind='provider-action' AND member_adapter_id=? AND member_id=? AND state='active'
+      `).run(reason, this.#clock(), projectSessionId, task.runId, adapterId, actionId);
     }
 
     const requests = this.#database.prepare(`
@@ -2279,6 +2427,7 @@ export function createProductionOperatorActionPorts(options: {
   database: Database.Database;
   clock?: () => number;
   adapter: ProductionOperatorAdapterPort;
+  providerActionAdmission: ProviderActionAdmissionCoordinator;
   daemonStop?: ProductionDaemonStopPort;
   externalEffects?: ExternalEffectService;
   typedGit?: TypedGitService;
@@ -2289,6 +2438,7 @@ export function createProductionOperatorActionPorts(options: {
     database: options.database,
     clock: options.clock ?? Date.now,
     adapter: options.adapter,
+    providerActionAdmission: options.providerActionAdmission,
     ...(options.daemonStop === undefined ? {} : { daemonStop: options.daemonStop }),
     ...(options.externalEffects === undefined ? {} : { externalEffects: options.externalEffects }),
     ...(options.typedGit === undefined ? {} : { typedGit: options.typedGit }),

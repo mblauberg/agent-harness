@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -220,7 +219,7 @@ describe("provider session admission", () => {
     }
   });
 
-  it("binds an action identity to its adapter and operation", async () => {
+  it("binds an action identity to its adapter and operation pair", async () => {
     const directory = await mkdtemp(join(tmpdir(), "fabric-provider-identity-"));
     const fabric = await openFabric({
       databasePath: join(directory, "fabric.sqlite3"),
@@ -256,7 +255,7 @@ describe("provider session admission", () => {
         operation: "steer",
         payload: { instruction: "same bytes" },
         commandId: "identity:second",
-      })).rejects.toMatchObject({ code: "DEDUPE_CONFLICT" });
+      })).resolves.toMatchObject({ status: "terminal" });
     } finally {
       await fabric.close();
       await rm(directory, { recursive: true, force: true });
@@ -464,6 +463,7 @@ describe("provider session admission", () => {
       })).rejects.toMatchObject({ code: "PROVIDER_TURN_ACTIVE" });
 
       await expect(fixture.chair.reconcileProviderAction({
+        adapterId: "fake-lifecycle",
         actionId: ambiguous.actionId,
         commandId: "turn-reconcile:lookup",
       })).resolves.toMatchObject({ status: "terminal" });
@@ -528,88 +528,8 @@ describe("provider session admission", () => {
     }
   });
 
-  it("projects registered routing and independent review evidence into the receipt", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "fabric-provider-evidence-"));
-    const runDirectory = join(directory, ".agent-run", "provider-evidence");
-    await mkdir(runDirectory, { recursive: true });
-    const fabric = await openFabric({
-      databasePath: join(directory, "fabric.sqlite3"),
-      workspaceRoots: [directory],
-      adapters: {
-        claude: {
-          command: [process.execPath, "--import", "tsx", actionAdapter],
-          environment: { FAKE_ADAPTER_JOURNAL: join(directory, "route-action.json") },
-        },
-      },
-    });
-    try {
-      const run = await currentRun(directory, {
-        runId: "provider-evidence",
-        projectRunDirectory: runDirectory,
-        chair: { agentId: "chair", authority: authority(directory) },
-      });
-      const chair = fabric.connect(run.chairCapability);
-      const reviewerAuthority = await chair.delegateAuthority({
-        parentAuthorityId: run.chairAuthorityId,
-        authority: { ...authority(directory), budget: { turns: 2 } },
-      });
-      await chair.registerAgent({ agentId: "anthropic-reviewer", authorityId: reviewerAuthority.authorityId });
-      const routeBytes = `${JSON.stringify({
-        schema_version: 1,
-        status: "ok",
-        adapter: "claude",
-        role: "reviewer",
-        model_family: "anthropic",
-        model: "fable",
-        effort: "high",
-      })}\n`;
-      const reviewBytes = "independent provider-boundary review\n";
-      await writeFile(join(runDirectory, "model-route.json"), routeBytes);
-      await writeFile(join(runDirectory, "review.md"), reviewBytes);
-      const routeSha = createHash("sha256").update(routeBytes).digest("hex");
-      const reviewSha = createHash("sha256").update(reviewBytes).digest("hex");
-      await chair.publishArtifact({ relativePath: "model-route.json", sha256: routeSha, commandId: "evidence:route:publish" });
-      await chair.publishArtifact({ relativePath: "review.md", sha256: reviewSha, commandId: "evidence:review:publish" });
-      await chair.dispatchProviderAction({
-        adapterId: "claude",
-        actionId: "spawn-reviewer",
-        operation: "steer",
-        payload: { instruction: "run the routed review" },
-        commandId: "evidence:routed-action",
-      });
-
-      fabric.recordModelRoutingEvidence("provider-evidence", "chair", {
-        evidenceId: "route-1",
-        actionId: "spawn-reviewer",
-        relativePath: "model-route.json",
-        sha256: routeSha,
-      });
-      fabric.recordCrossFamilyReviewEvidence("provider-evidence", "chair", {
-        evidenceId: "review-1",
-        reviewerAgentId: "anthropic-reviewer",
-        providerFamily: "anthropic",
-        status: "pass",
-        independent: true,
-        relativePath: "review.md",
-        sha256: reviewSha,
-      });
-
-      const exported = await chair.exportReceipt({ commandId: "evidence:receipt" });
-      const receipt = JSON.parse(await readFile(join(runDirectory, exported.relativePath), "utf8")) as Record<string, unknown>;
-      expect(receipt.modelRoutingReceipts).toEqual([
-        expect.objectContaining({ evidenceId: "route-1", actionId: "spawn-reviewer", relativePath: "model-route.json", sha256: routeSha }),
-      ]);
-      expect(receipt.crossFamilyReviews).toEqual([
-        expect.objectContaining({ evidenceId: "review-1", reviewerAgentId: "anthropic-reviewer", providerFamily: "anthropic", independent: true, relativePath: "review.md", sha256: reviewSha }),
-      ]);
-    } finally {
-      await fabric.close();
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
   it("marks persisted provider sessions unreconciled when a restarted adapter reports them unmanaged", async () => {
-    const fixture = await createLifecycleFixture();
+    const fixture = await createLifecycleFixture({ retainedAgents: true });
     let reopened: Awaited<ReturnType<typeof reopenLifecycleFabric>> | undefined;
     try {
       await fixture.fabric.close();
@@ -618,10 +538,14 @@ describe("provider session admission", () => {
       await expect(reopened.recoverStartupState()).resolves.toMatchObject({ sessionsDegraded: 2 });
       const chair = reopened.connect(fixture.capabilities.chair);
       await expect(chair.getAgentLifecycle({ agentId: "leader" })).resolves.toMatchObject({
-        lifecycle: "context-unreconciled",
+        lifecycle: "suspended",
+        contextState: "context-unreconciled",
+        currentSource: { sourceKind: "generation-loss", state: "open" },
       });
       await expect(chair.getAgentLifecycle({ agentId: "child" })).resolves.toMatchObject({
-        lifecycle: "context-unreconciled",
+        lifecycle: "suspended",
+        contextState: "context-unreconciled",
+        currentSource: { sourceKind: "generation-loss", state: "open" },
       });
     } finally {
       await reopened?.close();
@@ -631,7 +555,7 @@ describe("provider session admission", () => {
   });
 
   it("marks persisted provider sessions unreconciled when health evidence is absent", async () => {
-    const fixture = await createLifecycleFixture();
+    const fixture = await createLifecycleFixture({ retainedAgents: true });
     let reopened: Awaited<ReturnType<typeof reopenLifecycleFabric>> | undefined;
     try {
       await fixture.fabric.close();
@@ -639,7 +563,9 @@ describe("provider session admission", () => {
       await expect(reopened.recoverStartupState()).resolves.toMatchObject({ sessionsDegraded: 2 });
       const chair = reopened.connect(fixture.capabilities.chair);
       await expect(chair.getAgentLifecycle({ agentId: "leader" })).resolves.toMatchObject({
-        lifecycle: "context-unreconciled",
+        lifecycle: "suspended",
+        contextState: "context-unreconciled",
+        currentSource: { sourceKind: "generation-loss", state: "open" },
       });
     } finally {
       await reopened?.close();

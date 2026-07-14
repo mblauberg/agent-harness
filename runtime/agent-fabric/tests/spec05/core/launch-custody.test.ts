@@ -21,6 +21,7 @@ import {
 } from "@local/agent-fabric-protocol";
 
 import { applyMigrations } from "../../../src/core/migrations.ts";
+import { ProviderActionAdmissionCoordinator } from "../../../src/application/provider-action-admission.ts";
 import { openFabric } from "../../../src/index.ts";
 import { OperatorActionStore } from "../../../src/operator/action-store.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
@@ -36,7 +37,9 @@ import {
   type LaunchCustodyIntent,
 } from "../../../src/project-session/launch-custody.ts";
 import { ProjectSessionStore } from "../../../src/project-session/store.ts";
+import { ProjectFabricCoreError } from "../../../src/project-session/contracts.ts";
 import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
+import { admitProviderActionFixture } from "../../support/provider-action-fixture.ts";
 
 const databases: Database.Database[] = [];
 const directories: string[] = [];
@@ -122,6 +125,7 @@ function createFixture(options: Readonly<{
   root: string;
   service: LaunchCustodyService;
   intent: LaunchCustodyIntent;
+  providerActionAdmission: ProviderActionAdmissionCoordinator;
 } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "afab-launch-custody-")));
   directories.push(root);
@@ -217,10 +221,17 @@ function createFixture(options: Readonly<{
     );
   `);
 
+  const clock = () => now;
+  const providerActionAdmission = new ProviderActionAdmissionCoordinator({
+    database,
+    clock,
+    ...(options.fault === undefined ? {} : { fault: options.fault }),
+  });
   let capabilityGeneration = 0;
   const service = new LaunchCustodyService({
     database,
-    clock: () => now,
+    providerActionAdmission,
+    clock,
     ...(options.fault === undefined ? {} : { fault: options.fault }),
     randomCapability: () => `chair-secret-canary-${String(++capabilityGeneration).padStart(2, "0")}`,
     randomAttestationChallenge: () => attestationChallenge,
@@ -265,7 +276,7 @@ function createFixture(options: Readonly<{
     providerContractDigest: contractDigest,
     resourceStateDigest: computeLaunchResourceStateDigest(database, "project_01", "session_launch_01"),
   });
-  return { database, databasePath, root, service, intent };
+  return { database, databasePath, root, service, intent, providerActionAdmission };
 }
 
 function restartedLiveHandoffService(
@@ -278,6 +289,7 @@ function restartedLiveHandoffService(
 ): LaunchCustodyService {
   return new LaunchCustodyService({
     database: fixture.database,
+    providerActionAdmission: fixture.providerActionAdmission,
     clock: () => now,
     randomCapability: () => "unused-live-handoff-restart-secret",
     fabricSocketPath: "/private/agent-fabric.sock",
@@ -387,10 +399,39 @@ async function prepareFixture(fixture: ReturnType<typeof createFixture>): Promis
       inspection,
       operatorId: "operator_01",
       operatorCommandId: "commit_launch_01",
+      principal: operatorPrincipal(),
     });
-  })();
+  }).immediate();
   if (handle === undefined) throw new Error("launch handle was not prepared");
   return { inspection, handle };
+}
+
+function operatorPrincipal() {
+  return {
+    operatorId: "operator_01" as never,
+    projectId: "project_01" as never,
+    projectAuthorityGeneration: 1,
+    principalGeneration: 1,
+  };
+}
+
+function recoveryTicket(
+  fixture: ReturnType<typeof createFixture>,
+  inspection: Awaited<ReturnType<LaunchCustodyService["inspectChairRecovery"]>>,
+) {
+  return fixture.service.preflightChairRecovery({ inspection, principal: operatorPrincipal() });
+}
+
+function handoffTicket(
+  fixture: ReturnType<typeof createFixture>,
+  inspection: Awaited<ReturnType<LaunchCustodyService["inspectChairLiveHandoff"]>>,
+  operatorCommandId: string,
+) {
+  return fixture.service.preflightChairLiveHandoff({
+    inspection,
+    operatorCommandId,
+    principal: operatorPrincipal(),
+  });
 }
 
 function seedLiveHandoffSuccessor(fixture: ReturnType<typeof createFixture>): {
@@ -446,24 +487,24 @@ function seedLiveHandoffSuccessor(fixture: ReturnType<typeof createFixture>): {
       INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
       VALUES (?, 'run_launch_01', 'successor_live_01', 1, ?)
     `).run(successorCapabilityHash, now + 60_000);
-    fixture.database.prepare(`
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, result_json, updated_at
-      ) VALUES (
-        'run_launch_01', 'successor_live_action_01', 'claude-agent-sdk', 'spawn', 'successor_live_01',
-        1, NULL, ?, ?, ?, 'terminal', '["prepared","dispatched","accepted","terminal"]',
-        1, 1, 1, ?, ?
-      )
-    `).run(
-      sha256("successor-live-identity"),
-      sha256(successorPayload),
-      successorPayload,
-      successorResult,
-      now,
-    );
+    admitProviderActionFixture(fixture.database, {
+      runId: "run_launch_01",
+      adapterId: "claude-agent-sdk",
+      actionId: "successor_live_action_01",
+      operation: "spawn",
+      targetAgentId: "successor_live_01",
+      providerSessionGeneration: 1,
+      identityHash: sha256("successor-live-identity"),
+      payloadHash: sha256(successorPayload),
+      payloadJson: successorPayload,
+      status: "terminal",
+      historyJson: '["prepared","dispatched","accepted","terminal"]',
+      executionCount: 1,
+      effectCount: 1,
+      idempotencyProven: true,
+      resultJson: successorResult,
+      updatedAt: now,
+    });
     fixture.database.prepare(`
       INSERT INTO provider_agent_custody(
         run_id, action_id, operation, actor_agent_id, target_agent_id, authority_id,
@@ -627,6 +668,11 @@ describe("launch custody", () => {
        WHERE adapter_id='claude-agent-sdk' AND action_id='provider_launch_01'
     `).get()).toEqual({ status: "prepared", execution_count: 0, effect_count: 0 });
     expect(fixture.database.prepare(`
+      SELECT run_id, state FROM provider_action_pair_preflights
+       WHERE adapter_id='claude-agent-sdk' AND action_id='provider_launch_01'
+    `).get()).toEqual({ run_id: "run_launch_01", state: "admitted" });
+    expect(fixture.database.pragma("foreign_key_check")).toEqual([]);
+    expect(fixture.database.prepare(`
       SELECT COUNT(*) AS count FROM project_session_launch_custody
        WHERE attestation_challenge_digest=?
     `).get(attestationChallengeDigest)).toEqual({ count: 1 });
@@ -718,6 +764,7 @@ describe("launch custody", () => {
     const labels = [
       "launch:prepare:session",
       "launch:prepare:run",
+      "provider-action-admission:after-preflight-insert",
       "launch:prepare:authority",
       "launch:prepare:chair",
       "launch:prepare:scopes",
@@ -727,21 +774,106 @@ describe("launch custody", () => {
       "launch:prepare:custody",
     ];
     for (const target of labels) {
+      let armed = true;
       const fixture = createFixture({
         fault: (label) => {
-          if (label === target) throw new Error(`fault:${target}`);
+          if (label === target && armed) {
+            armed = false;
+            throw new Error(`fault:${target}`);
+          }
         },
       });
       await expect(prepareFixture(fixture)).rejects.toThrow(`fault:${target}`);
       expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM runs").get(), target).toEqual({ count: 0 });
       expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM provider_actions").get(), target).toEqual({ count: 0 });
+      expect(fixture.database.prepare(`
+        SELECT state FROM provider_action_pair_preflights
+         WHERE adapter_id=? AND action_id=?
+      `).get(fixture.intent.providerAdapterId, fixture.intent.providerActionId), target)
+        .toBeUndefined();
       expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM resource_reservations").get(), target).toEqual({ count: 0 });
       expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM project_session_launch_custody").get(), target).toEqual({ count: 0 });
       expect(fixture.database.prepare(`
         SELECT state, revision FROM project_sessions WHERE project_session_id='session_launch_01'
       `).get(), target).toEqual({ state: "awaiting_launch", revision: 2 });
       expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM operator_commands").get(), target).toEqual({ count: 0 });
+      await expect(prepareFixture(fixture)).resolves.toMatchObject({
+        handle: { providerActionId: fixture.intent.providerActionId },
+      });
+      expect(fixture.database.prepare(`
+        SELECT state FROM provider_action_pair_preflights
+         WHERE adapter_id=? AND action_id=?
+      `).get(fixture.intent.providerAdapterId, fixture.intent.providerActionId), target)
+        .toEqual({ state: "admitted" });
     }
+  });
+
+  it("leaves no launch run or preflight when the atomic operator preparation rolls back", async () => {
+    const fixture = createFixture();
+    const failure = new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch command is permanently reused");
+    let prepareCalls = 0;
+    const actions = new OperatorActionStore({
+      database: fixture.database,
+      operatorStore: new OperatorStore({ database: fixture.database, clock: () => now }),
+      statePort: { read: async () => { throw new Error("generic state port must not inspect launch"); } },
+      effectPort: {
+        dispatch: async () => { throw new Error("generic effect port must not launch"); },
+        observe: async () => { throw new Error("generic effect port must not launch"); },
+      },
+      launchCustody: {
+        readCurrentState: fixture.service.readCurrentState.bind(fixture.service),
+        inspect: fixture.service.inspect.bind(fixture.service),
+        prepareInTransaction: () => {
+          prepareCalls += 1;
+          throw failure;
+        },
+        dispatchPrepared: fixture.service.dispatchPrepared.bind(fixture.service),
+        launchProviderActionJournalRefForCommand:
+          fixture.service.launchProviderActionJournalRefForCommand.bind(fixture.service),
+      },
+      clock: () => now,
+    });
+    const context = operatorPrincipal() as never;
+    const command = {
+      credential: { capabilityId: "operator_cap_launch_01", token: "operator-secret" },
+      commandId: "preview_launch_terminal_preflight_01",
+      expectedRevision: 2,
+      actor: "operator_01",
+      provenance: {
+        kind: "console-direct-input",
+        clientId: "console_launch_terminal_preflight_01",
+        inputEventId: "input_preview_launch_terminal_preflight_01",
+      },
+      evidenceRefs: [],
+    };
+    const preview = await actions.preview(context, {
+      command,
+      projectId: "project_01",
+      intent: fixture.intent,
+    } as unknown as OperatorActionPreviewRequest);
+    const commit = {
+      command: {
+        ...command,
+        commandId: "commit_launch_terminal_preflight_01",
+        provenance: { ...command.provenance, inputEventId: "input_commit_launch_terminal_preflight_01" },
+      },
+      projectId: "project_01",
+      previewId: preview.previewId,
+      expectedPreviewRevision: preview.previewRevision,
+      previewDigest: preview.previewDigest,
+      expectedIntentDigest: preview.intentDigest,
+      confirmation: { kind: "explicit", confirmationId: "confirm_launch_terminal_preflight_01" },
+    } as unknown as OperatorActionCommitRequest;
+
+    await expect(actions.commit(context, commit)).rejects.toBe(failure);
+
+    expect(fixture.database.prepare(`
+      SELECT state FROM provider_action_pair_preflights
+       WHERE adapter_id=? AND action_id=?
+    `).get(fixture.intent.providerAdapterId, fixture.intent.providerActionId)).toBeUndefined();
+    expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM runs").get()).toEqual({ count: 0 });
+    await expect(actions.commit(context, commit)).rejects.toBe(failure);
+    expect(prepareCalls).toBe(2);
   });
 
   it("cleans a prepared crash without adapter I/O and preserves immutable custody", async () => {
@@ -1228,6 +1360,7 @@ describe("launch custody", () => {
       inspection,
       operatorId: "operator_01",
       operatorCommandId: "recovery_rebind_01",
+      providerActionTicket: recoveryTicket(fixture, inspection),
     }))();
     expect(recovery).toMatchObject({
       capability: "chair-secret-canary-02",
@@ -1326,6 +1459,7 @@ describe("launch custody", () => {
       inspection: concurrentInspection,
       operatorId: "operator_01",
       operatorCommandId: "recovery_rebind_concurrent_01",
+      providerActionTicket: recoveryTicket(fixture, concurrentInspection),
     }))()).toThrowError(expect.objectContaining({ code: "CONFLICT" }));
     expect(databaseContains(fixture.database, "chair-secret-canary-02")).toBe(false);
     expect(databaseContains(fixture.database, attestationChallenge)).toBe(false);
@@ -1446,18 +1580,24 @@ describe("launch custody", () => {
         INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at)
         VALUES (?, 'run_launch_01', 'successor_01', 1, ?)
       `).run(successorCapabilityHash, now + 60_000);
-      fixture.database.prepare(`
-        INSERT INTO provider_actions(
-          run_id, action_id, adapter_id, operation, target_agent_id,
-          provider_session_generation, turn_lease_generation, identity_hash,
-          payload_hash, payload_json, status, history_json, execution_count,
-          effect_count, idempotency_proven, result_json, updated_at
-        ) VALUES (
-          'run_launch_01', 'successor_action_01', 'claude-agent-sdk', 'spawn', 'successor_01',
-          1, NULL, ?, ?, '{}', 'terminal', '["prepared","dispatched","accepted","terminal"]',
-          1, 1, 1, ?, ?
-        )
-      `).run(sha256("successor-identity"), sha256("{}"), successorResult, now);
+      admitProviderActionFixture(fixture.database, {
+        runId: "run_launch_01",
+        adapterId: "claude-agent-sdk",
+        actionId: "successor_action_01",
+        operation: "spawn",
+        targetAgentId: "successor_01",
+        providerSessionGeneration: 1,
+        identityHash: sha256("successor-identity"),
+        payloadHash: sha256("{}"),
+        payloadJson: "{}",
+        status: "terminal",
+        historyJson: '["prepared","dispatched","accepted","terminal"]',
+        executionCount: 1,
+        effectCount: 1,
+        idempotencyProven: true,
+        resultJson: successorResult,
+        updatedAt: now,
+      });
       fixture.database.prepare(`
         INSERT INTO provider_agent_custody(
           run_id, action_id, operation, actor_agent_id, target_agent_id, authority_id,
@@ -1529,6 +1669,7 @@ describe("launch custody", () => {
       inspection,
       operatorId: "operator_01",
       operatorCommandId: "recovery_takeover_01",
+      providerActionTicket: recoveryTicket(fixture, inspection),
     }))();
     await expect(fixture.service.dispatchPreparedChairRecovery(recovery)).resolves.toMatchObject({
       status: "ambiguous",
@@ -1605,6 +1746,7 @@ describe("launch custody", () => {
     const inspection = await fixture.service.inspectChairRecovery(intent);
     fixture.database.transaction(() => fixture.service.prepareChairRecoveryInTransaction({
       inspection, operatorId: "operator_01", operatorCommandId: "prepared_recovery_command",
+      providerActionTicket: recoveryTicket(fixture, inspection),
     }))();
     const recovered = await fixture.service.recover();
     expect(recoveryEffects).toBe(0);
@@ -1701,6 +1843,7 @@ describe("launch custody", () => {
     const inspection = await fixture.service.inspectChairRecovery(intent);
     const recovery = fixture.database.transaction(() => fixture.service.prepareChairRecoveryInTransaction({
       inspection, operatorId: "operator_01", operatorCommandId: "ambiguous_recovery_command",
+      providerActionTicket: recoveryTicket(fixture, inspection),
     }))();
     await expect(fixture.service.dispatchPreparedChairRecovery(recovery)).resolves.toMatchObject({ status: "ambiguous" });
     expect(probeRecoveryCapabilityIdentityGuards(fixture.database)).toEqual({
@@ -1769,6 +1912,7 @@ describe("launch custody", () => {
     const inspection = await fixture.service.inspectChairRecovery(intent);
     const recovery = fixture.database.transaction(() => fixture.service.prepareChairRecoveryInTransaction({
       inspection, operatorId: "operator_01", operatorCommandId: "startup_unresolved_rebind_command",
+      providerActionTicket: recoveryTicket(fixture, inspection),
     }))();
     await expect(fixture.service.dispatchPreparedChairRecovery(recovery)).resolves.toMatchObject({ status: "ambiguous" });
     closeTrackedDatabase(fixture.database);
@@ -1794,6 +1938,7 @@ describe("launch custody", () => {
       startup = await runtime.recoverStartupState();
       try {
         await runtime.reconcileProviderAction("run_launch_01", "chair_launch_01", {
+          adapterId: "claude-agent-sdk",
           actionId: "startup_unresolved_rebind_action",
           commandId: "generic_rebind_reconcile_forbidden_01",
         });
@@ -1905,6 +2050,7 @@ describe("launch custody", () => {
     };
     const restarted = new LaunchCustodyService({
       database: fixture.database,
+      providerActionAdmission: fixture.providerActionAdmission,
       clock: () => now,
       randomCapability: () => "unused-restart-secret",
       fabricSocketPath: "/private/agent-fabric.sock",
@@ -2061,6 +2207,7 @@ describe("launch custody", () => {
       fabricSocketPath: join(prepared.root, "fabric.sock"),
     });
     await expect(preparedRuntime.reconcileProviderAction("run_launch_01", "chair_launch_01", {
+      adapterId: "claude-agent-sdk",
       actionId: "provider_launch_01",
       commandId: "generic_launch_reconcile_forbidden_01",
     })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
@@ -2074,6 +2221,11 @@ describe("launch custody", () => {
         JOIN provider_actions p
           ON p.adapter_id=c.provider_adapter_id AND p.action_id=c.provider_action_id
     `).get()).toEqual({ state: "launch_failed", status: "terminal", execution_count: 0 });
+    expect(preparedState.prepare(`
+      SELECT run_id, state FROM provider_action_pair_preflights
+       WHERE adapter_id='claude-agent-sdk' AND action_id='provider_launch_01'
+    `).get()).toEqual({ run_id: "run_launch_01", state: "admitted" });
+    expect(preparedState.pragma("foreign_key_check")).toEqual([]);
     preparedState.close();
 
     const dispatched = createFixture({ persistent: true });
@@ -2174,8 +2326,9 @@ describe("launch custody", () => {
         inspection,
         operatorId: "operator_01",
         operatorCommandId: "commit_launch_02",
+        principal: operatorPrincipal(),
       });
-    })();
+    }).immediate();
     expect(fixture.database.prepare(`
       SELECT state, revision, launch_packet_path FROM project_sessions
        WHERE project_session_id='session_launch_01'
@@ -2187,6 +2340,14 @@ describe("launch custody", () => {
       SELECT retry_of_provider_action_id FROM project_session_launch_custody
        WHERE custody_attempt_generation=2
     `).get()).toEqual({ retry_of_provider_action_id: "provider_launch_01" });
+    expect(fixture.database.prepare(`
+      SELECT run_id, state FROM provider_action_pair_preflights
+       ORDER BY action_id
+    `).all()).toEqual([
+      { run_id: "run_launch_01", state: "admitted" },
+      { run_id: "run_launch_02", state: "admitted" },
+    ]);
+    expect(fixture.database.pragma("foreign_key_check")).toEqual([]);
   });
 
   it("rejects extra artifact fields and symlink escape before any launch row", async () => {
@@ -2246,18 +2407,28 @@ describe("launch custody", () => {
   });
 
   it("rolls back failed prepare and commit transactions, then reconciles commit by lookup", async () => {
+    let prepareFaultArmed = true;
     const prepared = await prepareLiveHandoffFixture({
       fault: (label) => {
-        if (label === "chair-live-handoff:prepared") throw new Error("prepare crash");
+        if (label === "chair-live-handoff:prepared" && prepareFaultArmed) {
+          prepareFaultArmed = false;
+          throw new Error("prepare crash");
+        }
       },
     });
+    const preparedTicket = handoffTicket(
+      prepared.fixture,
+      prepared.inspection,
+      "commit_live_handoff_prepare_crash_01",
+    );
     expect(() => prepared.fixture.database.transaction(() => {
       prepared.fixture.service.prepareChairLiveHandoffInTransaction({
         inspection: prepared.inspection,
         operatorId: "operator_01",
         operatorCommandId: "commit_live_handoff_prepare_crash_01",
+        providerActionTicket: preparedTicket,
       });
-    })()).toThrow("prepare crash");
+    }).immediate()).toThrow("prepare crash");
     expect(prepared.fixture.database.prepare(`
       SELECT (SELECT COUNT(*) FROM chair_live_handoff_custody) AS custody,
              (SELECT COUNT(*) FROM provider_actions WHERE operation='promote_retained_bridge') AS actions,
@@ -2268,6 +2439,19 @@ describe("launch custody", () => {
     `).get()).toEqual({ lifecycle_state: "active", revision: prepared.seeded.intent.expectedRunRevision });
     expect(prepared.fixture.database.prepare("SELECT status FROM run_chair_leases WHERE lease_id=?")
       .get(prepared.seeded.intent.expectedChairLeaseId)).toEqual({ status: "active" });
+    expect(prepared.fixture.database.transaction(() => (
+      prepared.fixture.service.prepareChairLiveHandoffInTransaction({
+        inspection: prepared.inspection,
+        operatorId: "operator_01",
+        operatorCommandId: "commit_live_handoff_prepare_crash_01",
+        providerActionTicket: preparedTicket,
+      })
+    )).immediate()).toMatchObject({ promotionActionId: preparedTicket.actionRef.actionId });
+    expect(prepared.fixture.database.prepare(`
+      SELECT state FROM provider_action_pair_preflights
+       WHERE adapter_id=? AND action_id=?
+    `).get(preparedTicket.actionRef.adapterId, preparedTicket.actionRef.actionId))
+      .toEqual({ state: "admitted" });
 
     let promotions = 0;
     const committing = await prepareLiveHandoffFixture({
@@ -2276,11 +2460,18 @@ describe("launch custody", () => {
       },
       promoteSuccessor: async () => { promotions += 1; return true; },
     });
-    const handoff = committing.fixture.service.prepareChairLiveHandoffInTransaction({
-      inspection: committing.inspection,
-      operatorId: "operator_01",
-      operatorCommandId: "commit_live_handoff_commit_crash_01",
-    });
+    const handoff = committing.fixture.database.transaction(() => (
+      committing.fixture.service.prepareChairLiveHandoffInTransaction({
+        inspection: committing.inspection,
+        operatorId: "operator_01",
+        operatorCommandId: "commit_live_handoff_commit_crash_01",
+        providerActionTicket: handoffTicket(
+          committing.fixture,
+          committing.inspection,
+          "commit_live_handoff_commit_crash_01",
+        ),
+      })
+    )).immediate();
     await expect(committing.fixture.service.dispatchPreparedChairLiveHandoff(handoff))
       .rejects.toThrow("commit crash");
     expect(promotions).toBe(1);
@@ -2350,11 +2541,14 @@ describe("launch custody", () => {
     await fixture.service.dispatchPrepared(launchHandle);
     const seeded = seedLiveHandoffSuccessor(fixture);
     const inspection = await fixture.service.inspectChairLiveHandoff(seeded.intent);
-    let handoff = fixture.service.prepareChairLiveHandoffInTransaction({
-      inspection,
-      operatorId: "operator_01",
-      operatorCommandId: "commit_live_handoff_01",
-    });
+    let handoff = fixture.database.transaction(() => (
+      fixture.service.prepareChairLiveHandoffInTransaction({
+        inspection,
+        operatorId: "operator_01",
+        operatorCommandId: "commit_live_handoff_01",
+        providerActionTicket: handoffTicket(fixture, inspection, "commit_live_handoff_01"),
+      })
+    )).immediate();
     expect(promotions).toBe(0);
     expect(fixture.database.prepare(`
       SELECT lifecycle_state, revision FROM runs WHERE run_id='run_launch_01'
@@ -2444,11 +2638,14 @@ describe("launch custody", () => {
     await fixture.service.dispatchPrepared(launchHandle);
     const seeded = seedLiveHandoffSuccessor(fixture);
     const inspection = await fixture.service.inspectChairLiveHandoff(seeded.intent);
-    const handoff = fixture.service.prepareChairLiveHandoffInTransaction({
-      inspection,
-      operatorId: "operator_01",
-      operatorCommandId: "commit_live_handoff_no_effect_01",
-    });
+    const handoff = fixture.database.transaction(() => (
+      fixture.service.prepareChairLiveHandoffInTransaction({
+        inspection,
+        operatorId: "operator_01",
+        operatorCommandId: "commit_live_handoff_no_effect_01",
+        providerActionTicket: handoffTicket(fixture, inspection, "commit_live_handoff_no_effect_01"),
+      })
+    )).immediate();
 
     await expect(fixture.service.dispatchPreparedChairLiveHandoff(handoff)).resolves.toMatchObject({
       status: "no-effect",
@@ -2509,11 +2706,18 @@ describe("launch custody", () => {
     await preparedFixture.service.dispatchPrepared(preparedLaunch);
     const preparedSeed = seedLiveHandoffSuccessor(preparedFixture);
     const preparedInspection = await preparedFixture.service.inspectChairLiveHandoff(preparedSeed.intent);
-    preparedFixture.service.prepareChairLiveHandoffInTransaction({
-      inspection: preparedInspection,
-      operatorId: "operator_01",
-      operatorCommandId: "commit_live_handoff_prepared_restart_01",
-    });
+    preparedFixture.database.transaction(() => {
+      preparedFixture.service.prepareChairLiveHandoffInTransaction({
+        inspection: preparedInspection,
+        operatorId: "operator_01",
+        operatorCommandId: "commit_live_handoff_prepared_restart_01",
+        providerActionTicket: handoffTicket(
+          preparedFixture,
+          preparedInspection,
+          "commit_live_handoff_prepared_restart_01",
+        ),
+      });
+    }).immediate();
     let preparedIo = 0;
     const preparedRestart = restartedLiveHandoffService(preparedFixture, {
       promote: async () => { preparedIo += 1; throw new Error("prepared restart promoted"); },
@@ -2563,11 +2767,18 @@ describe("launch custody", () => {
     await dispatchedFixture.service.dispatchPrepared(dispatchedLaunch);
     const dispatchedSeed = seedLiveHandoffSuccessor(dispatchedFixture);
     const dispatchedInspection = await dispatchedFixture.service.inspectChairLiveHandoff(dispatchedSeed.intent);
-    const dispatched = dispatchedFixture.service.prepareChairLiveHandoffInTransaction({
-      inspection: dispatchedInspection,
-      operatorId: "operator_01",
-      operatorCommandId: "commit_live_handoff_dispatched_restart_01",
-    });
+    const dispatched = dispatchedFixture.database.transaction(() => (
+      dispatchedFixture.service.prepareChairLiveHandoffInTransaction({
+        inspection: dispatchedInspection,
+        operatorId: "operator_01",
+        operatorCommandId: "commit_live_handoff_dispatched_restart_01",
+        providerActionTicket: handoffTicket(
+          dispatchedFixture,
+          dispatchedInspection,
+          "commit_live_handoff_dispatched_restart_01",
+        ),
+      })
+    )).immediate();
     await expect(dispatchedFixture.service.dispatchPreparedChairLiveHandoff(dispatched))
       .rejects.toThrow("crash after durable dispatch");
     expect(promotions).toBe(0);
@@ -2626,11 +2837,14 @@ describe("launch custody", () => {
     await fixture.service.dispatchPrepared(launchHandle);
     const seeded = seedLiveHandoffSuccessor(fixture);
     const inspection = await fixture.service.inspectChairLiveHandoff(seeded.intent);
-    const handoff = fixture.service.prepareChairLiveHandoffInTransaction({
-      inspection,
-      operatorId: "operator_01",
-      operatorCommandId: "commit_live_handoff_ambiguous_01",
-    });
+    const handoff = fixture.database.transaction(() => (
+      fixture.service.prepareChairLiveHandoffInTransaction({
+        inspection,
+        operatorId: "operator_01",
+        operatorCommandId: "commit_live_handoff_ambiguous_01",
+        providerActionTicket: handoffTicket(fixture, inspection, "commit_live_handoff_ambiguous_01"),
+      })
+    )).immediate();
     await expect(fixture.service.dispatchPreparedChairLiveHandoff(handoff)).resolves.toMatchObject({
       status: "ambiguous",
     });

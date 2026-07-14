@@ -76,7 +76,10 @@ export function readControlActiveTurns(
       SELECT lease.action_id, lease.provider_session_generation, lease.turn_lease_generation,
              action.adapter_id, action.payload_hash, action.payload_json, action.result_json
         FROM provider_session_turn_leases lease
-        JOIN provider_actions action ON action.run_id=lease.run_id AND action.action_id=lease.action_id
+        JOIN provider_actions action
+          ON action.run_id=lease.run_id
+         AND action.adapter_id=lease.adapter_id
+         AND action.action_id=lease.action_id
        WHERE lease.run_id=? AND lease.agent_id=? AND lease.status='active'
     `).get(agent.runId, agent.agentId);
     if (!isRow(value)) continue;

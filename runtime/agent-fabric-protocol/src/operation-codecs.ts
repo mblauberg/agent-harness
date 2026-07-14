@@ -170,7 +170,10 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.releaseWriteLease]: object(["leaseId", "expectedGeneration", "commandId"]),
   [FABRIC_OPERATIONS.requestLifecycle]: object(["action", "agentId", "taskId", "taskRevision", "checkpoint", "commandId"]),
   [FABRIC_OPERATIONS.getAgentLifecycle]: object(["agentId"]),
-  [FABRIC_OPERATIONS.reportProviderState]: object(["agentId", "providerSessionGeneration", "contextRevision", "commandId"], ["checkpointSha256"]),
+  [FABRIC_OPERATIONS.reportProviderState]: object([
+    "sourceEventId", "providerSessionRef", "providerSessionGeneration", "contextRevision",
+    "evidenceDigest", "agentId", "commandId",
+  ], ["checkpointSha256"]),
   [FABRIC_OPERATIONS.dispatchProviderAction]: object(
     ["adapterId", "actionId", "operation", "payload", "commandId", "certifyingReview"],
     ["authorityId", "taskId", "routeRequest"],
@@ -221,7 +224,7 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.taskRequest]: object(["commandId", "projectSessionId", "coordinationRunId", "task", "request"]),
   [FABRIC_OPERATIONS.taskCompleteWithReply]: object(["commandId", "taskId", "expectedTaskRevision", "ownerLeaseId", "ownerLeaseGeneration", "requestMessageId", "expectedRequestRevision", "callbackId", "callbackGeneration", "reply", "terminalResult"]),
   [FABRIC_OPERATIONS.resultDeliveryClaim]: object(["commandId", "resultDeliveryId", "expectedRevision", "expectedClaimGeneration", "claimantAgentId", "claimDeadline"]),
-  [FABRIC_OPERATIONS.resultDeliveryProviderAccept]: object(["commandId", "resultDeliveryId", "expectedRevision", "claimGeneration", "providerActionId"]),
+  [FABRIC_OPERATIONS.resultDeliveryProviderAccept]: object(["commandId", "resultDeliveryId", "expectedRevision", "claimGeneration", "providerAdapterId", "providerActionId"]),
   [FABRIC_OPERATIONS.resultDeliveryConsume]: object(["commandId", "resultDeliveryId", "expectedRevision", "claimGeneration", "callbackId", "payloadDigest"]),
   [FABRIC_OPERATIONS.resultDeliveryRetry]: object(["commandId", "resultDeliveryId", "expectedRevision", "sameCallbackId", "reason"]),
   [FABRIC_OPERATIONS.resultDeliveryReassign]: object(["commandId", "resultDeliveryId", "expectedRevision", "targetAgentId", "targetProviderSessionRef", "reason"]),
@@ -2758,12 +2761,17 @@ const scopedGateReadInputCodec = objectCodec({
   gateId: identifier,
 }, { expectedRevision: positiveInteger });
 
-function memberVariants(kind: string, identityField: string): Codec<unknown>[] {
+function memberVariants(
+  kind: string,
+  identityField: string,
+  additionalIdentity: Readonly<Record<string, Codec<unknown>>> = {},
+): Codec<unknown>[] {
   const identity = {
     kind: literal(kind),
     membershipId: identifier,
     coordinationRunId: identifier,
     [identityField]: identifier,
+    ...additionalIdentity,
   };
   return [
     objectCodec({ ...identity, state: literal("active") }),
@@ -2776,7 +2784,7 @@ const projectSessionMemberCodec = unionOf([
   ...memberVariants("workstream", "workstreamId"),
   ...memberVariants("task", "taskId"),
   ...memberVariants("lease", "leaseId"),
-  ...memberVariants("provider-action", "providerActionId"),
+  ...memberVariants("provider-action", "providerActionId", { providerAdapterId: identifier }),
   ...memberVariants("required-message", "messageId"),
   ...memberVariants("artifact-obligation", "artifactObligationId"),
   ...memberVariants("gate", "gateId"),
@@ -3204,6 +3212,9 @@ function semanticFieldCodec(
     field === "sha256" &&
     (operation === FABRIC_OPERATIONS.publishArtifact || operation === FABRIC_OPERATIONS.exportReceipt)
   ) return sha256Hex;
+  if (field === "evidenceDigest" && operation === FABRIC_OPERATIONS.reportProviderState && direction === "input") {
+    return sha256;
+  }
   if (field === "checkpointSha256" && operation === FABRIC_OPERATIONS.reportProviderState) return sha256Hex;
   if (["sha256", "authorityRef", "before", "after", "checkpointSha256", "payloadDigest", "receiptDigest", "stateDigest"].includes(field)) {
     if (field === "after" && direction === "input") return integer();

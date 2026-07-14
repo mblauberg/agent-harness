@@ -44,7 +44,7 @@
       "id": "unannounced-compaction",
       "scenario": "A provider session generation advances without a checkpointed lifecycle transition.",
       "risk": "An agent writes using context whose durable state is unknown.",
-      "oracle": {"kind": "deterministic", "outcome": "fence", "code": "CONTEXT_UNRECONCILED"},
+      "oracle": {"kind": "deterministic", "outcome": "fence", "code": "STALE_LEASE_GENERATION"},
       "publicSurface": ["FabricClient.reportProviderState", "FabricClient.acquireWriteLease"]
     },
     {
