@@ -550,6 +550,7 @@ export class LifecycleReviewAdoptionStore {
     this.#requireTransaction();
     const review = prepared.review;
     if (review === null) return;
+    const canApplyRebind = this.#assertPreparedReviewAuthentic(prepared, review, reviewReceipt);
     if (review.cut !== null) {
       const cut = row(review.cut, "prepared review certification cut");
       const ref = row(cut.lifecycleCustodyRef, "prepared review custody reference");
@@ -566,7 +567,7 @@ export class LifecycleReviewAdoptionStore {
         text(cut, "lifecycleAdoptionEvidenceDigest"), text(cut, "cutDigest"), appliedAt,
       );
     }
-    if (review.successorBinding !== null && review.rebindReceipt !== null) {
+    if (canApplyRebind && review.successorBinding !== null && review.rebindReceipt !== null) {
       const binding = row(review.successorBinding, "prepared successor review binding");
       this.#database.prepare(`
         INSERT INTO review_target_chair_bindings(
@@ -648,6 +649,185 @@ export class LifecycleReviewAdoptionStore {
       cutDigest, cutDigest ?? "none", prepared.applyId,
     );
     void decision;
+  }
+
+  #assertPreparedReviewAuthentic(
+    context: PreparedReviewAdoptionContext,
+    review: PreparedReviewAdoption,
+    reviewReceipt: VerifiedReviewReceipt,
+  ): boolean {
+    const invalid = (): never => {
+      throw new Error("prepared review adoption is not authentic");
+    };
+    const reservationValue = this.#database.prepare(`
+      SELECT * FROM lifecycle_review_adoption_reservations WHERE reservation_id=?
+    `).get(review.reservationId);
+    if (!isRow(reservationValue)) invalid();
+    const reservation = row(reservationValue, "review adoption reservation row");
+    const reservationJson = text(reservation, "reservation_json");
+    const reservationBody = (() => {
+      try {
+        return row(JSON.parse(reservationJson), "review adoption reservation");
+      } catch {
+        return invalid();
+      }
+    })();
+    const batchValue = this.#database.prepare(`
+      SELECT batch.*,
+             primary_intent.subject_json AS custody_terminal_subject_json,
+             primary_intent.subject_digest AS custody_terminal_subject_digest
+        FROM lifecycle_receipt_batches batch
+        JOIN lifecycle_receipt_intents primary_intent
+          ON primary_intent.batch_id=batch.batch_id AND primary_intent.ordinal=1
+       WHERE batch.batch_id=? AND batch.planned_apply_id=?
+         AND batch.project_session_id=? AND batch.run_id=? AND batch.agent_id=?
+         AND batch.transition_kind='custody-terminal'
+         AND batch.receipt_intent_count=2
+         AND batch.secondary_intent_kind='review-adoption-decision'
+    `).get(
+      context.batchId, context.applyId, context.projectSessionId, context.runId, context.agentId,
+    );
+    if (!isRow(batchValue)) invalid();
+    const batch = row(batchValue, "review adoption receipt batch");
+    const custodyTerminalSubject = (() => {
+      try {
+        return row(JSON.parse(text(batch, "custody_terminal_subject_json")), "custody terminal subject");
+      } catch {
+        return invalid();
+      }
+    })();
+    if (
+      canonicalJson(custodyTerminalSubject) !== text(batch, "custody_terminal_subject_json") ||
+      lifecycleDigest("receipt-subject", custodyTerminalSubject) !==
+        text(batch, "custody_terminal_subject_digest")
+    ) invalid();
+    const ownerRef = row(custodyTerminalSubject.ownerRef, "custody terminal owner reference");
+    const ownerCustodyRef = row(ownerRef.custodyRef, "custody terminal owner custody reference");
+    if (
+      ownerRef.kind !== "custody" || typeof ownerRef.sourceRefDigest !== "string" ||
+      canonicalJson(ownerCustodyRef) !== canonicalJson(custodyRef(
+        context.runId, context.agentId, context.custodyId, context.finalRevision,
+      ))
+    ) invalid();
+    const expectedSubject = {
+      schemaVersion: 1,
+      kind: "review-adoption-decision",
+      projectSessionId: context.projectSessionId,
+      runId: context.runId,
+      agentId: context.agentId,
+      ownerRef,
+      custodyTerminalSubjectDigest: text(batch, "custody_terminal_subject_digest"),
+      lifecycleAdoptionEvidenceDigest: text(reservation, "lifecycle_adoption_evidence_digest"),
+      reviewReservationDigest: review.reservationDigest,
+      reviewDecision: review.decision,
+      reviewDecisionDigest: review.decisionDigest,
+      successorBinding: review.successorBinding,
+      rebindReceipt: review.rebindReceipt,
+      certificationCut: review.cut,
+      certificationCutDigest: review.cutDigest,
+      recoverySource: { kind: "none" },
+      recoverySourceDecisionDigest: null,
+      transitionReplayDigest: text(batch, "transition_replay_digest"),
+    };
+    if (
+      text(reservation, "reservation_digest") !== review.reservationDigest ||
+      review.reservationDigest !== lifecycleDigest("review-adoption-reservation", reservationBody) ||
+      canonicalJson(reservationBody) !== reservationJson ||
+      text(reservation, "project_session_id") !== context.projectSessionId ||
+      text(reservation, "run_id") !== context.runId ||
+      text(reservation, "agent_id") !== context.agentId ||
+      text(reservation, "custody_id") !== context.custodyId ||
+      integer(reservation, "finalized_custody_revision") !== context.finalRevision ||
+      text(reservation, "review_decision_json") !== canonicalJson(review.decision) ||
+      text(reservation, "review_decision_digest") !== review.decisionDigest ||
+      review.decisionDigest !== lifecycleDigest("review-adoption-decision", review.decision) ||
+      canonicalJson(reservationBody.reviewDecision) !== canonicalJson(review.decision) ||
+      reservationBody.reviewDecisionDigest !== review.decisionDigest ||
+      canonicalJson(review.subject) !== review.subjectJson ||
+      canonicalJson(review.subject) !== canonicalJson(expectedSubject) ||
+      review.subjectDigest !== lifecycleDigest("receipt-subject", review.subject) ||
+      canonicalJson(review.intent) !== review.intentJson ||
+      review.intentDigest !== lifecycleDigest("receipt-intent", review.intent) ||
+      review.intent.subjectDigest !== review.subjectDigest ||
+      review.intent.batchId !== context.batchId ||
+      canonicalJson(review.subject.reviewDecision) !== canonicalJson(review.decision) ||
+      review.subject.reviewDecisionDigest !== review.decisionDigest ||
+      canonicalJson(review.subject.successorBinding) !== canonicalJson(review.successorBinding) ||
+      canonicalJson(review.subject.rebindReceipt) !== canonicalJson(review.rebindReceipt)
+    ) invalid();
+
+    const storedCutJson = reservation.certification_cut_json;
+    const expectedCutJson = review.cut === null ? null : canonicalJson(review.cut);
+    if (
+      storedCutJson !== expectedCutJson ||
+      reservation.certification_cut_digest !== review.cutDigest ||
+      canonicalJson(reservationBody.certificationCut) !== canonicalJson(review.cut)
+    ) invalid();
+    if (review.cut !== null && review.cutDigest !== lifecycleDigest(
+      "review-certification-cut",
+      Object.fromEntries(Object.entries(review.cut).filter(([key]) => key !== "cutDigest")),
+    )) invalid();
+
+    const decision = review.decision;
+    if (
+      canonicalJson(decision.successorBinding) !== canonicalJson(review.successorBinding) ||
+      canonicalJson(decision.certificationCut) !== canonicalJson(review.cut)
+    ) invalid();
+    if (review.successorBinding !== null) {
+      const { binding_digest: bindingDigest, ...bindingBody } = review.successorBinding;
+      if (
+        typeof bindingDigest !== "string" ||
+        bindingDigest !== lifecycleDigest("review-target-chair-binding", bindingBody)
+      ) invalid();
+    }
+    if (review.rebindReceipt !== null) {
+      const { rebind_receipt_digest: receiptDigest, ...receiptBody } = review.rebindReceipt;
+      if (
+        typeof receiptDigest !== "string" ||
+        receiptDigest !== lifecycleDigest("review-target-rebind-receipt", receiptBody)
+      ) invalid();
+    }
+    const authorityReceipt = this.#database.prepare(`
+      SELECT 1 FROM lifecycle_authority_receipts
+       WHERE receipt_digest=? AND intent_digest=? AND batch_id=? AND ordinal=2
+         AND kind='review-adoption-decision' AND project_session_id=?
+         AND run_id=? AND agent_id=? AND subject_owner_kind='custody'
+         AND subject_owner_id=? AND subject_owner_revision=? AND subject_digest=?
+    `).get(
+      reviewReceipt.receiptDigest, review.intentDigest, context.batchId,
+      context.projectSessionId, context.runId, context.agentId, context.custodyId,
+      context.finalRevision, review.subjectDigest,
+    );
+    if (!isRow(authorityReceipt)) invalid();
+    if (decision.outcome === "rebound") {
+      const targetGeneration = decision.targetGeneration;
+      const predecessorBindingGeneration = decision.predecessorBindingGeneration;
+      if (!Number.isSafeInteger(targetGeneration) || !Number.isSafeInteger(predecessorBindingGeneration)) {
+        invalid();
+      }
+      const currentTarget = this.#database.prepare(`
+        SELECT * FROM review_completion_targets
+         WHERE run_id=? AND target_generation=? AND state='current'
+      `).get(context.runId, targetGeneration);
+      const currentBinding = this.#database.prepare(`
+        SELECT binding.*,head.active_binding_generation,
+               head.revision AS binding_head_revision
+          FROM review_target_chair_bindings binding
+          JOIN review_target_chair_binding_heads head
+            ON head.run_id=binding.run_id AND head.target_generation=binding.target_generation
+           AND head.active_binding_generation=binding.binding_generation
+         WHERE binding.run_id=? AND binding.target_generation=?
+           AND binding.binding_generation=?
+      `).get(context.runId, targetGeneration, predecessorBindingGeneration);
+      if (
+        !isRow(currentTarget) || !isRow(currentBinding) ||
+        canonicalJson(currentTarget) !== canonicalJson(decision.target) ||
+        canonicalJson(currentBinding) !== canonicalJson(decision.predecessorBinding)
+      ) {
+        return false;
+      }
+    }
+    return true;
   }
 
 

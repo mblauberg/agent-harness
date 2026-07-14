@@ -12,12 +12,10 @@ false circular dependency:
    `_batch_completions`, `_batch_authorizations`, `lifecycle_transition_applies`
    and `lifecycle_admitted_run_scopes`.
 
-   **This schema is not on `main`.** It exists only in the **uncommitted** W005
-   working tree (branch `w005-preflight-fixtures`,
-   `runtime/agent-fabric/migrations/0001-current-baseline.sql`). `main`'s migration
-   contains none of these tables. This ADR decides the *target* boundary; it does
-   not describe shipped code. Re-anchor these citations to real line numbers when
-   W005 lands.
+   The W005 branch implements this schema in
+   `runtime/agent-fabric/migrations/0001-current-baseline.sql`. This ADR describes
+   the state that W005 and the ADR are intended to land together; it does not
+   assert that the branch has already been merged or shipped.
 2. **`AuthorityEnvelopeV2`** / the provider authority-compilation receipt —
    *provider capability compilation* (ADR 0002). It does not exist in code yet.
 3. **"receipt portability"** — publication of *release evidence*. Unrelated to
@@ -40,22 +38,20 @@ text. Specifically, for the lifecycle receipt authority:
   following the existing `externalEffects` ports/adapters precedent in the same
   options block.
 
-  **Status on `main`: not wired.** `FabricRuntimeOpenOptions`
-  (`runtime/agent-fabric/src/core/fabric.ts:192-206`) exposes no such member. The
-  interface itself does exist on `main`, but only as the optional
-  `LifecycleDomainPorts.integrityReceipts`
-  (`runtime/agent-fabric/src/lifecycle/types.ts:435-440`, `:310-317`). The W005
-  working tree already adds the port to the options block; this ADR ratifies that
-  shape rather than reporting it as shipped.
+  W005 exposes the port on `FabricRuntimeOpenOptions`, wires it through
+  `runtime/agent-fabric/src/core/fabric.ts`, and keeps the external contract in
+  `runtime/agent-fabric/src/lifecycle/receipt-authority.ts`. The live
+  receipt/custody persistence path is repository-backed; the retired in-memory
+  lifecycle aggregate is not an authority fallback.
 - It **cannot mint its own identity**. `authority_id` is FK-bound to
   `lifecycle_admitted_run_scopes`, which permits exactly one authority per
   `(project_session_id, run_id)` — the receipt chain is also hash-linked, with
   sequence 1 forbidden a predecessor and every later sequence required to name
   one. An in-process default may never forge an authority, and must not claim
-  third-party attestation it does not hold. (Verified against the W005 working
-  tree, not `main` — see the Context note.)
-- **W005 ships the lifecycle receipt authority** and keeps an **explicitly
-  labelled transitional unrouted provider-action arm** that claims **no** Spec-04
+  third-party attestation it does not hold. (Verified against the W005 branch;
+  see the Context note.)
+- **The W005 landing includes the lifecycle receipt authority** and keeps an
+  **explicitly labelled transitional unrouted provider-action arm** that claims **no** Spec-04
   v1.32 authority conformance. W008 closes that arm.
 
 There is therefore no circular dependency.
