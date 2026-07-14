@@ -1868,7 +1868,6 @@ mod unsafe_sys {
         ) -> c_int;
         fn geteuid() -> c_uint;
         fn getpid() -> c_int;
-        #[cfg(target_os = "macos")]
         fn getsid(process_id: c_int) -> c_int;
         fn kill(process_id: c_int, signal: c_int) -> c_int;
         fn open(path: *const std::os::raw::c_char, flags: c_int, ...) -> c_int;
@@ -1953,23 +1952,12 @@ mod unsafe_sys {
         let device = u64::from(status.device.cast_unsigned());
         #[cfg(target_os = "linux")]
         let device = status.device;
-        #[cfg(target_os = "macos")]
-        let mode = u32::from(status.mode);
-        #[cfg(target_os = "linux")]
-        let mode = status.mode;
-        #[cfg(any(
-            target_os = "macos",
-            all(target_os = "linux", not(target_arch = "x86_64"))
-        ))]
-        let hard_links = u64::from(status.hard_links);
-        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-        let hard_links = status.hard_links;
         Ok(EntryStatus {
             device,
             inode: status.inode,
-            mode,
+            mode: u32::from(status.mode),
             user_id: status.user_id,
-            hard_links,
+            hard_links: u64::from(status.hard_links),
         })
     }
 
@@ -2080,7 +2068,6 @@ mod unsafe_sys {
         unsafe { getpid() }
     }
 
-    #[cfg(target_os = "macos")]
     pub fn process_session_id(process_id: i32) -> io::Result<i32> {
         // SAFETY: getsid consumes one integer and does not dereference memory.
         let result = unsafe { getsid(process_id) };
@@ -2265,12 +2252,17 @@ mod unsafe_sys {
         #[repr(C)]
         #[derive(Clone, Copy)]
         struct UCred {
-            pid: c_int,
-            uid: u32,
-            gid: u32,
+            process_id: c_int,
+            user_id: u32,
+            group_id: u32,
         }
         let credentials = socket_option::<UCred>(descriptor, SOL_SOCKET, SO_PEERCRED)?;
-        Ok((credentials.uid, credentials.gid, credentials.pid, None))
+        Ok((
+            credentials.user_id,
+            credentials.group_id,
+            credentials.process_id,
+            None,
+        ))
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
