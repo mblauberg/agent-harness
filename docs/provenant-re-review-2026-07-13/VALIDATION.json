@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "validatedAt": "2026-07-13T15:02:36.335417+00:00",
+  "scope": "generated review pack only",
+  "status": "pass",
+  "checks": [
+    {
+      "check": "document-frontmatter.schema.json validates document-frontmatter.example.json",
+      "status": "pass"
+    },
+    {
+      "check": "work-item.schema.json validates work-item.example.json",
+      "status": "pass"
+    },
+    {
+      "check": "decision-delegation.schema.json validates decision-delegation.example.json",
+      "status": "pass"
+    },
+    {
+      "check": "decision-request.schema.json validates decision-request.example.json",
+      "status": "pass"
+    },
+    {
+      "check": "26 finding IDs/priorities are unique and valid",
+      "status": "pass"
+    },
+    {
+      "check": "11 required report/proposal documents exist",
+      "status": "pass"
+    }
+  ],
+  "limitations": [
+    "No repository files were changed.",
+    "No repository build, test, provider, daemon, Console, Rust or security command was executed.",
+    "The proposals are design artefacts, not integrated patches."
+  ]
+}

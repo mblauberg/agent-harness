@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-07-13T15:02:36.336862+00:00",
+  "repository": "mblauberg/provenant",
+  "baseline": "9f168eed9ac7001744d372a840be9648bb11edcf",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 2156,
+      "sha256": "5a8a88af76fa1196236ec4ecb7832ab22c01d1732d30f33d18e6c091053ad02f"
+    },
+    {
+      "path": "SOURCE_MAP.md",
+      "bytes": 2807,
+      "sha256": "33af96b36e38ea6ab4ed25434d83b54342b1b87d77ff306ea0a0fbf79ffc804d"
+    },
+    {
+      "path": "UPDATED_ASSESSMENT.md",
+      "bytes": 12146,
+      "sha256": "b421e81aae3d53256129942c8987ca908d7edf1181870313605bdb7ffbf4b6c6"
+    },
+    {
+      "path": "VALIDATION.json",
+      "bytes": 1079,
+      "sha256": "1ddb61e79dcb535c010efccedf65a6a75fa49c5a3559294ad830d060e8845e79"
+    },
+    {
+      "path": "VALIDATION.md",
+      "bytes": 760,
+      "sha256": "fe7e79f511e3996356db2b21eb43fa79fe722747ec8f322f692e5492bc701589"
+    },
+    {
+      "path": "documentation-governance-model.md",
+      "bytes": 10342,
+      "sha256": "2c44c484ea826e3bcfd5f815ad7ccca182127ebde04708eab56408ac27ab0cd5"
+    },
+    {
+      "path": "governance-reconciliation.md",
+      "bytes": 6985,
+      "sha256": "34f1c74698e79fbf1ab06ebee4c96454d35985b3768aa1402e99e4b8abbb6a7d"
+    },
+    {
+      "path": "implementation-priorities.md",
+      "bytes": 5293,
+      "sha256": "5c99e0b512d1cc72c42e977eb75edf5435ec0fa0d2fe55bac3e9a03107c31165"
+    },
+    {
+      "path": "issue-pr-autonomy-model.md",
+      "bytes": 8993,
+      "sha256": "df7ffeda866dd454b319eeaaea57935801c7ef9ab03d8fe261a962cb6143f01b"
+    },
+    {
+      "path": "prior-review-delta.md",
+      "bytes": 3789,
+      "sha256": "48aa4db6dc9ca9de25f9c7b9667df752e188f25d0387ade1d976b5ffb5b9c05a"
+    },
+    {
+      "path": "proposals/PROJECT-DOCUMENTATION-POLICY.md",
+      "bytes": 1707,
+      "sha256": "d537d25547bb75cd4840064764cffd5a52a1b8f8486911e96ec1f4e0c4324c47"
+    },
+    {
+      "path": "proposals/examples/decision-delegation.example.json",
+      "bytes": 1942,
+      "sha256": "0765d01c287d81c612facf6de5c87e0f25bfca2dae3bd3684f1cf93028280330"
+    },
+    {
+      "path": "proposals/examples/decision-request.example.json",
+      "bytes": 861,
+      "sha256": "699fd91204fcc0aa0fb9b5b10efcc944ee9ee9e2a1d62be0b8a7775cd9689562"
+    },
+    {
+      "path": "proposals/examples/document-frontmatter.example.json",
+      "bytes": 518,
+      "sha256": "d5e80a5b7e12ffee01c4dcfe006cdd9eb214009608c5b07df392fe59982e8fa5"
+    },
+    {
+      "path": "proposals/examples/work-item.example.json",
+      "bytes": 1957,
+      "sha256": "2acff1794a1101f6b35296751aaac100bebe0261b887e7b284e725cd5912f209"
+    },
+    {
+      "path": "proposals/schemas/decision-delegation.schema.json",
+      "bytes": 4039,
+      "sha256": "31b1daf6b35c9ef2f6226df5558cb2b671714e4454dc0ee254a55ce5cf7b0049"
+    },
+    {
+      "path": "proposals/schemas/decision-request.schema.json",
+      "bytes": 2804,
+      "sha256": "290e1325d9a4354d48cb9adf2f71791247f7c2f39dd26d7045b93148397beb7f"
+    },
+    {
+      "path": "proposals/schemas/document-frontmatter.schema.json",
+      "bytes": 2989,
+      "sha256": "472eb16bdf19aefde35c26c48725be64028bf9c29e7f3bf363f758a6050b90da"
+    },
+    {
+      "path": "proposals/schemas/work-item.schema.json",
+      "bytes": 5463,
+      "sha256": "d6125ef9039a08ecfca3ffef88ede58d3be71760bb8a86f5997ba801a3e61196"
+    },
+    {
+      "path": "proposals/skill-deltas.md",
+      "bytes": 2667,
+      "sha256": "e6602d374c596518ba1714ff23f9c44dd774820fc32193b019c7493a0563e489"
+    },
+    {
+      "path": "proposals/templates/adr.md",
+      "bytes": 628,
+      "sha256": "e4171b51d72d19227e09597867f1f3a24b47291b76562dc151f64bb5279961b5"
+    },
+    {
+      "path": "proposals/templates/governance.md",
+      "bytes": 958,
+      "sha256": "1d63a381b53d401cdf34ac850b45eb92fea61a3e86a33055a4c2c392bde1bae1"
+    },
+    {
+      "path": "proposals/templates/local-issue.md",
+      "bytes": 922,
+      "sha256": "186f1b472bde31b20e703a1c249cd69e95ec144aaeec4e7052c60477f38535b3"
+    },
+    {
+      "path": "proposals/templates/spec.md",
+      "bytes": 900,
+      "sha256": "558266a78b2c723f411aae18f0b07695af95b7a78748d9b5d6e89d8454a18674"
+    },
+    {
+      "path": "updated-findings-register.md",
+      "bytes": 22016,
+      "sha256": "32d7a2b6361ba58a121dcecdf5fb9aa78cff8c6e2ff3572b0547f776d2369410"
+    },
+    {
+      "path": "updated-findings.json",
+      "bytes": 19617,
+      "sha256": "4e2be249877f8419fcb8a23589a8eff3196b367b5d573d17c66122c121ead3b1"
+    }
+  ]
+}

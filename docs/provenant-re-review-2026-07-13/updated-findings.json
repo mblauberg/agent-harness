@@ -1,0 +1,333 @@
+{
+  "schemaVersion": 1,
+  "repository": "mblauberg/provenant",
+  "baseline": "9f168eed9ac7001744d372a840be9648bb11edcf",
+  "reviewDate": "2026-07-13",
+  "findings": [
+    {
+      "id": "UR-001",
+      "priority": "P0",
+      "theme": "Integrated correctness",
+      "finding": "The live programme records a known red Fabric and Rust integration baseline, so current main is not a safe basis for write-profile activation or stable release.",
+      "evidence": [
+        "docs/efforts/EFFORT-capability-profiles.md:65-91",
+        ".github/workflows/ci.yml",
+        "current-head connector query returned no PR workflow evidence"
+      ],
+      "recommendation": "Create a machine-visible integration-red state, complete Lane D and Rust reconciliation, then require current-head clean evidence before write pilots.",
+      "acceptance": "One current main commit passes the complete root, Fabric, Console, Herdr and Rust matrix; the result is visible in status/Console and protected by required checks."
+    },
+    {
+      "id": "UR-002",
+      "priority": "P0",
+      "theme": "Specification authority",
+      "finding": "Specs 01 and 04 are approximately 9,733 and 8,458 lines, contain known P0/P1 defects and have explicitly incomplete audit coverage.",
+      "evidence": [
+        "docs/specs/01-agent-fabric.md",
+        "docs/specs/04-agent-fabric-operational-hardening.md",
+        "docs/specs/amendment-audit-2026-07-13.md:112-171"
+      ],
+      "recommendation": "Repair, split and freeze the spec families before AuthorityEnvelopeV2 depends on them. Remove amendment history from current normative bodies.",
+      "acceptance": "Every current spec module is <=1,000 lines, has a single subject owner, passes requirement-ID uniqueness/traceability checks and has no unresolved P0-P1 audit finding."
+    },
+    {
+      "id": "UR-003",
+      "priority": "P0",
+      "theme": "Decision authority",
+      "finding": "Global policy mandates human spec/final-acceptance gates while the programme charter delegates those gates to an LLM chair/council; the protocol and delivery receipt still encode human resolution.",
+      "evidence": [
+        "HARNESS.md:32-55",
+        "docs/specs/02-adaptive-agent-harness.md:69-90,220-234",
+        "docs/agent-harness-comprehensive-review/CHAIR-CHARTER.md:16-28,111-136",
+        "runtime/agent-fabric-protocol/src/gates.ts:51-110"
+      ],
+      "recommendation": "Generalise the charter into a typed, human-approved decision-delegation contract consumed by the delivery validator, Fabric and Console.",
+      "acceptance": "For every decision class, all surfaces agree on chair/council/human authority; a delegated decision has an authenticated resolution type rather than masquerading as human evidence."
+    },
+    {
+      "id": "UR-004",
+      "priority": "P0",
+      "theme": "Provider execution",
+      "finding": "Managed primary-provider execution remains read-only; the capability-profile work has not reached AuthorityEnvelopeV2, AuthorityCompiler or a containment-proven write pilot.",
+      "evidence": [
+        "docs/adr/0002-capability-compiled-execution-authority.md",
+        "docs/efforts/EFFORT-capability-profiles.md:55-98",
+        "docs/handoffs/HANDOFF-2026-07-13-capability-profiles-v2.md"
+      ],
+      "recommendation": "Do not shortcut the staged plan. Complete spec freeze, V2 cutover, pure compiler extraction and adversarial containment before one-provider workspace-write-offline.",
+      "acceptance": "A provider can write only in one owned worktree with no egress/effects, and hostile path, Git, symlink, settings, secret, lifecycle and process tests pass."
+    },
+    {
+      "id": "UR-005",
+      "priority": "P0",
+      "theme": "Documentation truth",
+      "finding": "Operational authority is duplicated across constitution, architecture, specs, ADRs, charter, decision register, effort map, handoffs and the old review pack.",
+      "evidence": [
+        "docs/agent-harness-comprehensive-review/README.md",
+        "docs/agent-harness-comprehensive-review/CHAIR-CHARTER.md",
+        "docs/agent-harness-comprehensive-review/decision-register.md",
+        "docs/efforts/EFFORT-capability-profiles.md",
+        "docs/handoffs/HANDOFF-2026-07-13-capability-profiles-v2.md"
+      ],
+      "recommendation": "Adopt a document-routing policy with a canonical type/claim key, migrate live work to specs/ADRs/issues/project policy, and retire working-pack authority.",
+      "acceptance": "Every current claim resolves to exactly one canonical owner; generated indexes detect duplicates; superseded working documents contain no live directives."
+    },
+    {
+      "id": "UR-006",
+      "priority": "P1",
+      "theme": "Work tracking",
+      "finding": "Issue forms exist, but the active implementation graph is not issue-backed and the accepted backlog-item schema remains unimplemented.",
+      "evidence": [
+        ".github/ISSUE_TEMPLATE/feature.yml",
+        "docs/adr/0006-backlog-schema-first-store-pluggable.md",
+        "docs/efforts/EFFORT-capability-profiles.md"
+      ],
+      "recommendation": "Publish the vertical-slice work-item schema and select GitHub Issues as Provenant's canonical work store; use docs/issues only for non-GitHub projects.",
+      "acceptance": "Every active implementation slice has one issue with spec/ADR links, dependencies, authority, write scope and acceptance; effort maps no longer own task status."
+    },
+    {
+      "id": "UR-007",
+      "priority": "P1",
+      "theme": "Scope evolution",
+      "finding": "Current scope/implement rules return any scope or design drift to a fresh human gate, contrary to the desired delegated, low-handholding implementation mode.",
+      "evidence": [
+        "skills/scope/SKILL.md:70-73",
+        "skills/implement/SKILL.md:45-47,56-74",
+        "docs/specs/02-adaptive-agent-harness.md:87-90"
+      ],
+      "recommendation": "Introduce three delta classes: implementation detail, delegated reversible spec delta, and hard authority/one-way-door change.",
+      "acceptance": "Class A/B deltas proceed under the delegation charter, update issue/spec/PR and raise a soft decision; only Class C blocks for human authority."
+    },
+    {
+      "id": "UR-008",
+      "priority": "P1",
+      "theme": "Soft decisions",
+      "finding": "Fabric models blocking scoped gates but lacks a first-class non-blocking decision request with an applied default and human override window.",
+      "evidence": [
+        "runtime/agent-fabric-protocol/src/gates.ts:35-163",
+        "runtime/agent-fabric-console/src/presenter.ts"
+      ],
+      "recommendation": "Add informational, soft and hard decision modes; keep hard decisions as gates and project soft decisions into Attention without blocking work.",
+      "acceptance": "A soft decision shows default, rationale, council record, override cut-point and related issue/PR; work proceeds and any override becomes a traceable replan."
+    },
+    {
+      "id": "UR-009",
+      "priority": "P1",
+      "theme": "Council governance",
+      "finding": "The charter uses 'council vote' language even though the constitution says objective evidence outranks opinions and decisions must not be majority-voted into truth.",
+      "evidence": [
+        "docs/agent-harness-comprehensive-review/CHAIR-CHARTER.md:89-109",
+        "HARNESS.md:89-92"
+      ],
+      "recommendation": "Rename the mechanism council deliberation; require independent first passes and chair adjudication against evidence, policy and oracle strength.",
+      "acceptance": "Council records contain claims, evidence, dissent and adjudication; vote count is never sufficient to override deterministic evidence or authority."
+    },
+    {
+      "id": "UR-010",
+      "priority": "P1",
+      "theme": "PR strategy",
+      "finding": "The programme charter mandates one monolithic PR, while its per-leg loop says to open a PR after each leg; neither is a suitable global default.",
+      "evidence": [
+        "docs/agent-harness-comprehensive-review/CHAIR-CHARTER.md:67-87",
+        "docs/agent-harness-comprehensive-review/CHAIR-CHARTER.md:172-185"
+      ],
+      "recommendation": "Derive PR topology from task dependencies and path conflicts: independent, stacked, consolidated, or no-PR/direct-commit by project policy.",
+      "acceptance": "Each plan records a conflict graph and PR strategy; concurrently open PRs are mergeable in the declared order and do not race on canonical docs/generated files."
+    },
+    {
+      "id": "UR-011",
+      "priority": "P1",
+      "theme": "Repository governance",
+      "finding": "The branch-protection ruleset is only a proposal and deliberately not applied; direct commits appear after the PR-based foundation change.",
+      "evidence": [
+        "docs/efforts/EFFORT-capability-profiles.md:100-140",
+        "current commit history at baseline"
+      ],
+      "recommendation": "After the red baseline is repaired, apply branch rules consistent with the selected project policy and test the ruleset as repository assurance.",
+      "acceptance": "Current main can advance only through the authorised route, and the route is consistent with the project delegation/PR policy."
+    },
+    {
+      "id": "UR-012",
+      "priority": "P1",
+      "theme": "Runtime modularity",
+      "finding": "Fabric remains 7,403 lines and a new lifecycle engine is approximately 4,427 lines, creating multiple high-context application centres.",
+      "evidence": [
+        "runtime/agent-fabric/src/core/fabric.ts",
+        "runtime/agent-fabric/src/lifecycle/engine.ts",
+        "docs/adr/0003-modular-monolith-complete-existing-seams.md"
+      ],
+      "recommendation": "Continue vertical extraction through existing seams, preceded by architecture/import tests; alert on responsibility/change-pressure rather than only line count.",
+      "acceptance": "Provider admission, lifecycle custody and projection responsibilities have focused owners, forbidden imports are gated and old paths are deleted."
+    },
+    {
+      "id": "UR-013",
+      "priority": "P1",
+      "theme": "Console modularity",
+      "finding": "Console presenter and renderer/interaction entrypoint are each approximately 1,900 lines.",
+      "evidence": [
+        "runtime/agent-fabric-console/src/presenter.ts",
+        "runtime/agent-fabric-console/src/index.ts"
+      ],
+      "recommendation": "Separate view models, text safety, layout, rendering, hit regions and input reduction; keep protocol bindings immutable.",
+      "acceptance": "Individual views and reducers are independently testable; no principal Console module mixes Unicode handling, full layout and action interaction."
+    },
+    {
+      "id": "UR-014",
+      "priority": "P1",
+      "theme": "Native supervisor",
+      "finding": "The dependency-free Rust supervisor is approximately 2,549 lines and explicitly does not yet prove the certifying-review containment contract.",
+      "evidence": [
+        "runtime/agent-fabric-review-portal-supervisor/README.md:35-54",
+        "runtime/agent-fabric-review-portal-supervisor/src/lib.rs"
+      ],
+      "recommendation": "Keep capability=false until daemon integration and escape canaries pass; split process, framing and custody modules where ownership is stable.",
+      "acceptance": "Both hosted platforms pass, outer confinement is attested and every required failure/death path is tested end to end."
+    },
+    {
+      "id": "UR-015",
+      "priority": "P1",
+      "theme": "Portable configuration",
+      "finding": "Tracked adapter compatibility still mixes portable policy with absolute workstation executable paths and local digests.",
+      "evidence": [
+        "config/adapter-compatibility.yaml"
+      ],
+      "recommendation": "Keep portable adapter contracts/ranges in Git and generate private local attestation overlays through doctor/activation.",
+      "acceptance": "A clean checkout contains no user-machine executable path; local pins remain exact and fail closed through a private overlay."
+    },
+    {
+      "id": "UR-016",
+      "priority": "P1",
+      "theme": "Spec ownership",
+      "finding": "Spec 01 says the specification owns its decisions with no separate ADR, while accepted ADRs now own major architecture decisions.",
+      "evidence": [
+        "docs/specs/01-agent-fabric.md:3-15",
+        "docs/adr/README.md"
+      ],
+      "recommendation": "Define precedence: ADR owns decision/rationale, current spec owns normative behaviour, Git owns history.",
+      "acceptance": "Specs link decisions but do not claim competing decision ownership; ADR changes trigger exact spec updates."
+    },
+    {
+      "id": "UR-017",
+      "priority": "P1",
+      "theme": "Document staleness",
+      "finding": "The chair charter's embedded lane snapshot says Lane B is not started, while the current effort map says it is complete and merged.",
+      "evidence": [
+        "docs/agent-harness-comprehensive-review/CHAIR-CHARTER.md:201-215",
+        "docs/efforts/EFFORT-capability-profiles.md:3-10,45-54"
+      ],
+      "recommendation": "Remove mutable status snapshots from policy/charter documents; project live state only from issues/Fabric.",
+      "acceptance": "No durable policy document embeds mutable lane status; stale-state checks flag any such section."
+    },
+    {
+      "id": "UR-018",
+      "priority": "P1",
+      "theme": "Document archiving",
+      "finding": "Move-never-delete defaults preserve working history in the live documentation tree and increase agent context and drift risk.",
+      "evidence": [
+        "skills/engineering-docs/SKILL.md:66-70",
+        "skills/session/SKILL.md:36-38",
+        "skills/work-map/SKILL.md:63-64"
+      ],
+      "recommendation": "Use Git history as the default archive; retain/move only audit, legal or operational evidence required by policy. Delete superseded working docs after reference migration.",
+      "acceptance": "A prune action can delete known superseded docs under policy, refuses unknown files, and leaves one current owner plus immutable Git history."
+    },
+    {
+      "id": "UR-019",
+      "priority": "P1",
+      "theme": "Document checks",
+      "finding": "The accepted <=1,000-line spec-family gate is not present in the current harness gate, and docs/references are explicitly outside the style gate.",
+      "evidence": [
+        "docs/efforts/EFFORT-capability-profiles.md:31-44",
+        "scripts/check-harness:43-62",
+        "CONTRIBUTING.md:67-81"
+      ],
+      "recommendation": "Add document schemas, spec size/name/ownership checks, link/duplicate-key checks and changed-file style gating.",
+      "acceptance": "CI rejects numbered new spec names, >1,000-line spec modules, duplicate canonical keys, stale indexes and unowned active working docs."
+    },
+    {
+      "id": "UR-020",
+      "priority": "P1",
+      "theme": "Review policy",
+      "finding": "Risk/oracle-adjusted review is accepted but the binding constitution and Spec 05 still mandate broader fixed review profiles.",
+      "evidence": [
+        "docs/adr/0008-review-pressure-risk-and-oracle-adjusted.md",
+        "HARNESS.md:80-92",
+        "docs/specs/05-project-fabric-console.md:19-73"
+      ],
+      "recommendation": "Land one coherent amendment and validator change before relying on the new policy.",
+      "acceptance": "Risk/oracle inputs deterministically derive required reviewers, and no current document or validator retains the superseded profile."
+    },
+    {
+      "id": "UR-021",
+      "priority": "P1",
+      "theme": "Retention",
+      "finding": "Retention classes are accepted but class tagging and governed deletion remain unimplemented.",
+      "evidence": [
+        "docs/adr/0007-retention-classes-then-governed-deletion.md",
+        "docs/specs/04-agent-fabric-operational-hardening.md:207-217"
+      ],
+      "recommendation": "Class-tag new docs/run artefacts now; implement deletion after the write-profile prerequisites without extending archive-only as a permanent policy.",
+      "acceptance": "Every retained artefact has a class/owner/expiry; deletion preview/apply is protected, hold-aware and receipt-bearing."
+    },
+    {
+      "id": "UR-022",
+      "priority": "P1",
+      "theme": "Issue effects",
+      "finding": "The desired autonomous creation/update of GitHub issues is an external collaboration effect but no standing project authority policy is defined for it.",
+      "evidence": [
+        "docs/adr/0006-backlog-schema-first-store-pluggable.md:14-24",
+        "runtime/agent-fabric-protocol/src/operator-actions.ts:154-187"
+      ],
+      "recommendation": "Register issue create/update/close as bounded external operations and allow a project charter to pre-authorise them independently of release/push/merge.",
+      "acceptance": "Agents can raise traceable issues without human micro-approval, but cannot broaden labels, repositories, recipients or other external effects beyond the charter."
+    },
+    {
+      "id": "UR-023",
+      "priority": "P2",
+      "theme": "Instructions",
+      "finding": "AGENTS still requires full HARNESS loading for orchestration and retains `$caveman` as the global style default despite a later accepted style split.",
+      "evidence": [
+        "AGENTS.md:3-20",
+        "docs/adr/0008-review-pressure-risk-and-oracle-adjusted.md:24-30"
+      ],
+      "recommendation": "Update the bootstrap to load document/decision policy progressively and use domain-appropriate human-facing prose.",
+      "acceptance": "Global instructions and ADR agree; routine tasks do not load unrelated deep governance."
+    },
+    {
+      "id": "UR-024",
+      "priority": "P2",
+      "theme": "Architecture review skill",
+      "finding": "Architecture-review promotion is accepted but the skill is not in the 33-skill catalogue.",
+      "evidence": [
+        "docs/adr/0008-review-pressure-risk-and-oracle-adjusted.md:24-27",
+        "README.md:143-160"
+      ],
+      "recommendation": "Implement it through the normal skill-authoring/evaluation path after the document policy is in place.",
+      "acceptance": "The skill has a distinct trigger, read-only authority, outputs, nearest-neighbour tests and generated catalogue entry."
+    },
+    {
+      "id": "UR-025",
+      "priority": "P2",
+      "theme": "PR evidence",
+      "finding": "The PR template is evidence-rich but still assumes historical format readability and human gates in ways that may conflict with direct cutover and delegated decisions.",
+      "evidence": [
+        ".github/pull_request_template.md:24-29,44-52",
+        "docs/adr/0002-capability-compiled-execution-authority.md:44-48"
+      ],
+      "recommendation": "Add direct-cutover/not-applicable paths, scope-delta and soft-decision sections, issue closure and conflict/stack strategy.",
+      "acceptance": "PRs describe current policy without implying compatibility or human gates that do not apply."
+    },
+    {
+      "id": "UR-026",
+      "priority": "P2",
+      "theme": "Review-pack lifecycle",
+      "finding": "The original review pack remains a live execution route even though its proposals were dispositioned and the repo has been renamed.",
+      "evidence": [
+        "docs/agent-harness-comprehensive-review/README.md:3-36",
+        "docs/agent-harness-comprehensive-review/CHAIR-CHARTER.md:49-65"
+      ],
+      "recommendation": "Extract current decisions into ADR/spec/policy/issues; retain the pack only as frozen evidence or delete it from the live tree after the programme closes.",
+      "acceptance": "Fresh agents never need the old review pack to determine current authority or work state."
+    }
+  ]
+}

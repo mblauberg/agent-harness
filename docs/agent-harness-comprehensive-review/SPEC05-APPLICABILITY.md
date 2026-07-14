@@ -6,12 +6,19 @@ Original pack baseline: `main@0ea935f8ccaad550d8db0f9ea40324f58bdda569`
 
 Integration precondition: [Spec 01](../specs/01-agent-fabric.md) v0.36,
 [Spec 04](../specs/04-agent-fabric-operational-hardening.md) v1.31 and
-[Spec 05](../specs/05-project-fabric-console.md) v1.13
+[Spec 05](../specs/05-project-fabric-console.md) v1.13 draft, after its
+material post-v1.0 additions receive an exact authority trace or human
+acceptance
 
 This note overlays the pack's static baseline with the current Spec 05 delivery
 context. It does not rewrite the original findings or promote anything under
 [`proposals/`](proposals/) to accepted policy. Merge it only with or after the
 owned Spec 01 v0.36 and Spec 04 v1.31 amendments.
+
+Current `main` contains those draft amendments through consolidation merge
+`941a72f`; that satisfies ordering only. It does not freeze or accept them.
+Lane A's anchored audit and human-approved spec freeze remain prerequisites for
+the ADR-0002 V2 authority cutover.
 
 The original `ARTIFACT_MANIFEST.json` and `VALIDATION.*` receipts remain
 byte-valid at import commit `798c800a57176e817a62c0f5690b63a5d7ed25f5`.

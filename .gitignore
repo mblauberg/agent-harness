@@ -11,3 +11,6 @@ skills/.backups/
 .env
 .env.*
 node_modules/
+
+# Transient review snapshots (build scratch, contains node_modules)
+.review-snapshots/
