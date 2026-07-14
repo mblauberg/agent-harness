@@ -10,7 +10,9 @@ reconciliation remain pending. The authority cutover continues in
 
 The document-structure work is resolved by ADR 0009's standalone semantic
 specifications. Git owns history and integrity; the generic spec gate checks
-only size, ownership IDs, local links and semantic filenames.
+only size, ownership IDs, local links, complete discovery-index coverage,
+exact `docs/specs/<domain>/<topic>.md` depth with root and deeper paths
+rejected, and semantic filenames.
 
 ## Destination
 
