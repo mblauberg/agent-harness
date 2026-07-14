@@ -405,6 +405,7 @@ describe("Spec 05 external lifecycle receipt authority worker", () => {
       beforePrepare.close();
     }
     let afterPrepareRaceError: unknown;
+    let deliveryDeleteRaceError: unknown;
     let ownershipUpdateRaceError: unknown;
     let ownershipDeleteRaceError: unknown;
     let recoveryRaceResult: ReturnType<AtomicDeliveryStore["recover"]> | undefined;
@@ -451,6 +452,14 @@ describe("Spec 05 external lifecycle receipt authority worker", () => {
         } catch (error: unknown) {
           afterPrepareRaceError = error;
         }
+        try {
+          racing.prepare(`
+            DELETE FROM result_deliveries
+             WHERE result_delivery_id='lifecycle-result-delivery-1'
+          `).run();
+        } catch (error: unknown) {
+          deliveryDeleteRaceError = error;
+        }
       } catch (error: unknown) {
         afterPrepareRaceError ??= error;
       } finally {
@@ -476,6 +485,7 @@ describe("Spec 05 external lifecycle receipt authority worker", () => {
       "INVARIANT_lifecycle_custody_adoption_delivery_owner",
     );
     expect(String(afterPrepareRaceError)).toContain("INVARIANT_result_delivery_lifecycle_receipt_owner");
+    expect(String(deliveryDeleteRaceError)).toContain("INVARIANT_result_delivery_lifecycle_receipt_owner");
     expect(recoveryRaceResult).toMatchObject({ returnedClaims: 0, overdueDeliveries: 0 });
     expect(deadlineRaceResult).toMatchObject({ overdueDeliveries: 0 });
     expect(context.authority.scopeRecords(projectSessionId, context.fixture.runId)).toHaveLength(2);
@@ -543,20 +553,13 @@ describe("Spec 05 external lifecycle receipt authority worker", () => {
         SELECT lease_id,lease_generation,source_status,active_owner
           FROM lifecycle_custody_write_leases ORDER BY ordinal
       `).all()).toEqual([
-        { lease_id: "lifecycle-write-lease-a", lease_generation: 3, source_status: "active", active_owner: 1 },
-        { lease_id: "lifecycle-write-lease-b", lease_generation: 7, source_status: "active", active_owner: 1 },
+        { lease_id: "lifecycle-write-lease-a", lease_generation: 3, source_status: "active", active_owner: 0 },
+        { lease_id: "lifecycle-write-lease-b", lease_generation: 7, source_status: "active", active_owner: 0 },
       ]);
       expect(() => database.prepare(`
-        UPDATE lifecycle_custody_write_leases SET active_owner=0
+        DELETE FROM lifecycle_custody_write_leases
          WHERE lease_id='lifecycle-write-lease-a'
       `).run()).toThrow("INVARIANT_lifecycle_custody_write_lease_owner");
-      expect(() => database.prepare(`
-        UPDATE leases SET status='active',updated_at=3
-         WHERE lease_id='lifecycle-write-lease-a'
-      `).run()).toThrow("INVARIANT_write_lease_lifecycle_custody_owner");
-      expect(() => database.prepare(`
-        DELETE FROM leases WHERE lease_id='lifecycle-write-lease-a'
-      `).run()).toThrow("INVARIANT_write_lease_lifecycle_custody_owner");
       expect(database.prepare(`
         SELECT quarantined_write_set_digest,adoption_delivery_set_digest
           FROM lifecycle_rotation_custodies
@@ -660,6 +663,8 @@ describe("Spec 05 external lifecycle receipt authority worker", () => {
             { relation: "lifecycle_custody_adoption_deliveries", key: `${context.fixture.runId}:${context.agentId}:${custody.custody_id}:lifecycle-result-delivery-1:3`, operation: "update" },
             { relation: "lifecycle_custody_adoption_deliveries", key: `${context.fixture.runId}:${context.agentId}:${custody.custody_id}:lifecycle-result-delivery-2:3`, operation: "update" },
             { relation: "lifecycle_custody_adoption_deliveries", key: `${context.fixture.runId}:${context.agentId}:${custody.custody_id}:lifecycle-result-delivery-4:3`, operation: "update" },
+            { relation: "lifecycle_custody_write_leases", key: `${context.fixture.runId}:${context.agentId}:${custody.custody_id}:lifecycle-write-lease-a:3`, operation: "update" },
+            { relation: "lifecycle_custody_write_leases", key: `${context.fixture.runId}:${context.agentId}:${custody.custody_id}:lifecycle-write-lease-b:7`, operation: "update" },
             { relation: "lifecycle_authority_receipts", key: `${apply.receipt_batch_id}:1`, operation: "insert" },
             { relation: "lifecycle_receipt_scope_checkpoints", key: `${projectSessionId}:${context.fixture.runId}:${apply.verified_scope_checkpoint_digest}`, operation: "insert" },
             { relation: "lifecycle_receipt_scope_heads", key: `${projectSessionId}:${context.fixture.runId}`, operation: "update" },

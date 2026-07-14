@@ -8826,6 +8826,13 @@ export class Fabric {
           operation: "update",
         });
       }
+      for (const lease of custodyWriteLeases) {
+        auxiliaryLocalWrites.push({
+          relation: "lifecycle_custody_write_leases",
+          key: `${input.runId}:${input.agentId}:${input.custodyId}:${stringField(lease, "leaseId")}:${numberField(lease, "leaseGeneration")}`,
+          operation: "update",
+        });
+      }
     } else if (terminal.disposition === "no-effect" || terminal.disposition === "superseded") {
       for (const lease of custodyWriteLeases) {
         const key = stringField(lease, "leaseId");
@@ -8848,6 +8855,15 @@ export class Fabric {
         auxiliaryLocalWrites.push({
           relation: "lifecycle_custody_adoption_deliveries",
           key: `${input.runId}:${input.agentId}:${input.custodyId}:${stringField(delivery, "deliveryId")}:${numberField(delivery, "claimGeneration")}`,
+          operation: "update",
+        });
+      }
+    }
+    if (terminal.disposition === "quarantined") {
+      for (const lease of custodyWriteLeases) {
+        auxiliaryLocalWrites.push({
+          relation: "lifecycle_custody_write_leases",
+          key: `${input.runId}:${input.agentId}:${input.custodyId}:${stringField(lease, "leaseId")}:${numberField(lease, "leaseGeneration")}`,
           operation: "update",
         });
       }
@@ -9220,6 +9236,22 @@ export class Fabric {
                 if (released.changes !== 1) throw new Error("lifecycle adoption delivery ownership changed");
               }
             }
+            if (terminal.disposition === "quarantined") {
+              for (const lease of custodyWriteLeases) {
+                const released = this.#database.prepare(`
+                  UPDATE lifecycle_custody_write_leases SET active_owner=0
+                   WHERE run_id=? AND agent_id=? AND custody_id=? AND lease_id=?
+                     AND lease_generation=? AND active_owner=1
+                `).run(
+                  input.runId,
+                  input.agentId,
+                  input.custodyId,
+                  stringField(lease, "leaseId"),
+                  numberField(lease, "leaseGeneration"),
+                );
+                if (released.changes !== 1) throw new Error("lifecycle custody write lease ownership changed");
+              }
+            }
             this.#database.prepare(`
               UPDATE capabilities SET revoked_at=?
                WHERE token_hash=? AND revoked_at IS NULL
@@ -9407,6 +9439,20 @@ export class Fabric {
             `lifecycle-rotation:${sha256(input.custodyId).slice(0, 32)}`,
           );
           if (freeze.changes !== 1) throw new Error("lifecycle delivery freeze changed before apply");
+          for (const lease of custodyWriteLeases) {
+            const released = this.#database.prepare(`
+              UPDATE lifecycle_custody_write_leases SET active_owner=0
+               WHERE run_id=? AND agent_id=? AND custody_id=? AND lease_id=?
+                 AND lease_generation=? AND active_owner=1
+            `).run(
+              input.runId,
+              input.agentId,
+              input.custodyId,
+              stringField(lease, "leaseId"),
+              numberField(lease, "leaseGeneration"),
+            );
+            if (released.changes !== 1) throw new Error("lifecycle custody write lease ownership changed");
+          }
           this.#recordLifecycleOperation(
             input.runId,
             lifecycleInput,

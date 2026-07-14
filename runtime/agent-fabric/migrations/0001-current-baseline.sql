@@ -3199,8 +3199,8 @@ WHEN NOT (
        AND lease.generation=OLD.lease_generation
      WHERE head.run_id=OLD.run_id AND head.agent_id=OLD.agent_id
        AND head.custody_id=OLD.custody_id AND head.terminal=1
-       AND head.disposition_code IN ('no-effect','superseded')
-       AND lease.status='active'
+       AND ((head.disposition_code IN ('no-effect','superseded') AND lease.status='active')
+         OR (head.disposition_code IN ('adopted','quarantined') AND lease.status='quarantined'))
   )
 )
 BEGIN SELECT RAISE(ABORT,'INVARIANT_lifecycle_custody_write_lease_owner'); END;
@@ -5245,6 +5245,21 @@ CREATE TABLE result_deliveries (
 );
 CREATE TRIGGER result_delivery_lifecycle_receipt_owner_guard
 BEFORE UPDATE ON result_deliveries
+WHEN EXISTS (
+  SELECT 1
+    FROM lifecycle_custody_adoption_deliveries ownership
+    JOIN lifecycle_rotation_custody_heads head
+      ON head.run_id=ownership.run_id AND head.agent_id=ownership.agent_id
+     AND head.custody_id=ownership.custody_id
+    JOIN lifecycle_receipt_custody_effects effect
+      ON effect.run_id=ownership.run_id AND effect.agent_id=ownership.agent_id
+     AND effect.custody_id=ownership.custody_id
+   WHERE ownership.delivery_id=OLD.result_delivery_id
+     AND ownership.active_owner=1 AND head.terminal=0
+)
+BEGIN SELECT RAISE(ABORT,'INVARIANT_result_delivery_lifecycle_receipt_owner'); END;
+CREATE TRIGGER result_delivery_lifecycle_receipt_owner_delete_guard
+BEFORE DELETE ON result_deliveries
 WHEN EXISTS (
   SELECT 1
     FROM lifecycle_custody_adoption_deliveries ownership
