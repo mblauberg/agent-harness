@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
 Executable SQLite fixtures proving five substantiated spec defects are
-accepted by the current DDL in docs/specs/agent-fabric/persistence.md
-the lifecycle-custody and recovery modules and the adjacent capability/route
-lineage contracts at commit d7f3536
-(spec text unchanged through HEAD 71b167b -- only a new audit doc was added
-on top; verified via `git diff d7f3536 71b167b -- docs/specs/`).
+accepted by DDL in the current semantic persistence, lifecycle-custody,
+recovery and adjacent capability/route-lineage owners. Those current owners
+contain DDL derived from the historical freeze at commit d7f3536; Git retains
+the former specification path and its full history.
 
 Every CREATE TABLE below transliterates the spec's bracket-list pseudo-DDL
 into real SQLite syntax, verbatim in column set / PRIMARY KEY / UNIQUE / CHECK

@@ -44,7 +44,9 @@ contract, load order, version mirror or acceptance state.
   is split into another semantic specification instead of packing content to
   meet a fixed module count.
 - The permanent gate checks only the limits, duplicate normative IDs, local
-  links/fragments and rejected positional or continuation filenames.
+  links/fragments, complete discovery-index coverage, exact
+  `docs/specs/<domain>/<topic>.md` depth with root and deeper paths rejected,
+  and rejected positional or continuation filenames.
 - Source-equivalence maps and frozen-block comparisons are one-time migration
   evidence, not permanent runtime or authoring machinery.
 
