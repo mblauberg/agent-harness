@@ -4,6 +4,7 @@ import { rm } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import { LifecycleRotationRepository } from "../../../src/lifecycle/rotation-repository.ts";
+import { LifecycleReceiptRepository } from "../../../src/lifecycle/receipt-repository.ts";
 import { sha256 } from "../../../src/project-session/store-support.ts";
 import { admitProviderActionFixture } from "../../support/provider-action-fixture.ts";
 import { createLifecycleFixture } from "../../support/lifecycle-testkit.ts";
@@ -461,6 +462,7 @@ describe("lifecycle rotation repository", () => {
         updatedAt: 10,
       });
       const repository = new LifecycleRotationRepository(database);
+      const receiptRepository = new LifecycleReceiptRepository(database, repository);
       const createInput = {
         projectSessionId: identity.project_session_id,
         runId: "run-stage1",
@@ -582,7 +584,7 @@ describe("lifecycle rotation repository", () => {
         writes: [],
         writeSetDigest: lifecycleDigest("mutation-plan", { schemaVersion: 1, writes: [] }),
       };
-      const preparedTerminal = database.transaction(() => repository.prepareChildCustodyTerminalInCurrentTransaction({
+      const preparedTerminal = database.transaction(() => receiptRepository.prepareChildCustodyTerminalInCurrentTransaction({
         runId: "run-stage1",
         agentId: "chair",
         custodyId: "rotation-custody-01",
@@ -605,7 +607,7 @@ describe("lifecycle rotation repository", () => {
       expect(database.prepare("SELECT count(*) AS count FROM lifecycle_transition_applies").get())
         .toEqual({ count: 0 });
 
-      expect(() => database.transaction(() => repository.applyAuthorizedChildCustodyTerminalInCurrentTransaction({
+      expect(() => database.transaction(() => receiptRepository.applyAuthorizedChildCustodyTerminalInCurrentTransaction({
         prepared: preparedTerminal,
         expectedRevision: head.revision,
         expectedScopeHead: { checkpointDigest: "missing", revision: 1 },
@@ -677,7 +679,7 @@ describe("lifecycle rotation repository", () => {
       const scopeCheckpointDigest = lifecycleDigest("scope-checkpoint", scopeCheckpointBody);
       let callbackObservedApply = true;
       let simulateBusinessCasDrift = true;
-      const applyTerminal = () => database.transaction(() => repository.applyAuthorizedChildCustodyTerminalInCurrentTransaction({
+      const applyTerminal = () => database.transaction(() => receiptRepository.applyAuthorizedChildCustodyTerminalInCurrentTransaction({
         prepared: preparedTerminal,
         expectedRevision: head.revision,
         expectedScopeHead: { checkpointDigest: initialScope.checkpointDigest, revision: 1 },
@@ -796,7 +798,7 @@ describe("lifecycle rotation repository", () => {
         }))();
       }
       expect(() => database.transaction(() =>
-        repository.prepareChildCustodyTerminalInCurrentTransaction({
+        receiptRepository.prepareChildCustodyTerminalInCurrentTransaction({
           runId: "run-stage1",
           agentId: "chair",
           custodyId: chairCustodyInput.custodyId,

@@ -196,8 +196,8 @@ import { resolveRunArtifactRoot } from "../artifacts/run-root.js";
 import {
   LifecycleRotationRepository,
   type LifecycleCustodyHead,
-  type PreparedChildCustodyTerminal,
 } from "../lifecycle/rotation-repository.js";
+import { LifecycleReceiptRepository } from "../lifecycle/receipt-repository.js";
 import {
   GenerationLossRepository,
   type GenerationLossSource,
@@ -938,6 +938,7 @@ export class Fabric {
   readonly #commandJournal: CommandJournal;
   readonly #providerActionAdmission: ProviderActionAdmissionCoordinator;
   readonly #lifecycleRotations: LifecycleRotationRepository;
+  readonly #lifecycleReceipts: LifecycleReceiptRepository;
   readonly #generationLosses: GenerationLossRepository;
   readonly #lifecycleReceiptAuthority: LifecycleIntegrityReceiptAuthorityPort | undefined;
   readonly #lifecycleReceiptRecovery: LifecycleReceiptRecoveryService | undefined;
@@ -1005,6 +1006,11 @@ export class Fabric {
       fault: this.#fault,
     });
     this.#lifecycleRotations = new LifecycleRotationRepository(this.#database);
+    this.#lifecycleReceipts = new LifecycleReceiptRepository(
+      this.#database,
+      this.#lifecycleRotations,
+      this.#clock,
+    );
     this.#generationLosses = new GenerationLossRepository(this.#database);
     this.#lifecycleReceiptAuthority = options.lifecycleReceiptAuthority;
     this.#lifecycleReceiptRecovery = options.lifecycleReceiptAuthority === undefined
@@ -8111,7 +8117,7 @@ export class Fabric {
       ): Promise<void> => {
         const postterminal = head.state === "provider-terminal" || head.state === "committing";
         const abandonedAdoption = postterminal
-          ? this.#lifecycleRotations.readPreparedChildCustodyTerminal(
+          ? this.#lifecycleReceipts.readPreparedChildCustodyTerminal(
               runId,
               agentId,
               minimalInput.custodyId,
@@ -8156,7 +8162,7 @@ export class Fabric {
           }
           head = this.#database.transaction(() => {
             if (recoveredAdoptionReceipt !== null) {
-              this.#persistVerifiedLifecycleAuthorityReceiptInCurrentTransaction(
+              this.#lifecycleReceipts.persistVerifiedAuthorityReceiptInCurrentTransaction(
                 abandonedAdoption,
                 recoveredAdoptionReceipt,
               );
@@ -9169,13 +9175,13 @@ export class Fabric {
       }
     };
     const recordedAt = this.#clock();
-    const prepared = this.#lifecycleRotations.readPreparedChildCustodyTerminal(
+    const prepared = this.#lifecycleReceipts.readPreparedChildCustodyTerminal(
       input.runId,
       input.agentId,
       input.custodyId,
       applyId,
     ) ?? this.#database.transaction(() =>
-      this.#lifecycleRotations.prepareChildCustodyTerminalInCurrentTransaction({
+      this.#lifecycleReceipts.prepareChildCustodyTerminalInCurrentTransaction({
         runId: input.runId,
         agentId: input.agentId,
         custodyId: input.custodyId,
@@ -9350,7 +9356,7 @@ export class Fabric {
     }
     try {
       this.#database.transaction(() => {
-        this.#lifecycleRotations.applyAuthorizedChildCustodyTerminalInCurrentTransaction({
+        this.#lifecycleReceipts.applyAuthorizedChildCustodyTerminalInCurrentTransaction({
         prepared,
         expectedRevision: head.revision,
         expectedScopeHead: {
@@ -9675,7 +9681,10 @@ export class Fabric {
       };
       this.#fault("lifecycle-rotation:after-authoritative-adoption-receipt");
       this.#database.transaction(() => {
-        this.#persistVerifiedLifecycleAuthorityReceiptInCurrentTransaction(prepared, record);
+        this.#lifecycleReceipts.persistVerifiedAuthorityReceiptInCurrentTransaction(
+          prepared,
+          record,
+        );
       }).immediate();
       head = this.#database.transaction(() => this.#lifecycleRotations.appendInCurrentTransaction({
         runId: input.runId,
@@ -9698,62 +9707,6 @@ export class Fabric {
         },
       );
     }
-  }
-
-  #persistVerifiedLifecycleAuthorityReceiptInCurrentTransaction(
-    prepared: PreparedChildCustodyTerminal,
-    record: LifecycleReceiptRecord,
-  ): void {
-    if (!this.#database.inTransaction) {
-      throw new Error("lifecycle authority receipt persistence requires a transaction");
-    }
-    const existing = this.#database.prepare(`
-      SELECT receipt_digest FROM lifecycle_authority_receipts WHERE intent_digest=?
-    `).get(prepared.intentDigest);
-    if (isRow(existing)) {
-      if (stringField(existing, "receipt_digest") !== record.receipt.receiptDigest) {
-        throw new Error("stale lifecycle adoption receipt changed before supersession");
-      }
-      return;
-    }
-    const receiptBody = {
-      schemaVersion: 1,
-      kind: "custody-terminal",
-      authorityId: record.receipt.authorityId,
-      authoritySequence: record.receipt.authoritySequence,
-      previousReceiptDigest: record.receipt.previousReceiptDigest,
-      intentDigest: prepared.intentDigest,
-      subjectDigest: prepared.subjectDigest,
-    };
-    this.#database.prepare(`
-      INSERT INTO lifecycle_authority_receipts(
-        intent_digest,batch_id,ordinal,project_session_id,run_id,agent_id,kind,
-        subject_owner_kind,subject_owner_id,subject_owner_revision,subject_digest,
-        authority_id,authority_sequence,previous_authority_sequence,previous_receipt_digest,
-        receipt_json,receipt_digest,attestation,verified_at
-      ) VALUES (?, ?,1,?,?,?,'custody-terminal','custody',?,?,?,?,?,?,?,?,?,?,?)
-    `).run(
-      prepared.intentDigest,
-      prepared.batchId,
-      prepared.projectSessionId,
-      prepared.runId,
-      prepared.agentId,
-      prepared.custodyId,
-      prepared.finalRevision,
-      prepared.subjectDigest,
-      record.receipt.authorityId,
-      record.receipt.authoritySequence,
-      record.receipt.authoritySequence === 1 ? null : record.receipt.authoritySequence - 1,
-      record.receipt.previousReceiptDigest,
-      canonicalJson({
-        ...receiptBody,
-        receiptDigest: record.receipt.receiptDigest,
-        attestation: record.receipt.attestation,
-      }),
-      record.receipt.receiptDigest,
-      record.receipt.attestation,
-      this.#clock(),
-    );
   }
 
   #verifyCheckpoint(
