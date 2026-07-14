@@ -11,11 +11,11 @@ Ownership. It permits no provider, network, release or deployment effect.
 
 ## Evidence and invariant
 
-The frozen authority is Spec 04 v1.32 at commit `0305376`:
+The frozen authority is the provider-custody contract at commit `0305376`:
 
 - the pair preflight is globally keyed by `(adapter_id, action_id)`, has a
   closed `provider-smoke|run-action` scope and immutable owner/principal/input
-  identity (`docs/specs/04-agent-fabric-operational-hardening.md:2846-2862`);
+  identity (`docs/specs/agent-fabric/provider-custody.md`);
 - it is the parent of the compilation receipt, configuration, reservations,
   action, route and failure history; only one CAS may end `resolving` as
   `admitted|released` (`:5403-5416`);

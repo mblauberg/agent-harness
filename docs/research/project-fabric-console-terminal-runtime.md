@@ -8,7 +8,8 @@ Implementation evidence cut-off: 13 July 2026
 
 Evidence snapshot: [July 2026 continuity and routing evidence](evidence-snapshots/agent-continuity-routing-2026-07.md)
 
-Normative owner: [Spec 05 sections 8, 15 and 17](../specs/05-project-fabric-console.md)
+Normative owners: [Console operator views](../specs/console/operator-interaction.md)
+and [acceptance and usability](../specs/console/acceptance.md)
 
 ## Decision
 
@@ -19,13 +20,13 @@ bounded repair. Do not add Go or C++ for the current Console.
 
 The decision-time TypeScript spike passed the required resize, input,
 hostile-text and terminal-restoration oracles, so the Rust fallback was not
-triggered. The 13 July consolidated presenter now enforces Spec 05's exact
+triggered. The 13 July consolidated presenter now enforces the Console contract's exact
 30x6 interactive minimum: 30x6 renders `strip`, while 29x6 and 30x5 are inert.
-Full Console/runtime/evaluation gates remain owned by Spec 05.
+Full Console/runtime/evaluation gates remain owned by the Console contract.
 
 The 80x24 frame is the default/reference acceptance viewport, not a fixed
 terminal size. Runtime layout follows current dimensions. Exact compact and
-inert thresholds, state preservation and resize oracles are owned by Spec 05.
+inert thresholds, state preservation and resize oracles are owned by the Console contract.
 
 ## Conclusions
 
@@ -124,7 +125,7 @@ The decision-time spike gate required TDD proof of:
 
 Failure after one bounded repair switches to Rust/Ratatui and adds pinned Rust
 CI plus generated or exhaustive public-protocol parity. The switch does not
-weaken Spec 05 or itself authorise a broader native rewrite.
+weaken the Console contract or itself authorise a broader native rewrite.
 
 ## Runtime boundary
 

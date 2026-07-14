@@ -12,7 +12,7 @@ import {
 } from "../src/index.js";
 
 const artifact = {
-  path: "docs/specs/05-project-fabric-console.md",
+  path: "docs/specs/console/acceptance.md",
   digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 } as const;
 

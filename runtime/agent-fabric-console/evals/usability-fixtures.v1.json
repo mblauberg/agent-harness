@@ -190,7 +190,7 @@
       "expectedTopAttentionId": "attention-safety-gate",
       "evidenceReview": {
         "evidenceId": "evidence-accepted-spec",
-        "path": "docs/specs/05-project-fabric-console.md",
+        "path": "docs/specs/console/acceptance.md",
         "sourceDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "renderedDigest": "sha256:f1a7b0b9d772bc138cf503c51fe3edae2e0f62682e1458bd401efa8ae6874fa0",
         "transformation": "terminal-neutralised",

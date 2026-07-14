@@ -4,9 +4,9 @@ Status: Durable research reference
 
 Evidence snapshot: [July 2026 continuity and routing evidence](evidence-snapshots/agent-continuity-routing-2026-07.md)
 
-Normative owners: [Spec 01 section 32.20](../specs/01-agent-fabric.md),
-[Spec 04 sections 9.22–9.23](../specs/04-agent-fabric-operational-hardening.md),
-[Spec 05 sections 5.3 and 17](../specs/05-project-fabric-console.md)
+Normative owners: [lifecycle and gates](../specs/agent-fabric/lifecycle-and-gates.md),
+[recovery and reconciliation](../specs/agent-fabric/recovery.md), and
+[intake and fresh-context continuation](../specs/console/intake-and-continuation.md)
 
 ## Conclusions
 
@@ -42,8 +42,8 @@ controller or threshold policy.
 | Google ADK pause/resume guidance | Durable state, external wake-up and hydration should be tested as one lifecycle. | Another framework is not a state owner here. |
 | Parallel Context Compaction | Keep structured checkpoint truth independent of generated summary/compression technique. | Reported results are workload-specific. |
 | Anthropic containment engineering | Prefer hard custody/semantic gates over repetitive approval prompts. | Vendor engineering evidence, not a local conformance result. |
-| Current Specs 01/04 lifecycle design | Generation high-water, checkpoint binding, fresh rotation, successor attestation and recovery already have one owner. | Implementation still requires full crash/conformance gates. |
-| Spec 05 fresh implementation rule | Substantial work starts from an accepted digest-bound handoff in a fresh context. | Routine bounded work may remain in the current context. |
+| Current lifecycle design | Generation high-water, checkpoint binding, fresh rotation, successor attestation and recovery already have one owner. | Implementation still requires full crash/conformance gates. |
+| Console fresh implementation rule | Substantial work starts from an accepted digest-bound handoff in a fresh context. | Routine bounded work may remain in the current context. |
 
 Source URLs and dated caveats are preserved in the evidence snapshot rather
 than repeated as volatile current-state claims.

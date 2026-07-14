@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "skills" / "skill-audit" / "SKILL.md"
 METHOD = ROOT / "skills" / "skill-audit" / "references" / "method.md"
 FIXTURES = ROOT / "skills" / "skill-audit" / "evals" / "trigger_cases.yaml"
-SPEC = ROOT / "docs" / "specs" / "02-adaptive-agent-harness.md"
+SPEC = ROOT / "docs" / "specs" / "harness" / "lifecycle.md"
 ADR = ROOT / "docs" / "adr" / "0001-personal-first-product-compatible.md"
 EFFORT = ROOT / "docs" / "efforts" / "EFFORT-harness-lifecycle-refactor.md"
 
@@ -94,9 +94,9 @@ def test_normative_docs_match_the_local_first_contract():
     compact_effort = " ".join(effort.split())
     compact_spec = " ".join(spec.split())
 
-    assert "Version: 1.3" in spec
-    assert "Date: 14 July 2026" in spec
-    assert "## 10. Local skill evidence and shared exports" in spec
+    assert "Status: Base implementation machine verified" in spec
+    assert "current contract permits direct read-only analysis" in compact_spec
+    assert "## Local skill evidence and shared exports" in spec
     assert "same authorised session is local delivery, not sharing/export" in compact_spec
     assert "persistent repository/shared artifact" in compact_spec
     assert "no provider-native adapter or producer" in compact_spec

@@ -34,7 +34,7 @@ describe("Spec 05 review schemas and checked-in catalogues", () => {
     expect(validate(crossedRisk)).toBe(false);
   });
 
-  it("catalogues every Spec 05 v1.14 acceptance ID under the D-021 council gates", () => {
+  it("catalogues every Spec 05 v1.13 acceptance ID under the D-021 council gates", () => {
     const ajv = new Ajv2020({ allErrors: true, strict: true });
     const validate = ajv.compile(read("runtime/agent-fabric/schemas/spec05-delivery-requirements.v1.schema.json"));
     const catalogue = read("config/spec05-delivery-requirements.v1.json");
@@ -45,10 +45,10 @@ describe("Spec 05 review schemas and checked-in catalogues", () => {
     const registeredSources = new Map(selectorRegistry.sources.map((source: any) => [source.sourceRef, source]));
     expect(registeredSelectors.size).toBe(selectorRegistry.selectors.length);
     expect(selectorRegistry.sources).toEqual([{
-      sourceRef: "spec05-project-fabric-console-v1.14",
+      sourceRef: "spec05-project-fabric-console-v1.13",
       sourceRole: "spec",
-      artifactRef: "docs/specs/05-project-fabric-console.md",
-      version: "1.14",
+      artifactRef: "docs/specs/console/acceptance.md",
+      version: "1.13",
     }]);
     expect(validate(catalogue), JSON.stringify(validate.errors)).toBe(true);
     expect(catalogue.entries.map((entry: any) => entry.requirementId)).toEqual(

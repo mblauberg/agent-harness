@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Executable SQLite fixtures proving five substantiated spec defects are
-accepted by the current DDL in docs/specs/04-agent-fabric-operational-hardening.md
-section 9.22 "Asynchronous lifecycle rotation persistence" (anchors ~5822-7632)
-and the adjacent 9.23 capability/route-lineage tables, at commit d7f3536
+accepted by the current DDL in docs/specs/agent-fabric/persistence.md
+the lifecycle-custody and recovery modules and the adjacent capability/route
+lineage contracts at commit d7f3536
 (spec text unchanged through HEAD 71b167b -- only a new audit doc was added
 on top; verified via `git diff d7f3536 71b167b -- docs/specs/`).
 

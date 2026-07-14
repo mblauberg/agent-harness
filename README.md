@@ -189,7 +189,7 @@ two agents writing one source surface; acceptance and promotion stay human
 ([`HARNESS.md`](HARNESS.md)).
 
 [`Architecture`](docs/ARCHITECTURE.md) ·
-[`Lifecycle spec`](docs/specs/02-adaptive-agent-harness.md) ·
+[`Specifications`](docs/specs/README.md) ·
 [`Research`](docs/research/skill-portfolio-practices-2026.md) ·
 [`Maintenance`](MAINTAINING.md) ·
 [`Acknowledgements`](ACKNOWLEDGEMENTS.md) ·

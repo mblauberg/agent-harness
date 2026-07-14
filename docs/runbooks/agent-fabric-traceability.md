@@ -2,15 +2,15 @@
 
 Status: delivery contract; implementation, integrated verification, provider
 review, council adjudication and consolidated PR review remain pending
-Protocol source: [Spec 01 v0.37](../specs/01-agent-fabric.md)
-Activation context: [Spec 03 v1.3](../specs/03-agent-fabric-activation.md)
-Daemon-hardening context: [Spec 04 v1.32](../specs/04-agent-fabric-operational-hardening.md)
-Delivery context: [Spec 05 v1.14](../specs/05-project-fabric-console.md)
+Protocol source: [Agent Fabric specifications](../specs/README.md#agent-fabric)
+Activation context: [Activation and operations](../specs/agent-fabric/activation.md)
+Daemon-hardening context: [Architecture assurance](../specs/agent-fabric/architecture-assurance.md)
+Delivery context: [Console specifications](../specs/README.md#project-fabric-console)
 Test roots: `runtime/agent-fabric/`, `runtime/agent-fabric-protocol/` and
 `runtime/agent-fabric-console/`
 
-This runbook maps the earlier Spec 01 requirements and acceptance scenarios below to
-planned or implemented Vitest evidence. It is not a complete Spec 04 or Spec 05
+This runbook maps the Agent Fabric requirements and acceptance scenarios below to
+planned or implemented Vitest evidence. It is not a complete hardening or Console
 conformance receipt and does not prove integrated verification, provider review
 or programme acceptance. A listed test path is mandatory from its introduction
 stage onward. Absence, skip, todo or quarantine of a deterministic test fails
@@ -19,16 +19,22 @@ name must identify each mapped ID.
 
 ## Capability-authority freeze boundary
 
-D-023 accepts the authority design in Spec 01 section 33, Spec 03 v1.3, Spec 04
-v1.32 and Spec 05 section 18. It does not record runtime implementation. The
+D-023 accepts the design in the
+[authority](../specs/agent-fabric/authority.md),
+[provider-action](../specs/agent-fabric/provider-actions-and-adapters.md),
+[activation](../specs/agent-fabric/activation.md) and
+[provider/lifecycle custody](../specs/agent-fabric/provider-custody.md)
+owners. It does not record runtime implementation or accept the remaining
+Console draft by implication. The
 direct `AuthorityEnvelopeV2` cutover, monotone compiler, immutable native-
 settings/persistence receipts and the exact per-provider Step-3 containment
 tuple still require implementation and deterministic evidence.
 
 `workspace-write-offline` therefore remains inert. Every certifying action
 continues to request and execute `review-readonly`; no generic write result can
-certify Spec 05. Spec 01 FR-089–FR-095, NFR-040–NFR-042 and AC-066–AC-070, plus
-the Spec 05 section 18 Console projections, are pending additions to this
+certify the Console. FR-089–FR-095, NFR-040–NFR-042 and AC-066–AC-070, plus
+the Console [operator projections](../specs/console/operator-interaction.md),
+are pending additions to this
 matrix rather than evidence supplied by its older paths.
 
 ## Functional requirements
