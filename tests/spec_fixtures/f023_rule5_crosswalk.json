@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "decision": "D-027",
+  "entries": [
+    {"r5Id": "R5-01", "f023Id": "F023-09", "family": "01-agent-fabric", "frozenRange": [3803, 3807], "frozenRangeSha256": "sha256:a5b7b0c64b76d0abee3e8d30f93142f4facb8d9bcde3496349b4bd227dabb41e", "folded": false},
+    {"r5Id": "R5-02", "f023Id": "F023-10", "family": "04-agent-fabric-operational-hardening", "frozenRange": [350, 356], "frozenRangeSha256": "sha256:4eaed778c528e24330667179c71895fca75e72cbe5ec8c95237fc38d3950b163", "folded": false},
+    {"r5Id": "R5-03", "f023Id": "F023-04", "family": "04-agent-fabric-operational-hardening", "frozenRange": [990, 995], "frozenRangeSha256": "sha256:b0b333ffde75afc2b79579ec4b54ea6d78f817e24ab9935433beed4339c7b7f2", "folded": true},
+    {"r5Id": "R5-04", "f023Id": "F023-11", "family": "04-agent-fabric-operational-hardening", "frozenRange": [1096, 1102], "frozenRangeSha256": "sha256:877fb24e856803dc7a9afd65bc8a6eaba65604ade6804176bbf171491afc5ecb", "folded": false},
+    {"r5Id": "R5-05", "f023Id": "F023-12", "family": "04-agent-fabric-operational-hardening", "frozenRange": [1394, 1401], "frozenRangeSha256": "sha256:a889edcfb076ca80b658e9de99959327f3d73cb9ff7e7db382967d89b1e97889", "folded": false},
+    {"r5Id": "R5-06", "f023Id": "F023-13", "family": "04-agent-fabric-operational-hardening", "frozenRange": [1835, 1848], "frozenRangeSha256": "sha256:1fcb2b023e810997846d90c79ca9d28ad306da031aeee6491a18078dd77e97ff", "folded": false},
+    {"r5Id": "R5-07", "f023Id": "F023-14", "family": "04-agent-fabric-operational-hardening", "frozenRange": [1850, 1858], "frozenRangeSha256": "sha256:39f2b6f2abd47c012315145797ecb54d9c85801b5d859e0928be15cf2f0c8d2e", "folded": false},
+    {"r5Id": "R5-08", "f023Id": "F023-15", "family": "04-agent-fabric-operational-hardening", "frozenRange": [1860, 1866], "frozenRangeSha256": "sha256:0be24405ce90781b2a7e6c89d6275a5395ef2b96026869324666720097d29bf3", "folded": false},
+    {"r5Id": "R5-09", "f023Id": "F023-16", "family": "04-agent-fabric-operational-hardening", "frozenRange": [2089, 2093], "frozenRangeSha256": "sha256:81652e0774d3728ca7318f6873df02021a4f24139cd97755d635aec042d67984", "folded": false},
+    {"r5Id": "R5-10", "f023Id": "F023-17", "family": "04-agent-fabric-operational-hardening", "frozenRange": [2095, 2100], "frozenRangeSha256": "sha256:168651ca70d5a0a6b32b749679fbfc94fde72f4702d8ba77cb34411de81a1975", "folded": false},
+    {"r5Id": "R5-11", "f023Id": "F023-18", "family": "04-agent-fabric-operational-hardening", "frozenRange": [2108, 2115], "frozenRangeSha256": "sha256:3467a8e983fa33a389365581d59fb274edd7e84f3f4b02cadddd05869e719461", "folded": false},
+    {"r5Id": "R5-12", "f023Id": "F023-19", "family": "04-agent-fabric-operational-hardening", "frozenRange": [2252, 2261], "frozenRangeSha256": "sha256:56eac237f8938b9b36500fb9c726f6cd0f879ce2a3f189c833aed83968a15f3d", "folded": false},
+    {"r5Id": "R5-13", "f023Id": "F023-20", "family": "04-agent-fabric-operational-hardening", "frozenRange": [11100, 11127], "frozenRangeSha256": "sha256:191902e774b0b82ce9891518d5ad811ef1ea15e0b469dd87087225a9ac9b9233", "folded": false},
+    {"r5Id": "R5-14", "f023Id": "F023-21", "family": "05-project-fabric-console", "frozenRange": [105, 120], "frozenRangeSha256": "sha256:7fc7e8b52a37b5e744d8b2d268e5f0d99ed2c32eab64058d24dce28337f7f38a", "folded": false}
+  ]
+}

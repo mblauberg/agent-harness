@@ -18,7 +18,7 @@ Corrections and sharpenings recorded during verification:
 | F-005 | Confirmed precisely: README headline says 34; README's own generated catalogue table lists 33; `skills/*/SKILL.md` count is 33 (the 34th dir is `_shared/`, not a skill). `check_harness.py` never reads the README number. |
 | F-007 | Nuance: `static-security-check.py` IS wired into CI, and `security-evidence.json` IS consumed — but only as fixture data for synthetic receipts, not a live gate. 13 of 14 declared checks have no implementation; the scanner covers Python only, so the whole TypeScript runtime is unscanned. |
 | F-010 | Disambiguation: the runtime's `IntakeStore` (`project-session/intake-store.ts`) is Console task-request drafting, NOT the missing intake-decision kernel. Don't let the name produce a false negative. |
-| F-023 | Severity understated: amendment sections are ~72% of spec 01 (8,223 lines) and ~93% of spec 04 (4,779 lines). Spec 05 is only ~8%. |
+| F-023 | Focused D-024 audit corrected the earlier 72%/93% estimate: it overclassified cumulative current requirements as history. The residual is narrower but real — legacy import/migration/baseline wording in Spec 01; additive migration/import/backfill/old-client/compatibility wording in Spec 04; and a duplicate chronology/stale freeze statement in Spec 05. Structural packaging is complete, but F-023 remains partial/open under W017. |
 | F-026 | PARTIALLY CONFIRMED: the claim (no canonical hook-policy generation) is plausible and no generator was found, but both cited evidence surfaces contain zero hook references — citations are wrong as written. |
 | F-033 | Nuance: `*-boundary*.test.ts` files exist but test provider trust boundaries, not import/architecture boundaries. Core claim holds. |
 | F-036 | Strengthened: live `gh api` shows `main` has no branch protection and no rulesets at all — affirmatively confirmed, not merely unverifiable. |
@@ -408,6 +408,7 @@ adapters, `domain/types.ts`) were byte-identical across the merge
 
 **Priority:** P1
 **Theme:** Specifications
+**Status:** Partial under D-024; W017 net-current consolidation remains open.
 
 **Evidence surfaces**
 
@@ -418,6 +419,13 @@ adapters, `domain/types.ts`) were byte-identical across the merge
 **Recommendation:** Keep a current normative document; move decisions to ADRs and revision history to a changelog/archive.
 
 **Acceptance criterion:** An agent can load current requirements without reading superseded amendment prose; traceability remains available.
+
+The focused D-024 audit supersedes the scoping session's 72%/93% estimate,
+which treated cumulative current requirements as history. The exact frozen
+family is now reversible and bounded, but the non-binding topical candidate
+still carries the focused obsolete/mixed clauses recorded in D-024. W017 must
+map each supersession by hash and prove net-effective equivalence before this
+acceptance criterion is closed.
 
 ### F-024 — The installer is safe about ownership but writes absolute repository paths and depends on Bash/POSIX and symlinks.
 

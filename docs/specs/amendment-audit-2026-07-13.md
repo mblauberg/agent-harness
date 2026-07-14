@@ -172,7 +172,7 @@ normative spec text and its executable fixtures only.
 ## Executable-fixture evidence (defects reproduced)
 
 Two deterministic stdlib-`sqlite3` harnesses under
-`.agent-run/CAPA-001/fixtures/` transcribe the cited DDL verbatim
+[`tests/spec_fixtures/`](../../tests/spec_fixtures/) transcribe the cited DDL verbatim
 (`PRAGMA foreign_keys=ON`) and reproduce each substantiated defect; both exit 0
 on `python3` 3.14.3:
 

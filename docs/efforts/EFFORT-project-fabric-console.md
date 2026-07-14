@@ -1,23 +1,23 @@
 # EFFORT: project fabric console
 
-Updated: 13 July 2026
+Updated: 14 July 2026
 Status: active
 
 ## Destination
 
-Deliver the approved [Spec 05](../specs/05-project-fabric-console.md) from its
-`c2fc623` approval baseline: a project-scoped terminal Console over the shared
-Fabric, including the owned Spec 01/04 extensions, adaptive one-chair sessions,
-typed operator actions, reliable result delivery, lifecycle skills and full
-verification. Stop at explicit human acceptance; push and release remain
-separate gates.
+Deliver [Spec 05 v1.14](../specs/05-project-fabric-console.md) from its
+`c2fc623` v1.0 approval baseline: a project-scoped terminal Console over the
+shared Fabric, including the owned Spec 01/03/04 authority extensions, adaptive
+one-chair sessions, typed operator actions, reliable result delivery, lifecycle
+skills and full verification. D-021 makes the consolidated PR review the only
+human gate; push beyond that branch, merge and release remain prohibited.
 
 ## Route
 
-- [>] Leg 1: canonical delivery run, draft Spec 01/04 amendments and versioned
-  evaluation plan; a same-session review reported nine P1 leads but left no
-  durable anchored receipt, so a fresh audit is required before repair and the
-  amendments are not implementation-ready
+- [>] Leg 1: canonical delivery run, anchored amendment audit, versioned
+  evaluation plan and D-023 council-accepted Specs 01 v0.37, 03 v1.3, 04 v1.32
+  and 05 v1.14 freeze candidates; family split and final integration review
+  remain before runtime implementation
 - [>] Leg 2: one current public protocol and one current database baseline are
   consolidated on local `main` as preserved WIP; compact schema generation and
   invariant reconciliation remain open
@@ -32,18 +32,23 @@ separate gates.
 - [ ] Leg 5: serial Fabric/RPC/MCP/package integration and affected lifecycle skills
 - [ ] Leg 6: clean full harness/runtime/Console/Herdr/evaluation/load/audit gates and live MCP round-trip on the final integrated commit
 - [ ] Leg 7: fresh native, Claude Opus, Cursor Grok and Gemini reviews, bounded repair and machine-ready receipt
-- [ ] Leg 8: human-recorded 80x24 timed-identification evaluation and explicit final human acceptance
+- [ ] Leg 8: chair-run 80x24 timed-identification evaluation, council
+  adjudication and inclusion in the consolidated PR evidence index
 
-## Human gates and exclusions
+## Governance gate and exclusions
 
-- The automated Console evaluation intentionally cannot certify the human
-  identification criterion. Final acceptance requires the human-recorded
-  repetitions in the current [implementation handoff](../handoffs/HANDOFF-2026-07-13-project-fabric-console.md).
+- D-021 supersedes the handoff's separate human usability/final-acceptance
+  gates. The chair runs the versioned repetitions and the council adjudicates
+  the result; neither step substitutes for the final consolidated PR review.
 - Browser Console, remote listener, login daemon, arbitrary shell, automatic release/deploy and unauthorised Git publication remain excluded.
 
 ## Invariants for every leg
 
-- Follow [HARNESS.md](../../HARNESS.md), amended [Spec 01](../specs/01-agent-fabric.md), amended [Spec 04](../specs/04-agent-fabric-operational-hardening.md), approved Spec 05 v1.0 and traced direct-human clarifications. Material additions recorded only in the v1.13 draft require acceptance before becoming binding.
+- Follow [HARNESS.md](../../HARNESS.md), Spec 01 v0.37, Spec 03 v1.3, Spec 04
+  v1.32, Spec 05 v1.14 and traced direct-human clarifications. D-023 accepts the
+  write-profile authority design; remaining material additions require exact
+  authority trace and council resolution under D-021 before the consolidated
+  PR.
 - One Codex chair and one stage owner. Concurrent source writers have disjoint scopes in `.worktrees/<task-agent>`; shared integration is serial.
 - New or changed behaviour requires a witnessed right-reason RED before production code.
 - Fabric SQLite is the only coordination authority. Console, Herdr, GitHub, exports and this map are projections or evidence.
@@ -59,8 +64,8 @@ separate gates.
   baseline and current protocol, removed pre-release import/fallback paths,
   bound MCP seats to current project/session/run principals and added
   task-bound answer-bearing provider review actions. The remaining route is
-  fresh integrated evidence, independent review, the human timed-identification
-  evaluation and final acceptance.
+  fresh integrated evidence, independent review, the then-governing human
+  timed-identification evaluation and final acceptance (superseded by D-021).
 - 13 July 2026 Codex: corrected this map after live branch inspection. Protocol
   contracts and current result identities are staged on the serial integration
   branch; database invariant repair, responsive Console repair and the native
@@ -80,3 +85,8 @@ separate gates.
   41. Fabric remains red with 30 files/162 tests failing from squashed-baseline,
   lifecycle, Herdr, MCP-vocabulary and adapter-manifest drift; the public schema
   also exceeds the five-MiB release bound. Full clean gates remain open.
+- 14 July 2026 Codex chair: D-021 reduced the programme's human gates to the
+  consolidated PR review. D-023 council-accepted the capability-authority
+  design while keeping `workspace-write-offline` inert and every certifying
+  action `review-readonly`; implementation, containment and Console acceptance
+  evidence remain pending.

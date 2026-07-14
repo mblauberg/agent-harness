@@ -1,0 +1,696 @@
+{
+  "schemaVersion": 3,
+  "familyId": "spec-01-agent-fabric",
+  "familyVersion": "0.37",
+  "indexPath": "docs/specs/01-agent-fabric.md",
+  "bindingCurrentContentSha256": "sha256:c1e7a5503fa8924647189fa08a141bdd692b91d301d935b14512263d03adeada",
+  "archiveContentSha256": "sha256:7a2156feb6c7f3f15bd96c9583f51b22a42688fd298d4db42db4396573df60d0",
+  "moduleSetSha256": "sha256:5e2d33d92e5000167aca50273a988aadc68cda35aebe6f0f3d28775a862715b4",
+  "transformationReceiptSha256": "sha256:bfdf73cd84e86c7a50a61a0f4949dd26cf9e638cbeb99e548584f3e1147a525f",
+  "supersessionMapPath": "docs/specs/01-agent-fabric/supersession-map.json",
+  "supersessionMapSha256": "sha256:5a75b2516c2e906c9b353b847244efbb6eceaf323a5a32e2d5d0aeedc022524d",
+  "sequences": {
+    "bindingCurrent": [
+      0,
+      33,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      9,
+      10,
+      30,
+      25,
+      31,
+      27,
+      11,
+      12,
+      13,
+      32,
+      29,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23
+    ],
+    "archive": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      24,
+      25,
+      26,
+      27,
+      11,
+      12,
+      13,
+      28,
+      29,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23
+    ]
+  },
+  "transformation": {
+    "schemaVersion": 1,
+    "kind": "reversible-family-split-v1",
+    "frozenCommit": "0305376624fdb03e14166a2a831e0053fca367c9",
+    "frozenSourcePath": "docs/specs/01-agent-fabric.md",
+    "frozenSourceLineCount": 11514,
+    "frozenSourceSha256": "sha256:7a2156feb6c7f3f15bd96c9583f51b22a42688fd298d4db42db4396573df60d0",
+    "sourceRanges": [
+      {
+        "moduleOrdinal": 0,
+        "sourceStartLine": 1,
+        "sourceEndLine": 11,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 1,
+        "sourceStartLine": 12,
+        "sourceEndLine": 130,
+        "kind": "binding-context"
+      },
+      {
+        "moduleOrdinal": 2,
+        "sourceStartLine": 131,
+        "sourceEndLine": 486,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 3,
+        "sourceStartLine": 487,
+        "sourceEndLine": 1193,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 4,
+        "sourceStartLine": 1194,
+        "sourceEndLine": 1783,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 5,
+        "sourceStartLine": 1784,
+        "sourceEndLine": 2318,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 6,
+        "sourceStartLine": 2319,
+        "sourceEndLine": 3121,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 7,
+        "sourceStartLine": 3122,
+        "sourceEndLine": 3595,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 8,
+        "sourceStartLine": 3596,
+        "sourceEndLine": 3613,
+        "kind": "binding-context"
+      },
+      {
+        "moduleOrdinal": 9,
+        "sourceStartLine": 3614,
+        "sourceEndLine": 3666,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 10,
+        "sourceStartLine": 3667,
+        "sourceEndLine": 3773,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 24,
+        "sourceStartLine": 3774,
+        "sourceEndLine": 3786,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 25,
+        "sourceStartLine": 3787,
+        "sourceEndLine": 3801,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 26,
+        "sourceStartLine": 3802,
+        "sourceEndLine": 3807,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 27,
+        "sourceStartLine": 3808,
+        "sourceEndLine": 4105,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 11,
+        "sourceStartLine": 4106,
+        "sourceEndLine": 4748,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 12,
+        "sourceStartLine": 4749,
+        "sourceEndLine": 5547,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 13,
+        "sourceStartLine": 5548,
+        "sourceEndLine": 5827,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 28,
+        "sourceStartLine": 5828,
+        "sourceEndLine": 5844,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 29,
+        "sourceStartLine": 5845,
+        "sourceEndLine": 6092,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 14,
+        "sourceStartLine": 6093,
+        "sourceEndLine": 6807,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 15,
+        "sourceStartLine": 6808,
+        "sourceEndLine": 7304,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 16,
+        "sourceStartLine": 7305,
+        "sourceEndLine": 8030,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 17,
+        "sourceStartLine": 8031,
+        "sourceEndLine": 8703,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 18,
+        "sourceStartLine": 8704,
+        "sourceEndLine": 9042,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 19,
+        "sourceStartLine": 9043,
+        "sourceEndLine": 9822,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 20,
+        "sourceStartLine": 9823,
+        "sourceEndLine": 10434,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 21,
+        "sourceStartLine": 10435,
+        "sourceEndLine": 10931,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 22,
+        "sourceStartLine": 10932,
+        "sourceEndLine": 11444,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 23,
+        "sourceStartLine": 11445,
+        "sourceEndLine": 11514,
+        "kind": "candidate-topical"
+      }
+    ],
+    "relocatedLinks": [
+      {
+        "logicalByteOffset": 483512,
+        "beforeUtf8": "../research/evidence-snapshots/agent-continuity-routing-2026-07.md",
+        "afterUtf8": "../../research/evidence-snapshots/agent-continuity-routing-2026-07.md"
+      }
+    ],
+    "splitPoints": [
+      {
+        "afterModuleOrdinal": 0,
+        "logicalByteOffset": 443,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 1,
+        "logicalByteOffset": 9517,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 2,
+        "logicalByteOffset": 24089,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 3,
+        "logicalByteOffset": 56948,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 4,
+        "logicalByteOffset": 90251,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 5,
+        "logicalByteOffset": 115846,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 6,
+        "logicalByteOffset": 155851,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 7,
+        "logicalByteOffset": 177863,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 8,
+        "logicalByteOffset": 178719,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 9,
+        "logicalByteOffset": 181965,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 10,
+        "logicalByteOffset": 187495,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 24,
+        "logicalByteOffset": 188401,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 25,
+        "logicalByteOffset": 189376,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 26,
+        "logicalByteOffset": 189756,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 27,
+        "logicalByteOffset": 206109,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 11,
+        "logicalByteOffset": 241114,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 12,
+        "logicalByteOffset": 287632,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 13,
+        "logicalByteOffset": 303800,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 28,
+        "logicalByteOffset": 305001,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 29,
+        "logicalByteOffset": 318661,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 14,
+        "logicalByteOffset": 353620,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 15,
+        "logicalByteOffset": 381105,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 16,
+        "logicalByteOffset": 423837,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 17,
+        "logicalByteOffset": 461680,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 18,
+        "logicalByteOffset": 483339,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 19,
+        "logicalByteOffset": 520219,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 20,
+        "logicalByteOffset": 551805,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 21,
+        "logicalByteOffset": 575283,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 22,
+        "logicalByteOffset": 600154,
+        "boundaryKind": "section"
+      }
+    ],
+    "scaffolding": []
+  },
+  "modules": [
+    {
+      "ordinal": 0,
+      "path": "docs/specs/01-agent-fabric/00-authority-and-status-header.md",
+      "title": "Authority and status header",
+      "role": "shared-current",
+      "lineCount": 11,
+      "sha256": "sha256:76608ec019d8dfb0e996a8fcf95dd52a5ad6b63f17a4ac03ee81cbc4d22c3b09"
+    },
+    {
+      "ordinal": 1,
+      "path": "docs/specs/01-agent-fabric/01-version-history.md",
+      "title": "Version history",
+      "role": "archive-only",
+      "lineCount": 119,
+      "sha256": "sha256:735dbd96ec82e8cdc6a6fc57dd81a435d63af3a07186976beed145754bcb7a62"
+    },
+    {
+      "ordinal": 2,
+      "path": "docs/specs/01-agent-fabric/02-foundations-and-execution-control.md",
+      "title": "Foundations and execution control",
+      "role": "shared-current",
+      "lineCount": 356,
+      "sha256": "sha256:276f9a01ce15f27948615b77deb3c69d3992bb4e0a53920bb2ed0cb09ab3978b"
+    },
+    {
+      "ordinal": 3,
+      "path": "docs/specs/01-agent-fabric/03-lifecycle-receipts-a.md",
+      "title": "Lifecycle receipts A",
+      "role": "shared-current",
+      "lineCount": 707,
+      "sha256": "sha256:ad08ac869cbd554c00bf3b80bdcccf282016710153526d3b81c74f8b8fdd0874"
+    },
+    {
+      "ordinal": 4,
+      "path": "docs/specs/01-agent-fabric/04-lifecycle-receipts-b.md",
+      "title": "Lifecycle receipts B",
+      "role": "shared-current",
+      "lineCount": 590,
+      "sha256": "sha256:b05440c93a611c90f29b215f2f4ea46552eb86f48f3904d48affffea05da1b10"
+    },
+    {
+      "ordinal": 5,
+      "path": "docs/specs/01-agent-fabric/05-hybrid-topology-and-security.md",
+      "title": "Hybrid topology and security",
+      "role": "shared-current",
+      "lineCount": 535,
+      "sha256": "sha256:ab6e8592522f64c5879df95d20fd91cb1a617f9481154865df30f5274e2ae486"
+    },
+    {
+      "ordinal": 6,
+      "path": "docs/specs/01-agent-fabric/06-observability-and-receipt-export.md",
+      "title": "Observability and receipt export",
+      "role": "shared-current",
+      "lineCount": 803,
+      "sha256": "sha256:15a2cc4f325fdfde1c3207a5257e304c5b24e3bcff6d53648f3a9a3437c0b4ca"
+    },
+    {
+      "ordinal": 7,
+      "path": "docs/specs/01-agent-fabric/07-baseline-requirements.md",
+      "title": "Baseline requirements",
+      "role": "shared-current",
+      "lineCount": 474,
+      "sha256": "sha256:018be90469ffb97a33650e563906c3c26d17101060247a3ef4d89b92bb86c88a"
+    },
+    {
+      "ordinal": 8,
+      "path": "docs/specs/01-agent-fabric/08-review-history.md",
+      "title": "Review history",
+      "role": "archive-only",
+      "lineCount": 18,
+      "sha256": "sha256:11f62209cc14b2d101afabd47d9fccbe7ea051285cb5e8ef594304d979415594"
+    },
+    {
+      "ordinal": 9,
+      "path": "docs/specs/01-agent-fabric/09-approval-and-delivery-gates.md",
+      "title": "Approval and delivery gates",
+      "role": "shared-current",
+      "lineCount": 53,
+      "sha256": "sha256:edec96079385d1a8592f8a1dd615a761de3463be5eb80a901ff3d58b95230c52"
+    },
+    {
+      "ordinal": 10,
+      "path": "docs/specs/01-agent-fabric/10-project-session-protocol-core.md",
+      "title": "Project-session protocol core",
+      "role": "shared-current",
+      "lineCount": 107,
+      "sha256": "sha256:68d1c3833c654d3047c24aa03487c7f3864bea33691b6ec276f7abdfd3d9ff53"
+    },
+    {
+      "ordinal": 11,
+      "path": "docs/specs/01-agent-fabric/11-operator-bootstrap-and-chair-lifecycle.md",
+      "title": "Operator bootstrap and chair lifecycle",
+      "role": "shared-current",
+      "lineCount": 643,
+      "sha256": "sha256:92defb8eb3dbf677f14c9982eec666de94d38aa22da2c156aa5c07118bbafbfc"
+    },
+    {
+      "ordinal": 12,
+      "path": "docs/specs/01-agent-fabric/12-typed-git-authority.md",
+      "title": "Typed Git authority",
+      "role": "shared-current",
+      "lineCount": 799,
+      "sha256": "sha256:31e69cd1897b57908e88d4cd0e3254d9d1d5f2978c6abd81a63f9c65430ef5c5"
+    },
+    {
+      "ordinal": 13,
+      "path": "docs/specs/01-agent-fabric/13-operator-artifacts-notifications-budget.md",
+      "title": "Operator artifacts, notifications and budget",
+      "role": "shared-current",
+      "lineCount": 280,
+      "sha256": "sha256:dcc44e2391679d8b1324479bfb6e87f804f218cca08b4245640ac78ac653547d"
+    },
+    {
+      "ordinal": 14,
+      "path": "docs/specs/01-agent-fabric/14-review-publication-and-bundle-a.md",
+      "title": "Review publication and bundle A",
+      "role": "shared-current",
+      "lineCount": 715,
+      "sha256": "sha256:64cf9ffb8616e4b0288cfbf8492913a2c3fbe68e95f343998fc4dabdda44d874"
+    },
+    {
+      "ordinal": 15,
+      "path": "docs/specs/01-agent-fabric/15-review-bundle-b.md",
+      "title": "Review bundle B",
+      "role": "shared-current",
+      "lineCount": 497,
+      "sha256": "sha256:1f8ac3a0ac861beaa3a8498d84e7b2460b9ca1d049bd4a48870949895de7a3d9"
+    },
+    {
+      "ordinal": 16,
+      "path": "docs/specs/01-agent-fabric/16-review-profile-routing-and-results.md",
+      "title": "Review profile, routing and results",
+      "role": "shared-current",
+      "lineCount": 726,
+      "sha256": "sha256:3eb27dd79d3e0a85d15cef4d6c8fabbe57f0451963141e593284e47a69ed8986"
+    },
+    {
+      "ordinal": 17,
+      "path": "docs/specs/01-agent-fabric/17-review-heads-completion-and-recovery.md",
+      "title": "Review heads, completion and recovery",
+      "role": "shared-current",
+      "lineCount": 673,
+      "sha256": "sha256:95d7dea013a8c5c5b06682c7799c5da2ce08659f1cd740a2632ab084882d22fc"
+    },
+    {
+      "ordinal": 18,
+      "path": "docs/specs/01-agent-fabric/18-lifecycle-rotation-custody.md",
+      "title": "Lifecycle rotation custody",
+      "role": "shared-current",
+      "lineCount": 339,
+      "sha256": "sha256:583eaff7f536009b28d50312437fd573ef063f29770b7fb3cfd81046a143be1c"
+    },
+    {
+      "ordinal": 19,
+      "path": "docs/specs/01-agent-fabric/19-deployed-routes-and-telemetry.md",
+      "title": "Deployed routes and telemetry",
+      "role": "shared-current",
+      "lineCount": 780,
+      "sha256": "sha256:5cc3a7e4fe4fabf4a0a67e1c6f60a2c854bee7c70f8575396671e8383163c873"
+    },
+    {
+      "ordinal": 20,
+      "path": "docs/specs/01-agent-fabric/20-console-read-and-authority-profiles.md",
+      "title": "Console read and authority profiles",
+      "role": "shared-current",
+      "lineCount": 612,
+      "sha256": "sha256:89e4c47ac96cde2858bb4006bdda294d8a6251a4143dac471800b398612c341f"
+    },
+    {
+      "ordinal": 21,
+      "path": "docs/specs/01-agent-fabric/21-authority-compilation-a.md",
+      "title": "Authority compilation A",
+      "role": "shared-current",
+      "lineCount": 497,
+      "sha256": "sha256:7e74404cebb76d34a6349e5add6b847eebec296afb5c8ad157ed25173c71ff3c"
+    },
+    {
+      "ordinal": 22,
+      "path": "docs/specs/01-agent-fabric/22-authority-compilation-b.md",
+      "title": "Authority compilation B",
+      "role": "shared-current",
+      "lineCount": 513,
+      "sha256": "sha256:ff7046616eaf29c543d3a3fc716116af8d74bf5734ff44ea732867f26f298308"
+    },
+    {
+      "ordinal": 23,
+      "path": "docs/specs/01-agent-fabric/23-activation-and-acceptance.md",
+      "title": "Activation and acceptance",
+      "role": "shared-current",
+      "lineCount": 70,
+      "sha256": "sha256:5169cb9bbc01cdd9f2cdf51411dc02fddd0ba998deabcc8f52def774fc51cfa3"
+    },
+    {
+      "ordinal": 24,
+      "path": "docs/specs/01-agent-fabric/24-f023-01-archive.md",
+      "title": "F023-01 frozen archive slice",
+      "role": "archive-only",
+      "lineCount": 13,
+      "sha256": "sha256:e0ec100771f15fc83137b842ef005bcf15b7d4dd0445b6f95f3d77e7a774d6a9"
+    },
+    {
+      "ordinal": 25,
+      "path": "docs/specs/01-agent-fabric/25-project-session-protocol-core-continued-2.md",
+      "title": "Project-session protocol core (continued 2)",
+      "role": "shared-current",
+      "lineCount": 15,
+      "sha256": "sha256:3a96156fe569ab0ac13ac7bed488c031a9ed1d4711d504142f7dadd02a781b46"
+    },
+    {
+      "ordinal": 26,
+      "path": "docs/specs/01-agent-fabric/26-f023-09-archive.md",
+      "title": "F023-09 frozen archive slice",
+      "role": "archive-only",
+      "lineCount": 6,
+      "sha256": "sha256:d96647fb107bc6dc4f35e471dacf0c1f623be3feb1cb97d3cd3f58e28b81a292"
+    },
+    {
+      "ordinal": 27,
+      "path": "docs/specs/01-agent-fabric/27-project-session-protocol-core-continued-4.md",
+      "title": "Project-session protocol core (continued 4)",
+      "role": "shared-current",
+      "lineCount": 298,
+      "sha256": "sha256:ee327139e8bf07cc37f0e99823c7211b148d281b74bb596cb16065976ee7c42d"
+    },
+    {
+      "ordinal": 28,
+      "path": "docs/specs/01-agent-fabric/28-f023-02-archive.md",
+      "title": "F023-02 frozen archive slice",
+      "role": "archive-only",
+      "lineCount": 17,
+      "sha256": "sha256:9504a5d2e9c5dd76256f88ec72151a0c45758ac7c70e68d2d6f3d248c5a7c768"
+    },
+    {
+      "ordinal": 29,
+      "path": "docs/specs/01-agent-fabric/29-operator-artifacts-notifications-and-budget-continued-2.md",
+      "title": "Operator artifacts, notifications and budget (continued 2)",
+      "role": "shared-current",
+      "lineCount": 248,
+      "sha256": "sha256:2d89bd96b9f86cc1bfec2e1ae8806c51ac06f1cbb0252e81a2fca300e11b3d16"
+    },
+    {
+      "ordinal": 30,
+      "path": "docs/specs/01-agent-fabric/30-f023-01-current.md",
+      "title": "F023-01 binding-current replacement",
+      "role": "current-only",
+      "lineCount": 11,
+      "sha256": "sha256:efecd54a8cfc37ac91b24d8ebf2dea51268a71fa8ddcce722eeb991f671caadb"
+    },
+    {
+      "ordinal": 31,
+      "path": "docs/specs/01-agent-fabric/31-f023-09-current.md",
+      "title": "F023-09 binding-current replacement",
+      "role": "current-only",
+      "lineCount": 7,
+      "sha256": "sha256:7cf2085fb6bee742abf1b7b2e13ab3e7e127bf5d8f5baf7887dea1f8107a85e0"
+    },
+    {
+      "ordinal": 32,
+      "path": "docs/specs/01-agent-fabric/32-f023-02-current.md",
+      "title": "F023-02 binding-current replacement",
+      "role": "current-only",
+      "lineCount": 18,
+      "sha256": "sha256:f82801e564e8bcf569c8698d2001e3df988650c175ed6fc309afa38484ceccd9"
+    },
+    {
+      "ordinal": 33,
+      "path": "docs/specs/01-agent-fabric/33-binding-current-authority.md",
+      "title": "Binding-current authority",
+      "role": "current-only",
+      "lineCount": 21,
+      "sha256": "sha256:760d00b7d2ccc0cfb0a030da64c33dc1fe0f22df74355c2e09df583a9cbc2a3a"
+    }
+  ]
+}

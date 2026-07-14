@@ -932,8 +932,7 @@ gen_readme() {
 <!--
   GENERIC, knob-driven. The ONE human entry point to this lab. It NEVER hardcodes
   a live status snapshot — read DASHBOARD.md for current state. Domain lines
-  ({{DOMAIN}}/{{MISSION}}) and the lab path ({{LAB_DIR}}) are substituted by
-  scripts/bootstrap-lab.sh.
+  ({{DOMAIN}}/{{MISSION}}) are substituted by scripts/bootstrap-lab.sh.
 -->
 
 ## What this lab is
@@ -972,15 +971,14 @@ idle checkpoint instead of endless dispatch. See OPERATING_MANUAL.md.
 ## Run / resume / steer / stop
 
 - **Run / resume (Claude):** open a session in this lab at high/ultracode effort and paste:
-  > /loop — You are the orchestrator for the autonomous lab at {{LAB_DIR}}. Read
-  > OPERATING_MANUAL.md, then GOAL.md, then STATE.md, then DECISION_QUEUE.md, and
-  > run one 8-step iteration; preserve the RUN mission until human STOP, and
-  > pause on a dry frontier using the OPERATING_MANUAL idle checkpoint. Before
-  > accepting PAUSED, run `python3
+  > /loop — You are the orchestrator for the autonomous lab in this lab root.
+  > Read OPERATING_MANUAL.md IN FULL first, then GOAL.md, then STATE.md, then
+  > DECISION_QUEUE.md, and run one 8-step iteration; preserve the RUN mission
+  > until human STOP, and pause on a dry frontier using the OPERATING_MANUAL
+  > idle checkpoint. Before accepting PAUSED, run `python3
   > "${AGENTS_HOME:-$HOME/.agents}/skills/autonomous-lab/scripts/validate_idle_pause.py"
-  > "{{LAB_DIR}}/STATE.md" --runs "{{LAB_DIR}}/.orchestrator/runs.md" --queue
-  > "{{LAB_DIR}}/DECISION_QUEUE.md"`; a non-zero result means re-invoke one
-  > iteration and do not exit the driver.
+  > "STATE.md" --runs ".orchestrator/runs.md" --queue "DECISION_QUEUE.md"`; a
+  > non-zero result means re-invoke one iteration and do not exit the driver.
 - **Steer:** edit the `Active directives` block in GOAL.md.
 - **Stop:** set `STATUS: STOP` in GOAL.md (GOAL + STATE + HANDOFF must agree on
   the terminal truth first).
@@ -1081,7 +1079,7 @@ note ""
 note "[4/5] substitute CONFIG KNOBS from GOAL.md"
 
 # Targets that carry {{KNOBS}} and SHOULD be substituted. README.md is included
-# (its {{DOMAIN}}/{{MISSION}}/{{LAB_DIR}} lines are filled here). GOAL.md is
+# (its {{DOMAIN}}/{{MISSION}} lines are filled here). GOAL.md is
 # excluded — it is the knob SOURCE and the human's file; we never rewrite it. The
 # ADR template (adr/_meta/ADR.template.md) is ALSO excluded on purpose: its
 # {{HARD_GATES}}/{{LOCKED_CONSTRAINTS}} references are LIVE per-item guidance the
@@ -1192,12 +1190,6 @@ DEFS
     esc_dv="$(printf '%s' "$dv" | sed -e 's/[&\\|]/\\&/g')"
     printf 's|{{%s}}|%s|g\n' "$dk" "$esc_dv" >> "$SED_PROG"
   done
-
-  # ---- dynamic knob: {{LAB_DIR}} = this lab's absolute path ---------------
-  # Not a GOAL/DEFAULT knob (its value is runtime-resolved), but templates +
-  # the README's /loop kickoff reference it, so always emit a substitution.
-  esc_lab="$(printf '%s' "$LAB" | sed -e 's/[&\\|]/\\&/g')"
-  printf 's|{{LAB_DIR}}|%s|g\n' "$esc_lab" >> "$SED_PROG"
 
   # Determine if ANY required knob is unfilled (report on stderr, do not abort).
   REQUIRED="DOMAIN MISSION LOCKED_CONSTRAINTS HARD_GATES ESCALATION_GATES BUILD_CEILING"

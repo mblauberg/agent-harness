@@ -48,7 +48,7 @@ deeply familiar with the codebase.
 | Batch | Verdict summary |
 |---|---|
 | F-001..F-010 | pending (P0 verifier running) |
-| F-011..F-028 | All CONFIRMED except F-026 PARTIALLY CONFIRMED (claim plausible; cited evidence files contain no hook references — citations mismatched). F-023 severity UNDERSTATED: amendments are ~72% of spec 01 (8,223 lines) and ~93% of spec 04 (4,779 lines). |
+| F-011..F-028 | All CONFIRMED except F-026 PARTIALLY CONFIRMED (claim plausible; cited evidence files contain no hook references — citations mismatched). This session estimated F-023 amendment prose at ~72% of Spec 01 and ~93% of Spec 04; the later focused D-024 audit supersedes that overclassification and records a narrower residual under W017. |
 | F-029..F-046 | 18/18 CONFIRMED. F-036 strengthened (no branch protection, affirmatively verified). F-046 nuance: manual proposal-first flywheel exists in `skills/retrospect`; missing piece is runtime enforcement only. F-033 nuance: `*-boundary*` tests exist but test provider trust boundaries, not import boundaries. |
 | Live session evidence | `scripts/agent-fabric status` fails with `ERR_MODULE_NOT_FOUND: @local/agent-fabric-protocol` — F-011 bites in practice on current HEAD. |
 

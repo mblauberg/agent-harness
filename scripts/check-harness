@@ -19,6 +19,7 @@ fi
 
 cd "$ROOT"
 "$PYTHON" scripts/check_harness.py
+"$PYTHON" scripts/check_spec_families.py
 "$PYTHON" skills/orchestrate/evals/check_skill_triggers.py
 "$PYTHON" skills/orchestrate/evals/spec05_skill_evaluation.py validate-inputs
 "$PYTHON" skills/orchestrate/evals/spec05_skill_evaluation.py probe

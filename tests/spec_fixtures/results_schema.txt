@@ -1,0 +1,6 @@
+LEAD2=CONFIRMED (foreign key mismatch — FK targets non-unique tuple)
+LEAD5=ACCEPTED (defect reproduced)
+LEAD7=ACCEPTED (defect reproduced)
+MF04-1=CONFIRMED (foreign key mismatch — FK targets 6-col tuple with only a 4-col UNIQUE)
+MF04-2=ACCEPTED (defect reproduced — no CHECK(action_adapter_id=adapter_id); smoke row for adapterA cites adapterB's action pair)
+MF04-3=ACCEPTED (defect reproduced — discriminator CHECK doesn't constrain the activation_configuration_* triple; all-NULL accepted)

@@ -140,6 +140,27 @@ def test_default_agent_run_directory_is_ignored_in_the_harness_repo():
     assert ".agent-run/" in (ROOT / ".gitignore").read_text().splitlines()
 
 
+def test_private_receipts_project_durable_public_evidence_without_being_tracked():
+    run_contract = (
+        ROOT / "skills" / "implement" / "references" / "run-contract.md"
+    ).read_text()
+    kickoff = (
+        ROOT / "docs" / "agent-harness-comprehensive-review" / "KICKOFF.md"
+    ).read_text()
+    charter = (
+        ROOT / "docs" / "agent-harness-comprehensive-review" / "CHAIR-CHARTER.md"
+    ).read_text()
+    maintaining = (ROOT / "MAINTAINING.md").read_text()
+
+    for text in (run_contract, kickoff, charter):
+        assert "validator-readable" in text
+        assert "force-track" in text
+        assert "tested-tree facts" in text
+    assert "scripts/public-release-check --publication-range" in maintaining
+    assert "origin/main^{commit}" in maintaining
+    assert "HEAD^{commit}" in maintaining
+
+
 def test_context_hygiene_is_owned_by_session_and_delivery_checkpoints():
     harness = " ".join((ROOT / "HARNESS.md").read_text().split())
     implementation = (ROOT / "skills" / "implement" / "references" / "run-contract.md").read_text()

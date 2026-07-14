@@ -83,6 +83,10 @@ PR** for the human to review and merge — not a stream of small PRs.
   (deterministic gates, review legs, council `D-nnn` rationale, per-lane
   receipts) in the description, so the human review is a genuine gate. Keep the
   branch rebased/current and the PR description a living index of what landed.
+- Per-lane `.agent-run/<id>/` receipts are exact private operational evidence:
+  keep them local, ignored and validator-readable, and never force-track them.
+  The tracked evidence index carries their durable tested-tree facts, verdicts,
+  artifact digests and pending gates; it does not publish the raw run tree.
 
 ## 5. Decision protocol (LLM resolution)
 
@@ -179,8 +183,9 @@ not route around it.
    `git diff --check`). Objective evidence is the floor.
 6. Review pressure per risk tier (§6); council-adjudicate findings (§5).
 7. Bounded repair (≤2 cycles), then re-verify.
-8. Open a PR with full evidence for the human. Update the effort map, the
-   decision-register and the owning handoff (mark consumed when done).
+8. Project durable receipt facts into the tracked effort map, decision register,
+   owning handoff and PR evidence index; keep the exact raw receipt private.
+   Open the one programme PR with full evidence for the human.
 
 ## 9. Bootstrap reading order (fresh chair)
 

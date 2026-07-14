@@ -65,7 +65,10 @@ First actions:
    green, crucial-tier review pressure (fresh native + Opus pair + one bonus
    family), council adjudication of disputed or high-blast findings, bounded
    repair (≤2 cycles), and update the effort map, decision register and per-lane
-   `.agent-run/<id>/RUN.json` receipts as you go.
+   `.agent-run/<id>/RUN.json` receipts as you go. Exact raw receipts stay local,
+   ignored and validator-readable; never force-track them. Project durable
+   tested-tree facts, verdicts, artifact digests and pending gates into tracked
+   programme docs and the final PR evidence index.
 5. When the whole programme is integrated and green on one commit, push
    `comprehensive-review` and open the single PR for the human.
 
@@ -78,12 +81,10 @@ Do not stop for anything except a genuine external-effect requirement or an
 
 ## Notes for the human
 
-- Lane A's remaining structural repairs are fully specified with exact anchors
-  and repair sketches in `docs/specs/amendment-audit-2026-07-13.md` (§"Repair
-  status"), and 11 defects are already reproduced by the fixtures under
-  `.agent-run/CAPA-001/fixtures/` (those live in the now-merged Lane A worktree;
-  they are deterministic and rebuildable from the receipt if that worktree is
-  pruned).
+- Lane A's structural D-024 split is integrated on `comprehensive-review` and
+  dual-primary certified. The 11 amendment defects remain reproduced by the
+  tracked fixtures under `tests/spec_fixtures/`; W017 separately owns the
+  residual semantic net-current consolidation and F-023 closure proof.
 - The chair being codex means the Opus pair supplies the decorrelated
   other-primary review the charter requires; keep both families available.
 - If you want the chair to also hold release/deploy/egress authority, say so

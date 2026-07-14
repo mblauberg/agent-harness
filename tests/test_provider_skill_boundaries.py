@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from scripts.check_spec_families import load_family_text
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -10,7 +12,7 @@ def read(path: str) -> str:
 
 def test_agy_is_a_fabric_adapter_not_a_parallel_provider_skill():
     assert not (ROOT / "skills/agy-headless").exists()
-    spec = read("docs/specs/01-agent-fabric.md")
+    spec = load_family_text(ROOT, "01-agent-fabric")
     orchestrate = read("skills/orchestrate/SKILL.md")
     assert "Agy | Gemini or Antigravity access | Adapter only; no separate provider skill" in spec
     assert "Answer-bearing external work uses Fabric request/reply" in orchestrate

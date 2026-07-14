@@ -1,0 +1,227 @@
+{
+  "schemaVersion": 3,
+  "familyId": "spec-05-project-fabric-console",
+  "familyVersion": "1.14",
+  "indexPath": "docs/specs/05-project-fabric-console.md",
+  "bindingCurrentContentSha256": "sha256:65fb80cb1144ec7cf752c49a99944c6b44b237e14b27940e813828284c125e31",
+  "archiveContentSha256": "sha256:8bef2451fa6b3ac3c2f7ba4a1485c41b88e84e14b8ffd3454e5036c0377e8c32",
+  "moduleSetSha256": "sha256:9c8829a6a7a76d732d19ae2628ff9dadbab71db13c602460fa6e5b1df102a576",
+  "transformationReceiptSha256": "sha256:41cbdfbd8e3204033b4848eb428a70b6902b68baa64fcfd22d974fa7f4516198",
+  "supersessionMapPath": "docs/specs/05-project-fabric-console/supersession-map.json",
+  "supersessionMapSha256": "sha256:cb391529b6c82961556d53b75b863824294a012665555b4b2d95be3c56f71c79",
+  "sequences": {
+    "bindingCurrent": [
+      0,
+      10,
+      2,
+      8,
+      6,
+      3,
+      9,
+      4
+    ],
+    "archive": [
+      0,
+      1,
+      2,
+      5,
+      6,
+      3,
+      7,
+      4
+    ]
+  },
+  "transformation": {
+    "schemaVersion": 1,
+    "kind": "reversible-family-split-v1",
+    "frozenCommit": "0305376624fdb03e14166a2a831e0053fca367c9",
+    "frozenSourcePath": "docs/specs/05-project-fabric-console.md",
+    "frozenSourceLineCount": 1534,
+    "frozenSourceSha256": "sha256:8bef2451fa6b3ac3c2f7ba4a1485c41b88e84e14b8ffd3454e5036c0377e8c32",
+    "sourceRanges": [
+      {
+        "moduleOrdinal": 0,
+        "sourceStartLine": 1,
+        "sourceEndLine": 16,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 1,
+        "sourceStartLine": 17,
+        "sourceEndLine": 95,
+        "kind": "binding-context"
+      },
+      {
+        "moduleOrdinal": 2,
+        "sourceStartLine": 96,
+        "sourceEndLine": 103,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 5,
+        "sourceStartLine": 104,
+        "sourceEndLine": 120,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 6,
+        "sourceStartLine": 121,
+        "sourceEndLine": 829,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 3,
+        "sourceStartLine": 830,
+        "sourceEndLine": 1332,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 7,
+        "sourceStartLine": 1333,
+        "sourceEndLine": 1367,
+        "kind": "candidate-topical"
+      },
+      {
+        "moduleOrdinal": 4,
+        "sourceStartLine": 1368,
+        "sourceEndLine": 1534,
+        "kind": "candidate-topical"
+      }
+    ],
+    "relocatedLinks": [
+      {
+        "logicalByteOffset": 83897,
+        "beforeUtf8": "../research/evidence-snapshots/agent-continuity-routing-2026-07.md",
+        "afterUtf8": "../../research/evidence-snapshots/agent-continuity-routing-2026-07.md"
+      }
+    ],
+    "splitPoints": [
+      {
+        "afterModuleOrdinal": 0,
+        "logicalByteOffset": 715,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 1,
+        "logicalByteOffset": 6570,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 2,
+        "logicalByteOffset": 6976,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 5,
+        "logicalByteOffset": 8018,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 6,
+        "logicalByteOffset": 50097,
+        "boundaryKind": "section"
+      },
+      {
+        "afterModuleOrdinal": 3,
+        "logicalByteOffset": 81320,
+        "boundaryKind": "paragraph"
+      },
+      {
+        "afterModuleOrdinal": 7,
+        "logicalByteOffset": 83770,
+        "boundaryKind": "section"
+      }
+    ],
+    "scaffolding": []
+  },
+  "modules": [
+    {
+      "ordinal": 0,
+      "path": "docs/specs/05-project-fabric-console/00-authority-and-status-header.md",
+      "title": "Authority and status header",
+      "role": "shared-current",
+      "lineCount": 16,
+      "sha256": "sha256:7389641af2ba977acc13040097894d32b6264eea1b92221c0482b9ccc9bf2ef9"
+    },
+    {
+      "ordinal": 1,
+      "path": "docs/specs/05-project-fabric-console/01-version-history.md",
+      "title": "Version history",
+      "role": "archive-only",
+      "lineCount": 79,
+      "sha256": "sha256:8c868dacf025f90fbcb4a7e05a445dab4084f7888400f4d9158683be1628744c"
+    },
+    {
+      "ordinal": 2,
+      "path": "docs/specs/05-project-fabric-console/02-console-contract.md",
+      "title": "Console contract",
+      "role": "shared-current",
+      "lineCount": 8,
+      "sha256": "sha256:fdae6e457ca26777a7a5b088f7b2e3731c25a1f5d7ef3dc8d5320e970dc16747"
+    },
+    {
+      "ordinal": 3,
+      "path": "docs/specs/05-project-fabric-console/03-integrations-lifecycle-and-acceptance.md",
+      "title": "Integrations, lifecycle and acceptance",
+      "role": "shared-current",
+      "lineCount": 503,
+      "sha256": "sha256:7d05d690abef7811c15601d74618928641171927b5bdc9fdb83ed9cd420059a7"
+    },
+    {
+      "ordinal": 4,
+      "path": "docs/specs/05-project-fabric-console/04-continuity-and-authority.md",
+      "title": "Continuity and authority",
+      "role": "shared-current",
+      "lineCount": 167,
+      "sha256": "sha256:6d9d28c37658cd244f92cc77e19ee80d84d351e6d1089800671a331901d8f736"
+    },
+    {
+      "ordinal": 5,
+      "path": "docs/specs/05-project-fabric-console/05-f023-21-archive.md",
+      "title": "F023-21 frozen archive slice",
+      "role": "archive-only",
+      "lineCount": 17,
+      "sha256": "sha256:c7a8b0e2eb0fa246a0c88fcb7c4b288eaa38ae02fdb246720cf3224aa0c690e4"
+    },
+    {
+      "ordinal": 6,
+      "path": "docs/specs/05-project-fabric-console/06-console-contract-continued-2.md",
+      "title": "Console contract (continued 2)",
+      "role": "shared-current",
+      "lineCount": 709,
+      "sha256": "sha256:33ffe5bd316447ffa908da73f8e3035a0e4170161bb85d7c658d2b1211ebb50d"
+    },
+    {
+      "ordinal": 7,
+      "path": "docs/specs/05-project-fabric-console/07-f023-08-archive.md",
+      "title": "F023-08 frozen archive slice",
+      "role": "archive-only",
+      "lineCount": 35,
+      "sha256": "sha256:e274ed515887df46d338845cfdb8b1365a2fb38fe1dea3e3562f67aaa08bbd00"
+    },
+    {
+      "ordinal": 8,
+      "path": "docs/specs/05-project-fabric-console/08-f023-21-current.md",
+      "title": "F023-21 binding-current replacement",
+      "role": "current-only",
+      "lineCount": 16,
+      "sha256": "sha256:d3b25956c22df68ffea5b02707fe96ba01bf5c125019e037bc9deae1bc6ee876"
+    },
+    {
+      "ordinal": 9,
+      "path": "docs/specs/05-project-fabric-console/09-f023-08-current.md",
+      "title": "F023-08 binding-current replacement",
+      "role": "current-only",
+      "lineCount": 32,
+      "sha256": "sha256:8c7f2fc93c18e99e4bc1a86329d66194497f6b7b115a88918ca3b695f41ae12b"
+    },
+    {
+      "ordinal": 10,
+      "path": "docs/specs/05-project-fabric-console/10-binding-current-authority.md",
+      "title": "Binding-current authority",
+      "role": "current-only",
+      "lineCount": 27,
+      "sha256": "sha256:6e9e85d155cc852008951c9a7733b2f3d1062a40e19dbebd586fde12a7c05818"
+    }
+  ]
+}

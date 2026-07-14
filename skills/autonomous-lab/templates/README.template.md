@@ -61,11 +61,11 @@ The lab is driven entirely through **`GOAL.md`**.
 
 - **Resume / launch:** set `GOAL.md` → `STATUS: RUN`, open a Claude Code session **in
   the lab root** at high effort (`/effort ultracode` or `high`), and paste the
-  self-pacing loop below (fill only the lab path):
+  self-pacing loop below:
 
   ```
-  /loop You are the orchestrator for the autonomous lab at {{LAB_DIR}}.
-  Read {{LAB_DIR}}/OPERATING_MANUAL.md IN FULL first — it is your constitution.
+  /loop You are the orchestrator for the autonomous lab in this lab root.
+  Read OPERATING_MANUAL.md IN FULL first — it is your constitution.
   Then read GOAL.md (mission + STATUS gate + Active directives), STATE.md (your
   recover-after-compaction anchor), and the work-queue head.
   Run ONE iteration of the 8-step loop (RECONCILE → READ → SELECT → DISPATCH →
@@ -75,7 +75,7 @@ The lab is driven entirely through **`GOAL.md`**.
   write a clean handoff and HALT. Otherwise self-pace while work is active and
   use the validated idle-frontier PAUSED checkpoint when the frontier is dry.
   Before accepting PAUSED, run
-  `python3 "${AGENTS_HOME:-$HOME/.agents}/skills/autonomous-lab/scripts/validate_idle_pause.py" "{{LAB_DIR}}/STATE.md" --runs "{{LAB_DIR}}/.orchestrator/runs.md" --queue "{{LAB_DIR}}/DECISION_QUEUE.md"`.
+  `python3 "${AGENTS_HOME:-$HOME/.agents}/skills/autonomous-lab/scripts/validate_idle_pause.py" "STATE.md" --runs ".orchestrator/runs.md" --queue "DECISION_QUEUE.md"`.
   A non-zero result means re-invoke one iteration; do not exit the driver.
   ```
 
@@ -122,7 +122,7 @@ The lab is driven entirely through **`GOAL.md`**.
 ## Navigation map
 
 ```
-<LAB_DIR>/
+<lab-root>/
 │  ── human entry & control ──
 ├── README.md             ← you are here (the single human entry point)
 ├── DASHBOARD.md          ← generated one-screen status (never hand-edited)

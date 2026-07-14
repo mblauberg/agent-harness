@@ -1,17 +1,18 @@
 # Spec 05 applicability
 
-Date: 13 July 2026
+Date: 14 July 2026
 
 Original pack baseline: `main@0ea935f8ccaad550d8db0f9ea40324f58bdda569`
 
-Integration precondition: [Spec 01](../specs/01-agent-fabric.md) v0.36,
-[Spec 04](../specs/04-agent-fabric-operational-hardening.md) v1.31 and
-[Spec 05](../specs/05-project-fabric-console.md) v1.13
+Integration precondition: [Spec 01](../specs/01-agent-fabric.md) v0.37,
+[Spec 03](../specs/03-agent-fabric-activation.md) v1.3,
+[Spec 04](../specs/04-agent-fabric-operational-hardening.md) v1.32 and
+[Spec 05](../specs/05-project-fabric-console.md) v1.14
 
 This note overlays the pack's static baseline with the current Spec 05 delivery
 context. It does not rewrite the original findings or promote anything under
 [`proposals/`](proposals/) to accepted policy. Merge it only with or after the
-owned Spec 01 v0.36 and Spec 04 v1.31 amendments.
+four integration-precondition revisions above.
 
 The original `ARTIFACT_MANIFEST.json` and `VALIDATION.*` receipts remain
 byte-valid at import commit `798c800a57176e817a62c0f5690b63a5d7ed25f5`.
@@ -20,16 +21,17 @@ link; current local checks are reported below instead.
 
 ## Delivery decision
 
-The pack does not justify a broad architecture, build-system, retention,
-installer, replay or TUI decomposition inside the current delivery. Those
-changes need a fresh scope and review session. This delivery owns four narrow
-responses:
+The original pack did not itself authorise a broad architecture, build-system,
+retention, installer, replay or TUI decomposition. D-021 now governs those
+larger changes through the comprehensive-review programme and one consolidated
+PR; it does not turn this overlay into implementation evidence. The pack's four
+narrow responses remain:
 
 1. F-005 is fixed by making the root README report 33 portable skills and by
    testing that the reported count equals the live catalogue.
 2. F-006 is narrowed to source truth: the Fabric traceability runbook now names
-   Specs 01 v0.36, 04 v1.31 and 05 v1.13 without claiming their implementation,
-   provider review or human acceptance is complete.
+   Specs 01 v0.37, 03 v1.3, 04 v1.32 and 05 v1.14 without claiming their
+   implementation, provider review or programme verification is complete.
 3. F-007 remains a current close-out check, not an implementation in this
    document branch. The security catalogue selects `sast` for source changes,
    while the shipped static scanner is Python-specific. A TypeScript delivery
@@ -42,9 +44,11 @@ responses:
    with the chair or one serial specialist. Nine topology fixtures and their
    static checker cover the serial/parallel boundary.
 
-The owned v0.36/v1.31 exact-read, portal-custody and lifecycle-receipt
-amendments reinforce F-001 and F-027's existing classifications. They do not
-complete runtime implementation or justify reclassifying another finding.
+D-023 and the v0.37/v1.3/v1.32/v1.14 authority amendments resolve the former
+specification conflict for F-001 and define the authority/worktree contract
+needed by F-029. They do not implement either finding, execute containment or
+make `workspace-write-offline` available. F-027's specification-level
+classification is unchanged; its runtime gates remain pending.
 
 ## Finding matrix
 
@@ -56,7 +60,7 @@ be applied in this delivery without amending a binding specification.
 
 | ID | Class | Current decision and evidence |
 |---|---|---|
-| F-001 | Conflict | Certifying review actions are deliberately read-only in Spec 01 and Spec 05. A managed write profile is future scope requiring an authority/specification amendment. |
+| F-001 | Current | D-023 and Specs 01 v0.37, 03 v1.3, 04 v1.32 and 05 v1.14 accept the two-profile authority design, so the former specification conflict is closed. The direct V2 cutover, compiler/native-settings path and provider containment remain unimplemented; `workspace-write-offline` is inert and certifying review remains `review-readonly`. |
 | F-002 | Deferred | `runtime/agent-fabric/src/core/fabric.ts` remains about 7,400 lines. Bounded-context extraction is a large fresh-session refactor, not a Spec 05 close-out repair. |
 | F-003 | Deferred | Tracked adapter compatibility still mixes portable policy with machine-local paths and digests. Splitting it requires a Spec 03-compatible activation and attestation design. |
 | F-004 | Deferred | Consolidating lifecycle prose into an executable kernel crosses the constitution, skills, validators and specifications. Scope it independently after Spec 05. |
@@ -82,9 +86,9 @@ be applied in this delivery without amending a binding specification.
 | F-024 | Deferred | Cross-platform installer redesign is independent of Spec 05 and needs portability fixtures. |
 | F-025 | Deferred | Constitution-loading and default-style policy affect every harness task and need separate evidence, not a delivery-local edit. |
 | F-026 | Deferred | A generated hook policy and Fabric attestation surface crosses providers and activation; scope it after current provider gates are complete. |
-| F-027 | Resolved | Specs 01 v0.36 and 04 v1.31 now state the same-user/cooperative-control limit and the authentic-runtime threat model. Current portal-custody implementation still needs its own gates. |
+| F-027 | Resolved | Specs 01 v0.37 and 04 v1.32 state the same-user/cooperative-control limit and the authentic-runtime threat model. Current portal-custody implementation still needs its own gates. |
 | F-028 | Deferred | A uniform staged-effect model crosses Git and other external effects. The current typed operator path remains the Spec 05 owner. |
-| F-029 | Deferred | Runtime-verifiable worktree capability envelopes require a broader authority design; the current human-approved worktree envelope remains binding. |
+| F-029 | Current | Spec 01 v0.37 now defines authenticated task ownership, owned-worktree identity and compilation receipts. Runtime/helper enforcement of that exact capability is still pending, so a copied self-attested flag has not yet been proved rejectable. |
 | F-030 | Conflict | Outcome-learning and route economics are nonbinding future work in Spec 05 and must not alter current route selection. |
 | F-031 | Conflict | Operator time-travel is not Spec 05 replay semantics. It requires a new projection/event-retention specification. |
 | F-032 | Conflict | Spec 05 excludes a second UI. A provider-neutral native-UI projection contract requires new approved scope. |
@@ -96,7 +100,7 @@ be applied in this delivery without amending a binding specification.
 | F-038 | Deferred | Contribution guidance is productisation work for the fresh documentation/governance session. |
 | F-039 | Deferred | A governed notes inbox needs promotion, expiry and privacy rules before implementation. |
 | F-040 | Deferred | SBOM, provenance and signing belong to a separately authorised release/supply-chain tranche. Push and release are not authorised in this delivery. |
-| F-041 | Resolved | Specs 03 and 05 already require live provider-backed and human usability evidence in addition to hermetic tests. Those gates remain pending; no fake test is presented as live proof. |
+| F-041 | Resolved | Specs 03 and 05 require live provider-backed and timed usability evidence in addition to hermetic tests. Those evidence runs and D-021 council adjudication remain pending; no fake test is presented as live proof. |
 | F-042 | Deferred | Portable compatibility ranges versus exact local identity pins is coupled to F-003 and needs the same Spec 03 amendment. |
 | F-043 | Deferred | Non-POSIX IPC is a portability architecture decision; current specifications deliberately use local Unix sockets. |
 | F-044 | Deferred | Skill-description prose constraints are harness-wide routing policy and need trigger-quality evaluation before change. |
@@ -131,7 +135,7 @@ The documentation/test overlay passed these focused checks in the isolated
 - matrix check: 46 classified finding rows with no duplicate ID.
 
 These checks validate this overlay only. They are not Spec 05 runtime, provider,
-security or human-acceptance evidence.
+security or programme-acceptance evidence.
 
 F-018's separately owned patch was verified at
 `97d74d9dc92fe4073b2f42f97203ad1655ec9d0e`:
@@ -150,11 +154,11 @@ are complete.
 
 ## Evidence boundary and review reconciliation
 
-The current run directory `.agent-run/AFAB-004` is prohibited for this task and
-was not read. Its security receipt, live provider evidence and acceptance map
-therefore remain unverified here. The chair must check that evidence through an
-authorised gate before delivery close-out. This note neither passes nor fails a
-current `sast` claim.
+The run directory named by the charter's standing prohibition was not accessed
+and cannot supply evidence to this programme. Security, live-provider and
+acceptance evidence must be produced through an authorised current run without
+touching that directory. This note neither passes nor fails a current `sast`
+claim.
 
 The Claude review identified the F-007 scope mismatch as a current candidate and
 the F-005/F-006 truth defects as narrow repairs. The Cursor review treated the

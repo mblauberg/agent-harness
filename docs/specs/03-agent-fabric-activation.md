@@ -1,10 +1,16 @@
 # Agent fabric activation and operations
 
-Status: Base activation implemented; v1.2 capability/effective-route amendment implementation and final human acceptance pending
-Version: 1.2
-Date: 13 July 2026
+Status: Base activation implemented; v1.3 authority-profile alignment freeze
+candidate, implementation verification pending
+Version: 1.3
+Date: 14 July 2026
 Decision owner: Human maintainer
 Approval: Direct instruction to implement, activate and provider-smoke all listed capabilities, with quota use authorised
+
+Version 1.3 subordinates activation to the closed Spec 01 authority-profile
+contract. Activation recognises only `review-readonly` and the currently inert
+`workspace-write-offline`; it cannot create a third profile, silently downgrade
+one or make writes available without the exact containment receipt.
 
 Version 1.2 closes effective-configuration identity, subject lineage and
 permission semantics across activation, smoke and provider actions. It permits
@@ -20,11 +26,12 @@ Promote the coordination-only agent fabric into a safely activated local model-e
 ## Required behaviour
 
 1. Every activated adapter is bound to verified wrapper closure, upstream executable or package, protocol/schema and model-family constraints.
-2. Provider work uses the admitted absolute working directory and exact matched
-   permission profile. Generic work may use write tools/edit modes only when its
-   task authority and matched profile explicitly grant them; approval bypasses,
-   extra roots and uncontrolled provider/model substitutions remain forbidden.
-   Certifying review always requires an enforced `read-only` profile.
+2. Provider work uses the admitted absolute working directory and the exact
+   admitted Spec 01 `authorityProfile`. Generic work may use write tools/edit
+   modes only under a satisfied `workspace-write-offline` compilation receipt
+   after its per-provider containment gate; approval bypasses, extra roots and
+   uncontrolled provider/model substitutions remain forbidden. Certifying
+   review always requires `review-readonly` plus enforced read-only capability.
 3. Malformed, drifted or ambiguous provider responses fail closed before state is accepted.
 4. Kiro uses a real, version-pinned ACP client with bounded framing, capability negotiation, session lifecycle and read-only tool policy.
 5. Activation is staged and reversible. One adapter failure cannot disable coordination or corrupt another adapter's journal.
@@ -77,7 +84,11 @@ capability snapshot
 binds the activated executable/package, wrapper closure, adapter contract,
 host/version, model catalogue, raw effort values, raw native-mode values,
 context boundary claims, orchestration bounds and enforceable permission
-source. The
+source. Its closed `authorityProfileSupport` rows also classify every advertised
+model/native-mode/profile tuple as `enforceable` or `unavailable`, bind the
+native-settings schema and fix filesystem/tool-egress/secret/external-effect
+shape. Capability support is necessary but never substitutes for task authority
+or the current Spec 01 local-attestation/containment row. The
 snapshot source is exactly `runtime-discovery` or
 `version-pinned-conformance`. A conformance fixture cannot be reported as
 runtime discovery. A `source/kind: unavailable` snapshot is persisted negative
@@ -87,10 +98,12 @@ rewriting prior receipts.
 
 `safety.enforcedReadOnly` is a capability fact, not a global permission mode.
 `true` is mandatory before the adapter/profile pair can advertise certifying
-review. `false` may activate generic answer-bearing work only when the exact
-permission profile, task authority and launch envelope admit the requested
-writes. `unknown` cannot certify review and cannot satisfy any task that depends
-on enforced read-only. No route gains write authority from activation alone.
+review, together with an enforceable `review-readonly` support row. `false` may activate generic answer-bearing work, but cannot admit a
+write unless the exact Spec 01 `workspace-write-offline` contract, task
+authority, owned-worktree binding, local attestation and per-provider
+containment gate all succeed. `unknown` cannot certify review and cannot satisfy
+any task that depends on enforced read-only. No route gains write authority
+from activation alone, and activation defines no authority-profile fallback.
 
 Every activation, provider-backed smoke and answer-bearing provider action
 stores one closed
@@ -103,7 +116,9 @@ adapterEffectiveConfigurationV1:
   configurationRevision: positive-contiguous-integer
   adapterId: exact-adapter-id
   adapterContractDigest: sha256-prefixed-digest
+  hostIdentityDigest: sha256-prefixed-digest
   executableIdentityDigest: sha256-prefixed-digest
+  nativeSettingsSchemaDigest: sha256-prefixed-digest
   capabilitySnapshotRef: capabilitySnapshotRefV1
   subjectKind: activation | provider-smoke | provider-action
   subjectRef:
@@ -133,7 +148,8 @@ adapterEffectiveConfigurationV1:
 The object and each subject arm are closed; field paths are sorted and unique.
 Subject kind selects exactly one matching ref arm. Activation requires null
 `activationConfigurationRef`; smoke/action require the exact current activation
-configuration for the same adapter/contract/executable and cannot cite another
+configuration for the same adapter/contract/host/executable/native-settings
+schema and cannot cite another
 subject. `subjectRefDigest` is SHA-256 of RFC 8785 JCS of the selected closed
 subject-ref arm. `subjectKind` plus that exact selected ref is the sole subject
 identity; there is no caller-authored parallel ID. Per adapter, one activation
@@ -145,6 +161,18 @@ those discriminator-specific identities independently of the digest.
 only that field omitted. Capability instance/body, requested/effective,
 permission and discovery-surface identities equality-bind the shared route and
 launch evidence.
+`permissionProfileDigest` remains the digest of the compiled provider-native
+permission/settings projection. It is not an authority-profile ID and cannot
+select or widen the closed Spec 01 profile. The correlated
+`providerAuthorityCompilationReceiptV1` owns requested/effective
+`authorityProfile`, compiler policy and native-settings identity. For a
+provider-action subject, `permissionProfileDigest` exactly equals that admitted
+receipt's `nativeSettingsDigest`; the effective configuration, action, route
+and every dispatch equality-bind the same pair/digest. There is no wrapper,
+second hash algorithm or independently caller-selected permission digest. The
+same join also binds host identity, executable identity, capability body and
+native-settings schema; drift in any one requires a new action/attestation and
+cannot reuse a Step-3 acceptance.
 Host-global settings remain user-owned. Fabric generates only a minimal
 per-run overlay inside existing authority, records every unsupported field and
 does not silently persist global defaults or hooks. Smoke/action rows record

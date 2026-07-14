@@ -1,0 +1,305 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "F023-09",
+      "family": "01-agent-fabric",
+      "frozenRange": [3803, 3807],
+      "ownerModulePath": "docs/specs/01-agent-fabric/31-f023-09-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "one-run-per-session", "marker": "at most one non-terminal coordination run per project session"},
+        {"key": "one-active-chair", "marker": "at most one `active` chair lease per run"},
+        {"key": "bounded-predecessor-coexistence", "marker": "bounded takeover/recovery transaction"},
+        {"key": "predecessor-revocation", "marker": "every non-current predecessor is revoked"},
+        {"key": "membership-consistency", "marker": "membership agrees with\nthe current lease"},
+        {"key": "duplicate-current-rejection", "marker": "ambiguous duplicate current runs are rejected without\nmutation"}
+      ]
+    },
+    {
+      "id": "F023-02",
+      "family": "01-agent-fabric",
+      "frozenRange": [5829, 5844],
+      "ownerModulePath": "docs/specs/01-agent-fabric/32-f023-02-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "base-success", "marker": "unnegotiated base success"},
+        {"key": "extension-success", "marker": "negotiated exact-extension success"},
+        {"key": "negative-frames", "marker": "negotiated-missing-field, unnegotiated-extra-field and malformed-summary"},
+        {"key": "feature-admission", "marker": "Unknown bounded optional feature names are ignored only at"},
+        {"key": "closed-validation", "marker": "65-combined-entry, 64-plus-64 entry, cross-array"},
+        {"key": "revision-semantics", "marker": "advance global revision exactly as defined"},
+        {"key": "stale-page", "marker": "force\n  resnapshot for a stale page"},
+        {"key": "polling-observation", "marker": "pending-to-terminal state without an unrelated Fabric event"},
+        {"key": "ui-stability", "marker": "resnapshot preserve stable UI state and bounded load"},
+        {"key": "attention-nonmutation", "marker": "mutates its Attention\n  item"}
+      ]
+    },
+    {
+      "id": "F023-10",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [350, 356],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/46-f023-10-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "protocol-owner", "marker": "Spec 01 owns the protocol entities and atomic coordination invariants"},
+        {"key": "persistence-owner", "marker": "spec owns their current persistence"},
+        {"key": "bootstrap-owner", "marker": "lock-safe on-demand daemon bootstrap"},
+        {"key": "liveness-stop-owner", "marker": "global liveness and stop predicates"},
+        {"key": "outbox-recovery-owner", "marker": "notification outbox and crash recovery"}
+      ]
+    },
+    {
+      "id": "F023-04",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [990, 1008],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/48-f023-04-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "git-semantics-owner", "marker": "owns `GitActionAuthorisation` and the observable Git\nsemantics"},
+        {"key": "current-persistence-owner", "marker": "This section owns their current persistence, the one production Git"},
+        {"key": "effect-and-recovery-owner", "marker": "the one production Git\neffect owner and crash recovery"},
+        {"key": "effect-authority-boundary", "marker": "does not authorise a Git mutation, push"},
+        {"key": "git-grant-binding", "marker": "immutable revisioned Git grants and a one-to-one\nGit binding"},
+        {"key": "single-journal-state-machine", "marker": "neither a second journal nor a parallel state machine"},
+        {"key": "run-authority-columns", "marker": "The current `runs` relation has `authority_revision`"},
+        {"key": "authority-history-shape", "marker": "`run_authority_revisions(project_session_id, coordination_run_id"}
+      ]
+    },
+    {
+      "id": "F023-11",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [1096, 1102],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/49-f023-11-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "hash-mirror-only", "marker": "canonical hash mirror, not the enforcement owner"},
+        {"key": "normalised-children", "marker": "normalised closed child rows for concrete operation"},
+        {"key": "remote-and-path-shape", "marker": "registered remote identities/revisions/generations/target digests"},
+        {"key": "closed-operation-enum", "marker": "closed enumeration and reject every gate-only value"},
+        {"key": "remote-composite-fk", "marker": "bind each remote child to `git_remote_registrations`"},
+        {"key": "empty-means-unavailable", "marker": "Empty child sets mean\nunavailable for that category"}
+      ]
+    },
+    {
+      "id": "F023-12",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [1394, 1401],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/50-f023-12-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "custody-state-set", "marker": "`operator_effect_custody.state` set includes `conflict` and\n`quarantined`"},
+        {"key": "admission-state-set", "marker": "`operation_admissions.state` includes `conflict`, `ambiguous`"},
+        {"key": "canonical-owner", "marker": "states of the canonical owners, not parallel\njournals"},
+        {"key": "exact-git-join", "marker": "exact Git\nbinding/admission/reservation join exists"},
+        {"key": "closed-row-combinations", "marker": "permit only\nthe following row combinations"},
+        {"key": "one-transaction", "marker": "update every named row in one transaction"}
+      ]
+    },
+    {
+      "id": "F023-13",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [1835, 1848],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/51-f023-13-current.md",
+      "lockstepWith": ["F023-15"],
+      "obligations": [
+        {"key": "path-value-digest-rejection", "marker": "rejects malformed/non-canonical paths,\nunknown effect, variant, recipe or state values, invalid digests"},
+        {"key": "authority-profile-remote-rejection", "marker": "missing run\nauthority history, missing execution-profile or target-bound remote records"},
+        {"key": "grant-revision-and-constraints", "marker": "non-contiguous grant revisions, two active grant revisions, missing normalised\nconstraint children"},
+        {"key": "provenance-scope-binding", "marker": "issuance provenance, cross-project/session/run references and an existing\ngeneric Git custody row without a complete typed binding"},
+        {"key": "lower-valid-revision", "marker": "issuing revision lower than the current orchestration revision is not stale"},
+        {"key": "gate-and-four-owner-check", "marker": "gate-operation association, any mismatch in the four-owner Git state table"},
+        {"key": "reservation-resolution-lock-check", "marker": "duplicate active common-directory reservations, a partial/duplicate human\nresolution and unowned/native Git locks"},
+        {"key": "no-mutation", "marker": "Incompatible persisted data is preserved without mutation"},
+        {"key": "zero-inference", "marker": "validation infers no grant, draft, target, profile, admission, resolution or\nhuman gate"}
+      ]
+    },
+    {
+      "id": "F023-14",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [1850, 1858],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/52-f023-14-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "atomic-install", "marker": "foreign keys, indexes and triggers install in one\ntransaction in the fresh baseline"},
+        {"key": "sole-operation-join", "marker": "operation-ID join is the only\n`operation_gate_block` trigger"},
+        {"key": "live-trigger-set", "marker": "positive-containment, live-authority, same-run and global-\nrevision triggers are live in the current baseline"},
+        {"key": "verified-restore", "marker": "verified-restore procedure under section 7 and preserves these invariants"}
+      ]
+    },
+    {
+      "id": "F023-15",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [1860, 1866],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/53-f023-15-current.md",
+      "lockstepWith": ["F023-13"],
+      "obligations": [
+        {"key": "current-integrity-rollback", "marker": "current-baseline integrity and atomic-install rollback"},
+        {"key": "composite-fk-and-immutability", "marker": "every composite\n  foreign key, immutable draft/binding/resolution content"},
+        {"key": "grant-revision-exclusivity", "marker": "contiguous grant\n  revisions, one-active-revision, exclusive grant/gate choice"},
+        {"key": "four-owner-combinations", "marker": "every four-\n  owner state combination"},
+        {"key": "reservation-and-indexes", "marker": "one active reservation per common directory and\n  indexed current-grant/draft/recovery queries"}
+      ]
+    },
+    {
+      "id": "F023-16",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [2089, 2093],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/55-f023-16-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "quarantine-without-guess", "marker": "explicitly quarantined and\nunprojected rather than crashing a codec or guessing provenance"},
+        {"key": "exact-registry-id", "marker": "Every receipt\nand intake binding references an exact registry ID"},
+        {"key": "same-scope-active-row", "marker": "foreign key and trigger proving its repeated path/digest equals one active\nsame-scope registry row"}
+      ]
+    },
+    {
+      "id": "F023-17",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [2095, 2100],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/56-f023-17-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "accepted-scope-state", "marker": "store an accepted-scope registry ID and closed\nstate"},
+        {"key": "accepted-scope-ref-rule", "marker": "accepted revision requires the one explicit registered\n`acceptedScopeRef`; other states forbid one"},
+        {"key": "candidate-rejection", "marker": "Zero, multiple or quarantined\ncandidates are rejected"},
+        {"key": "no-first-ref", "marker": "runtime never chooses the first ref"},
+        {"key": "project-revision-atomicity", "marker": "increments the project revision in the same transaction"}
+      ]
+    },
+    {
+      "id": "F023-18",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [2108, 2115],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/57-f023-18-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "stage-before-publish", "marker": "stages every normalised row and binding before atomic\npublication"},
+        {"key": "validation-probes", "marker": "foreign-key/integrity checks, identity/count\nreconciliation, canonical path/digest queries and registry-trigger probes"},
+        {"key": "fault-boundaries", "marker": "Fault injection at every staging, schema-build, binding and catalogue-record\nboundary"},
+        {"key": "all-or-nothing-publication", "marker": "incompatible prior state remains unchanged or the\ncomplete current schema is published"},
+        {"key": "capability-after-validation", "marker": "`artifact-content-read.v1` advertise only after validation passes"},
+        {"key": "console-owner-boundary", "marker": "Spec 05\nowns all Console paging, disclosure, acceptance and viewport behaviour"},
+        {"key": "daemon-capability-owner", "marker": "spec owns only the daemon/client capability boundary"}
+      ]
+    },
+    {
+      "id": "F023-19",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [2252, 2261],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/58-f023-19-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "session-run-binding", "marker": "gate's exact project session and coordination run"},
+        {"key": "operation-target-revision", "marker": "`operationTarget` and current dependency\nrevision"},
+        {"key": "task-owner-gate-join", "marker": "joins the operation kind to the gate's current `scoped_gate_tasks` row"},
+        {"key": "task-subtree-separation", "marker": "For `{kind: run}`, task/subtree gates\nnever match"},
+        {"key": "run-release-scope", "marker": "Run/release gates remain bounded to their exact run"},
+        {"key": "same-service-predicate", "marker": "Preparation\ntriggers and service checks use the same predicate"},
+        {"key": "negative-cases", "marker": "target-less call,\nsame-kind sibling substitution, stale graph or cross-run task cannot authorise"}
+      ]
+    },
+    {
+      "id": "F023-06",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [2418, 2440],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/59-f023-06-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "atomic-session-run-cas", "marker": "crash\nrollback exposes neither half"},
+        {"key": "work-admission", "marker": "requires exact active\nrequired run and current-chair membership"},
+        {"key": "recovery-custody", "marker": "typed recovery custody commits or abandons the loss"},
+        {"key": "closed-supersession", "marker": "closed system-supersession\ndisposition"},
+        {"key": "no-effect-authority", "marker": "consequential-operation authority check"},
+        {"key": "typed-cause", "marker": "closed\n`{kind, ref}` union"},
+        {"key": "exact-feature", "marker": "exact\n`gate-system-supersession.v1` result feature"},
+        {"key": "zero-mutation-rejection", "marker": "typed feature unavailability and\nzero mutation before projection"},
+        {"key": "transactional-revisions", "marker": "owning session\nmembership/session revisions in one transaction"},
+        {"key": "replay-and-rollback", "marker": "committed revisions without a second increment"}
+      ]
+    },
+    {
+      "id": "F023-07",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [2459, 2481],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/60-f023-07-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "singleton-topology", "marker": "at most one non-terminal run per project\nsession"},
+        {"key": "singleton-indexes", "marker": "partial unique active-chair-lease\nindex"},
+        {"key": "membership-source-truth", "marker": "membership is current\nonly when it agrees with source truth"},
+        {"key": "single-revision-advance", "marker": "session revision exactly once"},
+        {"key": "reject-inconsistent-state", "marker": "fails without mutation and requires explicit recovery"},
+        {"key": "zero-delivery-fixture", "marker": "fixtures reject zero-delivery messages"},
+        {"key": "expired-abandoned-delivery-fixture", "marker": "expired or abandoned delivery"},
+        {"key": "cancelled-degraded-task-fixture", "marker": "cancelled or degraded tasks"},
+        {"key": "missing-chair-fixture", "marker": "missing current\nchair membership"},
+        {"key": "superseded-predecessor-fixture", "marker": "superseded predecessor leases without mutation"},
+        {"key": "retirement-evidence", "marker": "persist immutable bridge-retirement evidence"},
+        {"key": "retirement-binding", "marker": "terminal\nkind/reference, exact owner command or recovery and timestamp"},
+        {"key": "retirement-preconditions", "marker": "revoked current chair\nlease/capability and archived agent are rechecked"},
+        {"key": "child-clear", "marker": "with provider and capability fields cleared"},
+        {"key": "startup-exclusion", "marker": "Startup excludes retired launched bridges"},
+        {"key": "volatile-cleanup", "marker": "best-effort closes and removes\nvolatile transport/action/generation mappings"}
+      ]
+    },
+    {
+      "id": "F023-20",
+      "family": "04-agent-fabric-operational-hardening",
+      "frozenRange": [11100, 11127],
+      "ownerModulePath": "docs/specs/04-agent-fabric-operational-hardening/61-f023-20-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "every-answer-bearing-action", "marker": "Every current `provider_action_routes` row for an answer-bearing action stores"},
+        {"key": "nonnull-capability-config", "marker": "non-null `capability_snapshot_generation`, `capability_snapshot_digest`"},
+        {"key": "authority-and-approval", "marker": "`coordination_run_id`, `authority_id`, `authority_envelope_digest`,\n`approval_evidence_digest`, `task_ownership_digest`"},
+        {"key": "nullable-identity-split", "marker": "`workspace_root_identity_digest`, nullable `worktree_identity_digest`, nullable\n`private_temp_root_identity_digest`"},
+        {"key": "profile-attestation-executable", "marker": "`provider_control_plane_exception_digest`, `local_attestation_digest`,\n`executable_identity_digest`"},
+        {"key": "route-harness-context", "marker": "`deployed_route_admission_digest`, `route_policy_revision`, `harness_revision`,\n`harness_digest`, `context_policy_revision`, `context_policy_digest`"},
+        {"key": "discovery-fields", "marker": "`discovery_surface_evidence_id`,\n`discovery_surface_evidence_revision` and `discovery_surface_digest`"},
+        {"key": "exact-route-foreign-keys", "marker": "keys bind the exact adapter/generation/digest"}
+      ]
+    },
+    {
+      "id": "F023-21",
+      "family": "05-project-fabric-console",
+      "frozenRange": [105, 120],
+      "ownerModulePath": "docs/specs/05-project-fabric-console/08-f023-21-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "spec01-owner", "marker": "Spec 01 owns coordination, authority, provider-session, project-session"},
+        {"key": "spec02-owner", "marker": "Spec 02 owns the adaptive harness and delivery lifecycle"},
+        {"key": "spec03-owner", "marker": "Spec 03 owns model-adapter activation and Herdr observation"},
+        {"key": "spec04-owner", "marker": "Spec 04 owns protocol, trust, operational hardening, lock-safe bootstrap"},
+        {"key": "spec05-owner", "marker": "This spec owns the project Console, operator projection, adaptive session"},
+        {"key": "canonical-owners", "marker": "Specs 01 and 04 are the accepted canonical owners for those requirements"},
+        {"key": "product-invariant-split", "marker": "Product requirements remain here; transaction, schema and daemon invariants\nremain with their canonical owners"}
+      ]
+    },
+    {
+      "id": "F023-08",
+      "family": "05-project-fabric-console",
+      "frozenRange": [1334, 1367],
+      "ownerModulePath": "docs/specs/05-project-fabric-console/09-f023-08-current.md",
+      "lockstepWith": [],
+      "obligations": [
+        {"key": "resize", "marker": "dynamic terminal resizing and stable operator state"},
+        {"key": "evidence-and-sessions", "marker": "bounded evidence UX and exact multi-session selection"},
+        {"key": "answer-bearing-review", "marker": "answer-bearing Fabric tasks for fresh external review"},
+        {"key": "typed-actions", "marker": "typed revision-bound review/confirm paths for every shipped Pause/Resume"},
+        {"key": "no-action-placeholder", "marker": "no required action\n   is an implementation placeholder"},
+        {"key": "dispatch-read", "marker": "durable dispatch/read completion within the public protocol deadline"},
+        {"key": "routing-lineage", "marker": "trusted-router admission and daemon-derived review lineage"},
+        {"key": "bundle-completion", "marker": "one complete immutable bundle, linear slot heads, frozen safe results"},
+        {"key": "lifecycle-custody", "marker": "asynchronous lifecycle-rotation custody, durable target preparation"},
+        {"key": "supervision-and-pairs", "marker": "authenticated crash-safe Unix-socket supervision, canonical provider action"},
+        {"key": "projections", "marker": "capability, annotation, receipt and context-telemetry projections"},
+        {"key": "failure-capacity-recovery", "marker": "exact failure receipts, terminal sequence/cut, paged-finding capacity"},
+        {"key": "owned-wires", "marker": "topology/current, route/capability, actual-review-identity and"},
+        {"key": "authority-boundary", "marker": "does not\nitself authorise material additions beyond v1.0"},
+        {"key": "no-console-policy", "marker": "The Console owns neither a codec nor policy"},
+        {"key": "effect-boundary", "marker": "Git push,\nrelease, deployment and other separately gated effects remain"}
+      ]
+    }
+  ]
+}

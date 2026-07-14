@@ -1,5 +1,13 @@
 # Agent Harness comprehensive review pack
 
+## Live implementation
+
+The autonomous implementation now runs under the [chair charter](CHAIR-CHARTER.md)
+and [kickoff](KICKOFF.md). Its crash-safe current state, work queue and curated
+diagnostic evidence are indexed from the [implementation lab](lab/README.md).
+The historical review-pack baseline below remains provenance, not current
+execution status.
+
 **Repository:** `mblauberg/agent-harness`
 **Baseline:** `main` at `0ea935f8ccaad550d8db0f9ea40324f58bdda569`
 **Review date:** 13 July 2026

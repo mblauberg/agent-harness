@@ -1,15 +1,22 @@
 # EFFORT: capability-compiled execution authority
 
-Updated: 13 July 2026
-Status: active. Lane B is implemented, locally verified and authorised for
-promotion through PR #7 after rebasing over current `main`. Lane D and Rust CI
-reconciliation remain deferred. Lane C characterisation goldens are integrated;
-V2 cutover remains blocked on Lane A integration and a non-overlapping runtime
-baseline.
+Updated: 14 July 2026
+Status: active. D-023 council-accepted the capability-authority design in Specs
+01 v0.37, 03 v1.3, 04 v1.32 and 05 v1.14. That design remains inert: the
+structural family split is integrated and dual-primary certified under D-024;
+runtime implementation, exact Step-3 containment execution, W017 semantic
+consolidation, Lane C/D and Rust CI reconciliation remain pending. Lane B
+evidence is retained, but D-021 routes every programme change through the
+single `comprehensive-review` PR.
+
+F-023 is only partially resolved. The default family loader preserves exact
+frozen authority; its filtered topical candidate is non-binding. W017 owns the
+remaining net-current consolidation and equivalence proof.
 
 ## Destination
 
-Deliver ADR [0002](../adr/0002-capability-compiled-execution-authority.md):
+Deliver ADR [0002](../adr/0002-capability-compiled-execution-authority.md)
+under D-023's accepted safety deltas:
 provider-neutral authority profiles compiled into native settings so managed
 headless sessions can implement inside one owned worktree, with containment
 proven adversarially before any write profile ships. Direct V2 cutover, no
@@ -29,17 +36,24 @@ spec-edit) leg, digest-bound to the ADRs and this map.
 - [ ] Lane A — spec authority: fresh anchored amendment audit; repair the nine
   P1 leads from
   [HANDOFF-2026-07-13-project-fabric-console.md](../handoffs/HANDOFF-2026-07-13-project-fabric-console.md);
-  freeze Specs 01 v0.36/04 v1.31; spec-family split (≤1,000-line modules,
-  `check_spec_families.py` gate); draft and **council-resolve** the write-profile
-  spec amendment (Specs 01/05 currently mandate read-only; acceptance is now
-  LLM-resolved per the charter, no human stop)
+  freeze Specs 01 v0.37, 03 v1.3, 04 v1.32 and 05 v1.14; spec-family split
+  (≤1,000-line modules, `check_spec_families.py` gate); and integrate the
+  **council-accepted** write-profile amendment. The amendment adds no runtime
+  write authority: certifying stays read-only and the generic profile stays
+  inert until its exact Step-3 provider tuple passes.
   - [x] Anchored amendment audit with a durable receipt
     ([`docs/specs/amendment-audit-2026-07-13.md`](../specs/amendment-audit-2026-07-13.md));
     8/9 leads substantiated (lead 4 chair-adjudicated, its plan-equality
     sub-clause refuted), 10 missed defects found, 11 reproduced by fixtures
   - [x] Complete repairs landed: MF04-1 (P0), MF04-2, lead 9, lead 2 FK-mismatch
-  - [ ] Structural repairs (leads 1,3,4,5,6,7,8; lead-2 evidence-carry;
-    MF04-3/4/5/6; MF01-1/3/4), freeze, spec-family split, write-profile amendment
+  - [x] Structural repairs and D-023 authority semantics frozen in the v0.37/
+    v1.3/v1.32/v1.14 candidates; no runtime implementation claimed
+  - [x] Structural spec-family split and deterministic family gates under D-024
+    (exact frozen binding authority; filtered topical stream is non-binding)
+  - [ ] W017 — consolidate the focused residual superseded/mixed clauses into
+    net-current modules with a hash-bound supersession map and net-effective-
+    equivalence proof; F-023 remains open until this passes crucial review
+  - [x] D-024 structural integration and dual-primary certification
 - [x] Lane B — foundations/build: root npm workspace + single lockfile
   (F-011; fixes `@local/agent-fabric-protocol` resolution and the red CI
   legs); compact protocol schema generation under the 5 MiB release gate;
@@ -59,7 +73,8 @@ spec-edit) leg, digest-bound to the ADRs and this map.
     2026-07-13, commit `6748ceb`)
   - [ ] Atomic `AuthorityEnvelopeV2` direct cutover — BLOCKED; resume from
     [HANDOFF-2026-07-13-capability-profiles-v2.md](../handoffs/HANDOFF-2026-07-13-capability-profiles-v2.md)
-    only after the handoff's A/B/runtime gates pass
+    only after Lane A's family/integration gates and the handoff's runtime gate
+    pass
 - [ ] Lane D — runtime reconciliation: repair the failing Fabric test families
   via TDD after Lane B integration. Reproduction on the Lane B rebase over
   `main@24ceb83` passed 149 Fabric files/1,054 tests and failed 30 files/162
@@ -89,9 +104,10 @@ spec-edit) leg, digest-bound to the ADRs and this map.
   Lane B's build graph and prove it on both hosted targets.
 - [ ] Step 2 — pure admission extraction into `AuthorityCompiler`
   (read-only behaviour unchanged); starts after Lane C
-- [ ] Step 3 — one-provider write pilot behind the pre-approved adversarial
-  containment spike (worktree/symlink/git/network/settings/secret/lifecycle
-  matrix; provider chosen by evidence)
+- [ ] Step 3 — execute the fixed adversarial containment matrix and admit only
+  an exact passing provider tuple (worktree/symlink/git/network/settings/
+  secret/lifecycle; provider chosen by evidence). Until then
+  `workspace-write-offline` is unavailable.
 - [ ] Step 4 — second provider to the same gate, then provider-action
   structural extraction from the merged `ProviderActionDispatchInputV1` shape
 
@@ -153,8 +169,9 @@ JSON
 - The first accepted artifact (`2db4f5a`) was pushed to draft PR
   [#7](https://github.com/mblauberg/provenant/pull/7). Promotion stopped when
   remote `main` advanced, invalidating its exact ancestry and acceptance
-  binding. The human explicitly re-authorised conflict resolution and merge of
-  the rebased artifact on 13 July 2026; PR #7 is the canonical promotion state.
+  binding. D-021 now supersedes that separate promotion route: the retained
+  Lane B change/evidence must travel only through the consolidated
+  `comprehensive-review` PR.
 
 ## Deferred registry (decided, not scheduled here)
 
@@ -197,6 +214,7 @@ each decision (chair discretion or council vote) and recording it in the
   standing authority; the charter's single-branch push + PR authority is the
   sanctioned path from here.
 - Spec-05 close-out items (live MCP round-trips, four-family review, 80×24
-  usability evaluation, final acceptance) remain owned by
+  usability evaluation and council adjudication) remain owned by
   [EFFORT-project-fabric-console.md](EFFORT-project-fabric-console.md), executed
-  under the same charter governance.
+  under the same charter governance. The consolidated PR review is the only
+  human gate.
