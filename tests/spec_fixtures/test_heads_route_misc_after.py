@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Executable SQLite oracle for Lane A heads, routes, and MF repairs.
 
-The schema is an isolated transliteration of the keys, checks, update guards,
-and owner predicates needed by Spec 04 sections 9.21.4, 9.21.6, 9.22, and
-9.23.  It is deliberately not a substitute for the complete generated
-baseline schema.
+The main schema is an isolated transliteration of the keys, checks, update
+guards, and owner predicates needed by Spec 04 sections 9.21.4, 9.21.6, 9.22,
+and 9.23.  The adapter-integrity test additionally executes the two exact
+normative table definitions it covers. This remains deliberately narrower than
+the complete generated baseline schema.
 
 Run:
     python3 tests/spec_fixtures/test_heads_route_misc_after.py
@@ -15,10 +16,19 @@ from __future__ import annotations
 import sqlite3
 import unittest
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 
 CASES_RUN = 0
+ROOT = Path(__file__).resolve().parents[2]
+SPEC_04 = (ROOT / "docs/specs/04-agent-fabric-operational-hardening.md").read_text()
+
+
+def normative_table_sql(table: str) -> str:
+    start = SPEC_04.index(f"\n{table}(") + 1
+    end = SPEC_04.index("\n)\n", start) + 2
+    return f"CREATE TABLE {SPEC_04[start:end]};"
 
 
 SCHEMA = r"""
@@ -245,6 +255,8 @@ CREATE TABLE adapter_effective_configurations(
   configuration_id TEXT NOT NULL,
   configuration_revision INTEGER NOT NULL CHECK(configuration_revision>=1),
   adapter_id TEXT NOT NULL,
+  adapter_contract_digest TEXT NOT NULL,
+  executable_identity_digest TEXT NOT NULL,
   subject_kind TEXT NOT NULL CHECK(subject_kind IN
     ('activation','provider-smoke','provider-action')),
   subject_activation_id TEXT,
@@ -265,7 +277,7 @@ CREATE TABLE adapter_effective_configurations(
   PRIMARY KEY(configuration_id,configuration_revision),
   UNIQUE(configuration_id,configuration_revision,configuration_digest),
   UNIQUE(adapter_id,subject_kind,configuration_id,configuration_revision,
-    configuration_digest),
+    configuration_digest,adapter_contract_digest,executable_identity_digest),
   UNIQUE(configuration_digest),
   UNIQUE(subject_action_adapter_id,subject_action_id,configuration_id,
     configuration_revision,configuration_digest,capability_body_digest,
@@ -273,10 +285,12 @@ CREATE TABLE adapter_effective_configurations(
     discovery_surface_evidence_revision,discovery_surface_digest),
   FOREIGN KEY(adapter_id,activation_configuration_subject_kind,
       activation_configuration_id,activation_configuration_revision,
-      activation_configuration_digest)
+      activation_configuration_digest,adapter_contract_digest,
+      executable_identity_digest)
     REFERENCES adapter_effective_configurations(
       adapter_id,subject_kind,configuration_id,configuration_revision,
-      configuration_digest),
+      configuration_digest,adapter_contract_digest,
+      executable_identity_digest),
   FOREIGN KEY(adapter_id,subject_activation_id,subject_activation_revision)
     REFERENCES adapter_activation_subjects(
       adapter_id,activation_id,activation_revision),
@@ -877,15 +891,18 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
         self.db.execute(
             """INSERT OR IGNORE INTO adapter_effective_configurations(
                  configuration_id,configuration_revision,adapter_id,
+                 adapter_contract_digest,executable_identity_digest,
                  subject_kind,subject_activation_id,subject_activation_revision,
                  capability_body_digest,permission_profile_digest,
                  discovery_surface_evidence_id,
                  discovery_surface_evidence_revision,
                  discovery_surface_digest,configuration_digest)
-               VALUES(?,1,?,'activation',?,1,?,?,?,?,?,?)""",
+               VALUES(?,1,?,?,?,'activation',?,1,?,?,?,?,?,?)""",
             (
                 f"activation-config-{adapter}",
                 adapter,
+                f"contract-{adapter}",
+                f"executable-{adapter}",
                 f"activation-{adapter}",
                 f"body-{adapter}",
                 f"permission-{adapter}",
@@ -912,6 +929,7 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
         self.db.execute(
             """INSERT INTO adapter_effective_configurations(
                  configuration_id,configuration_revision,adapter_id,
+                 adapter_contract_digest,executable_identity_digest,
                  subject_kind,subject_action_adapter_id,subject_action_id,
                  activation_configuration_id,
                  activation_configuration_revision,
@@ -921,10 +939,12 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
                  discovery_surface_evidence_id,
                  discovery_surface_evidence_revision,
                  discovery_surface_digest,configuration_digest)
-               VALUES(?,1,?,'provider-action',?,?,?,1,?,'activation',?,?,?,?,?,?)""",
+               VALUES(?,1,?,?,?,'provider-action',?,?,?,1,?,'activation',?,?,?,?,?,?)""",
             (
                 f"config-{action}",
                 adapter,
+                f"contract-{adapter}",
+                f"executable-{adapter}",
                 adapter,
                 action,
                 f"activation-config-{adapter}",
@@ -1422,6 +1442,7 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
             ("version-pinned-conformance", "unavailable"),
             ("unavailable", "available"),
             ("future-source", "available"),
+            (None, "available"),
             ("runtime-discovery", "future-kind"),
         )
         for source, kind in invalid:
@@ -1460,6 +1481,126 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
         )
         self.assert_foreign_keys_clean()
 
+    def test_normative_adapter_integrity_ddl_executes_exactly(self) -> None:
+        db = sqlite3.connect(":memory:", isolation_level=None)
+        self.addCleanup(db.close)
+        db.execute("PRAGMA foreign_keys=ON")
+        db.executescript(
+            """
+            CREATE TABLE artifacts(
+              artifact_id TEXT NOT NULL,
+              revision INTEGER NOT NULL,
+              PRIMARY KEY(artifact_id,revision)
+            );
+            CREATE TABLE discovery_surface_manifests(
+              evidence_id TEXT NOT NULL,
+              evidence_revision INTEGER NOT NULL,
+              PRIMARY KEY(evidence_id,evidence_revision)
+            );
+            CREATE TABLE adapter_activation_subjects(
+              adapter_id TEXT NOT NULL,
+              activation_id TEXT NOT NULL,
+              activation_revision INTEGER NOT NULL,
+              PRIMARY KEY(adapter_id,activation_id,activation_revision)
+            );
+            CREATE TABLE adapter_provider_smoke_subjects(
+              adapter_id TEXT NOT NULL,
+              smoke_id TEXT NOT NULL,
+              PRIMARY KEY(adapter_id,smoke_id)
+            );
+            CREATE TABLE provider_action_pair_preflights(
+              adapter_id TEXT NOT NULL,
+              action_id TEXT NOT NULL,
+              PRIMARY KEY(adapter_id,action_id)
+            );
+            """
+        )
+        db.execute(normative_table_sql("adapter_capability_snapshots"))
+        db.execute(normative_table_sql("adapter_effective_configurations"))
+
+        db.execute(
+            """INSERT INTO adapter_capability_snapshots(
+                 adapter_id,snapshot_generation,snapshot_id,
+                 adapter_contract_digest,host_id,host_version,source,
+                 snapshot_json,snapshot_digest)
+               VALUES('adapter-n',1,'snapshot-n','contract-n','host-n','1',
+                 'runtime-discovery',
+                 '{"capabilities":{"kind":"available"}}','snapshot-d-n')"""
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute(
+                """INSERT INTO adapter_capability_snapshots(
+                     adapter_id,snapshot_generation,snapshot_id,
+                     adapter_contract_digest,host_id,host_version,source,
+                     snapshot_json,snapshot_digest)
+                   VALUES('adapter-n',2,'snapshot-n-2','contract-n','host-n','1',
+                     'unavailable',
+                     '{"capabilities":{"kind":"available"}}','snapshot-d-n-2')"""
+            )
+        mark_case()
+
+        db.execute(
+            "INSERT INTO adapter_activation_subjects VALUES('adapter-n','activation-n',1)"
+        )
+        db.execute(
+            "INSERT INTO adapter_provider_smoke_subjects VALUES('adapter-n','smoke-n')"
+        )
+        db.execute(
+            """INSERT INTO adapter_effective_configurations(
+                 configuration_id,configuration_revision,adapter_id,
+                 adapter_contract_digest,executable_identity_digest,
+                 subject_kind,subject_ref_digest,subject_activation_id,
+                 subject_activation_revision,configuration_digest)
+               VALUES('activation-config-n',1,'adapter-n','contract-n',
+                 'executable-n','activation','activation-ref-n',
+                 'activation-n',1,'activation-config-digest-n')"""
+        )
+        db.execute(
+            """INSERT INTO adapter_effective_configurations(
+                 configuration_id,configuration_revision,adapter_id,
+                 adapter_contract_digest,executable_identity_digest,
+                 subject_kind,subject_ref_digest,subject_smoke_id,
+                 activation_configuration_id,
+                 activation_configuration_revision,
+                 activation_configuration_digest,
+                 activation_configuration_subject_kind,configuration_digest)
+               VALUES('smoke-config-n',1,'adapter-n','contract-n',
+                 'executable-n','provider-smoke','smoke-ref-n','smoke-n',
+                 'activation-config-n',1,'activation-config-digest-n',
+                 'activation','smoke-config-digest-n')"""
+        )
+        mark_case()
+
+        for crossing, contract, executable in (
+            ("contract", "contract-crossed", "executable-n"),
+            ("executable", "contract-n", "executable-crossed"),
+        ):
+            with self.subTest(crossing=crossing):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    db.execute(
+                        """INSERT INTO adapter_effective_configurations(
+                             configuration_id,configuration_revision,adapter_id,
+                             adapter_contract_digest,executable_identity_digest,
+                             subject_kind,subject_ref_digest,subject_smoke_id,
+                             activation_configuration_id,
+                             activation_configuration_revision,
+                             activation_configuration_digest,
+                             activation_configuration_subject_kind,
+                             configuration_digest)
+                           VALUES(?,1,'adapter-n',?,?,'provider-smoke',?,
+                             'smoke-n','activation-config-n',1,
+                             'activation-config-digest-n','activation',?)""",
+                        (
+                            f"smoke-cross-{crossing}",
+                            contract,
+                            executable,
+                            f"smoke-ref-{crossing}",
+                            f"smoke-digest-{crossing}",
+                        ),
+                    )
+                mark_case()
+        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
     def test_effective_configuration_activation_parent_correlation(self) -> None:
         self.seed_adapter_primitives("adapter-a")
         self.seed_adapter_primitives("adapter-b")
@@ -1483,19 +1624,22 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
         mark_case()
 
         smoke_sql = """INSERT INTO adapter_effective_configurations(
-          configuration_id,configuration_revision,adapter_id,subject_kind,
+          configuration_id,configuration_revision,adapter_id,
+          adapter_contract_digest,executable_identity_digest,subject_kind,
           subject_smoke_id,activation_configuration_id,
           activation_configuration_revision,activation_configuration_digest,
           activation_configuration_subject_kind,capability_body_digest,
           permission_profile_digest,discovery_surface_evidence_id,
           discovery_surface_evidence_revision,discovery_surface_digest,
           configuration_digest)
-          VALUES(?,1,?,'provider-smoke',?,?,1,?,'activation',?,?,?,?,?,?)"""
+          VALUES(?,1,?,?,?,'provider-smoke',?,?,1,?,'activation',?,?,?,?,?,?)"""
         self.accept(
             smoke_sql,
             (
                 "smoke-config-a",
                 "adapter-a",
+                "contract-adapter-a",
+                "executable-adapter-a",
                 "smoke-a",
                 "activation-config-adapter-a",
                 "activation-config-digest-adapter-a",
@@ -1511,23 +1655,27 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
         self.reject(
             """INSERT INTO adapter_effective_configurations(
                  configuration_id,configuration_revision,adapter_id,
+                 adapter_contract_digest,executable_identity_digest,
                  subject_kind,subject_smoke_id,capability_body_digest,
                  permission_profile_digest,discovery_surface_evidence_id,
                  discovery_surface_evidence_revision,
                  discovery_surface_digest,configuration_digest)
-               VALUES('null-parent',1,'adapter-b','provider-smoke','smoke-b',
+               VALUES('null-parent',1,'adapter-b','contract-adapter-b',
+                 'executable-adapter-b','provider-smoke','smoke-b',
                  'body-adapter-b','permission-adapter-b',
                  'surface-id-adapter-b',1,'surface-adapter-b','null-parent-d')"""
         )
         self.reject(
             """INSERT INTO adapter_effective_configurations(
                  configuration_id,configuration_revision,adapter_id,
+                 adapter_contract_digest,executable_identity_digest,
                  subject_kind,subject_smoke_id,activation_configuration_id,
                  activation_configuration_subject_kind,capability_body_digest,
                  permission_profile_digest,discovery_surface_evidence_id,
                  discovery_surface_evidence_revision,
                  discovery_surface_digest,configuration_digest)
-               VALUES('half-parent',1,'adapter-b','provider-smoke','smoke-b',
+               VALUES('half-parent',1,'adapter-b','contract-adapter-b',
+                 'executable-adapter-b','provider-smoke','smoke-b',
                  'activation-config-adapter-b','activation',
                  'body-adapter-b','permission-adapter-b',
                  'surface-id-adapter-b',1,'surface-adapter-b','half-parent-d')"""
@@ -1535,6 +1683,7 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
         self.reject(
             """INSERT INTO adapter_effective_configurations(
                  configuration_id,configuration_revision,adapter_id,
+                 adapter_contract_digest,executable_identity_digest,
                  subject_kind,subject_activation_id,subject_activation_revision,
                  activation_configuration_id,
                  activation_configuration_revision,
@@ -1544,7 +1693,8 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
                  discovery_surface_evidence_id,
                  discovery_surface_evidence_revision,
                  discovery_surface_digest,configuration_digest)
-               VALUES('activation-with-parent',1,'adapter-a','activation',
+               VALUES('activation-with-parent',1,'adapter-a',
+                 'contract-adapter-a','executable-adapter-a','activation',
                  'activation-adapter-a',1,'activation-config-adapter-a',1,
                  'activation-config-digest-adapter-a','activation',
                  'body-adapter-a','permission-adapter-a',
@@ -1556,6 +1706,8 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
             (
                 "cross-adapter-parent",
                 "adapter-b",
+                "contract-adapter-b",
+                "executable-adapter-b",
                 "smoke-b",
                 "activation-config-adapter-a",
                 "activation-config-digest-adapter-a",
@@ -1570,6 +1722,7 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
         self.reject(
             """INSERT INTO adapter_effective_configurations(
                  configuration_id,configuration_revision,adapter_id,
+                 adapter_contract_digest,executable_identity_digest,
                  subject_kind,subject_action_adapter_id,subject_action_id,
                  activation_configuration_id,
                  activation_configuration_revision,
@@ -1579,7 +1732,8 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
                  discovery_surface_evidence_id,
                  discovery_surface_evidence_revision,
                  discovery_surface_digest,configuration_digest)
-               VALUES('nonactivation-parent',1,'adapter-a','provider-action',
+               VALUES('nonactivation-parent',1,'adapter-a',
+                 'contract-adapter-a','executable-adapter-a','provider-action',
                  'adapter-a','action-a','smoke-config-a',1,
                  'smoke-config-digest-a','activation','body-adapter-a',
                  'permission-adapter-a','surface-id-adapter-a',1,
@@ -1590,6 +1744,8 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
             (
                 "cross-parent-digest",
                 "adapter-b",
+                "contract-adapter-b",
+                "executable-adapter-b",
                 "smoke-b",
                 "activation-config-adapter-b",
                 "activation-config-digest-adapter-a",
@@ -1599,6 +1755,38 @@ class LaneAHeadsRouteMiscOracle(unittest.TestCase):
                 1,
                 "surface-adapter-b",
                 "cross-parent-digest-d",
+            ),
+        )
+        lineage_smoke_sql = """INSERT INTO adapter_effective_configurations(
+          configuration_id,configuration_revision,adapter_id,
+          adapter_contract_digest,executable_identity_digest,subject_kind,
+          subject_smoke_id,activation_configuration_id,
+          activation_configuration_revision,activation_configuration_digest,
+          activation_configuration_subject_kind,capability_body_digest,
+          permission_profile_digest,discovery_surface_evidence_id,
+          discovery_surface_evidence_revision,discovery_surface_digest,
+          configuration_digest)
+          VALUES(?,1,'adapter-b',?,?,'provider-smoke','smoke-b',
+            'activation-config-adapter-b',1,
+            'activation-config-digest-adapter-b','activation',
+            'body-adapter-b','permission-adapter-b','surface-id-adapter-b',1,
+            'surface-adapter-b',?)"""
+        self.reject(
+            lineage_smoke_sql,
+            (
+                "cross-parent-contract",
+                "contract-adapter-a",
+                "executable-adapter-b",
+                "cross-parent-contract-d",
+            ),
+        )
+        self.reject(
+            lineage_smoke_sql,
+            (
+                "cross-parent-executable",
+                "contract-adapter-b",
+                "executable-adapter-a",
+                "cross-parent-executable-d",
             ),
         )
         self.seed_preflight_and_configuration(

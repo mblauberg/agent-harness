@@ -9094,13 +9094,22 @@ view is retained.
 ```sql
 adapter_capability_snapshots(
   adapter_id, snapshot_generation, snapshot_id,
-  adapter_contract_digest, host_id, host_version, source,
+  adapter_contract_digest, host_id, host_version,
+  source TEXT NOT NULL CHECK(source IN
+    ('runtime-discovery','version-pinned-conformance','unavailable')),
   observed_at, expires_at, capability_body_digest,
-  snapshot_json, snapshot_digest, created_at,
+  snapshot_json TEXT NOT NULL,
+  capability_kind TEXT GENERATED ALWAYS AS
+    (json_extract(snapshot_json, '$.capabilities.kind')) STORED NOT NULL,
+  snapshot_digest, created_at,
   PRIMARY KEY(adapter_id, snapshot_generation),
   UNIQUE(snapshot_id), UNIQUE(snapshot_digest),
   UNIQUE(adapter_id, snapshot_generation, snapshot_digest,
-    capability_body_digest)
+    capability_body_digest),
+  CHECK(capability_kind IN ('available','unavailable')),
+  CHECK((source='unavailable' AND capability_kind='unavailable') OR
+    (source IN ('runtime-discovery','version-pinned-conformance') AND
+      capability_kind='available'))
 )
 
 adapter_capability_current(
@@ -9170,7 +9179,9 @@ adapter_effective_configurations(
   subject_activation_id, subject_activation_revision, subject_smoke_id,
   subject_action_adapter_id, subject_action_id,
   activation_configuration_id, activation_configuration_revision,
-  activation_configuration_digest, requested_configuration_digest,
+  activation_configuration_digest,
+  activation_configuration_subject_kind TEXT,
+  requested_configuration_digest,
   effective_configuration_digest, permission_profile_digest,
   discovery_surface_evidence_id, discovery_surface_evidence_revision,
   evidence_id, evidence_revision,
@@ -9179,6 +9190,9 @@ adapter_effective_configurations(
   UNIQUE(configuration_id, configuration_revision, configuration_digest),
   UNIQUE(evidence_id, evidence_revision),
   UNIQUE(configuration_digest),
+  UNIQUE(adapter_id,subject_kind,configuration_id,
+    configuration_revision,configuration_digest,
+    adapter_contract_digest,executable_identity_digest),
   UNIQUE(subject_action_adapter_id,subject_action_id,subject_kind,
     adapter_contract_digest,configuration_id,configuration_revision,
     configuration_digest,effective_configuration_digest,
@@ -9200,11 +9214,25 @@ adapter_effective_configurations(
     REFERENCES adapter_provider_smoke_subjects(adapter_id, smoke_id),
   FOREIGN KEY(subject_action_adapter_id, subject_action_id)
     REFERENCES provider_action_pair_preflights(adapter_id, action_id),
-  FOREIGN KEY(activation_configuration_id,
-      activation_configuration_revision,
-      activation_configuration_digest)
+  FOREIGN KEY(adapter_id,activation_configuration_subject_kind,
+      activation_configuration_id,activation_configuration_revision,
+      activation_configuration_digest,adapter_contract_digest,
+      executable_identity_digest)
     REFERENCES adapter_effective_configurations(
-      configuration_id, configuration_revision, configuration_digest),
+      adapter_id,subject_kind,configuration_id,configuration_revision,
+      configuration_digest,adapter_contract_digest,
+      executable_identity_digest),
+  CHECK(
+    (subject_kind='activation' AND
+      activation_configuration_id IS NULL AND
+      activation_configuration_revision IS NULL AND
+      activation_configuration_digest IS NULL AND
+      activation_configuration_subject_kind IS NULL) OR
+    (subject_kind IN ('provider-smoke','provider-action') AND
+      activation_configuration_id IS NOT NULL AND
+      activation_configuration_revision IS NOT NULL AND
+      activation_configuration_digest IS NOT NULL AND
+      activation_configuration_subject_kind='activation')),
   CHECK(
     (subject_kind='activation' AND subject_activation_id IS NOT NULL AND
       subject_activation_revision IS NOT NULL AND subject_smoke_id IS NULL AND
@@ -9255,9 +9283,10 @@ an arm or its partial index. The selected columns reproduce `subjectRef` and
 partial unique indexes make the selected ref—not a caller-selected value—the
 one-to-one subject identity. A different configuration ID, revision or digest
 cannot create a second effective configuration for the same subject. The nullable
-activation-configuration triple is all null only for an activation
-subject; smoke/action subjects require a same-adapter activation parent and
-cannot update it. Subject arm/ref digest, executable, snapshot instance/body,
+activation-configuration tuple is all null only for an activation
+subject; smoke/action subjects require a same-adapter activation parent with
+the same adapter contract and executable identity, and cannot update it.
+Subject arm/ref digest, executable, snapshot instance/body,
 permission and discovery-surface tuples must reproduce the JSON. Each row is
 also registered through the existing daemon-owned evidence registration path;
 no public publisher may forge its evidence kind. There is no host-global config

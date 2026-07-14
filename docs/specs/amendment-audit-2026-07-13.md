@@ -259,6 +259,17 @@ built.
   writer rule. Issue claim is plain insert-if-absent plus guarded update, not an
   upsert. The public ten-case fixture extracts and executes the normative table
   and all fourteen trigger definitions.
+- MF01-3 — capability snapshot persistence now closes `source`, derives the
+  stored capability kind from `snapshot_json`, and enforces exact
+  unavailable/available parity. The executable oracle covers every legal
+  source/kind pair, crossed pairs, unknown values, missing kind and attempted
+  generated-column forgery; it also executes the extracted normative DDL.
+- MF04-3 — activation effective configurations carry no parent, while smoke
+  and action configurations require a complete activation parent. The
+  candidate/self-foreign key equality-copies adapter, activation subject kind,
+  configuration identity/revision/digest, adapter contract and executable
+  identity. Executable fixtures reject null/partial parents and adapter, kind,
+  digest, contract and executable-identity crossings.
 
 **Pending structural repair (needed before freeze; codex-certified):** these
 close only with multi-part DDL changes, not one-line additions, so they are
@@ -267,12 +278,10 @@ deliberately not half-applied —
   canonical pointers or non-null sentinels so the fuller FKs cannot be
   null-vacuous; give `review_slot_heads` a real FK; publish
   `provider_review_evidence` DDL (unifies with MF01-2).
-- MF04-3 (partial) — discriminator CHECK for triple nullability + adapter/kind on
-  the FK; MF04-4 (context-pressure vs rotation); MF04-5 (§9.23/§9.24 admission
+- MF04-4 (context-pressure vs rotation); MF04-5 (§9.23/§9.24 admission
   order); MF04-6 (dispatch/observation route-admission binding).
 - MF01-1 (§32.21/§32.22 requirement IDs; new IDs start FR-077/NFR-034/AC-056);
-  MF01-3 (`adapter_capability_snapshots.source` CHECK); MF01-4 (generic-route
-  recovery owner cross-reference).
+  MF01-4 (generic-route recovery owner cross-reference).
 - Newly found — `lifecycleMutationPlanV1`'s closed relation enum omits
   `provider-action`, so an apply cannot name a provider-action mutation even
   where the complete write set requires one. This first Lead-3 slice records

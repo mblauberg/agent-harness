@@ -1682,19 +1682,20 @@ class SpecRepairTests(unittest.TestCase):
 
     def test_capability_snapshot_source_is_closed_in_persistence(self) -> None:
         block = ddl_block(SPEC_04, "adapter_capability_snapshots")
-        self.assertIn("host_id, host_version, source NOT NULL", block)
+        self.assertIn("source TEXT NOT NULL CHECK(source IN", block)
         self.assertIn(
-            "CHECK(source IN ('runtime-discovery','version-pinned-conformance',\n"
-            "    'unavailable'))",
+            "('runtime-discovery','version-pinned-conformance','unavailable'))",
             block,
         )
         self.assertIn(
-            "capability_kind GENERATED ALWAYS AS\n"
+            "capability_kind TEXT GENERATED ALWAYS AS\n"
             "    (json_extract(snapshot_json, '$.capabilities.kind')) STORED NOT NULL",
             block,
         )
         self.assertIn(
-            "(source='unavailable' AND capability_kind='unavailable')",
+            "CHECK((source='unavailable' AND capability_kind='unavailable') OR\n"
+            "    (source IN ('runtime-discovery','version-pinned-conformance') AND\n"
+            "      capability_kind='available'))",
             block,
         )
 
@@ -1760,24 +1761,26 @@ class SpecRepairTests(unittest.TestCase):
 
     def test_effective_configuration_parent_is_same_adapter_activation(self) -> None:
         block = ddl_block(SPEC_04, "adapter_effective_configurations")
-        self.assertIn("activation_configuration_subject_kind", block)
+        self.assertIn("activation_configuration_subject_kind TEXT", block)
         self.assertIn(
-            "UNIQUE(adapter_id, subject_kind, configuration_id,\n"
-            "    configuration_revision, configuration_digest)",
+            "UNIQUE(adapter_id,subject_kind,configuration_id,\n"
+            "    configuration_revision,configuration_digest,\n"
+            "    adapter_contract_digest,executable_identity_digest)",
             block,
         )
         self.assertIn(
-            "FOREIGN KEY(adapter_id, activation_configuration_subject_kind,\n"
-            "      activation_configuration_id, activation_configuration_revision,\n"
-            "      activation_configuration_digest, host_identity_digest,\n"
-            "      executable_identity_digest, capability_body_digest,\n"
-            "      native_settings_schema_digest)",
+            "FOREIGN KEY(adapter_id,activation_configuration_subject_kind,\n"
+            "      activation_configuration_id,activation_configuration_revision,\n"
+            "      activation_configuration_digest,adapter_contract_digest,\n"
+            "      executable_identity_digest)",
             block,
         )
         self.assertIn(
             "activation_configuration_subject_kind='activation'",
             block,
         )
+        self.assertNotIn("host_identity_digest", block)
+        self.assertNotIn("native_settings_schema_digest", block)
 
     def test_lifecycle_heads_use_nonnullable_canonical_parent_keys(self) -> None:
         scope = ddl_block(SPEC_04, "lifecycle_receipt_scope_heads")
