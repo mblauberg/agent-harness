@@ -1875,28 +1875,188 @@ class SpecRepairTests(unittest.TestCase):
         )
 
     def test_retirement_evidence_tuple_is_carried_end_to_end(self) -> None:
+        custody = ddl_block(SPEC_04, "lifecycle_rotation_custody_revisions")
         plan = ddl_block(SPEC_04, "lifecycle_recovery_retirement_plans")
         effect = ddl_block(
             SPEC_04, "lifecycle_receipt_recovery_retirement_effects"
         )
         result = ddl_block(SPEC_04, "agent_lifecycle_recovery_retirements")
-        evidence = (
+        plan_key = (
+            "retirement_id",
+            "planned_apply_id",
+            "project_session_id",
+            "run_id",
+            "agent_id",
+            "custody_id",
+            "custody_revision",
+            "custody_source_ref_digest",
+            "custody_journal_digest",
+            "finalized_disposition",
             "finalized_terminal_evidence_digest",
             "admission_digest",
             "transition_proof_digest",
             "mutation_plan_digest",
             "retirement_evidence_digest",
+            "retirement_plan_digest",
         )
-        for column in evidence:
-            self.assertIn(column, plan)
-            self.assertIn(column, effect)
-            self.assertIn(column, result)
+        effect_key = (
+            "batch_id",
+            *plan_key,
+            "effect_digest",
+        )
+        result_key = (
+            "retirement_id",
+            "receipt_apply_id",
+            "project_session_id",
+            "run_id",
+            "agent_id",
+            "custody_id",
+            "custody_revision",
+            "custody_source_ref_digest",
+            "custody_journal_digest",
+            "finalized_disposition",
+            "finalized_terminal_evidence_digest",
+            "admission_digest",
+            "transition_proof_digest",
+            "mutation_plan_digest",
+            "retirement_evidence_digest",
+            "retirement_plan_digest",
+            "receipt_batch_id",
+            "retirement_effect_digest",
+        )
+        for column in plan_key:
+            with self.subTest(column=column):
+                self.assertIn(f"{column} NOT NULL", plan)
+        for column in effect_key:
+            with self.subTest(column=column):
+                self.assertIn(f"{column} NOT NULL", effect)
+        for column in result_key:
+            with self.subTest(column=column):
+                self.assertIn(f"{column} NOT NULL", result)
+        self.assertIn(
+            "UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,\n"
+            "    disposition_code,terminal_evidence_digest,source_ref_digest,"
+            "journal_digest)",
+            custody,
+        )
+        self.assertIn(
+            "UNIQUE(retirement_id,planned_apply_id,project_session_id,run_id,"
+            "agent_id,\n"
+            "    custody_id,custody_revision,custody_source_ref_digest,"
+            "custody_journal_digest,\n"
+            "    finalized_disposition,finalized_terminal_evidence_digest,"
+            "admission_digest,\n"
+            "    transition_proof_digest,mutation_plan_digest,"
+            "retirement_evidence_digest,\n"
+            "    retirement_plan_digest)",
+            plan,
+        )
+        self.assertIn(
+            "FOREIGN KEY(project_session_id,run_id,agent_id,custody_id,"
+            "custody_revision,\n"
+            "      finalized_disposition,finalized_terminal_evidence_digest,\n"
+            "      custody_source_ref_digest,custody_journal_digest)\n"
+            "    REFERENCES lifecycle_rotation_custody_revisions(\n"
+            "      project_session_id,run_id,agent_id,custody_id,revision,"
+            "disposition_code,\n"
+            "      terminal_evidence_digest,source_ref_digest,journal_digest)",
+            plan,
+        )
+        exact_evidence_tail = (
+            "finalized_terminal_evidence_digest,admission_digest,\n"
+            "    transition_proof_digest,mutation_plan_digest,"
+            "retirement_evidence_digest"
+        )
+        self.assertIn(exact_evidence_tail, plan)
+        self.assertIn(exact_evidence_tail, effect)
+        self.assertIn(
+            "FOREIGN KEY(retirement_id,planned_apply_id,project_session_id,"
+            "run_id,agent_id,\n"
+            "      custody_id,custody_revision,custody_source_ref_digest,\n"
+            "      custody_journal_digest,finalized_disposition,\n"
+            "      finalized_terminal_evidence_digest,admission_digest,\n"
+            "      transition_proof_digest,mutation_plan_digest,"
+            "retirement_evidence_digest,\n"
+            "      retirement_plan_digest)",
+            effect,
+        )
+        self.assertIn(
+            "FOREIGN KEY(receipt_batch_id,receipt_apply_id,project_session_id,"
+            "run_id,agent_id,\n"
+            "      retirement_id,retirement_plan_digest,custody_id,"
+            "custody_revision,\n"
+            "      custody_source_ref_digest,custody_journal_digest,"
+            "finalized_disposition,\n"
+            "      finalized_terminal_evidence_digest,admission_digest,\n"
+            "      transition_proof_digest,mutation_plan_digest,"
+            "retirement_evidence_digest,\n"
+            "      retirement_effect_digest)",
+            result,
+        )
+        self.assertIn(
+            "FOREIGN KEY(retirement_id,receipt_apply_id,project_session_id,"
+            "run_id,agent_id,\n"
+            "      custody_id,custody_revision,custody_source_ref_digest,\n"
+            "      custody_journal_digest,finalized_disposition,\n"
+            "      finalized_terminal_evidence_digest,admission_digest,\n"
+            "      transition_proof_digest,mutation_plan_digest,"
+            "retirement_evidence_digest,\n"
+            "      retirement_plan_digest)\n"
+            "    REFERENCES lifecycle_recovery_retirement_plans(\n"
+            "      retirement_id,planned_apply_id,project_session_id,run_id,"
+            "agent_id,\n"
+            "      custody_id,custody_revision,custody_source_ref_digest,\n"
+            "      custody_journal_digest,finalized_disposition,\n"
+            "      finalized_terminal_evidence_digest,admission_digest,\n"
+            "      transition_proof_digest,mutation_plan_digest,"
+            "retirement_evidence_digest,\n"
+            "      retirement_plan_digest)",
+            result,
+        )
         retirement_subject = SPEC_01[
             SPEC_01.index("lifecycleCustodyRecoveryRetirementReceiptSubjectV1:") :
             SPEC_01.index("lifecycleReviewDecisionReceiptSubjectV1:")
         ]
+        retirement_plan = SPEC_01[
+            SPEC_01.index("lifecycleRecoveryRetirementPlanV1:") :
+            SPEC_01.index("lifecycleIntegrityReceiptBatchV1:")
+        ]
+        self.assertIn(
+            "finalizedTerminalEvidenceDigest: exact-digest", retirement_plan
+        )
         self.assertIn("transitionProofDigest: exact-digest", retirement_subject)
         self.assertIn("mutationPlanDigest: exact-digest", retirement_subject)
+        retirement_effect_start = SPEC_01.index(
+            "lifecycleRecoveryRetirementEffectV1:"
+        )
+        retirement_effect_end = SPEC_01.index("~~~", retirement_effect_start)
+        retirement_effect = SPEC_01[
+            retirement_effect_start:retirement_effect_end
+        ]
+        self.assertIn("effectKind: recovery-retirement", retirement_effect)
+        for field in (
+            "finalizedTerminalEvidenceDigest",
+            "admissionDigest",
+            "transitionProofDigest",
+            "mutationPlanDigest",
+            "retirementEvidenceDigest",
+        ):
+            with self.subTest(effect_field=field):
+                self.assertIn(f"{field}: exact-digest", retirement_effect)
+        self.assertIn("effectDigest: exact-digest", retirement_effect)
+        self.assertIn(
+            "The subject, plan, effect and result equality-copy the exact "
+            "`finalizedTerminalEvidenceDigest`, `admissionDigest`, "
+            "`transitionProofDigest`, `mutationPlanDigest` and "
+            "`retirementEvidenceDigest` tuple",
+            " ".join(SPEC_01.split()),
+        )
+        self.assertIn(
+            '`effectDigest=LD("lifecycle-effect",body)` over every displayed '
+            "effect member except `effectDigest`; crossing any of the five "
+            "evidence digests is invalid",
+            " ".join(SPEC_01.split()),
+        )
 
     def test_generic_route_integrity_has_a_separate_named_owner(self) -> None:
         start = SPEC_01.index("### 32.22 Exact Console read identity completion")

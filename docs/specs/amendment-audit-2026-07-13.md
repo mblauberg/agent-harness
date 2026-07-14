@@ -204,8 +204,8 @@ built.
   added to `lifecycle_rotation_custody_revisions` so the retirement-plan FK has a
   valid parent key (was uninsertable: foreign key mismatch). Safe: `source_ref_digest`
   is already globally UNIQUE, so this adds the exact FK index without a new data
-  constraint. **Evidence-carry columns through plan → effect → result remain
-  (deeper part of lead 2).**
+  constraint. The full evidence-chain closure is recorded in the current-branch
+  Lead 2 item below.
 
 **Complete in the current issue-17 branch:**
 - Lead 1 — every fresh-created custody now has an authenticated `fresh-origin`
@@ -225,6 +225,15 @@ built.
   `5 + N` local finalization boundary for both one- and two-member namespace
   snapshots; exact-prose tests bind those repairs to the
   normative Spec 01/04 text.
+- Lead 2 — the five non-null retirement evidence digests (finalized terminal
+  evidence, admission, transition proof, mutation plan and retirement evidence)
+  equality-copy through subject/plan/effect/result candidate keys and foreign
+  keys. Every component of those composite keys is non-null, the finalized
+  terminal evidence also binds the exact finalized custody revision, and the
+  distinct effect codec hashes all five evidence digests. The extracted normative
+  DDL oracle rejects 65/65 null-component mutations in addition to all 12 crossed
+  evidence cases. The earlier eight-column retirement-plan FK repair remains
+  intact.
 - Lead 3 — the reservation carries a non-null decision-loss effect key without
   referencing the not-yet-materialized after revision; its same-prepare batch
   binds the exact after tuple to the linked effect, and the review binding
@@ -247,9 +256,6 @@ built.
 **Pending structural repair (needed before freeze; codex-certified):** these
 close only with multi-part DDL changes, not one-line additions, so they are
 deliberately not half-applied —
-- Lead 2 (remaining) — evidence-carry columns (admission / transition-proof /
-  mutation-plan / finalized-terminal-evidence / retirement-evidence) bound
-  through plan → effect → result. (FK-mismatch part done above.)
 - Lead 7 — systemic head parity: restructure scope/loss/custody heads to
   canonical pointers or non-null sentinels so the fuller FKs cannot be
   null-vacuous; give `review_slot_heads` a real FK; publish

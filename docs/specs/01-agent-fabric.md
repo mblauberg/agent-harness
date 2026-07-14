@@ -578,6 +578,8 @@ lifecycleCustodyRecoveryRetirementReceiptSubjectV1:
   finalizedDisposition: no-effect | superseded | quarantined
   finalizedTerminalEvidenceDigest: exact-digest
   terminalProofKind: confirmed-abandon
+  transitionProofDigest: exact-digest
+  mutationPlanDigest: exact-digest
   retirementEvidenceDigest: exact-digest
   transitionReplayDigest: exact-digest
 
@@ -1027,6 +1029,7 @@ lifecycleRecoveryRetirementPlanV1:
   finalizedCustodySourceRefDigest: exact-source-ref-digest
   finalizedCustodyJournalDigest: exact-journal-digest
   finalizedDisposition: no-effect | superseded | quarantined
+  finalizedTerminalEvidenceDigest: exact-digest
   admissionDigest: exact-confirmed-abandon-admission
   transitionProof: exact-confirmed-abandon-proof
   transitionProofDigest: exact-digest
@@ -1151,7 +1154,11 @@ lifecycleTransitionApplyV1:
 `retirementPlanDigest=LD("recovery-retirement-plan",body)` over every displayed
 plan member except the digest. Its plan, proof and evidence are byte-identical to
 the retirement subject/replay/batch; a changed archival write cannot reuse the
-same plan or authority receipt.
+same plan or authority receipt. The subject, plan, effect and result equality-copy
+the exact `finalizedTerminalEvidenceDigest`, `admissionDigest`,
+`transitionProofDigest`, `mutationPlanDigest` and `retirementEvidenceDigest`
+tuple; the finalized terminal evidence also equality-binds the exact finalized
+custody revision.
 
 The transition replay is exactly `lifecycleTransitionReplayV1`:
 
@@ -1227,7 +1234,7 @@ including archival delivery/task/barrier effects and a linked generation loss,
 must occur exactly once. No unplanned lifecycle-affecting write may share the
 apply transaction.
 
-An owner-transition or recovery-retirement receipt effect is exactly
+An owner-transition receipt effect is exactly
 `{schemaVersion:1,effectKind,role,ownerBeforeRef,beforeJournalDigest,
 ownerAfterRef,afterSemanticDigest}`. A fresh-origin effect is exactly
 `{schemaVersion:1,effectKind:"fresh-origin",role,sourceMode,recoverySource,
@@ -1235,10 +1242,31 @@ sourceJournalDigest,freshHandoffDigest,admissionDigest,freshApplyPlanDigest,
 newCustodyRef,newCustodySemanticDigest,newCustodySourceRefDigest,
 affectedGenerationLossBeforeRef,affectedGenerationLossBeforeJournalDigest,
 affectedGenerationLossAfterRef,affectedGenerationLossAfterSemanticDigest}`.
-Each has `effectDigest=LD("lifecycle-effect",body)`. A recovery-retirement effect
-has the same immutable retirement-plan ref in both owner positions, the finalized
-custody journal as `beforeJournalDigest` and the unchanged plan digest as
-`afterSemanticDigest`; its mutation plan contains all archival effects. The effect set contains the primary effect first and at
+Each has `effectDigest=LD("lifecycle-effect",body)`.
+
+A recovery-retirement effect uses this distinct closed arm:
+
+~~~yaml
+lifecycleRecoveryRetirementEffectV1:
+  schemaVersion: 1
+  effectKind: recovery-retirement
+  role: primary
+  ownerBeforeRef: exact-immutable-retirement-plan-ref-v1
+  beforeJournalDigest: exact-finalized-custody-journal-digest
+  ownerAfterRef: exact-same-immutable-retirement-plan-ref-v1
+  afterSemanticDigest: exact-retirement-plan-digest
+  finalizedTerminalEvidenceDigest: exact-digest
+  admissionDigest: exact-digest
+  transitionProofDigest: exact-digest
+  mutationPlanDigest: exact-digest
+  retirementEvidenceDigest: exact-digest
+  effectDigest: exact-digest
+~~~
+
+Its mutation plan contains all archival effects.
+`effectDigest=LD("lifecycle-effect",body)` over every displayed effect member
+except `effectDigest`; crossing any of the five evidence digests is invalid.
+The effect set contains the primary effect first and at
 most one linked effect second;
 `effectsSetDigest=LD("effect-set",members)`. A custody batch has exactly one
 primary custody effect; a standalone loss batch exactly one primary loss effect;

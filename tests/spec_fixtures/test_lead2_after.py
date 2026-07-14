@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """Executable CAPA-001 Lead-2 retirement-evidence after-repair oracle.
 
-The schema below is intentionally isolated and Python-stdlib only. It
-transcribes the current Spec 04 plan/effect/result identity keys and foreign
-keys needed to prove the five-digest evidence chain. Unrelated lifecycle
-columns and parents are omitted. The five evidence values are explicitly
-nonnull, as required by the normative prose.
+The oracle is intentionally isolated and Python-stdlib only. Its original
+12-case crossing checks remain stable, while its NULL-vacuity checks execute
+the current Spec 04 plan/effect/result DDL directly with only unrelated parent
+tables reduced to fixtures.
 
-Stable output reports L2-A/B/C, the aggregate case count, and a final empty
-``PRAGMA foreign_key_check``.
+Stable output reports L2-A/B/C/D, the aggregate crossing case count, and a
+final empty ``PRAGMA foreign_key_check``.
 """
 
 from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 
@@ -29,6 +29,19 @@ EVIDENCE_FIELDS = (
     "mutation_plan_digest",
     "retirement_evidence_digest",
 )
+
+ROOT = Path(__file__).resolve().parents[2]
+SPEC_04 = (ROOT / "docs/specs/04-agent-fabric-operational-hardening.md").read_text()
+
+
+def ddl_block(text: str, table: str) -> str:
+    start = text.index(f"\n{table}(") + 1
+    end = text.index("\n)\n", start) + 2
+    return text[start:end]
+
+
+def create_from_spec(table: str) -> str:
+    return f"CREATE TABLE {ddl_block(SPEC_04, table)};"
 
 
 SCHEMA = r"""
@@ -219,6 +232,66 @@ CREATE TABLE agent_lifecycle_recovery_retirements(
 """
 
 
+NORMATIVE_SUPPORT_SCHEMA = r"""
+CREATE TABLE lifecycle_rotation_custody_revisions(
+  project_session_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  custody_id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  disposition_code TEXT NOT NULL,
+  terminal_evidence_digest TEXT NOT NULL,
+  source_ref_digest TEXT NOT NULL,
+  journal_digest TEXT NOT NULL,
+  PRIMARY KEY(run_id,agent_id,custody_id,revision),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,
+    disposition_code,terminal_evidence_digest,source_ref_digest,journal_digest)
+);
+"""
+
+NORMATIVE_BATCH_SCHEMA = r"""
+CREATE TABLE lifecycle_receipt_batches(
+  batch_id TEXT PRIMARY KEY,
+  planned_apply_id TEXT NOT NULL UNIQUE,
+  project_session_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  transition_kind TEXT NOT NULL
+    CHECK(transition_kind='custody-recovery-retirement'),
+  mutation_plan_digest TEXT NOT NULL,
+  recovery_retirement_id TEXT NOT NULL,
+  recovery_retirement_plan_digest TEXT NOT NULL,
+  UNIQUE(batch_id,planned_apply_id,project_session_id,run_id,agent_id,
+    transition_kind),
+  FOREIGN KEY(recovery_retirement_id,recovery_retirement_plan_digest,
+      planned_apply_id,project_session_id,run_id,agent_id,mutation_plan_digest)
+    REFERENCES lifecycle_recovery_retirement_plans(
+      retirement_id,retirement_plan_digest,planned_apply_id,
+      project_session_id,run_id,agent_id,mutation_plan_digest)
+);
+"""
+
+NORMATIVE_APPLY_SCHEMA = r"""
+CREATE TABLE lifecycle_transition_applies(
+  apply_id TEXT PRIMARY KEY,
+  apply_digest TEXT NOT NULL,
+  receipt_batch_id TEXT NOT NULL UNIQUE,
+  UNIQUE(apply_id,apply_digest,receipt_batch_id)
+);
+"""
+
+NORMATIVE_SCHEMA = "\n".join(
+    (
+        NORMATIVE_SUPPORT_SCHEMA,
+        create_from_spec("lifecycle_recovery_retirement_plans"),
+        NORMATIVE_BATCH_SCHEMA,
+        create_from_spec("lifecycle_receipt_recovery_retirement_effects"),
+        NORMATIVE_APPLY_SCHEMA,
+        create_from_spec("agent_lifecycle_recovery_retirements"),
+    )
+)
+
+
 CUSTODY = {
     "project_session_id": "project-session-1",
     "run_id": "run-1",
@@ -323,6 +396,13 @@ APPLY = {
     "receipt_batch_id": "batch-1",
 }
 
+# Every displayed member of these three closed rows is required. Exercising the
+# dictionaries directly keeps the extracted-DDL NULL audit aligned with the
+# executable exact-row fixtures as their codecs evolve.
+PLAN_CHAIN_FIELDS = tuple(PLAN)
+EFFECT_CHAIN_FIELDS = tuple(EFFECT)
+RESULT_CHAIN_FIELDS = tuple(RESULT)
+
 
 def require(condition: bool, message: str) -> None:
     if not condition:
@@ -364,6 +444,23 @@ def expect_foreign_key_rejection(
     raise OracleFailure("crossed tuple was accepted")
 
 
+def expect_not_null_rejection(
+    connection: sqlite3.Connection,
+    operation: Callable[[], None],
+) -> None:
+    try:
+        operation()
+    except sqlite3.IntegrityError as error:
+        error_name = getattr(error, "sqlite_errorname", "")
+        require(
+            error_name == "SQLITE_CONSTRAINT_NOTNULL",
+            f"wrong SQLite rejection: {error_name}: {error}",
+        )
+        connection.rollback()
+        return
+    raise OracleFailure("NULL composite-key component was accepted")
+
+
 def baseline(*, with_effect: bool) -> sqlite3.Connection:
     connection = sqlite3.connect(":memory:")
     connection.execute("PRAGMA foreign_keys=ON")
@@ -392,6 +489,24 @@ def insert_exact_result_and_apply(connection: sqlite3.Connection) -> None:
     # The apply marker is deliberately inserted last, as specified.
     insert_row(connection, "lifecycle_transition_applies", APPLY)
     connection.commit()
+
+
+def normative_baseline(*, with_effect: bool) -> sqlite3.Connection:
+    connection = sqlite3.connect(":memory:")
+    connection.execute("PRAGMA foreign_keys=ON")
+    connection.executescript(NORMATIVE_SCHEMA)
+    insert_row(connection, "lifecycle_rotation_custody_revisions", CUSTODY)
+    insert_row(connection, "lifecycle_recovery_retirement_plans", PLAN)
+    insert_row(connection, "lifecycle_receipt_batches", BATCH)
+    if with_effect:
+        insert_row(
+            connection,
+            "lifecycle_receipt_recovery_retirement_effects",
+            EFFECT,
+        )
+    connection.commit()
+    assert_foreign_keys_clean(connection)
+    return connection
 
 
 def l2_a_exact_tuple_is_accepted() -> None:
@@ -464,6 +579,59 @@ def l2_c_result_mutations_are_rejected() -> None:
             connection.close()
 
 
+def l2_d_normative_null_components_are_rejected() -> None:
+    for field in PLAN_CHAIN_FIELDS:
+        connection = sqlite3.connect(":memory:")
+        connection.execute("PRAGMA foreign_keys=ON")
+        try:
+            connection.executescript(NORMATIVE_SCHEMA)
+            insert_row(connection, "lifecycle_rotation_custody_revisions", CUSTODY)
+            mutant = dict(PLAN)
+            mutant[field] = None
+            expect_not_null_rejection(
+                connection,
+                lambda mutant=mutant: insert_row(
+                    connection,
+                    "lifecycle_recovery_retirement_plans",
+                    mutant,
+                ),
+            )
+        finally:
+            connection.close()
+
+    for field in EFFECT_CHAIN_FIELDS:
+        connection = normative_baseline(with_effect=False)
+        try:
+            mutant = dict(EFFECT)
+            mutant[field] = None
+            expect_not_null_rejection(
+                connection,
+                lambda mutant=mutant: insert_row(
+                    connection,
+                    "lifecycle_receipt_recovery_retirement_effects",
+                    mutant,
+                ),
+            )
+        finally:
+            connection.close()
+
+    for field in RESULT_CHAIN_FIELDS:
+        connection = normative_baseline(with_effect=True)
+        try:
+            mutant = dict(RESULT)
+            mutant[field] = None
+            expect_not_null_rejection(
+                connection,
+                lambda mutant=mutant: insert_row(
+                    connection,
+                    "agent_lifecycle_recovery_retirements",
+                    mutant,
+                ),
+            )
+        finally:
+            connection.close()
+
+
 def main() -> None:
     l2_a_exact_tuple_is_accepted()
     print("L2-A PASS exact plan/effect/result tuple accepted")
@@ -474,6 +642,14 @@ def main() -> None:
     l2_c_result_mutations_are_rejected()
     print("L2-C PASS result/effect crossings rejected 6/6")
     print("LEAD2-AFTER PASS cases=12")
+
+    l2_d_normative_null_components_are_rejected()
+    null_cases = (
+        len(PLAN_CHAIN_FIELDS)
+        + len(EFFECT_CHAIN_FIELDS)
+        + len(RESULT_CHAIN_FIELDS)
+    )
+    print(f"L2-D PASS normative NULL components rejected {null_cases}/{null_cases}")
 
     final_connection = baseline(with_effect=True)
     try:

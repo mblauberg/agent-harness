@@ -5987,6 +5987,8 @@ lifecycle_rotation_custody_revisions(
     disposition_code,semantic_digest,source_ref_digest,journal_digest),
   UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,
     disposition_code,source_ref_digest,journal_digest),
+  UNIQUE(project_session_id,run_id,agent_id,custody_id,revision,
+    disposition_code,terminal_evidence_digest,source_ref_digest,journal_digest),
   UNIQUE(semantic_digest), UNIQUE(source_ref_digest), UNIQUE(journal_digest),
   CHECK((revision=1 AND prior_revision IS NULL AND
       prior_journal_digest IS NULL) OR
@@ -6298,15 +6300,18 @@ lifecycle_receipt_namespace_heads(
 )
 
 lifecycle_recovery_retirement_plans(
-  retirement_id PRIMARY KEY, revision CHECK(revision=1),
-  project_session_id, run_id, agent_id, custody_id, custody_revision,
-  custody_source_ref_digest, custody_journal_digest,
-  finalized_disposition CHECK(finalized_disposition IN
+  retirement_id NOT NULL PRIMARY KEY, revision NOT NULL CHECK(revision=1),
+  project_session_id NOT NULL, run_id NOT NULL, agent_id NOT NULL,
+  custody_id NOT NULL, custody_revision NOT NULL,
+  custody_source_ref_digest NOT NULL, custody_journal_digest NOT NULL,
+  finalized_disposition NOT NULL CHECK(finalized_disposition IN
     ('no-effect','superseded','quarantined')),
-  finalized_terminal_evidence_digest, admission_digest,
-  transition_proof_json, transition_proof_digest,
-  mutation_plan_json, mutation_plan_digest, retirement_evidence_digest,
-  planned_apply_id UNIQUE, recorded_at, plan_json, retirement_plan_digest UNIQUE,
+  finalized_terminal_evidence_digest NOT NULL, admission_digest NOT NULL,
+  transition_proof_json NOT NULL, transition_proof_digest NOT NULL,
+  mutation_plan_json NOT NULL, mutation_plan_digest NOT NULL,
+  retirement_evidence_digest NOT NULL,
+  planned_apply_id NOT NULL UNIQUE, recorded_at NOT NULL, plan_json NOT NULL,
+  retirement_plan_digest NOT NULL UNIQUE,
   UNIQUE(retirement_id,revision,retirement_plan_digest),
   UNIQUE(retirement_id,retirement_plan_digest,planned_apply_id),
   UNIQUE(project_session_id,run_id,agent_id,custody_id,custody_revision),
@@ -6314,12 +6319,15 @@ lifecycle_recovery_retirement_plans(
     project_session_id,run_id,agent_id,mutation_plan_digest),
   UNIQUE(retirement_id,planned_apply_id,project_session_id,run_id,agent_id,
     custody_id,custody_revision,custody_source_ref_digest,custody_journal_digest,
-    finalized_disposition,retirement_plan_digest),
+    finalized_disposition,finalized_terminal_evidence_digest,admission_digest,
+    transition_proof_digest,mutation_plan_digest,retirement_evidence_digest,
+    retirement_plan_digest),
   FOREIGN KEY(project_session_id,run_id,agent_id,custody_id,custody_revision,
-      finalized_disposition,custody_source_ref_digest,custody_journal_digest)
+      finalized_disposition,finalized_terminal_evidence_digest,
+      custody_source_ref_digest,custody_journal_digest)
     REFERENCES lifecycle_rotation_custody_revisions(
       project_session_id,run_id,agent_id,custody_id,revision,disposition_code,
-      source_ref_digest,journal_digest)
+      terminal_evidence_digest,source_ref_digest,journal_digest)
 )
 
 lifecycle_receipt_batches(
@@ -6533,20 +6541,28 @@ lifecycle_receipt_generation_loss_effects(
 )
 
 lifecycle_receipt_recovery_retirement_effects(
-  batch_id PRIMARY KEY, ordinal CHECK(ordinal=1), role CHECK(role='primary'),
-  transition_kind CHECK(transition_kind='custody-recovery-retirement'),
-  planned_apply_id, project_session_id, run_id, agent_id,
-  retirement_id UNIQUE, retirement_revision CHECK(retirement_revision=1),
-  retirement_plan_digest,
-  custody_id, custody_revision, custody_source_ref_digest,
-  custody_journal_digest, finalized_disposition,
-  effect_digest UNIQUE,
+  batch_id NOT NULL PRIMARY KEY, ordinal NOT NULL CHECK(ordinal=1),
+  role NOT NULL CHECK(role='primary'),
+  transition_kind NOT NULL CHECK(transition_kind='custody-recovery-retirement'),
+  planned_apply_id NOT NULL, project_session_id NOT NULL, run_id NOT NULL,
+  agent_id NOT NULL, retirement_id NOT NULL UNIQUE,
+  retirement_revision NOT NULL CHECK(retirement_revision=1),
+  retirement_plan_digest NOT NULL,
+  custody_id NOT NULL, custody_revision NOT NULL,
+  custody_source_ref_digest NOT NULL, custody_journal_digest NOT NULL,
+  finalized_disposition NOT NULL,
+  finalized_terminal_evidence_digest NOT NULL, admission_digest NOT NULL,
+  transition_proof_digest NOT NULL, mutation_plan_digest NOT NULL,
+  retirement_evidence_digest NOT NULL,
+  effect_digest NOT NULL UNIQUE,
   UNIQUE(batch_id,effect_digest),
   UNIQUE(batch_id,effect_digest,project_session_id,run_id,agent_id,
     retirement_id,retirement_revision),
   UNIQUE(batch_id,planned_apply_id,project_session_id,run_id,agent_id,
     retirement_id,retirement_plan_digest,custody_id,custody_revision,
     custody_source_ref_digest,custody_journal_digest,finalized_disposition,
+    finalized_terminal_evidence_digest,admission_digest,
+    transition_proof_digest,mutation_plan_digest,retirement_evidence_digest,
     effect_digest),
   FOREIGN KEY(batch_id,planned_apply_id,project_session_id,run_id,agent_id,
       transition_kind)
@@ -6555,11 +6571,17 @@ lifecycle_receipt_recovery_retirement_effects(
       transition_kind),
   FOREIGN KEY(retirement_id,planned_apply_id,project_session_id,run_id,agent_id,
       custody_id,custody_revision,custody_source_ref_digest,
-      custody_journal_digest,finalized_disposition,retirement_plan_digest)
+      custody_journal_digest,finalized_disposition,
+      finalized_terminal_evidence_digest,admission_digest,
+      transition_proof_digest,mutation_plan_digest,retirement_evidence_digest,
+      retirement_plan_digest)
     REFERENCES lifecycle_recovery_retirement_plans(
       retirement_id,planned_apply_id,project_session_id,run_id,agent_id,
       custody_id,custody_revision,custody_source_ref_digest,
-      custody_journal_digest,finalized_disposition,retirement_plan_digest)
+      custody_journal_digest,finalized_disposition,
+      finalized_terminal_evidence_digest,admission_digest,
+      transition_proof_digest,mutation_plan_digest,retirement_evidence_digest,
+      retirement_plan_digest)
 )
 
 lifecycle_receipt_fresh_origin_effects(
@@ -7907,29 +7929,45 @@ agent_lifecycle_recovery_issue_revocations(
 )
 
 agent_lifecycle_recovery_retirements(
-  retirement_id PRIMARY KEY, project_session_id, run_id, agent_id,
-  retirement_plan_digest, custody_id, custody_revision,
-  custody_source_ref_digest, custody_journal_digest, finalized_disposition,
-  admission_digest, retirement_evidence_digest, retirement_effect_digest,
-  receipt_batch_id UNIQUE, receipt_apply_id UNIQUE, receipt_apply_digest,
-  retirement_json, retirement_digest UNIQUE, created_at,
+  retirement_id NOT NULL PRIMARY KEY, project_session_id NOT NULL,
+  run_id NOT NULL, agent_id NOT NULL, retirement_plan_digest NOT NULL,
+  custody_id NOT NULL, custody_revision NOT NULL,
+  custody_source_ref_digest NOT NULL, custody_journal_digest NOT NULL,
+  finalized_disposition NOT NULL,
+  finalized_terminal_evidence_digest NOT NULL, admission_digest NOT NULL,
+  transition_proof_digest NOT NULL, mutation_plan_digest NOT NULL,
+  retirement_evidence_digest NOT NULL,
+  retirement_effect_digest NOT NULL,
+  receipt_batch_id NOT NULL UNIQUE, receipt_apply_id NOT NULL UNIQUE,
+  receipt_apply_digest NOT NULL, retirement_json NOT NULL,
+  retirement_digest NOT NULL UNIQUE, created_at NOT NULL,
   UNIQUE(retirement_id,receipt_batch_id,receipt_apply_id,receipt_apply_digest),
   UNIQUE(retirement_digest),
   FOREIGN KEY(retirement_id,receipt_apply_id,project_session_id,run_id,agent_id,
       custody_id,custody_revision,custody_source_ref_digest,
-      custody_journal_digest,finalized_disposition,retirement_plan_digest)
+      custody_journal_digest,finalized_disposition,
+      finalized_terminal_evidence_digest,admission_digest,
+      transition_proof_digest,mutation_plan_digest,retirement_evidence_digest,
+      retirement_plan_digest)
     REFERENCES lifecycle_recovery_retirement_plans(
       retirement_id,planned_apply_id,project_session_id,run_id,agent_id,
       custody_id,custody_revision,custody_source_ref_digest,
-      custody_journal_digest,finalized_disposition,retirement_plan_digest),
+      custody_journal_digest,finalized_disposition,
+      finalized_terminal_evidence_digest,admission_digest,
+      transition_proof_digest,mutation_plan_digest,retirement_evidence_digest,
+      retirement_plan_digest),
   FOREIGN KEY(receipt_batch_id,receipt_apply_id,project_session_id,run_id,agent_id,
       retirement_id,retirement_plan_digest,custody_id,custody_revision,
       custody_source_ref_digest,custody_journal_digest,finalized_disposition,
+      finalized_terminal_evidence_digest,admission_digest,
+      transition_proof_digest,mutation_plan_digest,retirement_evidence_digest,
       retirement_effect_digest)
     REFERENCES lifecycle_receipt_recovery_retirement_effects(
       batch_id,planned_apply_id,project_session_id,run_id,agent_id,retirement_id,
       retirement_plan_digest,custody_id,custody_revision,
       custody_source_ref_digest,custody_journal_digest,finalized_disposition,
+      finalized_terminal_evidence_digest,admission_digest,
+      transition_proof_digest,mutation_plan_digest,retirement_evidence_digest,
       effect_digest),
   FOREIGN KEY(receipt_apply_id,receipt_apply_digest,receipt_batch_id)
     REFERENCES lifecycle_transition_applies(
