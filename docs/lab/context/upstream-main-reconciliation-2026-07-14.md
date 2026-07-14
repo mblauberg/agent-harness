@@ -15,7 +15,7 @@ The two main-only commits are:
 The cumulative delta is 88 paths (73 modified, 8 added, 7 deleted). Only two
 paths are touched on both sides:
 
-- `docs/agent-harness-comprehensive-review/decision-register.md`
+- `docs/lab/decision-register.md`
 - `scripts/check-harness`
 
 `git merge-tree` forecast no textual conflict. Semantic inspection remains
@@ -36,8 +36,8 @@ order:
 git diff --check
 rg -n 'check_spec_families|check-skill-javascript' scripts/check-harness
 python3 -m pytest -q tests/test_autonomous_lab_bootstrap.py tests/test_autonomous_lab_pause.py tests/test_delivery_contract.py tests/test_delivery_profile_scenarios.py tests/test_work_map_validator.py tests/test_skill_audit_contract.py tests/test_spec05_skill_alignment.py
-node docs/agent-harness-comprehensive-review/lab/tools/check-adr-immutability.mjs
-node docs/agent-harness-comprehensive-review/lab/tools/gen-dashboard.mjs --check
+node docs/lab/tools/check-adr-immutability.mjs
+node docs/lab/tools/gen-dashboard.mjs --check
 python3 scripts/check_spec_families.py
 scripts/check-skill-javascript skills
 python3 -m pytest -q tests/test_frontend_live_security.py tests/test_harness_contract.py tests/test_static_security_check.py tests/test_static_skill_corrections.py

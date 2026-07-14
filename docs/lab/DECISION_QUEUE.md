@@ -35,9 +35,9 @@ D-021 chair charter; KICKOFF ordering; one branch and one PR; no merge or origin
 | W002 | VERIFIED | W001 | Native + Opus repair-2 reviews are CLEAN; CAPA-001 receipt and exact frozen/candidate gates validate. |
 | W003 | VERIFIED | W002 | Structural Lane A foundation integrated as `1a3ceb4` + `b618c78`; exact-equivalent lane ref/worktree pruned. |
 | W004 | VERIFIED | Lane A semantic freeze, Lane B | Five ordered causes; evidence in `context/lane-d-diagnosis-2026-07-14.md`. |
-| W005 | BUILD-ARTEFACT | W003, W004, W017, D-029, D-031 | Exact D-031 stage `7d779d02...` is held after author content block and awaits Opus review; `context/w005-pair-classifier-green-scope-2026-07-14.md` maps the next exact-pair GREEN and live Herdr-vs-fake collision oracle, then one-cause preflight RED/GREEN, later serial lifecycle direct cut and full Fabric green. |
+| W005 | BUILD-ARTEFACT | W003, W004, W017, D-029, D-031 | D-031 is committed as `209e95f`; D-029 exact-pair GREEN is dual-primary CLEAN and committed as `12247d8`. The synchronous boundary tracer now has the intended sole missing-preflight cause. Next: canonical coordinator plus all production/fixture writer migration, then the serial lifecycle direct cut and full Fabric green. |
 | W006 | VERIFIED | Lane B | Linux Clippy and macOS ambient-FD/unbounded-accept causes; evidence in `context/rust-ci-diagnosis-2026-07-14.md`. |
-| W007 | BUILD-ARTEFACT | W003, W006 | Dual-primary CLEAN repair is locally integrated as `50065a1` + `5166328`; hosted Linux/macOS, Linux mutation, security and final-SHA acceptance gates remain pending. |
+| W007 | BUILD-ARTEFACT | W003, W006 | Dual-primary CLEAN repair is integrated as `50065a1` + `5166328`; D-035 keeps it honestly verifying and closes hosted Linux/macOS, Linux mutation, security and receipt acceptance on the single W014 PR SHA because the workflow has no manual trigger. |
 | W008 | BUILD-ARTEFACT | W005 | AuthorityEnvelopeV2 direct cutover preserving provider goldens and zero adapter-production diff. |
 | W009 | BUILD-ARTEFACT | W008 | Extract pure `AuthorityCompiler` admission with behaviour unchanged. |
 | W010 | SPIKE | W009 | Execute the fixed Step-3 containment matrix and council-adjudicate the exact provider tuple; write profile stays inert unless it passes. |
@@ -47,7 +47,7 @@ D-021 chair charter; KICKOFF ordering; one branch and one PR; no merge or origin
 
 | Item | Status | Depends on | Scope / next evidence |
 |---|---|---|---|
-| W012 | UNRESOLVED | W005-W011 | Reconcile roadmap tranches 2-9 and every still-open substantiated finding against live source; enumerate bounded implementation waves. |
+| W012 | UNRESOLVED | W005-W011 | Reconcile roadmap tranches 2-9 and every still-open substantiated finding against live source, including D-036 annotated-tag metadata/message scanning and the test-only duplicate raw-commit parser; enumerate bounded implementation waves. |
 | W013 | UNRESOLVED | W012 | Programme-wide deterministic, security, evaluation, load, live MCP, four-family and 80x24 usability gates. |
 | W014 | PROMOTION-GATED | W013 | Push only `comprehensive-review`, open the one evidence-index PR; human review/merge is the final gate. |
 | W015 | VERIFIED | W004 | Canonical pair-keyed preflight/coordinator and first-red contract is implementation-ready in `context/lane-d-preflight-tdd-contract.md` and handed to W005. |

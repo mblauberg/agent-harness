@@ -1,5 +1,22 @@
 # STATE — orchestrator heartbeat
-Updated: 2026-07-14T08:18:00Z
+Updated: 2026-07-14T10:13:00Z
+
+> **RELOCATION (2026-07-15, main@91d73fe).** This lab moved from
+> `docs/agent-harness-comprehensive-review/lab/` to `docs/lab/` and now lives on
+> `main`. The `comprehensive-review` branch and worktree are merged and pruned —
+> do not fetch, verify or resume from them. The review programme that wrapped this
+> lab is superseded and deleted; the lab itself is not.
+>
+> Two claims in the resume protocol below are now stale: `main` is no longer dirty
+> at `1ddfe24` (it is clean at `91d73fe`), and the `SPEC05-APPLICABILITY.md` edit
+> plus the re-review docs are no longer "untouched" — they were committed to history
+> (`3656240`) and then superseded (`701d663`), with their content extracted into
+> `docs/provenant_simplification_implementation_pack_2026-07-14/`.
+>
+> The spec-family split this programme produced was **not** adopted (ADR 0009);
+> `scripts/check_spec_families.py`, `tests/test_spec_families.py` and
+> `tests/spec_fixtures/` are coupled to it and were not merged. All are recoverable
+> with `git show d773cf0:<path>`. See issues #16, #17, #18.
 <!--
   ORCHESTRATOR-OWNED. Rewritten every iteration. This is the durable memory that
   SURVIVES context compaction — anyone (a human, or a fresh orchestrator session)
@@ -15,12 +32,12 @@ Updated: 2026-07-14T08:18:00Z
 
 ## Heartbeat (OVERWRITE this block every iteration)
 
-- **Run status:** RUNNING — W017/W018 and `origin/main@1ddfe24` are reconciled. D-033 final Opus review returned REVISE on one committer-only publication false clean; D-034's exact two-file Opus author repair is right-reason RED→GREEN with four mutation kills, final source/test `f20849d3...`/`4828563b...`, 100 focused and 194 combined tests. Fresh exact-tree Opus re-review and final sanitation/gates remain the current chair action. W005 D-031 stays frozen at `7d779d02...` for next session.
-- **Orchestrator lease:** Codex root chair · generation 65 · renewed 2026-07-14T08:06:12Z · expires 2026-07-14T08:21:12Z. Generations 47 and 52 expired during paused turns; no competing holder or mutation occurred before the same holder atomically reacquired generations 48 and 53.
+- **Run status:** RUNNING — the public-safe checkpoint remains exact locally/remotely at `d773cf02...` with its fresh replay and contained Opus rebind CLEAN. W005 D-031 is committed as `209e95f`; D-029 is independently native/Opus CLEAN and committed as `12247d8` with exact staged/commit diff `0d366adc...ec02`. Its cross-adapter and terminal-task oracles pass, typecheck passes, and the synchronous preflight tracer now reaches the capability hook and fails only because the `resolving` preflight is absent, with zero unhandled errors.
+- **Orchestrator lease:** Codex root chair · generation 75 · renewed 2026-07-14T10:12:46Z · expires 2026-07-14T10:27:46Z. Generation 66 expired during the session boundary; the same holder reacquired generation 67 after proving no competing holder or mutation, then renewed through generation 75.
 - **Iteration:** 1.
-- **This iteration:** Bootstrapped the durable lab; completed and integrated structural plus semantic Lane A; locally integrated W007 after dual-primary CLEAN review; resolved/integrated W017/W018; reconciled current `origin/main`; and closed D-033's final-review committer-identity false clean through the bounded D-034 Opus TDD repair.
-- **In flight:** None. W007 hosted/final-SHA gates have not launched yet.
-- **Next up:** Reconcile D-034 author bytes/evidence into the exact tree, regenerate/check the dashboard, create the single-parent public-safe commit by CAS, obtain a separate fresh contained Opus CLEAN re-review, replay all exact-SHA gates, and non-force push only `comprehensive-review`. On resume, remote/local equality proves those conditions completed; then start W005 D-031. W005-W014 remain programme work, not checkpoint defects.
+- **This iteration:** Recovered and re-certified the exact checkpoint, closed its final-review evidence gap, committed the frozen D-031 boundary oracle, then executed D-029's four-step right-reason ladder through exact pair classification. Fresh native and Claude exact-stage reviews are CLEAN; Claude's artifact is `be1749fd...` and the native artifact binds the same full 64-character stage digest.
+- **In flight:** None. W005 source is at clean `12247d8`; the next mutation is the separately bounded coordinator GREEN. W007 hosted/final-SHA gates cannot launch before the single W014 PR because the workflow has no manual trigger; they remain honestly pending.
+- **Next up:** Implement the W005 canonical preflight coordinator from the now-single-cause RED, migrate every production/fixture action writer and pair read, then take the serial lifecycle direct cut and full Fabric cascade. Preserve the honest transitional label for non-routed lifecycle journals until W008-W011 supply the frozen authority-compilation receipt binding. Route D-036's annotated-tag and duplicate-parser P2s into W012 rather than reopening the valid branch checkpoint.
 - **Open forks:** No open fork. Chair accepted reversible structural packaging but rejected the false F-023 closure claim; semantic consolidation is a separate W017 work unit, not a bounded repair fork.
 - **Blockers / escalations:** No human blocker. Native security-sensitive review is platform-content-blocked and native agent credits also report exhausted; per direct human instruction these legs route to Opus without native retries. Two earlier Opus passes violated the live-repository all-ref-history boundary and are discarded; the current pass is capability-contained. One unrecorded native topology helper also enumerated private path names despite its boundary; no contents were read, its private output is discarded, and chair re-proved only allowlisted non-private topology. Preserved hard stops: any genuine external-effect authority expansion or AFAB-004 need; final PR review/merge remains human-only.
 - **Spend checkpoint (§0a):** W004/W006/W015/W016 completed on first pass. W002's three exploratory jobs converged on NOT CLEAN/PARTIAL; repair cycle 1 was dual-primary CLEAN, chair staging caught an untracked-file whitespace blind spot, and final cycle 2/2 is independently CLEAN. W017's bounded cycle-2 corrections and exact-candidate reviews are CLEAN and locally integrated. W018 closed all D-030/D-032 findings: the final production repair is independently CLEAN and the only two residual test gaps now have right-reason mutation kills. W007 source cycle 1 and both mandatory primary reviews are CLEAN with no repair cycle; hosted proof remains pending.

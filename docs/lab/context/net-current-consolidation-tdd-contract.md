@@ -422,7 +422,7 @@ fi
 "$PYTHON" -m pytest -q tests/test_spec_families.py tests/test_provider_skill_boundaries.py
 "$PYTHON" -m pytest -q tests/spec_fixtures
 "$PYTHON" skills/engineering-writing/scripts/check_engineering_style.py \
-  docs/agent-harness-comprehensive-review/lab/context/net-current-consolidation-tdd-contract.md
+  docs/lab/context/net-current-consolidation-tdd-contract.md
 scripts/check-harness
 git diff --check
 ```

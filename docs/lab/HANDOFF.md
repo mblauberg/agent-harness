@@ -13,7 +13,7 @@ Consumed-at: pending
 Updated: 2026-07-14
 
 This lab remains `STATUS: RUN`. The canonical fresh-session handoff is
-[`docs/handoffs/HANDOFF-2026-07-14-agent-harness-comprehensive-review.md`](../../handoffs/HANDOFF-2026-07-14-agent-harness-comprehensive-review.md).
+[`docs/handoffs/HANDOFF-2026-07-14-agent-harness-comprehensive-review.md`](../handoffs/HANDOFF-2026-07-14-agent-harness-comprehensive-review.md).
 
 ## Current truth
 

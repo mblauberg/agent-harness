@@ -75,7 +75,9 @@ profiles, or access/list/enumerate `.agent-run/AFAB-004`.
    live same-action/different-adapter collision oracle.
 3. W005 D-031 one-cause preflight RED, coordinator GREEN, then the serial
    lifecycle direct cut and full Fabric cascade.
-4. W007 hosted Linux/macOS, Linux mutation, security and final-SHA evidence.
+4. W007 local/security evidence now; per D-035, bind hosted Linux/macOS, Linux
+   mutation and final-SHA receipt evidence on the single W014 PR head because
+   the workflow has no manual trigger and a branch push launches no jobs.
 5. W008 `AuthorityEnvelopeV2` direct cutover.
 6. W009 pure `AuthorityCompiler` extraction.
 7. W010 fixed containment matrix and council verdict.
