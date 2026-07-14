@@ -13,10 +13,10 @@ Deliver ADR [0002](../adr/0002-capability-compiled-execution-authority.md):
 provider-neutral authority profiles compiled into native settings so managed
 headless sessions can implement inside one owned worktree, with containment
 proven adversarially before any write profile ships. Direct V2 cutover, no
-backwards compatibility. Scope, evidence and challenge history live in
-[docs/agent-harness-comprehensive-review/SCOPING-SESSION.md](../agent-harness-comprehensive-review/SCOPING-SESSION.md)
+backwards compatibility. Scope, decision riders and challenge history live in
+the simplification pack [decision register](../provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/15_DECISION_REGISTER.md)
 and the [Step-1 work package and Step-3 containment
-checklist](../agent-harness-comprehensive-review/challenges/codex-pair-round2.md)
+checklist](../provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/25_AUTHORITY_V2_AND_CONTAINMENT.md)
 (both human-approved). Risk tier: crucial.
 
 Parallelisation constraint: one chair, disjoint write scopes per lane. Lane C
@@ -172,10 +172,12 @@ JSON
 ## Governance, gates and exclusions
 
 Per the human directive of 2026-07-13, this effort runs under the autonomous
-[chair charter](../agent-harness-comprehensive-review/CHAIR-CHARTER.md): a
-codex `gpt-5.6-sol` chair with an Opus pair implements every lane, LLM-resolving
-each decision (chair discretion or council vote) and recording it in the
-[decision register](../agent-harness-comprehensive-review/decision-register.md).
+[chair charter](../provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/24_AUTONOMOUS_CHARTER.md)
+(§6 superseded gates, §7 preserved boundaries; note the open carry-over question
+now that the comprehensive-review programme is superseded by the simplification
+pack): a codex `gpt-5.6-sol` chair with an Opus pair implements every lane,
+LLM-resolving each decision (chair discretion or council vote) and recording it
+in the [decision register](../provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/15_DECISION_REGISTER.md).
 
 - **The only human gate is PR review.** Nothing merges to `main` without a
   human approving the pull request; no direct pushes or admin-merge-over-red.

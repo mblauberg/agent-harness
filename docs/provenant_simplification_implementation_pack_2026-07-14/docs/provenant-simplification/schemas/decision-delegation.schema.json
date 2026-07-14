@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://provenant.local/schemas/decision-delegation.schema.json",
+  "title": "Project agent decision-delegation charter",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "charter_id",
+    "status",
+    "approved_by",
+    "approved_at",
+    "expires_at",
+    "scope_digest",
+    "decision_classes",
+    "collaboration",
+    "hard_boundaries",
+    "human_touchpoints"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "charter_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "active",
+        "revoked",
+        "expired"
+      ]
+    },
+    "approved_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approved_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "scope_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "risk_ceiling": {
+      "enum": [
+        "routine",
+        "substantial",
+        "crucial",
+        "terminal"
+      ]
+    },
+    "decision_classes": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resolver",
+          "mode"
+        ],
+        "properties": {
+          "resolver": {
+            "enum": [
+              "chair",
+              "council",
+              "human"
+            ]
+          },
+          "mode": {
+            "enum": [
+              "automatic",
+              "soft-decision",
+              "hard-gate"
+            ]
+          },
+          "council_minimum_families": {
+            "type": "integer",
+            "minimum": 2
+          },
+          "requires_evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maximum_risk": {
+            "enum": [
+              "routine",
+              "substantial",
+              "crucial",
+              "terminal"
+            ]
+          }
+        }
+      }
+    },
+    "collaboration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issue_create",
+        "issue_update",
+        "pr_open",
+        "pr_update",
+        "merge"
+      ],
+      "properties": {
+        "issue_create": {
+          "type": "boolean"
+        },
+        "issue_update": {
+          "type": "boolean"
+        },
+        "pr_open": {
+          "type": "boolean"
+        },
+        "pr_update": {
+          "type": "boolean"
+        },
+        "merge": {
+          "enum": [
+            "human-only",
+            "agent-when-green",
+            "forbidden"
+          ]
+        },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "allowed_labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "max_open_issues_per_run": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "hard_boundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "human_touchpoints": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "override_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "soft_default_allowed": {
+          "type": "boolean"
+        },
+        "cut_point_required": {
+          "type": "boolean"
+        },
+        "post_cut_override": {
+          "enum": [
+            "rework-issue",
+            "cancel-subtree",
+            "project-policy"
+          ]
+        }
+      }
+    }
+  }
+}

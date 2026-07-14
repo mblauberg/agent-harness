@@ -1,9 +1,11 @@
 # Architecture decision records
 
 Decisions ratified by the human on 2026-07-13 during the review-pack scoping
-session (`docs/agent-harness-comprehensive-review/SCOPING-SESSION.md`). Each
-ADR is the canonical owner of its decision; the review pack retains the
-supporting evidence and challenge history.
+session. Each ADR is the canonical owner of its decision. The scoping evidence,
+challenge history, decision riders and rejected-alternatives rationale are
+preserved in the simplification pack's decision register
+(`docs/provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/15_DECISION_REGISTER.md`),
+which supersedes the original review-pack register.
 
 | ADR | Title | Status |
 |---|---|---|

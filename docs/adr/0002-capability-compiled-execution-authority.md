@@ -51,4 +51,6 @@ pre-release state is reset — no dual parser is retained.
   effects via the existing `ExternalEffectService` model).
 - The first write pilot provider is chosen by containment evidence, not
   preference; the other stays read-only until it independently passes.
-- Work package details: `docs/agent-harness-comprehensive-review/challenges/codex-pair-round2.md`.
+- Work package details (schema, delivery→Fabric mapping, exact file plan,
+  the 8 acceptance gates and the adversarial containment-spike matrix):
+  `docs/provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/25_AUTHORITY_V2_AND_CONTAINMENT.md`.

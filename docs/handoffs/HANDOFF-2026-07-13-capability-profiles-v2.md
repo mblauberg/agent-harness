@@ -3,8 +3,8 @@
 Status: active
 
 Governance: runs under the
-[chair charter](../agent-harness-comprehensive-review/CHAIR-CHARTER.md) (human
-directive 2026-07-13). Every "human-approved", "ask the human" and "acceptance"
+[chair charter](../provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/24_AUTONOMOUS_CHARTER.md)
+(human directive 2026-07-13; see its §1 open carry-over question). Every "human-approved", "ask the human" and "acceptance"
 gate below is now **LLM-resolved** (chair discretion or council vote, recorded
 in the decision register) and lands via **PR review** — the only human gate.
 The preserved boundaries still hold verbatim: no push to `main`, no release/
@@ -77,8 +77,9 @@ Read only the current owners first:
 1. `AGENTS.md`, `HARNESS.md` and `docs/worktrees.md`;
 2. `docs/efforts/EFFORT-capability-profiles.md` and this handoff;
 3. `docs/adr/0002-capability-compiled-execution-authority.md`;
-4. `docs/agent-harness-comprehensive-review/challenges/codex-pair-round2.md`
-   §2, especially the reconciled direct-cutover file plan and gates;
+4. `docs/provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/25_AUTHORITY_V2_AND_CONTAINMENT.md`
+   (preserved verbatim from `codex-pair-round2.md` §2), especially the reconciled
+   direct-cutover file plan and gates;
 5. the frozen Lane A spec amendment and accepted Lane A/B integration commits.
 
 Then re-run the seam check from the completed Lane C checkpoint:
@@ -143,9 +144,10 @@ Keep one serial source writer and leave the tree green after each slice:
    that is Step 2.
 
 The exact create/modify list and dimension-negative matrix live in
-`codex-pair-round2.md` §2. Reconcile that list to post-A/B source before
-editing; do not copy historical line numbers or revive the rejected legacy
-bridge.
+`docs/provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/25_AUTHORITY_V2_AND_CONTAINMENT.md`
+(§§4–5, preserved from `codex-pair-round2.md` §2). Reconcile that list to
+post-A/B source before editing; do not copy historical line numbers or revive
+the rejected legacy bridge.
 
 ## Stop conditions
 

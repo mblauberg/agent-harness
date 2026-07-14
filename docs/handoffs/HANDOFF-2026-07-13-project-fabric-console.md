@@ -287,8 +287,9 @@ reruns. Older branch passes are not substitutes.
 ## Gates (under the chair charter)
 
 Per the human directive of 2026-07-13, this effort now runs under the
-[chair charter](../agent-harness-comprehensive-review/CHAIR-CHARTER.md). The
-gates below are reclassified accordingly.
+[chair charter](../provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/24_AUTONOMOUS_CHARTER.md)
+(§6 superseded gates, §7 preserved boundaries; see its §1 open carry-over
+question). The gates below are reclassified accordingly.
 
 **LLM-resolved (chair discretion or council vote, recorded, then landed via PR
 review — the only human gate):**

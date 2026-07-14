@@ -60,50 +60,81 @@ files under 1,000 lines each.
     before deletion; SPEC05-APPLICABILITY.md carries an **uncommitted local
     modification** that must be captured before deletion.
 
+### Also completed (after initial draft of this handoff)
+
+- **pair-codex review delivered**: `review/pair-codex-findings.md`
+  (STATUS: complete) — 0 P0, 8 P1, 2 P2; blocks deletion pending promotion;
+  provides the binding spec-split shape (Q4).
+- **Chair adjudication written**: `review/ADJUDICATION.md` — every finding
+  ruled on, codex anchors spot-verified, disagreements/degradations recorded,
+  four open human questions listed. **Read it before doing anything else.**
+- **consolidate-re-review** (Opus) finished: pack `21/22/23`, `schemas/`
+  (+examples), `templates/` created; `03` gained DecisionDelegation +
+  DecisionRequest subcontracts (§10–11, trailing sections renumbered to
+  §12–14); `09` gained PR-topology selection + WP6 pointer.
+
 ### In flight at handoff (verify before proceeding)
 
-- **consolidate-re-review** (Opus subagent): writing pack
-  `21_DECISION_DELEGATION.md`, `22_DOCUMENT_GOVERNANCE.md`,
-  `23_SKILL_DELTAS.md`, `schemas/`, `templates/`, and edits to
-  `03_MINIMAL_CONTRACTS.md`, `09_WORK_PACKAGES_AND_SEQUENCE.md`.
 - **consolidate-comprehensive** (Opus subagent): writing pack
   `24_AUTONOMOUS_CHARTER.md`, `25_AUTHORITY_V2_AND_CONTAINMENT.md`,
   `26_IMPLEMENTATION_SEEDS.md`, edits to `10/15/17`, and repointing the 5
-  inbound links.
-- **pair-codex** (gpt-5.6-sol xhigh, Herdr pane `w5:p16`): independent
-  cross-family pack review per `review/pair-codex-assignment.md`; writes
-  `review/pair-codex-findings.md` ending `STATUS: complete|partial`.
+  inbound links (ADR-0002, adr/README, EFFORT-capability-profiles, two
+  2026-07-13 handoffs). Its instructions are recorded verbatim in
+  `review/native-mine-comprehensive.md` — if it did not finish, re-dispatch
+  with the same scope. It must capture the uncommitted
+  SPEC05-APPLICABILITY.md diff before anything is deleted.
+- **pair-codex pane** `w5:p16`: findings consumed; close the pane
+  deliberately (created by this session).
 
-If any of the three did not finish: their instructions are fully recorded in
-`review/pair-codex-assignment.md` and the two `native-mine-*.md` reports —
-re-dispatch a fresh worker with the same scope. Fabric request/reply was
-unavailable (`FABRIC-ROUNDTRIP-UNAVAILABLE`); collection is by reading the
-named artifact files, with `herdr agent get pair-codex` / bounded
-`herdr agent read pair-codex --source recent-unwrapped --lines 60` for pane
-status only.
+`FABRIC-ROUNDTRIP-UNAVAILABLE` recorded for the whole run; collection is by
+named artifact files plus bounded `herdr agent get/read` for status only.
 
-## Open human decision (blocking for governance text, not for mechanics)
+## Open human decisions (blocking for governance text, not for mechanics)
 
-**Does the D-021 autonomous chair charter (and its §7 preserved boundaries)
-carry over from the superseded comprehensive-review programme to the
-simplification pack programme?** The charter's stated scope was the old
-programme; the pack re-introduces per-decision human gates the charter had
-converted to LLM resolution (P1-1). Until the human rules: treat the §7
-boundaries as in force and apply the stricter (pack) reading of approval
-gates. Record the ruling in pack `15_DECISION_REGISTER.md` and reconcile
-pack `04`/`05` notes.
+See `review/ADJUDICATION.md` "Open questions for the human":
+
+1. **D-021 charter carry-over** to this programme (native P1-1 / codex #3).
+   Until ruled: §7 boundaries in force; stricter (pack) approval reading.
+2. `AuthorityEnvelopeV2` name stability vs equivalent replacement.
+3. Numbered spec family manifests: permanent or transitional entry points.
+4. Accept/reject DecisionRequest + scope-delta semantics as pack policy
+   (drafted in pack `21_DECISION_DELEGATION.md`).
 
 ## Remaining work packages (execute in order)
 
-### H1 — collect and adjudicate pair-codex findings
+### H1 — verify consolidation and close the review round
 
-1. Wait/check for `review/pair-codex-findings.md`.
-2. Adjudicate against the native reports (chair owns the call; objective
-   checks outrank votes; do not majority-vote weak claims).
-3. Apply agreed pack corrections. Record disagreements in the findings file
-   or a short `review/ADJUDICATION.md`.
-4. Close the pane deliberately after capturing results (`herdr agent get`,
-   read bounded tail; the pane was created by this session and may be closed).
+1. Verify consolidate-comprehensive output (files 24/25/26, edits 10/15/17,
+   5 repoints, SPEC05 uncommitted-diff capture) against
+   `review/native-mine-comprehensive.md`.
+2. Close pane `w5:p16`.
+
+### H2b — apply the adjudicated pack repairs (all accepted; see ADJUDICATION)
+
+Text edits to the pack, one commit:
+
+- codex #1: import `AuthorityEnvelopeV2` dimensions/digests into `03`
+  (source: pack `25`); WP0 gains an explicit lane adoption/supersession
+  step; WP3 exit gains mapping/goldens/containment-receipt/direct-cutover
+  gates.
+- codex #2: `02`/`03`/`08` state delivery-run + `deliver` + validator as the
+  canonical lifecycle owner (ADR-0005); Fabric protocol owns transport
+  projections and explicit mappings only.
+- codex #4: label `06` minimum-patterns table future-state; `08` change map
+  adds `config/review-profiles/spec05-four-slot-v1.json` and
+  `skills/deliver/scripts/validate_delivery.py` to one atomic, effective-dated
+  review-policy migration (HARNESS + Spec 05 + configs + validator + fixtures).
+- codex #5: WorkItem gains approval/spec digest + authority-envelope identity
+  (ADR-0006); every persisted contract in `03` gains five-class
+  `retention_class` (ADR-0007); WP2 acceptance adds refusal/default rules.
+- codex #6: `08` §6 becomes a residual-responsibility map over the live seams
+  `ProviderSessionCoordinator`, `CommandJournal`, `ExternalEffectService`
+  (ADR-0003), admission/authority extracted first.
+- codex #7: minimum deterministic ReviewPlan derivation moves into WP4.
+- codex #10: `18` gains an adoption table mapping live lanes/owners/gates/
+  evidence to WPs or explicit supersession; no blank reset.
+- codex #9 residual: add PS/ADR accept-reject entries for DecisionRequest,
+  conflict keys, PR strategy, store identity in `15` (pending human Q4).
 
 ### H2 — finish pack integration
 
@@ -118,100 +149,91 @@ pack `04`/`05` notes.
 
 ### H3 — specs fold + split (largest package)
 
-Target layout (per pack `22_DOCUMENT_GOVERNANCE.md`, already human-directed):
+**Binding shape** (adjudicated: codex Q4 in `review/pair-codex-findings.md`
++ the pre-existing human requirement in
+`docs/handoffs/HANDOFF-2026-07-13-project-fabric-console.md:149-167`; this
+supersedes any earlier provisional layout): each existing root filename
+becomes a ≤250-line **family manifest**; topic modules live under a
+same-name directory; hard cap **999 lines and 100 KiB** per file, soft
+target 850; manifests bind ordered module paths, hashes and family version;
+add a tested `scripts/check_spec_families.py` gate (duplicate requirement
+IDs, broken links, missing modules, version drift, tampering, over-cap);
+retain **no monolith copies or aliases**.
+
+Target file map (from codex Q4 — refine per-module caps, keep names):
 
 ```text
 docs/specs/
-  README.md                        regenerated index (replaces 00-index.md)
-  agent-fabric/
-    index.md                       domain scope, version/acceptance provenance
-    <subject>.md                   current normative contract, <=1000 lines
-  console/
-    index.md
-    <subject>.md
-  harness/
-    index.md
-    adaptive-agent-harness.md      from 02 (726 lines, mostly relocation)
-    activation.md                  from 03 (171 lines, relocation)
+  01-agent-fabric.md + 01-agent-fabric/
+    scope-and-invariants · authority · ownership-and-topology ·
+    run-lifecycle-and-gates · provider-actions-and-adapters ·
+    messaging-and-public-protocol · evidence-and-review · effects ·
+    acceptance-map
+  04-agent-fabric-operational-hardening.md + …/
+    repository-and-architecture-assurance · daemon-and-wire ·
+    workspace-trust-and-containment · persistence-and-cutover ·
+    recovery-and-reconciliation · provider-route-budget-lifecycle-custody ·
+    review-bundle-and-portal-custody · retention-receipts-and-exports ·
+    observability-status-and-operations · acceptance-map
+  05-project-fabric-console.md + …/
+    scope-and-projections · project-sessions-and-chair ·
+    intake-scoping-and-continuation · artifact-review-and-attention ·
+    operator-views-and-interaction · integrations-git-github-herdr ·
+    lifecycle-and-failure-ux · acceptance-and-usability
 ```
 
-Source inventory (line numbers at `1ddfe24`):
+Source inventory (line numbers at `1ddfe24`): spec 01 base §1–31 ≈ 1–3425,
+§32 amendment ≈ 3426–9731 (32.19 ≈ 2,560 lines, 32.13 ≈ 800); spec 04 base
+§1–8 ≈ 1–342, §9 amendment ≈ 343–8456 (9.13 ≈ 970, 9.21 ≈ 3,230,
+9.22 ≈ 1,810); spec 05 base §1–16 + §17 amendment. Specs 02 (726) and 03
+(171) are already under cap — leave in place or manifest-ise for
+consistency, successor's call.
 
-- `01-agent-fabric.md` 9,731 lines; base §1–31 ≈ lines 1–3425; §32 amendment
-  ≈ 3426–9731 with subsections 32.1–32.22 (32.19 ≈ 2,560 lines,
-  32.20 ≈ 340, 32.21 ≈ 660, 32.13 ≈ 800).
-- `04-agent-fabric-operational-hardening.md` 8,456 lines; base §1–8 ≈ 1–342;
-  §9 amendment ≈ 343–8456, subsections 9.1–9.24 (9.13 ≈ 970, 9.21 ≈ 3,230,
-  9.22 ≈ 1,810, 9.23 ≈ 560).
-- `05-project-fabric-console.md` 1,465 lines; base §1–16 + §17 amendment.
-- `amendment-audit-2026-07-13.md` (246): retain as evidence; add a note that
-  its line anchors refer to the pre-split files at `1ddfe24`.
+Migration rules (binding — codex Q4 + Console handoff):
 
-Provisional subject allocation for `agent-fabric/` (planner refines to exact
-spans; expect ~14–18 files):
+1. **Repair and freeze semantics first**: complete the amendment-audit
+   repairs and an independent freeze of current semantics before moving
+   text. A purely mechanical split keeps the semantic version; any
+   behavioural change bumps it.
+2. **Fold, don't append**: every requirement/acceptance ID gets exactly one
+   normative module owner; `acceptance-map.md` links rather than restates.
+3. **Ownership boundaries**: spec 01 = public/domain contracts + six kernel
+   capabilities; spec 04 = enforcement/persistence/recovery/containment/
+   custody/observability (never the public lifecycle or Console policy);
+   spec 05 = product projections and UX only.
+4. **Status honesty**: amendments in 01 v0.36 / 04 v1.31 / 05 v1.13 are
+   under review, not accepted — family manifests must carry the acceptance
+   state currently in `00-index.md`; frontmatter per pack
+   `schemas/document-frontmatter.schema.json`.
+5. **Total accounting**: generate an old section/requirement-ID → new module
+   map; keep it until all conformance checks pass. A fresh-context verifier
+   confirms coverage, caps, unique IDs/canonical keys and link integrity
+   before originals are removed.
+6. **Reconcile, don't copy, known conflicts**: spec-owns-decisions vs ADR
+   practice; Spec 05 four-slot review profile still binding (ADR-0008);
+   read-only assumptions vs ADR-0002; Spec 04 archive-only language vs
+   ADR-0007.
+7. **Inbound references**: repoint every reference to the five current spec
+   files repo-wide (ADRs, efforts, handoffs, skills, runtime docs, pack).
+   `amendment-audit-2026-07-13.md` stays as evidence with a note that its
+   anchors refer to the pre-split files at `1ddfe24`.
+8. **Atomic replacement**: each monolith is replaced by its manifest in the
+   same commit; note the split in the commit body so the five active
+   worktree agents rebase deliberately.
 
-- `authority.md` — 01 §6, §10; `git-actions.md` — 01 §32.13 + 04 §9.13
-- `records-and-leases.md` — 01 §11–12; `protocol-surface.md` — 01 §14, §32.7
-- `execution-control.md` + `inbox-and-callbacks.md` — 01 §9 (must split), §32.5
-- `provider-adapters.md` — 01 §13, §32.11; `provider-routes.md` — 01 §32.19
-- `sessions-and-recovery.md` — 01 §15, §32.6, §32.12; `rotation-custody.md` —
-  01 §32.20 + 04 §9.22
-- `project-sessions-and-operator.md` — 01 §32.1–32.4, 32.8–32.10, 32.14–32.18,
-  32.22
-- `persistence-and-daemon.md` — 04 §1–8, §9.1–9.6;
-  `launch-custody.md` — 04 §9.7–9.12; `operator-reads-and-notifications.md` —
-  04 §9.14–9.20; `capability-routes-persistence.md` — 04 §9.21, 9.23–9.24
-- `observability.md` — 01 §19–20; `security.md` — 01 §18;
-  `acceptance.md` — 01 §22–25 + 04 §8/9.6/9.10 verification additions
-- decision/history sections (01 §26–31, review history, approval gates) →
-  ADR promotions + domain `index.md` provenance, per pack `11 §6`
-
-Fold rules (binding):
-
-1. **Fold, don't append**: each amendment subsection merges into the topical
-   file owning its subject; the folded text reads as one current contract.
-2. **Status honesty**: every new file carries frontmatter
-   (`schemas/document-frontmatter.schema.json` in the pack) recording source
-   spec + version + acceptance status. Spec 01 v0.36 / 04 v1.31 / 05 v1.13
-   amendments are **under review, not finally accepted** — the domain
-   `index.md` must preserve exactly the acceptance state currently in
-   `00-index.md`. Do not present under-review text as accepted.
-3. **Total accounting**: maintain a machine-checkable map: every source line
-   span → (target file | archived | dropped-with-reason). A verifier agent
-   must confirm coverage before deleting the original files.
-4. `<=1000` lines per output file, checked mechanically (`wc -l`).
-5. **Inbound references**: grep repo-wide for `01-agent-fabric`,
-   `02-adaptive-agent-harness`, `03-agent-fabric-activation`,
-   `04-agent-fabric-operational-hardening`, `05-project-fabric-console`,
-   `docs/specs/0` and repoint (ADRs, efforts, handoffs, skills, runtime docs,
-   pack files).
-6. Originals are tracked — git history is the archive; delete them only after
-   the verifier passes and the index is regenerated.
-7. **Coordination**: active worktrees (`lane-d-preflight-fixtures`,
-   `net-current-consolidation`, `receipt-portability-repair`,
-   `rust-ci-repair`, `comprehensive-review`) may reference current spec paths.
-   Land the split as one commit; note it in the commit body so worktree agents
-   rebase deliberately.
-
-Execution pipeline (chair stays integrator; one writer per target file —
-non-overlapping):
-
-1. **Planner** (flagship, high effort): read headings + skim spans; emit the
-   exact span→file map and per-file frontmatter/canonical_keys.
-2. **Writers** (flagship for the big semantic folds: 32.19, 9.13, 9.21, 9.22;
-   workhorse for mechanical relocations): each reads only its assigned spans
-   (`sed -n 'A,Bp'`), writes one target file.
-3. **Verifier** (flagship, high, fresh context): coverage map complete, line
-   limits, no duplicated normative claims across files (canonical_keys
-   unique), acceptance-status fidelity, links resolve.
-4. Regenerate index, delete originals, commit:
-   `docs(specs): fold amendments and split into <1000-line domain files`.
+Execution pipeline (one writer per module, non-overlapping): planner
+(flagship, high) emits exact span→module map; writers (flagship for the big
+semantic folds 32.19/9.13/9.21/9.22, workhorse for mechanical moves) read
+only assigned spans; fresh-context verifier (flagship, high) gates deletion
+of originals; then `scripts/check_spec_families.py` lands with tests and is
+wired into `scripts/check-harness`.
 
 ### H4 — deletion of the two review directories
 
 Gates, all required before `rm`:
 
-1. H1–H2 complete (extractions + codex adjudication landed and committed).
+1. H1, H2 and H2b complete (extractions, codex adjudication and the accepted
+   pack repairs landed and committed).
 2. The 5 inbound links repointed (verify:
    `grep -rn "agent-harness-comprehensive-review\|provenant-re-review-2026-07-13" --include="*.md" docs/ skills/ | grep -v pack_2026-07-14` → only
    self-references inside the two dirs remain).

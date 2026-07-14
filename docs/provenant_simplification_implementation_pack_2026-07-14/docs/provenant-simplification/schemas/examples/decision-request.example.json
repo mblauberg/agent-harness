@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "decision_id": "DEC-PROV-001",
+  "mode": "soft",
+  "decision_class": "reversible-spec-delta",
+  "scope": {
+    "project_session_id": "session-1",
+    "run_id": "run-1",
+    "issue_id": "PROV-DOC-1",
+    "task_ids": [
+      "task-doc-policy"
+    ]
+  },
+  "question": "Should handoffs move from docs/handoffs to run-owned state?",
+  "options": [
+    "run-owned by default",
+    "retain docs/handoffs"
+  ],
+  "recommendation": "run-owned by default",
+  "default_action": "run-owned by default",
+  "override_until": "2026-07-14T00:00:00Z",
+  "cut_point": "before migration PR merge",
+  "evidence_refs": [
+    "artifact://doc-audit"
+  ],
+  "council_record_ref": "artifact://council/dec-prov-001",
+  "related_prs": [],
+  "status": "default-applied",
+  "created_at": "2026-07-13T12:00:00Z",
+  "resolved_at": null,
+  "resolution_ref": null
+}
