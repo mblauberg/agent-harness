@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
 Executable SQLite fixtures proving six substantiated spec defects are
-accepted by the current DDL in docs/specs/agent-fabric/persistence.md
-(commit d7f3536), now owned by the workspace-trust, lifecycle-custody and
-observability modules.
+accepted by DDL in the current semantic persistence, workspace-trust,
+lifecycle-custody and observability owners. Those current owners contain DDL
+derived from the historical freeze at commit d7f3536; Git retains the former
+specification path and its full history.
 
 Each defect gets its own fresh in-memory sqlite3 connection with
 PRAGMA foreign_keys=ON. Column sets, PRIMARY KEY, UNIQUE and FOREIGN KEY
