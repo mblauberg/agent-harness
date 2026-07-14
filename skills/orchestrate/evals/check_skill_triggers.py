@@ -43,6 +43,7 @@ REQUIRED_REFS = [
     "domain-adaptation.md",
     "dynamic-workflows.md",
     "evaluation-and-observability.md",
+    "herdr-panes.md",
     "layering-and-context.md",
     "memory-scratchpad.md",
     "paired-primary.md",

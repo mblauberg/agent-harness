@@ -1,0 +1,283 @@
+from pathlib import Path
+import stat
+import subprocess
+import sys
+
+import yaml
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CHECKER = ROOT / "skills" / "orchestrate" / "evals" / "check_herdr_cli.py"
+CONFIG = ROOT / "config" / "adapter-compatibility.yaml"
+REFERENCE = ROOT / "skills" / "orchestrate" / "references" / "herdr-panes.md"
+
+ROOT_HELP = """\
+herdr agent <subcommand>         Agent helpers
+herdr pane <subcommand>          Pane helpers
+herdr wait <subcommand>          Blocking wait helpers
+herdr integration <subcommand>   Integration helpers
+herdr status [server|client]     Show status
+herdr api <subcommand>           API metadata
+  --version, -V                  Print version and exit
+  --help, -h                     Show this help
+"""
+AGENT_HELP = """\
+herdr agent list
+herdr agent get <target>
+herdr agent read <target>
+herdr agent send <target> <text>
+herdr agent start <name> -- <argv...>
+herdr agent explain <target> [--json]
+herdr agent wait <target> --status <idle|working|blocked|unknown> [--timeout MS]
+"""
+PANE_HELP = """\
+herdr pane process-info [--pane ID|--current]
+herdr pane run <pane_id> <command>
+"""
+WAIT_HELP = """\
+herdr wait output <pane_id> --match <text>
+herdr wait agent-status <pane_id> --status <idle|working|blocked|done|unknown> [--timeout MS]
+"""
+INTEGRATION_HELP = """\
+herdr integration install pi
+herdr integration status [--outdated-only]
+"""
+STATUS_HELP = """\
+herdr status server [--json]
+herdr status client [--json]
+"""
+API_HELP = """\
+herdr api schema [--json | --output PATH]
+"""
+
+
+def _fake_herdr(
+    tmp_path: Path,
+    *,
+    version: str = "0.7.3",
+    agent_help: str = AGENT_HELP,
+    pane_help: str = PANE_HELP,
+    wait_help: str = WAIT_HELP,
+    integration_help: str = INTEGRATION_HELP,
+) -> tuple[Path, Path]:
+    fake = tmp_path / "herdr"
+    log = tmp_path / "calls.log"
+    responses = {
+        "--version": f"herdr {version}\n",
+        "--help": ROOT_HELP,
+        "agent --help": agent_help,
+        "pane --help": pane_help,
+        "wait --help": wait_help,
+        "integration --help": integration_help,
+        "status --help": STATUS_HELP,
+        "api --help": API_HELP,
+    }
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "import pathlib, sys\n"
+        f"log = pathlib.Path({str(log)!r})\n"
+        "key = ' '.join(sys.argv[1:])\n"
+        "with log.open('a') as stream: stream.write(key + '\\n')\n"
+        f"responses = {responses!r}\n"
+        "if key not in responses:\n"
+        "    print('unexpected command: ' + key, file=sys.stderr)\n"
+        "    raise SystemExit(91)\n"
+        "print(responses[key], end='')\n"
+    )
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    return fake, log
+
+
+def _run(binary: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(CHECKER),
+            "--binary",
+            str(binary),
+            "--config",
+            str(CONFIG),
+            "--reference",
+            str(REFERENCE),
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_cli_gate_uses_only_version_and_group_help_without_a_live_session(tmp_path: Path) -> None:
+    fake, log = _fake_herdr(tmp_path)
+    result = _run(fake)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "HERDR CLI CHECK: PASS" in result.stdout
+    assert log.read_text().splitlines() == [
+        "--version",
+        "--help",
+        "agent --help",
+        "pane --help",
+        "wait --help",
+        "integration --help",
+        "status --help",
+        "api --help",
+    ]
+
+
+def test_cli_gate_skips_cleanly_when_herdr_is_unavailable(tmp_path: Path) -> None:
+    result = _run(tmp_path / "missing-herdr")
+
+    assert result.returncode == 0
+    assert "HERDR CLI CHECK: SKIP" in result.stdout
+    assert "binary not found" in result.stdout
+
+
+def test_cli_gate_fails_clearly_on_installed_version_conflict(tmp_path: Path) -> None:
+    fake, _ = _fake_herdr(tmp_path, version="0.7.4")
+    result = _run(fake)
+
+    assert result.returncode == 1
+    assert "HERDR CLI CHECK: FAIL" in result.stdout
+    assert "installed version 0.7.4 conflicts with compatibility pin 0.7.3" in result.stdout
+
+
+def test_cli_gate_distinguishes_agent_idle_from_pane_done_wait_statuses(tmp_path: Path) -> None:
+    fake, _ = _fake_herdr(
+        tmp_path,
+        agent_help=AGENT_HELP.replace("blocked|unknown", "blocked|done|unknown"),
+    )
+    result = _run(fake)
+
+    assert result.returncode == 1
+    assert "agent wait statuses" in result.stdout
+    assert "done" in result.stdout
+
+
+def test_cli_gate_rejects_documented_command_drift(tmp_path: Path) -> None:
+    fake, _ = _fake_herdr(tmp_path, agent_help=AGENT_HELP.replace("herdr agent read <target>\n", ""))
+    result = _run(fake)
+
+    assert result.returncode == 1
+    assert "documented command is absent from help: herdr agent read" in result.stdout
+
+
+def test_cli_gate_rejects_missing_documented_integration_install(tmp_path: Path) -> None:
+    fake, _ = _fake_herdr(
+        tmp_path,
+        integration_help=INTEGRATION_HELP.replace("herdr integration install pi\n", ""),
+    )
+    result = _run(fake)
+
+    assert result.returncode == 1
+    assert (
+        "documented command is absent from help: herdr integration install pi"
+        in result.stdout
+    )
+
+
+def test_cli_gate_rejects_missing_documented_pane_run_shorthand(tmp_path: Path) -> None:
+    fake, _ = _fake_herdr(
+        tmp_path,
+        pane_help=PANE_HELP.replace("herdr pane run <pane_id> <command>\n", ""),
+    )
+    result = _run(fake)
+
+    assert result.returncode == 1
+    assert "documented command is absent from help: herdr pane run" in result.stdout
+
+
+def test_cli_gate_rejects_a_documented_status_absent_from_help(tmp_path: Path) -> None:
+    reference = tmp_path / "herdr-panes.md"
+    reference.write_text(
+        REFERENCE.read_text().replace(
+            "A `blocked` agent needs input",
+            "A `blocked` agent needs input; a `paused` agent is suspended",
+        )
+    )
+    fake, _ = _fake_herdr(tmp_path)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(CHECKER),
+            "--binary",
+            str(fake),
+            "--config",
+            str(CONFIG),
+            "--reference",
+            str(reference),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "documented status tokens are absent from help: ['paused']" in result.stdout
+
+
+def test_cli_gate_rejects_an_internally_conflicting_protocol_pin(tmp_path: Path) -> None:
+    data = yaml.safe_load(CONFIG.read_text())
+    data["adapters"]["herdr"]["runtime_range"]["supported_protocol_versions"] = [17]
+    conflicting = tmp_path / "adapter-compatibility.yaml"
+    conflicting.write_text(yaml.safe_dump(data, sort_keys=False))
+    fake, log = _fake_herdr(tmp_path)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(CHECKER),
+            "--binary",
+            str(fake),
+            "--config",
+            str(conflicting),
+            "--reference",
+            str(REFERENCE),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "protocol pin 16 is not in supported_protocol_versions [17]" in result.stdout
+    assert not log.exists(), "configuration conflicts must fail before invoking Herdr"
+
+
+def test_cli_gate_reads_version_and_protocol_from_the_compatibility_pin(tmp_path: Path) -> None:
+    data = yaml.safe_load(CONFIG.read_text())
+    herdr = data["adapters"]["herdr"]
+    herdr["implementation"]["installed_version"] = "9.9.9"
+    herdr["runtime_range"]["supported_cli_versions"] = ["9.9.9"]
+    herdr["contract"]["protocol_version"] = 99
+    herdr["runtime_range"]["supported_protocol_versions"] = [99]
+    changed = tmp_path / "adapter-compatibility.yaml"
+    changed.write_text(yaml.safe_dump(data, sort_keys=False))
+    fake, _ = _fake_herdr(tmp_path, version="9.9.9")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(CHECKER),
+            "--binary",
+            str(fake),
+            "--config",
+            str(changed),
+            "--reference",
+            str(REFERENCE),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "version 9.9.9, protocol 99" in result.stdout
+
+
+def test_installed_herdr_matches_the_declared_contract_or_skips_cleanly() -> None:
+    result = subprocess.run(
+        [sys.executable, str(CHECKER)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "HERDR CLI CHECK: PASS" in result.stdout or "HERDR CLI CHECK: SKIP" in result.stdout
