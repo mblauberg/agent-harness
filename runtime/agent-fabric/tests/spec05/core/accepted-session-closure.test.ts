@@ -16,12 +16,14 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 
 import { applyMigrations } from "../../../src/core/migrations.ts";
+import { ProviderActionAdmissionCoordinator } from "../../../src/application/provider-action-admission.ts";
 import { createProductionOperatorActionPorts } from "../../../src/operator/production-action-ports.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
 import { ProjectSessionStore } from "../../../src/project-session/store.ts";
 import { ScopedGateStore } from "../../../src/gates/store.ts";
 import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
 import { NotificationOutbox } from "../../../src/attention/outbox.ts";
+import { admitProviderActionFixture } from "../../support/provider-action-fixture.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 const now = Date.parse("2027-01-01T00:00:00Z");
@@ -121,17 +123,44 @@ describe("accepted project-session closure", () => {
       VALUES
         ('cap_chair_bridge','run_01','chair_01',1,${now + 100_000},NULL),
         ('cap_child_bridge','run_01','agent_completion',1,${now + 100_000},NULL);
-      INSERT INTO provider_actions(
-        run_id,action_id,adapter_id,operation,target_agent_id,provider_session_generation,
-        turn_lease_generation,identity_hash,payload_hash,payload_json,status,history_json,
-        execution_count,effect_count,idempotency_proven,result_json,updated_at,journal_revision
-      ) VALUES
-        ('run_01','launch_chair','adapter_test','spawn','chair_01',1,NULL,
-         'identity-chair','payload-chair','{}','terminal','[]',1,1,1,
-         '{"outcome":{"kind":"terminal-success","providerSessionRef":"provider_session_01"}}',${now},1),
-        ('run_01','spawn_child','adapter_test','spawn','agent_completion',1,NULL,
-         'identity-child','payload-child','{}','terminal','[]',1,1,1,
-         '{"outcome":{"kind":"terminal-success","providerSessionRef":"provider_session_02"}}',${now},1);
+    `);
+    admitProviderActionFixture(database, {
+      runId: "run_01",
+      adapterId: "adapter_test",
+      actionId: "launch_chair",
+      operation: "spawn",
+      targetAgentId: "chair_01",
+      providerSessionGeneration: 1,
+      identityHash: "identity-chair",
+      payloadHash: "payload-chair",
+      payloadJson: "{}",
+      status: "terminal",
+      historyJson: "[]",
+      executionCount: 1,
+      effectCount: 1,
+      idempotencyProven: true,
+      resultJson: '{"outcome":{"kind":"terminal-success","providerSessionRef":"provider_session_01"}}',
+      updatedAt: now,
+    });
+    admitProviderActionFixture(database, {
+      runId: "run_01",
+      adapterId: "adapter_test",
+      actionId: "spawn_child",
+      operation: "spawn",
+      targetAgentId: "agent_completion",
+      providerSessionGeneration: 1,
+      identityHash: "identity-child",
+      payloadHash: "payload-child",
+      payloadJson: "{}",
+      status: "terminal",
+      historyJson: "[]",
+      executionCount: 1,
+      effectCount: 1,
+      idempotencyProven: true,
+      resultJson: '{"outcome":{"kind":"terminal-success","providerSessionRef":"provider_session_02"}}',
+      updatedAt: now,
+    });
+    database.exec(`
       INSERT INTO provider_agent_custody(
         run_id,action_id,operation,actor_agent_id,target_agent_id,authority_id,adapter_id,
         bridge_contract_digest,bridge_capable,capability_hash,capability_expires_at,
@@ -246,6 +275,7 @@ describe("accepted project-session closure", () => {
     const ports = createProductionOperatorActionPorts({
       database,
       clock: () => now,
+      providerActionAdmission: new ProviderActionAdmissionCoordinator({ database, clock: () => now }),
       adapter: {
         capabilities: async () => { throw new Error("drain must not inspect a provider adapter"); },
         dispatch: async () => { throw new Error("drain must not dispatch a provider adapter"); },
@@ -527,6 +557,7 @@ describe("accepted project-session closure", () => {
     const restartedPorts = createProductionOperatorActionPorts({
       database,
       clock: () => now + 2,
+      providerActionAdmission: new ProviderActionAdmissionCoordinator({ database, clock: () => now + 2 }),
       adapter: {
         capabilities: async () => { throw new Error("drain must not inspect a provider adapter"); },
         dispatch: async () => { throw new Error("drain must not dispatch a provider adapter"); },

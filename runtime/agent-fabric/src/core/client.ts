@@ -316,9 +316,12 @@ export class FabricClient {
   }
 
   async reportProviderState(input: {
+    sourceEventId: string;
+    providerSessionRef: string;
     agentId: string;
     providerSessionGeneration: number;
-    contextRevision: string;
+    contextRevision: number;
+    evidenceDigest: `sha256:${string}`;
     checkpointSha256?: string;
     commandId: string;
   }): Promise<LifecycleResult> {
@@ -338,15 +341,19 @@ export class FabricClient {
     return await this.#fabric.dispatchProviderAction(this.#runId, this.#agentId, input);
   }
 
-  async reconcileProviderAction(input: { actionId: string; commandId: string }): Promise<ProviderActionResult> {
+  async reconcileProviderAction(input: { adapterId: string; actionId: string; commandId: string }): Promise<ProviderActionResult> {
     this.#authorise(FABRIC_OPERATIONS.reconcileProviderAction);
     return await this.#fabric.reconcileProviderAction(this.#runId, this.#agentId, input);
   }
 
-  async getProviderAction(input: { actionId: string }): Promise<ProviderActionResult> {
+  async getProviderAction(input: {
+    adapterId: string;
+    actionId: string;
+    expectedActionKind: "non-review" | "certifying-review";
+  }): Promise<ProviderActionResult> {
     this.#authorise(FABRIC_OPERATIONS.getProviderAction);
     this.#fabric.assertProviderActionReadable(this.#runId, this.#agentId);
-    return this.#fabric.getProviderAction(this.#runId, input.actionId);
+    return this.#fabric.getProviderAction(this.#runId, input.adapterId, input.actionId);
   }
 
   async recordOperatorIntervention(input: {

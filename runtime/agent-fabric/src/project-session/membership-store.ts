@@ -80,7 +80,7 @@ export class ProjectSessionMembershipStore {
           project_session_id, coordination_run_id, member_kind, member_id,
           required, state, revision, created_at, updated_at
         ) VALUES (?, ?, ?, ?, 1, 'active', 1, ?, ?)
-        ON CONFLICT(project_session_id, coordination_run_id, member_kind, member_id)
+        ON CONFLICT(project_session_id, coordination_run_id, member_kind, member_id, member_adapter_id)
         DO NOTHING
       `);
       const now = this.#clock();

@@ -182,7 +182,16 @@ export type BaselineOperationInputMap = {
   [FABRIC_OPERATIONS.releaseWriteLease]: { leaseId: string; expectedGeneration: number; commandId: string };
   [FABRIC_OPERATIONS.requestLifecycle]: { action: "compact" | "rotate" | "completion-ready" | "release"; agentId: string; taskId: string; taskRevision: number; checkpoint: LifecycleCheckpoint; commandId: string };
   [FABRIC_OPERATIONS.getAgentLifecycle]: { agentId: string };
-  [FABRIC_OPERATIONS.reportProviderState]: { agentId: string; providerSessionGeneration: number; contextRevision: number; checkpointSha256?: string; commandId: string };
+  [FABRIC_OPERATIONS.reportProviderState]: {
+    sourceEventId: string;
+    providerSessionRef: string;
+    providerSessionGeneration: number;
+    contextRevision: number;
+    evidenceDigest: `sha256:${string}`;
+    agentId: string;
+    commandId: string;
+    checkpointSha256?: string;
+  };
   [FABRIC_OPERATIONS.dispatchProviderAction]: ProviderActionDispatchInputV1;
   [FABRIC_OPERATIONS.reconcileProviderAction]: { adapterId: string; actionId: string; expectedActionKind: "non-review" | "certifying-review"; commandId: string };
   [FABRIC_OPERATIONS.getProviderAction]: { adapterId: string; actionId: string; expectedActionKind: "non-review" | "certifying-review" };

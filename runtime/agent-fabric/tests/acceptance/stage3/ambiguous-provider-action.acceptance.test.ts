@@ -1,4 +1,5 @@
-import { readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, realpath, rm } from "node:fs/promises";
 
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,22 +10,50 @@ import {
   createLifecycleFixture,
   reopenLifecycleFabric,
 } from "../../support/lifecycle-testkit.ts";
+import { admitProviderActionFixture } from "../../support/provider-action-fixture.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 
 type ObservedProviderAction = Awaited<ReturnType<FabricClient["getProviderAction"]>>;
 
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) =>
+      `${JSON.stringify(key)}:${canonicalJson(record[key])}`
+    ).join(",")}}`;
+  }
+  throw new Error("canonical test input must be JSON-compatible");
+}
+
+function canonicalDigest(value: unknown): string {
+  return `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
+}
+
 async function waitForProviderAction(
   client: FabricClient,
   actionId: string,
+  adapterId = "fake-lifecycle",
 ): Promise<ObservedProviderAction> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
-    const action = await client.getProviderAction({ actionId });
+    const action = await readProviderAction(client, actionId, adapterId);
     if (["terminal", "ambiguous", "quarantined"].includes(action.status)) return action;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
   }
   throw new Error(`provider action did not settle: ${actionId}`);
+}
+
+function readProviderAction(
+  client: FabricClient,
+  actionId: string,
+  adapterId = "fake-lifecycle",
+): Promise<ObservedProviderAction> {
+  return client.getProviderAction({ adapterId, actionId, expectedActionKind: "non-review" });
 }
 
 function authorityBudget(
@@ -98,7 +127,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       },
       commandId: "provider-review-no-turns:dispatch",
     })).rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
-    await expect(fixture.chair.getProviderAction({ actionId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(readProviderAction(fixture.chair, actionId)).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("reserves and exactly settles every configured provider budget dimension", async () => {
@@ -297,6 +326,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       })).resolves.toMatchObject({ status: "prepared" });
       await expect(waitForProviderAction(fixture.chair, actionId)).resolves.toMatchObject({ status: "ambiguous" });
       await expect(fixture.chair.reconcileProviderAction({
+        adapterId: "fake-lifecycle",
         actionId,
         commandId: `provider-review-invalid-turns:${scenario}:reconcile`,
       })).resolves.toMatchObject({ status: "quarantined" });
@@ -345,6 +375,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     })).resolves.toMatchObject({ status: "prepared" });
     await expect(waitForProviderAction(fixture.chair, actionId)).resolves.toMatchObject({ status: "ambiguous" });
     await expect(fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId,
       commandId: `provider-review-invalid-usage:${scenario}:reconcile`,
     })).resolves.toMatchObject({ status: "quarantined", executionCount: 1 });
@@ -385,7 +416,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       },
       commandId: "provider-review-mandatory-usage:dispatch",
     })).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
-    await expect(fixture.chair.getProviderAction({ actionId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(readProviderAction(fixture.chair, actionId)).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("reconciles late exact usage without replaying the provider effect", async () => {
@@ -428,6 +459,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     })).resolves.toMatchObject({ status: "prepared" });
     await expect(waitForProviderAction(fixture.chair, actionId)).resolves.toMatchObject({ status: "ambiguous" });
     await expect(fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId,
       commandId: "provider-review-late-usage:reconcile-1",
     })).resolves.toMatchObject({
@@ -443,6 +475,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
 
     await expect(fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId,
       commandId: "provider-review-late-usage:reconcile-2",
     })).resolves.toMatchObject({ status: "terminal", executionCount: 1, effectCount: 1 });
@@ -482,7 +515,10 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         cwd: "src/leader",
       },
       commandId: "provider-review-task-race:dispatch",
-    });
+    }).then(
+      (value) => ({ status: "fulfilled" as const, value }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 25));
     await fixture.leader.updateTask({
       taskId: fixture.leaderTask.taskId,
@@ -491,10 +527,915 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-task-race:complete",
     });
 
-    await expect(dispatch).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
-    await expect(fixture.chair.getProviderAction({
-      actionId: "provider-review-task-race:spawn",
-    })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(dispatch).resolves.toMatchObject({
+      status: "rejected",
+      error: { code: "LIFECYCLE_PRECONDITION_FAILED" },
+    });
+    await expect(readProviderAction(fixture.chair, "provider-review-task-race:spawn"))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("does not classify the same action ID on another adapter as special custody", async () => {
+    const fixture = await createLifecycleFixture({ capabilitiesDelayMs: 1_000 });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const actionId = "provider-review-cross-adapter:shared";
+    const now = fixture.clock.now().getTime();
+    const seed = new Database(fixture.databasePath);
+    try {
+      admitProviderActionFixture(seed, {
+        runId: fixture.runId,
+        actionId,
+        adapterId: "herdr-control-v1",
+        operation: "wakeup",
+        identityHash: "a".repeat(64),
+        payloadHash: "b".repeat(64),
+        payloadJson: "{}",
+        status: "terminal",
+        historyJson: '["prepared","dispatched","terminal"]',
+        executionCount: 1,
+        effectCount: 1,
+        idempotencyProven: true,
+        resultJson: "{}",
+        updatedAt: now,
+      });
+    } finally {
+      seed.close();
+    }
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1 },
+      },
+      commandId: "provider-review-cross-adapter:authority",
+    });
+    const dispatch = fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Do not alias another adapter's action.",
+        cwd: "src/leader",
+      },
+      commandId: "provider-review-cross-adapter:dispatch",
+    }).then(
+      (value) => ({ status: "fulfilled" as const, value }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await fixture.leader.updateTask({
+      taskId: fixture.leaderTask.taskId,
+      expectedRevision: fixture.leaderTask.revision,
+      state: "complete",
+      commandId: "provider-review-cross-adapter:complete",
+    });
+
+    const dispatchOutcome = await dispatch;
+    expect(dispatchOutcome).toMatchObject({ status: "rejected" });
+    if (dispatchOutcome.status !== "rejected") return;
+    expect(dispatchOutcome.error).toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+    expect((dispatchOutcome.error as Error).message)
+      .toBe("terminal task cannot admit an ephemeral provider spawn");
+  });
+
+  it("keeps the same action ID independent across two live adapters and restart", async () => {
+    const fixture = await createLifecycleFixture({ secondaryAdapter: true });
+    cleanup.push(async () => rm(fixture.directory, { recursive: true, force: true }));
+    const authority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: {
+          turns: 4,
+          provider_calls: 4,
+          concurrent_turns: 2,
+          wall_clock_milliseconds: 10_000,
+          "cost:USD": 10,
+          "input_tokens:fake": 100,
+          "output_tokens:fake": 100,
+          descendants: 1,
+          message_bytes: 1_000,
+          artifact_bytes: 1_000,
+        },
+      },
+      commandId: "provider-review-pair:authority",
+    });
+    const actionId = "provider-review-pair:shared";
+    const request = (adapterId: string, commandId: string) => ({
+      adapterId,
+      actionId,
+      operation: "spawn" as const,
+      authorityId: authority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: `Run independently on ${adapterId}.`,
+        cwd: "src/leader",
+        scenario: "terminal-exact-usage",
+      },
+      commandId,
+    });
+
+    const primary = await fixture.chair.dispatchProviderAction(
+      request("fake-lifecycle", "provider-review-pair:primary"),
+    );
+    expect(primary).toMatchObject({ actionId, status: "prepared" });
+    const primarySettled = await waitForProviderAction(fixture.chair, actionId, "fake-lifecycle");
+    const secondary = await fixture.chair.dispatchProviderAction(
+      request("fake-lifecycle-secondary", "provider-review-pair:secondary"),
+    );
+    expect(secondary).toMatchObject({ actionId, status: "prepared" });
+    const secondarySettled = await waitForProviderAction(
+      fixture.chair,
+      actionId,
+      "fake-lifecycle-secondary",
+    );
+    expect(primarySettled).toMatchObject({ actionId, executionCount: 1 });
+    expect(secondarySettled).toMatchObject({ actionId, executionCount: 1 });
+
+    await expect(fixture.chair.dispatchProviderAction(
+      request("fake-lifecycle", "provider-review-pair:primary-retry"),
+    )).resolves.toEqual(primarySettled);
+    const secondaryReconciled = await fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle-secondary",
+      actionId,
+      commandId: "provider-review-pair:secondary-reconcile",
+    });
+    await expect(readProviderAction(fixture.chair, actionId, "fake-lifecycle"))
+      .resolves.toEqual(primarySettled);
+    await expect(readProviderAction(fixture.chair, actionId, "fake-lifecycle-secondary"))
+      .resolves.toEqual(secondaryReconciled);
+
+    await fixture.fabric.close();
+    const reopened = await reopenLifecycleFabric(fixture);
+    cleanup.push(async () => reopened.close());
+    const chair = asLifecycleClient(reopened.connect(fixture.capabilities.chair));
+    await expect(readProviderAction(chair, actionId, "fake-lifecycle")).resolves.toEqual(primarySettled);
+    await expect(readProviderAction(chair, actionId, "fake-lifecycle-secondary"))
+      .resolves.toEqual(secondaryReconciled);
+  });
+
+  it("persists the canonical pair preflight before adapter capability inspection", async () => {
+    const actionRef = {
+      adapterId: "fake-lifecycle",
+      actionId: "provider-review-preflight:spawn",
+    } as const;
+    type CapabilityBoundaryObservation = {
+      preflights: unknown[];
+      dependants: unknown;
+    };
+    let databasePath: string | undefined;
+    let capabilityBoundaryCalls = 0;
+    let resolveCapabilityBoundary: (value: CapabilityBoundaryObservation) => void = () => {
+      throw new Error("provider capability boundary resolver is unavailable");
+    };
+    const capabilityBoundary = new Promise<CapabilityBoundaryObservation>((resolvePromise) => {
+      resolveCapabilityBoundary = resolvePromise;
+    });
+    const fixture = await createLifecycleFixture({
+      capabilitiesDelayMs: 1_000,
+      fault: (label) => {
+        if (label !== "provider-action:before-capability-inspection") return;
+        capabilityBoundaryCalls += 1;
+        if (capabilityBoundaryCalls !== 1) {
+          throw new Error("provider capability boundary fired more than once");
+        }
+        if (databasePath === undefined) {
+          throw new Error("provider capability boundary fired before fixture setup completed");
+        }
+        const observer = new Database(databasePath, { readonly: true });
+        try {
+          resolveCapabilityBoundary({
+            preflights: observer.prepare(`
+              SELECT adapter_id,action_id,run_id,owner_digest,actor_principal_digest,input_digest,state
+                FROM provider_action_pair_preflights
+               WHERE adapter_id=? AND action_id=?
+            `).all(actionRef.adapterId, actionRef.actionId),
+            dependants: observer.prepare(`
+              SELECT
+                (SELECT COUNT(*) FROM adapter_effective_configurations
+                  WHERE subject_action_adapter_id=? AND subject_action_id=?) AS configuration_count,
+                (SELECT COUNT(*) FROM review_finding_capacity_reservations
+                  WHERE adapter_id=? AND action_id=?) AS reservation_count,
+                (SELECT COUNT(*) FROM provider_actions
+                  WHERE adapter_id=? AND action_id=?) AS action_count,
+                (SELECT COUNT(*) FROM provider_action_routes
+                  WHERE adapter_id=? AND action_id=?) AS route_count
+            `).get(
+              actionRef.adapterId, actionRef.actionId,
+              actionRef.adapterId, actionRef.actionId,
+              actionRef.adapterId, actionRef.actionId,
+              actionRef.adapterId, actionRef.actionId,
+            ),
+          });
+        } finally {
+          observer.close();
+        }
+      },
+    });
+    databasePath = fixture.databasePath;
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1 },
+      },
+      commandId: "provider-review-preflight:authority",
+    });
+    const canonicalFixtureDirectory = await realpath(fixture.directory);
+    const providerPayload = {
+      taskId: fixture.leaderTask.taskId,
+      model: "fake-reviewer-v1",
+      modelFamily: "fake",
+      prompt: "Release this admission after the task terminalises.",
+      maxTurns: 1,
+      cwd: `${canonicalFixtureDirectory}/src/leader`,
+      readOnlyRoot: `${canonicalFixtureDirectory}/src/leader`,
+      allowedTools: ["Read", "Glob", "Grep"],
+      approvalPolicy: "never",
+      sandbox: "read-only",
+    } as const;
+    const scope = { kind: "run-action", runId: fixture.runId } as const;
+    const canonicalInput = {
+      schemaVersion: 1,
+      scope,
+      actionRef,
+      operation: "spawn",
+      taskId: fixture.leaderTask.taskId,
+      authorityId: reviewAuthority.authorityId,
+      targetAgentId: null,
+      providerSessionGeneration: null,
+      providerPayload,
+      routeRequest: null,
+      certifyingBinding: null,
+    } as const;
+    const identityDatabase = new Database(fixture.databasePath, { readonly: true });
+    const principal = identityDatabase.prepare(`
+      SELECT run.project_session_id AS projectSessionId,
+             capability.principal_generation AS principalGeneration
+        FROM runs run
+        JOIN capabilities capability
+          ON capability.run_id=run.run_id AND capability.agent_id=run.chair_agent_id
+       WHERE run.run_id=? AND capability.revoked_at IS NULL
+       ORDER BY capability.principal_generation DESC
+       LIMIT 1
+    `).get(fixture.runId) as {
+      projectSessionId: string;
+      principalGeneration: number;
+    };
+    identityDatabase.close();
+    const actorPrincipalDigest = canonicalDigest({
+      agentId: "chair",
+      projectSessionId: principal.projectSessionId,
+      coordinationRunId: fixture.runId,
+      principalGeneration: principal.principalGeneration,
+    });
+    const inputDigest = canonicalDigest(canonicalInput);
+    const ownerDigest = canonicalDigest({
+      schemaVersion: 1,
+      scope,
+      actionRef,
+      actorPrincipalDigest,
+      inputDigest,
+    });
+
+    const dispatch = fixture.chair.dispatchProviderAction({
+      ...actionRef,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: providerPayload.model,
+        modelFamily: providerPayload.modelFamily,
+        prompt: providerPayload.prompt,
+        cwd: "src/leader",
+      },
+      commandId: "provider-review-preflight:dispatch",
+    }).then(
+      (value) => ({ status: "fulfilled" as const, value }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    const boundaryOrDispatch = await Promise.race([
+      capabilityBoundary.then((observation) => ({ kind: "boundary" as const, observation })),
+      dispatch.then((outcome) => ({ kind: "dispatch" as const, outcome })),
+    ]);
+    expect(boundaryOrDispatch).toMatchObject({ kind: "boundary" });
+    if (boundaryOrDispatch.kind !== "boundary") return;
+    expect(capabilityBoundaryCalls).toBe(1);
+    const inFlightObservation = boundaryOrDispatch.observation;
+
+    await fixture.leader.updateTask({
+      taskId: fixture.leaderTask.taskId,
+      expectedRevision: fixture.leaderTask.revision,
+      state: "complete",
+      commandId: "provider-review-preflight:complete",
+    });
+    const dispatchOutcome = await dispatch;
+
+    const terminalObserver = new Database(fixture.databasePath, { readonly: true });
+    const terminalObservation = (() => {
+      try {
+        return {
+          preflight: terminalObserver.prepare(`
+            SELECT state,failure_json FROM provider_action_pair_preflights
+             WHERE adapter_id=? AND action_id=?
+          `).get(actionRef.adapterId, actionRef.actionId),
+          dependants: terminalObserver.prepare(`
+            SELECT
+              (SELECT COUNT(*) FROM adapter_effective_configurations
+                WHERE subject_action_adapter_id=? AND subject_action_id=?) AS configuration_count,
+              (SELECT COUNT(*) FROM review_finding_capacity_reservations
+                WHERE adapter_id=? AND action_id=?) AS reservation_count,
+              (SELECT COUNT(*) FROM provider_actions
+                WHERE adapter_id=? AND action_id=?) AS action_count,
+              (SELECT COUNT(*) FROM provider_action_routes
+                WHERE adapter_id=? AND action_id=?) AS route_count
+          `).get(
+            actionRef.adapterId, actionRef.actionId,
+            actionRef.adapterId, actionRef.actionId,
+            actionRef.adapterId, actionRef.actionId,
+            actionRef.adapterId, actionRef.actionId,
+          ),
+        };
+      } finally {
+        terminalObserver.close();
+      }
+    })();
+
+    expect(inFlightObservation.preflights).toEqual([{
+      adapter_id: actionRef.adapterId,
+      action_id: actionRef.actionId,
+      run_id: fixture.runId,
+      owner_digest: ownerDigest,
+      actor_principal_digest: actorPrincipalDigest,
+      input_digest: inputDigest,
+      state: "resolving",
+    }]);
+    expect(inFlightObservation.dependants).toEqual({
+      configuration_count: 0,
+      reservation_count: 0,
+      action_count: 0,
+      route_count: 0,
+    });
+    expect(dispatchOutcome).toMatchObject({
+      status: "rejected",
+      error: { code: "LIFECYCLE_PRECONDITION_FAILED" },
+    });
+    expect(terminalObservation.preflight).toMatchObject({
+      state: "released",
+      failure_json: expect.stringContaining("terminal task cannot admit an ephemeral provider spawn"),
+    });
+    expect(terminalObservation.dependants).toEqual({
+      configuration_count: 0,
+      reservation_count: 0,
+      action_count: 0,
+      route_count: 0,
+    });
+    await expect(fixture.chair.dispatchProviderAction({
+      ...actionRef,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: providerPayload.model,
+        modelFamily: providerPayload.modelFamily,
+        prompt: providerPayload.prompt,
+        cwd: "src/leader",
+      },
+      commandId: "provider-review-preflight:retry-released",
+    })).rejects.toMatchObject({
+      code: "LIFECYCLE_PRECONDITION_FAILED",
+      message: "terminal task cannot admit an ephemeral provider spawn",
+    });
+    expect(capabilityBoundaryCalls).toBe(1);
+
+    await fixture.fabric.close();
+    const reopened = await reopenLifecycleFabric(fixture);
+    cleanup.push(async () => reopened.close());
+    const reopenedChair = asLifecycleClient(reopened.connect(fixture.capabilities.chair));
+    await expect(reopenedChair.dispatchProviderAction({
+      ...actionRef,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: providerPayload.model,
+        modelFamily: providerPayload.modelFamily,
+        prompt: providerPayload.prompt,
+        cwd: "src/leader",
+      },
+      commandId: "provider-review-preflight:retry-released-after-reopen",
+    })).rejects.toMatchObject({
+      code: "LIFECYCLE_PRECONDITION_FAILED",
+      message: "terminal task cannot admit an ephemeral provider spawn",
+    });
+  });
+
+  it("joins exact pair replay once and conflicts changed input before resolver work", async () => {
+    let capabilityBoundaryCalls = 0;
+    let resolveFirstCapabilityBoundary: () => void = () => {
+      throw new Error("first capability boundary resolver is unavailable");
+    };
+    const firstCapabilityBoundary = new Promise<void>((resolvePromise) => {
+      resolveFirstCapabilityBoundary = resolvePromise;
+    });
+    const fixture = await createLifecycleFixture({
+      capabilitiesDelayMs: 1_000,
+      fault: (label) => {
+        if (label !== "provider-action:before-capability-inspection") return;
+        capabilityBoundaryCalls += 1;
+        if (capabilityBoundaryCalls === 1) resolveFirstCapabilityBoundary();
+      },
+    });
+    let activeFabric = fixture.fabric;
+    cleanup.push(async () => {
+      await activeFabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 2 },
+      },
+      commandId: "provider-review-pair-flight:authority",
+    });
+    const actionRef = {
+      adapterId: "fake-lifecycle",
+      actionId: "provider-review-pair-flight:spawn",
+    } as const;
+    const providerPayload = {
+      taskId: fixture.leaderTask.taskId,
+      model: "fake-reviewer-v1",
+      modelFamily: "fake",
+      prompt: "Join this exact semantic provider request.",
+      cwd: "src/leader",
+    };
+    const dispatch = (commandId: string, payload: typeof providerPayload) =>
+      fixture.chair.dispatchProviderAction({
+        ...actionRef,
+        operation: "spawn",
+        authorityId: reviewAuthority.authorityId,
+        payload,
+        commandId,
+      });
+    const outcome = async <T>(promise: Promise<T>) => await promise.then(
+      (value) => ({ status: "fulfilled" as const, value }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+
+    const first = outcome(dispatch("provider-review-pair-flight:exact:first", providerPayload));
+    await firstCapabilityBoundary;
+    const second = outcome(dispatch("provider-review-pair-flight:exact:second", providerPayload));
+    const changed = outcome(dispatch("provider-review-pair-flight:changed:first", {
+      ...providerPayload,
+      prompt: "This changed prompt must conflict before resolver work.",
+    }));
+    const [firstOutcome, secondOutcome, changedOutcome] = await Promise.all([first, second, changed]);
+
+    expect(changedOutcome).toMatchObject({
+      status: "rejected",
+      error: { code: "ACTION_INPUT_CONFLICT" },
+    });
+    expect(capabilityBoundaryCalls).toBe(1);
+    expect([firstOutcome.status, secondOutcome.status]).toEqual(["fulfilled", "fulfilled"]);
+    if (firstOutcome.status !== "fulfilled" || secondOutcome.status !== "fulfilled") return;
+    expect(secondOutcome.value).toEqual(firstOutcome.value);
+    expect(firstOutcome.value).toMatchObject({
+      actionId: actionRef.actionId,
+      status: "prepared",
+      executionCount: 0,
+      effectCount: 0,
+    });
+
+    const durable = await waitForProviderAction(fixture.chair, actionRef.actionId);
+    expect(durable).toMatchObject({
+      actionId: actionRef.actionId,
+      status: "terminal",
+      executionCount: 1,
+      effectCount: 1,
+      providerAnswer: "fake provider review complete",
+    });
+    const providerJournalBeforeRestart = await readFile(fixture.providerJournalPath, "utf8");
+    const providerJournal = JSON.parse(providerJournalBeforeRestart) as {
+      actions: Record<string, { executionCount?: number }>;
+      sessions: Record<string, { spawnRequests?: number }>;
+    };
+    expect(providerJournal.actions[actionRef.actionId]).toMatchObject({ executionCount: 1 });
+    expect(Object.values(providerJournal.sessions).reduce(
+      (total, session) => total + (session.spawnRequests ?? 0),
+      0,
+    )).toBe(1);
+    const verification = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(verification.prepare(`
+        SELECT COUNT(*) AS count FROM provider_actions
+         WHERE run_id=? AND adapter_id=? AND action_id=?
+      `).get(fixture.runId, actionRef.adapterId, actionRef.actionId)).toEqual({ count: 1 });
+      expect(verification.prepare(`
+        SELECT state FROM provider_action_pair_preflights
+         WHERE adapter_id=? AND action_id=?
+      `).get(actionRef.adapterId, actionRef.actionId)).toEqual({ state: "admitted" });
+      const commandResults = verification.prepare(`
+        SELECT result_json FROM commands
+         WHERE run_id=? AND actor_agent_id='chair' AND command_id IN (?,?)
+         ORDER BY command_id
+      `).all(
+        fixture.runId,
+        "provider-review-pair-flight:exact:first",
+        "provider-review-pair-flight:exact:second",
+      ) as Array<{ result_json: string }>;
+      expect(commandResults).toHaveLength(2);
+      expect(commandResults[0]?.result_json).toBe(commandResults[1]?.result_json);
+    } finally {
+      verification.close();
+    }
+
+    await activeFabric.close();
+    activeFabric = await reopenLifecycleFabric(fixture);
+    const reopenedChair = asLifecycleClient(activeFabric.connect(fixture.capabilities.chair));
+    await expect(reopenedChair.dispatchProviderAction({
+      ...actionRef,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: providerPayload,
+      commandId: "provider-review-pair-flight:restart:exact",
+    })).resolves.toEqual(durable);
+    await expect(reopenedChair.dispatchProviderAction({
+      ...actionRef,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        ...providerPayload,
+        prompt: "This changed restart prompt must retain the conflict.",
+      },
+      commandId: "provider-review-pair-flight:restart:changed",
+    })).rejects.toMatchObject({ code: "ACTION_INPUT_CONFLICT" });
+    expect(await readFile(fixture.providerJournalPath, "utf8")).toBe(providerJournalBeforeRestart);
+    await expect(readProviderAction(reopenedChair, actionRef.actionId)).resolves.toEqual(durable);
+  });
+
+  it("replays an admitted pair after only its delegated authority expires", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const authority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        expiresAt: new Date(fixture.clock.now().getTime() + 100).toISOString(),
+        budget: { turns: 1 },
+      },
+      commandId: "provider-review-expired-replay:authority",
+    });
+    const request = (commandId: string) => ({
+      adapterId: "fake-lifecycle",
+      actionId: "provider-review-expired-replay:spawn",
+      operation: "spawn" as const,
+      authorityId: authority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Replay this admitted action after delegated authority expiry.",
+        cwd: "src/leader",
+      },
+      commandId,
+    });
+    await fixture.chair.dispatchProviderAction(request("provider-review-expired-replay:first"));
+    const admitted = await waitForProviderAction(
+      fixture.chair,
+      "provider-review-expired-replay:spawn",
+    );
+    fixture.clock.advance(200);
+    await expect(fixture.chair.dispatchProviderAction(
+      request("provider-review-expired-replay:retry"),
+    )).resolves.toEqual(admitted);
+  });
+
+  it.each([
+    "provider-action-admission:after-action-insert",
+    "provider-action-admission:after-dependants",
+    "provider-action-admission:after-final-cas",
+  ] as const)("leaves only the durable resolving preflight after %s faults", async (faultLabel) => {
+    const fixture = await createLifecycleFixture({
+      fault: (label) => {
+        if (label === faultLabel) throw new Error(`fault:${faultLabel}`);
+      },
+    });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1 },
+      },
+      commandId: `provider-review-admission-fault:${faultLabel}:authority`,
+    });
+    const actionRef = {
+      adapterId: "fake-lifecycle",
+      actionId: `provider-review-admission-fault:${faultLabel}:spawn`,
+    } as const;
+
+    await expect(fixture.chair.dispatchProviderAction({
+      ...actionRef,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Rollback this admission cut without releasing its durable preflight.",
+        cwd: "src/leader",
+      },
+      commandId: `provider-review-admission-fault:${faultLabel}:dispatch`,
+    })).rejects.toThrow(`fault:${faultLabel}`);
+
+    const observer = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(observer.prepare(`
+        SELECT state FROM provider_action_pair_preflights
+         WHERE adapter_id=? AND action_id=?
+      `).get(actionRef.adapterId, actionRef.actionId)).toEqual({ state: "resolving" });
+      expect(observer.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM provider_actions WHERE adapter_id=? AND action_id=?) AS action_count,
+          (SELECT COUNT(*) FROM provider_action_routes WHERE adapter_id=? AND action_id=?) AS route_count,
+          (SELECT COUNT(*) FROM commands WHERE command_id=?) AS command_count
+      `).get(
+        actionRef.adapterId,
+        actionRef.actionId,
+        actionRef.adapterId,
+        actionRef.actionId,
+        `provider-review-admission-fault:${faultLabel}:dispatch`,
+      )).toEqual({ action_count: 0, route_count: 0, command_count: 0 });
+    } finally {
+      observer.close();
+    }
+  });
+
+  it.each([
+    ["send_turn", "chair"] as const,
+    ["steer", "chair"] as const,
+  ])("keeps a %s admission fault resolving", async (operation, actor) => {
+    const faultLabel = "provider-action-admission:after-action-insert";
+    const fixture = await createLifecycleFixture({
+      fault: (label) => {
+        if (label === faultLabel) throw new Error(`fault:${operation}`);
+      },
+    });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const actionId = `provider-review-${operation}-admission-fault`;
+    const client = actor === "chair" ? fixture.chair : fixture.leader;
+    await expect(client.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId,
+      operation,
+      payload: operation === "send_turn"
+        ? { scenario: "terminal", taskId: fixture.leaderTask.taskId }
+        : { instruction: "Do not cross the faulted admission cut." },
+      commandId: `provider-review-${operation}-admission-fault:dispatch`,
+    })).rejects.toThrow(`fault:${operation}`);
+
+    const observer = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(observer.prepare(`
+        SELECT state FROM provider_action_pair_preflights
+         WHERE adapter_id='fake-lifecycle' AND action_id=?
+      `).get(actionId)).toEqual({ state: "resolving" });
+      expect(observer.prepare(`
+        SELECT COUNT(*) AS count FROM provider_actions
+         WHERE adapter_id='fake-lifecycle' AND action_id=?
+      `).get(actionId)).toEqual({ count: 0 });
+    } finally {
+      observer.close();
+    }
+  });
+
+  it("rolls back a faulted preflight insert before any admission work", async () => {
+    const faultLabel = "provider-action-admission:after-preflight-insert";
+    const fixture = await createLifecycleFixture({
+      fault: (label) => {
+        if (label === faultLabel) throw new Error(`fault:${faultLabel}`);
+      },
+    });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1 },
+      },
+      commandId: "provider-review-preflight-insert-fault:authority",
+    });
+    const actionRef = {
+      adapterId: "fake-lifecycle",
+      actionId: "provider-review-preflight-insert-fault:spawn",
+    } as const;
+    await expect(fixture.chair.dispatchProviderAction({
+      ...actionRef,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Rollback this preflight insert.",
+        cwd: "src/leader",
+      },
+      commandId: "provider-review-preflight-insert-fault:dispatch",
+    })).rejects.toThrow(`fault:${faultLabel}`);
+    const observer = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(observer.prepare(`
+        SELECT COUNT(*) AS count FROM provider_action_pair_preflights
+         WHERE adapter_id=? AND action_id=?
+      `).get(actionRef.adapterId, actionRef.actionId)).toEqual({ count: 0 });
+      expect(observer.prepare(`
+        SELECT COUNT(*) AS count FROM provider_actions WHERE adapter_id=? AND action_id=?
+      `).get(actionRef.adapterId, actionRef.actionId)).toEqual({ count: 0 });
+    } finally {
+      observer.close();
+    }
+  });
+
+  it.each([
+    ["provider-action-admission:after-action-insert", "action"],
+    ["provider-action-admission:after-dependant-command-append", "command"],
+    ["provider-action-admission:after-final-preflight-cas", "preflight-cas"],
+  ] as const)("keeps the separately committed preflight resolving across %s", async (faultLabel, cut) => {
+    const fixture = await createLifecycleFixture();
+    let activeFabric = fixture.fabric;
+    cleanup.push(async () => {
+      await activeFabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        actions: [...fixture.rootAuthority.actions],
+        budget: { turns: 1 },
+      },
+      commandId: `provider-review-admission-cut:${cut}:authority`,
+    });
+    const actionId = `provider-review-admission-cut:${cut}:spawn`;
+    const commandId = `provider-review-admission-cut:${cut}:dispatch`;
+    const injector = new Database(fixture.databasePath);
+    try {
+      if (cut === "action") {
+        injector.exec(`
+          CREATE TRIGGER provider_action_admission_fault_after_action
+          AFTER INSERT ON provider_actions
+          WHEN NEW.adapter_id='fake-lifecycle' AND NEW.action_id='${actionId}'
+          BEGIN
+            SELECT RAISE(ABORT, '${faultLabel}');
+          END;
+        `);
+      } else if (cut === "command") {
+        injector.exec(`
+          CREATE TRIGGER provider_action_admission_fault_after_command
+          AFTER INSERT ON commands
+          WHEN NEW.run_id='${fixture.runId}' AND NEW.actor_agent_id='chair'
+            AND NEW.command_id='${commandId}'
+          BEGIN
+            SELECT RAISE(ABORT, '${faultLabel}');
+          END;
+        `);
+      } else {
+        injector.exec(`
+          CREATE TRIGGER provider_action_admission_fault_after_preflight_cas
+          AFTER UPDATE OF state ON provider_action_pair_preflights
+          WHEN OLD.state='resolving' AND NEW.state='admitted'
+            AND NEW.adapter_id='fake-lifecycle' AND NEW.action_id='${actionId}'
+          BEGIN
+            SELECT RAISE(ABORT, '${faultLabel}');
+          END;
+        `);
+      }
+    } finally {
+      injector.close();
+    }
+
+    const dispatchOutcome = await fixture.chair.dispatchProviderAction({
+      adapterId: "fake-lifecycle",
+      actionId,
+      operation: "spawn",
+      authorityId: reviewAuthority.authorityId,
+      payload: {
+        taskId: fixture.leaderTask.taskId,
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: "Crash the admission transaction before provider work.",
+        cwd: "src/leader",
+      },
+      commandId,
+    }).then(
+      (value) => ({ status: "fulfilled" as const, value }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    expect(dispatchOutcome).toMatchObject({
+      status: "rejected",
+      error: { message: faultLabel },
+    });
+
+    const cleanupInjector = new Database(fixture.databasePath);
+    try {
+      cleanupInjector.exec(`DROP TRIGGER IF EXISTS ${cut === "action"
+        ? "provider_action_admission_fault_after_action"
+        : cut === "command"
+          ? "provider_action_admission_fault_after_command"
+          : "provider_action_admission_fault_after_preflight_cas"}`);
+    } finally {
+      cleanupInjector.close();
+    }
+
+    await activeFabric.close();
+    activeFabric = await reopenLifecycleFabric(fixture);
+    const verification = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(verification.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM provider_actions
+            WHERE adapter_id=? AND action_id=?) AS action_count,
+          (SELECT COUNT(*) FROM provider_action_routes
+            WHERE adapter_id=? AND action_id=?) AS route_count,
+          (SELECT COUNT(*) FROM review_finding_capacity_reservations
+            WHERE adapter_id=? AND action_id=?) AS reservation_count,
+          (SELECT COUNT(*) FROM adapter_effective_configurations
+            WHERE subject_action_adapter_id=? AND subject_action_id=?) AS configuration_count,
+          (SELECT COUNT(*) FROM commands
+            WHERE run_id=? AND actor_agent_id='chair' AND command_id=?) AS command_count,
+          (SELECT COALESCE(SUM(reserved),0) FROM authority_budget
+            WHERE authority_id=?) AS budget_reserved
+      `).get(
+        "fake-lifecycle", actionId,
+        "fake-lifecycle", actionId,
+        "fake-lifecycle", actionId,
+        "fake-lifecycle", actionId,
+        fixture.runId, commandId,
+        reviewAuthority.authorityId,
+      )).toEqual({
+        action_count: 0,
+        route_count: 0,
+        reservation_count: 0,
+        configuration_count: 0,
+        command_count: 0,
+        budget_reserved: 0,
+      });
+      expect(verification.prepare(`
+        SELECT state FROM provider_action_pair_preflights
+         WHERE adapter_id=? AND action_id=?
+      `).get("fake-lifecycle", actionId)).toEqual({ state: "resolving" });
+    } finally {
+      verification.close();
+    }
+    const providerJournal = await readFile(fixture.providerJournalPath, "utf8").then(
+      (bytes) => JSON.parse(bytes) as { actions?: Record<string, unknown> },
+      (error: unknown) => {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") return { actions: {} };
+        throw error;
+      },
+    );
+    expect(providerJournal.actions ?? {}).toEqual({});
   });
 
   it.each([
@@ -685,6 +1626,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-task-obligation:complete-early",
     })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
     await fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId: "provider-review-task-obligation:spawn",
       commandId: "provider-review-task-obligation:reconcile",
     });
@@ -842,10 +1784,11 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       .resolves.toMatchObject({ status: "ambiguous" });
     await expect(dispatch("two", secondAuthority.authorityId)).resolves.toMatchObject({ status: "prepared" });
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 150));
-    await expect(fixture.chair.getProviderAction({ actionId: "provider-review-ambiguous-cap:two" }))
+    await expect(readProviderAction(fixture.chair, "provider-review-ambiguous-cap:two"))
       .resolves.toMatchObject({ status: "prepared", executionCount: 0 });
 
     await expect(fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId: "provider-review-ambiguous-cap:one",
       commandId: "provider-review-ambiguous-cap:one:reconcile",
     })).resolves.toMatchObject({ status: "terminal" });
@@ -911,6 +1854,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         .resolves.toMatchObject({ status: "ambiguous" });
       if (holderStatus === "quarantined") {
         await expect(fixture.chair.reconcileProviderAction({
+          adapterId: "fake-lifecycle",
           actionId: actionId("holder"),
           commandId: `${actionId("holder")}:reconcile`,
         })).resolves.toMatchObject({ status: "quarantined" });
@@ -920,9 +1864,9 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         .resolves.toMatchObject({ status: "prepared" });
       await expect(dispatch("queued", queuedAuthority.authorityId))
         .resolves.toMatchObject({ status: "prepared" });
-      await expect(fixture.chair.getProviderAction({ actionId: actionId("claimed") }))
+      await expect(readProviderAction(fixture.chair, actionId("claimed")))
         .resolves.toMatchObject({ status: "dispatched", executionCount: 1 });
-      await expect(fixture.chair.getProviderAction({ actionId: actionId("queued") }))
+      await expect(readProviderAction(fixture.chair, actionId("queued")))
         .resolves.toMatchObject({ status: "prepared", executionCount: 0 });
 
       const closing = fixture.fabric.close();
@@ -999,22 +1943,28 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     const now = fixture.clock.now().getTime();
     const database = new Database(fixture.databasePath);
     try {
+      admitProviderActionFixture(database, {
+        runId: fixture.runId,
+        actionId: "provider-review-capacity-sentinel",
+        adapterId: "fake-lifecycle",
+        operation: "send_turn",
+        targetAgentId: "leader",
+        providerSessionGeneration: 1,
+        turnLeaseGeneration: 1,
+        identityHash: "a".repeat(64),
+        payloadHash: "b".repeat(64),
+        payloadJson: `{"taskId":"${fixture.leaderTask.taskId}"}`,
+        status: "dispatched",
+        historyJson: '["prepared","dispatched"]',
+        executionCount: 1,
+        updatedAt: now,
+      });
       database.exec(`
-        INSERT INTO provider_actions(
-          run_id,action_id,adapter_id,operation,target_agent_id,
-          provider_session_generation,turn_lease_generation,identity_hash,
-          payload_hash,payload_json,status,history_json,execution_count,
-          effect_count,idempotency_proven,updated_at
-        ) VALUES (
-          '${fixture.runId}','provider-review-capacity-sentinel','fake-lifecycle','send_turn','leader',
-          1,1,'${"a".repeat(64)}','${"b".repeat(64)}','{"taskId":"${fixture.leaderTask.taskId}"}',
-          'dispatched','["prepared","dispatched"]',1,0,0,${now}
-        );
         INSERT INTO provider_session_turn_leases(
           run_id,agent_id,provider_session_generation,turn_lease_generation,
-          action_id,status,created_at,updated_at
+          adapter_id,action_id,status,created_at,updated_at
         ) VALUES (
-          '${fixture.runId}','leader',1,1,'provider-review-capacity-sentinel','active',${now},${now}
+          '${fixture.runId}','leader',1,1,'fake-lifecycle','provider-review-capacity-sentinel','active',${now},${now}
         );
       `);
     } finally {
@@ -1046,7 +1996,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-external-capacity:dispatch",
     })).resolves.toMatchObject({ status: "prepared" });
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 150));
-    await expect(fixture.chair.getProviderAction({ actionId }))
+    await expect(readProviderAction(fixture.chair, actionId))
       .resolves.toMatchObject({ status: "prepared", executionCount: 0 });
 
     const release = new Database(fixture.databasePath);
@@ -1104,6 +2054,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     cleanup.push(async () => reopened.close());
     const chair = asLifecycleClient(reopened.connect(fixture.capabilities.chair));
     await expect(chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId: "provider-review-restart-budget:ambiguous",
       commandId: "provider-review-restart-budget:reconcile",
     })).resolves.toMatchObject({ status: "terminal", providerAnswer: "recovered provider review" });
@@ -1155,9 +2106,8 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       },
       commandId: "provider-review-exhausted:dispatch",
     })).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
-    await expect(fixture.chair.getProviderAction({
-      actionId: "provider-review-exhausted:spawn",
-    })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(readProviderAction(fixture.chair, "provider-review-exhausted:spawn"))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("freezes further turns when ambiguous provider usage cannot be validated", async () => {
@@ -1194,6 +2144,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     })).resolves.toMatchObject({ status: "prepared" });
     await expect(waitForProviderAction(fixture.chair, action)).resolves.toMatchObject({ status: "ambiguous" });
     await expect(fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId: action,
       commandId: "provider-review-unknown:reconcile",
     })).resolves.toMatchObject({ status: "quarantined" });
@@ -1250,9 +2201,8 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       },
       commandId: "provider-review-terminal-task:dispatch",
     })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
-    await expect(fixture.chair.getProviderAction({
-      actionId: "provider-review-terminal-task:spawn",
-    })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(readProviderAction(fixture.chair, "provider-review-terminal-task:spawn"))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("runs a task-bound ephemeral provider spawn without creating an agent identity", async () => {
@@ -1303,16 +2253,17 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       providerAnswer: "fake provider review complete",
     });
     expect((await fixture.chair.getRunStatus({ runId: fixture.runId })).counts.agents).toBe(before.counts.agents);
-    expect(await fixture.chair.getProviderAction({ actionId: "provider-review:spawn" })).toEqual(result);
+    expect(await readProviderAction(fixture.chair, "provider-review:spawn")).toEqual(result);
     expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
       turns: { reserved: 0, consumed: 1, usageUnknown: false },
       "cost:USD": { reserved: 1, consumed: 0, usageUnknown: true },
     });
     await expect(fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId: "provider-review:spawn",
       commandId: "provider-review:late-usage-unavailable",
     })).resolves.toEqual(result);
-    expect(await fixture.chair.getProviderAction({ actionId: "provider-review:spawn" })).toEqual(result);
+    expect(await readProviderAction(fixture.chair, "provider-review:spawn")).toEqual(result);
     await fixture.leader.updateTask({
       taskId: fixture.leaderTask.taskId,
       expectedRevision: fixture.leaderTask.revision,
@@ -1354,7 +2305,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         cwd: "src/leader",
       },
       commandId: "provider-review:dispatch-conflict-after-quiesce",
-    })).rejects.toMatchObject({ code: "DEDUPE_CONFLICT" });
+    })).rejects.toMatchObject({ code: "ACTION_INPUT_CONFLICT" });
 
     await expect(fixture.chair.dispatchProviderAction({
       adapterId: "fake-lifecycle",
@@ -1406,6 +2357,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     await expect(waitForProviderAction(fixture.chair, "provider-review-recovery:ambiguous-review-valid"))
       .resolves.toMatchObject({ status: "ambiguous" });
     await expect(fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId: "provider-review-recovery:ambiguous-review-valid",
       commandId: "provider-review-recovery:valid:reconcile",
     })).resolves.toMatchObject({
@@ -1432,12 +2384,12 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       await expect(waitForProviderAction(fixture.chair, `provider-review-recovery:${scenario}`))
         .resolves.toMatchObject({ status: "ambiguous" });
       await expect(fixture.chair.reconcileProviderAction({
+        adapterId: "fake-lifecycle",
         actionId: `provider-review-recovery:${scenario}`,
         commandId: `provider-review-recovery:${scenario}:reconcile`,
       })).resolves.toMatchObject({ status: "quarantined" });
-      expect(await fixture.chair.getProviderAction({
-        actionId: `provider-review-recovery:${scenario}`,
-      })).toMatchObject({ status: "quarantined" });
+      expect(await readProviderAction(fixture.chair, `provider-review-recovery:${scenario}`))
+        .toMatchObject({ status: "quarantined" });
     }
   });
 
@@ -1478,11 +2430,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
 
     const proxy = asLifecycleClient(fixture.fabric.connect(fixture.capabilities.chair));
     const firstPromise = fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId,
       commandId: "provider-review-concurrent:reconcile:first",
     });
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
     const secondPromise = proxy.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId,
       commandId: "provider-review-concurrent:reconcile:second",
     });
@@ -1490,12 +2444,14 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
 
     expect(first).toEqual(second);
     expect(first).toMatchObject({ status: "terminal", providerAnswer: "recovered provider review" });
-    expect(await fixture.chair.getProviderAction({ actionId })).toEqual(first);
+    expect(await readProviderAction(fixture.chair, actionId)).toEqual(first);
     await expect(fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId,
       commandId: "provider-review-concurrent:reconcile:first",
     })).resolves.toEqual(first);
     await expect(proxy.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId,
       commandId: "provider-review-concurrent:reconcile:second",
     })).resolves.toEqual(first);
@@ -1545,7 +2501,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     const reopened = await reopenLifecycleFabric(fixture);
     cleanup.push(async () => reopened.close());
     const chair = asLifecycleClient(reopened.connect(fixture.capabilities.chair));
-    expect(await chair.getProviderAction({ actionId: "action-terminal" })).toEqual(terminal);
+    expect(await readProviderAction(chair, "action-terminal")).toEqual(terminal);
   });
 
   it("quarantines ambiguity without replay when downstream idempotency is unproven", async () => {
@@ -1569,11 +2525,12 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
 
     const reconciled = await fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId: ambiguous.actionId,
       commandId: "provider-action:ambiguous-unproven:reconcile",
     });
     expect(reconciled).toMatchObject({ status: "quarantined", executionCount: 1, effectCount: 1 });
-    expect(await fixture.chair.getProviderAction({ actionId: ambiguous.actionId })).toEqual(reconciled);
+    expect(await readProviderAction(fixture.chair, ambiguous.actionId)).toEqual(reconciled);
   });
 
   it("replays only the same action ID when the adapter proves idempotency", async () => {
@@ -1590,6 +2547,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-action:ambiguous-idempotent:dispatch",
     });
     const reconciled = await fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId: ambiguous.actionId,
       commandId: "provider-action:ambiguous-idempotent:reconcile",
     });
@@ -1620,6 +2578,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     await fixture.chair.revokeCapability({ agentId: "leader", commandId: "provider-action:revoke-leader" });
 
     await expect(fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId: ambiguous.actionId,
       commandId: "provider-action:revoked:reconcile",
     })).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
@@ -1641,6 +2600,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     fixture.clock.advance(Date.parse("2100-01-01T00:00:00.000Z") - fixture.clock.now().getTime());
 
     await expect(fixture.chair.reconcileProviderAction({
+      adapterId: "fake-lifecycle",
       actionId: ambiguous.actionId,
       commandId: "provider-action:expired:reconcile",
     })).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });

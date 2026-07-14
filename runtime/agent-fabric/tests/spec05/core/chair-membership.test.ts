@@ -17,6 +17,7 @@ import type { PublicProtocolContext } from "../../../src/daemon/public-protocol.
 import { OperatorStore } from "../../../src/operator/store.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
+import { admitProviderActionFixture } from "../../support/provider-action-fixture.ts";
 
 const now = Date.parse("2027-01-01T00:00:00Z");
 const digest = `sha256:${"a".repeat(64)}`;
@@ -125,16 +126,24 @@ async function setup(): Promise<Fixture> {
         'lease_membership', 'run_membership', 'write', 'chair_membership', 1,
         'active', ${Date.parse("2099-01-01T00:00:00Z")}, ${now}
       );
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, result_json, updated_at
-      ) VALUES (
-        'run_membership', 'action_membership', 'adapter_membership', 'turn',
-        'chair_membership', 1, 1, 'identity_membership', 'payload_membership', '{}',
-        'prepared', '[]', 0, 0, 0, NULL, ${now}
-      );
+    `);
+    admitProviderActionFixture(database, {
+      runId: "run_membership",
+      actionId: "action_membership",
+      adapterId: "adapter_membership",
+      operation: "turn",
+      targetAgentId: "chair_membership",
+      providerSessionGeneration: 1,
+      turnLeaseGeneration: 1,
+      identityHash: "identity_membership",
+      payloadHash: "payload_membership",
+      payloadJson: "{}",
+      status: "prepared",
+      historyJson: "[]",
+      executionCount: 0,
+      updatedAt: now,
+    });
+    database.exec(`
       INSERT INTO messages(
         message_id, run_id, sender_id, dedupe_key, payload_hash, audience_json,
         kind, body, requires_ack, conversation_id, reply_to_message_id,
@@ -231,7 +240,7 @@ function fullRequest(fixture: Fixture): MembershipBindRequest {
       { kind: "workstream", membershipId: "membership_workstream", coordinationRunId: "run_membership", workstreamId: "workstream_membership", state: "active" },
       { kind: "task", membershipId: "membership_task", coordinationRunId: "run_membership", taskId: "task_membership", state: "active" },
       { kind: "lease", membershipId: "membership_lease", coordinationRunId: "run_membership", leaseId: "lease_membership", state: "active" },
-      { kind: "provider-action", membershipId: "membership_action", coordinationRunId: "run_membership", providerActionId: "action_membership", state: "active" },
+      { kind: "provider-action", membershipId: "membership_action", coordinationRunId: "run_membership", providerAdapterId: "adapter_membership", providerActionId: "action_membership", state: "active" },
       { kind: "required-message", membershipId: "membership_message", coordinationRunId: "run_membership", messageId: "message_membership", state: "active" },
       { kind: "artifact-obligation", membershipId: "membership_artifact", coordinationRunId: "run_membership", artifactObligationId: "artifact_membership", state: "terminal" },
       { kind: "gate", membershipId: "membership_gate", coordinationRunId: "run_membership", gateId: "gate_membership", state: "active" },
@@ -314,6 +323,109 @@ describe("chair project-session membership", () => {
       ]);
     } finally {
       database.close();
+    }
+  });
+
+  it("binds and settles same-ID provider memberships by exact adapter pair", async () => {
+    const fixture = await setup();
+    const writer = new Database(fixture.databasePath);
+    try {
+      admitProviderActionFixture(writer, {
+        runId: "run_membership",
+        actionId: "action_membership",
+        adapterId: "adapter_membership_secondary",
+        operation: "turn",
+        targetAgentId: "chair_membership",
+        providerSessionGeneration: 1,
+        turnLeaseGeneration: 1,
+        identityHash: "identity_membership_secondary",
+        payloadHash: "payload_membership_secondary",
+        payloadJson: "{}",
+        status: "prepared",
+        historyJson: "[]",
+        executionCount: 0,
+        updatedAt: now,
+      });
+    } finally {
+      writer.close();
+    }
+    const base = fullRequest(fixture);
+    if (base.origin !== "chair") throw new Error("expected chair membership request");
+    const bind = parseMembershipBindRequest({
+      ...base,
+      members: [
+        {
+          kind: "provider-action",
+          membershipId: "membership_action_primary",
+          coordinationRunId: "run_membership",
+          providerAdapterId: "adapter_membership",
+          providerActionId: "action_membership",
+          state: "active",
+        },
+        {
+          kind: "provider-action",
+          membershipId: "membership_action_secondary",
+          coordinationRunId: "run_membership",
+          providerAdapterId: "adapter_membership_secondary",
+          providerActionId: "action_membership",
+          state: "active",
+        },
+      ],
+    });
+    await expect(fixture.fabric.dispatchPublicProtocol(
+      fixture.chairContext,
+      FABRIC_OPERATIONS.membershipBind,
+      bind,
+    )).resolves.toMatchObject({ membershipRevision: 2 });
+
+    const terminalWriter = new Database(fixture.databasePath);
+    try {
+      terminalWriter.prepare(`
+        UPDATE provider_actions SET status='terminal', history_json='["prepared","terminal"]',
+               idempotency_proven=1, result_json='{}', journal_revision=journal_revision+1
+         WHERE run_id='run_membership' AND adapter_id='adapter_membership' AND action_id='action_membership'
+      `).run();
+      terminalWriter.prepare("UPDATE project_sessions SET state='quiescing', revision=revision+1 WHERE project_session_id=?")
+        .run(fixture.projectSessionId);
+    } finally {
+      terminalWriter.close();
+    }
+    const settle = parseMembershipBindRequest({
+      ...bind,
+      command: {
+        ...bind.command,
+        commandId: "command_membership_pair_settle",
+        expectedRevision: 2,
+      },
+      expectedMembershipRevision: 2,
+      members: [{
+        kind: "provider-action",
+        membershipId: "membership_action_primary",
+        coordinationRunId: "run_membership",
+        providerAdapterId: "adapter_membership",
+        providerActionId: "action_membership",
+        state: "terminal",
+      }],
+    });
+    await expect(fixture.fabric.dispatchPublicProtocol(
+      fixture.chairContext,
+      FABRIC_OPERATIONS.membershipBind,
+      settle,
+    )).resolves.toMatchObject({ membershipRevision: 3 });
+
+    const reader = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(reader.prepare(`
+        SELECT member_adapter_id, state FROM project_session_memberships
+         WHERE project_session_id=? AND coordination_run_id='run_membership'
+           AND member_kind='provider-action' AND member_id='action_membership'
+         ORDER BY member_adapter_id
+      `).all(fixture.projectSessionId)).toEqual([
+        { member_adapter_id: "adapter_membership", state: "reconciled" },
+        { member_adapter_id: "adapter_membership_secondary", state: "active" },
+      ]);
+    } finally {
+      reader.close();
     }
   });
 
@@ -642,7 +754,7 @@ describe("chair project-session membership", () => {
       { kind: "workstream", membershipId: "missing_workstream", coordinationRunId: "run_membership", workstreamId: "workstream_missing", state: "active" },
       { kind: "task", membershipId: "missing_task", coordinationRunId: "run_membership", taskId: "task_missing", state: "active" },
       { kind: "lease", membershipId: "missing_lease", coordinationRunId: "run_membership", leaseId: "lease_missing", state: "active" },
-      { kind: "provider-action", membershipId: "missing_action", coordinationRunId: "run_membership", providerActionId: "action_missing", state: "active" },
+      { kind: "provider-action", membershipId: "missing_action", coordinationRunId: "run_membership", providerAdapterId: "adapter_missing", providerActionId: "action_missing", state: "active" },
       { kind: "required-message", membershipId: "missing_message", coordinationRunId: "run_membership", messageId: "message_missing", state: "active" },
       { kind: "artifact-obligation", membershipId: "missing_artifact", coordinationRunId: "run_membership", artifactObligationId: "artifact_missing", state: "active" },
       { kind: "gate", membershipId: "missing_gate", coordinationRunId: "run_membership", gateId: "gate_missing", state: "active" },

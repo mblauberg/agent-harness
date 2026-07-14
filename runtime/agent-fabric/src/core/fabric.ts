@@ -6,17 +6,28 @@ import type Database from "better-sqlite3";
 import { v7 as uuidv7 } from "uuid";
 import {
   GATE_SYSTEM_SUPERSESSION_FEATURE,
+  LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC,
+  LIFECYCLE_CURRENT_STATE_V1_CODEC,
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   RUN_SESSION_PROJECTION_FEATURE,
   type AgentCustodyResult,
   type EvidenceArtifactRegistration,
   type EvidencePublishRequest,
   type GateOperationTarget,
+  type LifecycleAcceptedSuspendedV1,
+  type LifecycleCustodyRowV1,
+  type LifecycleCurrentStateV1,
+  type LifecycleGenerationLossRowV1,
   type OperationInputMap,
   type ProtocolOperation,
   type VerifiedProtocolCredential,
 } from "@local/agent-fabric-protocol";
 import { parseEvidenceArtifactRegistration } from "@local/agent-fabric-protocol";
+
+import {
+  parseAgentProvisionProviderResult,
+  type AgentProvisionProviderResult,
+} from "../adapters/providers/types.js";
 
 import type {
   AuthorityInput,
@@ -38,10 +49,11 @@ import {
 } from "../domain/operations.js";
 import { CommandJournal } from "../application/command-journal.js";
 import {
-  ProviderSessionCoordinator,
-  type CrossFamilyReviewEvidenceInput,
-  type ModelRoutingEvidenceInput,
-} from "../application/provider-session-coordinator.js";
+  ProviderActionAdmissionCoordinator,
+  ProviderActionAdmissionTransactionError,
+  type ProviderActionTicket,
+} from "../application/provider-action-admission.js";
+import { ProviderSessionCoordinator } from "../application/provider-session-coordinator.js";
 import { FabricError } from "../errors.js";
 import { AdapterSupervisor } from "../adapters/supervisor.js";
 import {
@@ -181,6 +193,21 @@ import { currentMcpSeatGeneration } from "./mcp-seat-generation.js";
 import { FabricReadPolicy } from "./read-policy.js";
 import { ArtifactRegistry } from "../artifacts/registry.js";
 import { resolveRunArtifactRoot } from "../artifacts/run-root.js";
+import {
+  LifecycleRotationRepository,
+  type LifecycleCustodyHead,
+} from "../lifecycle/rotation-repository.js";
+import {
+  GenerationLossRepository,
+  type GenerationLossSource,
+} from "../lifecycle/generation-loss-repository.js";
+import type {
+  LifecycleAdmittedRunScope,
+  LifecycleAuthenticatedScopeCheckpoint,
+  LifecycleDigest,
+  LifecycleIntegrityReceiptAuthorityPort,
+  LifecycleReceiptRecord,
+} from "../lifecycle/receipt-authority.js";
 
 export { FabricClient } from "./client.js";
 
@@ -202,6 +229,7 @@ export type FabricRuntimeOpenOptions = FabricOpenOptions & {
   gitMutationPort?: GitMutationPort;
   gitConflictInspector?: GitConflictInspectorPort;
   trustedGitConfiguration?: TrustedGitConfiguration;
+  lifecycleReceiptAuthority?: LifecycleIntegrityReceiptAuthorityPort;
   fault?: (label: string) => void;
 };
 
@@ -305,6 +333,48 @@ function sha256(value: string): string {
 
 function sha256Digest(value: string): string {
   return `sha256:${sha256(value)}`;
+}
+
+function lifecycleDigest(domain: string, value: unknown): string {
+  return sha256Digest(`agent-fabric.lifecycle.v1\0${domain}\0${canonicalJson(value)}`);
+}
+
+function lifecycleReceiptSetMember(record: LifecycleReceiptRecord): readonly [
+  string, LifecycleDigest, LifecycleDigest, string, string, string, string, string,
+] {
+  const subject = record.subject;
+  const ownerRef = isRow(subject.ownerRef) ? subject.ownerRef : null;
+  if (typeof subject.kind !== "string" || typeof subject.agentId !== "string" || ownerRef === null) {
+    throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt page contains an invalid subject");
+  }
+  let ownerKind: string;
+  let ownerId: string;
+  let ownerRevision: string;
+  if (ownerRef.kind === "custody" && isRow(ownerRef.custodyRef)) {
+    ownerKind = "custody";
+    ownerId = stringField(ownerRef.custodyRef, "custodyId");
+    ownerRevision = String(numberField(ownerRef.custodyRef, "custodyRevision"));
+  } else if (ownerRef.kind === "generation-loss" && isRow(ownerRef.generationLossRef)) {
+    ownerKind = "generation-loss";
+    ownerId = stringField(ownerRef.generationLossRef, "generationLossId");
+    ownerRevision = String(numberField(ownerRef.generationLossRef, "generationLossRevision"));
+  } else if (ownerRef.kind === "recovery-retirement" && isRow(ownerRef.retirementRef)) {
+    ownerKind = "recovery-retirement";
+    ownerId = stringField(ownerRef.retirementRef, "retirementId");
+    ownerRevision = stringField(ownerRef.retirementRef, "revisionDec");
+  } else {
+    throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt page contains an invalid owner ref");
+  }
+  return [
+    String(record.receipt.authoritySequence),
+    record.receipt.receiptDigest,
+    record.receipt.intentDigest,
+    subject.kind,
+    subject.agentId,
+    ownerKind,
+    ownerId,
+    ownerRevision,
+  ];
 }
 
 function canonicalPath(path: string): string {
@@ -662,12 +732,16 @@ function isLifecycleCheckpoint(value: unknown): value is LifecycleCheckpoint {
 }
 
 function isLifecycleResult(value: unknown): value is LifecycleResult {
-  return (
-    isRow(value) &&
-    typeof value.agentId === "string" &&
-    typeof value.lifecycle === "string" &&
-    typeof value.providerSessionGeneration === "number"
-  );
+  try {
+    if (isRow(value) && value.kind === "accepted-suspended") {
+      LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC.parse(value, "lifecycleResult");
+    } else {
+      LIFECYCLE_CURRENT_STATE_V1_CODEC.parse(value, "lifecycleResult");
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function lifecycleHandoffPrompt(input: {
@@ -779,19 +853,6 @@ function isProviderActionResult(value: unknown): value is ProviderActionResult {
   }
 }
 
-function quarantinedProviderAction(candidate: ProviderActionResult): ProviderActionResult {
-  const quarantined: ProviderActionResult = {
-    ...candidate,
-    status: "quarantined",
-    history: candidate.history.at(-1) === "quarantined"
-      ? candidate.history
-      : [...candidate.history, "quarantined"],
-  };
-  delete quarantined.result;
-  delete quarantined.providerAnswer;
-  return quarantined;
-}
-
 function assertAdapterOperation(capabilities: unknown, operation: string): void {
   if (
     !isRow(capabilities) || capabilities.actionJournal !== true ||
@@ -858,7 +919,12 @@ export class Fabric {
   readonly #adapters: NonNullable<FabricOpenOptions["adapters"]>;
   readonly #readPolicy: FabricReadPolicy;
   readonly #commandJournal: CommandJournal;
+  readonly #providerActionAdmission: ProviderActionAdmissionCoordinator;
+  readonly #lifecycleRotations: LifecycleRotationRepository;
+  readonly #generationLosses: GenerationLossRepository;
+  readonly #lifecycleReceiptAuthority: LifecycleIntegrityReceiptAuthorityPort | undefined;
   readonly #capabilityKey: string;
+  readonly #fabricSocketPath: string | undefined;
   readonly #adapterSupervisor: AdapterSupervisor;
   readonly #providerSessions: ProviderSessionCoordinator;
   readonly #maximumConcurrentProviderTurns: number;
@@ -869,6 +935,7 @@ export class Fabric {
   readonly #deferredProviderActions: Array<{
     key: string;
     runId: string;
+    adapterId: string;
     actionId: string;
     execute: () => Promise<ProviderActionResult>;
     settle: () => void;
@@ -914,6 +981,14 @@ export class Fabric {
     this.#database = openFabricDatabase(options.databasePath);
     this.#readPolicy = new FabricReadPolicy(this.#database);
     this.#commandJournal = new CommandJournal(this.#database, this.#clock);
+    this.#providerActionAdmission = new ProviderActionAdmissionCoordinator({
+      database: this.#database,
+      clock: this.#clock,
+      fault: this.#fault,
+    });
+    this.#lifecycleRotations = new LifecycleRotationRepository(this.#database);
+    this.#generationLosses = new GenerationLossRepository(this.#database);
+    this.#lifecycleReceiptAuthority = options.lifecycleReceiptAuthority;
     this.#artifactRegistry = new ArtifactRegistry(this.#database, this.#clock);
     this.#adapters = options.adapters ?? {};
     this.#adapterSupervisor = new AdapterSupervisor(this.#adapters);
@@ -922,8 +997,10 @@ export class Fabric {
       database: this.#database,
       clock: this.#clock,
       maximumConcurrentTurns: this.#maximumConcurrentProviderTurns,
+      providerActionAdmission: this.#providerActionAdmission,
     });
     this.#capabilityKey = options.capabilityKey ?? randomBytes(32).toString("base64url");
+    this.#fabricSocketPath = options.fabricSocketPath;
     this.#operatorStore = new OperatorStore({ database: this.#database, clock: this.#clock });
     this.#gates = new ScopedGateStore({
       database: this.#database,
@@ -995,6 +1072,7 @@ export class Fabric {
         dispatch: async (adapterId, input) => await this.#adapterSupervisor.request(adapterId, "dispatch", input),
         lookup: async (adapterId, actionId) => await this.#adapterSupervisor.request(adapterId, "lookup_action", { actionId }),
       },
+      providerActionAdmission: this.#providerActionAdmission,
       ...(options.daemonStopPort === undefined ? {} : { daemonStop: options.daemonStopPort }),
       ...(this.#externalEffects === undefined ? {} : { externalEffects: this.#externalEffects }),
       typedGit: this.#typedGit,
@@ -1006,6 +1084,7 @@ export class Fabric {
       ? undefined
       : new LaunchCustodyService({
           database: this.#database,
+          providerActionAdmission: this.#providerActionAdmission,
           clock: this.#clock,
           randomCapability: () => `afc_${randomBytes(32).toString("base64url")}`,
           fabricSocketPath: options.fabricSocketPath,
@@ -1123,6 +1202,7 @@ export class Fabric {
     });
     this.#herdr = new HerdrDaemonIntegration({
       database: this.#database,
+      providerActionAdmission: this.#providerActionAdmission,
       configuration: options.herdr ?? { mode: "disabled" },
       clock: this.#clock,
     });
@@ -1415,17 +1495,18 @@ export class Fabric {
     }
   }
 
-  #providerActionOwnershipKey(runId: string, actionId: string): string {
-    return `${runId}\u0000${actionId}`;
+  #providerActionOwnershipKey(runId: string, adapterId: string, actionId: string): string {
+    return `${runId}\u0000${adapterId}\u0000${actionId}`;
   }
 
   #enqueueDeferredProviderAction(input: {
     runId: string;
+    adapterId: string;
     actionId: string;
     execute: () => Promise<ProviderActionResult>;
   }): void {
     if (this.#closing) return;
-    const key = this.#providerActionOwnershipKey(input.runId, input.actionId);
+    const key = this.#providerActionOwnershipKey(input.runId, input.adapterId, input.actionId);
     if (this.#ownedProviderActions.has(key)) return;
     let settle = (): void => undefined;
     const tracked = new Promise<void>((resolvePromise) => {
@@ -1445,11 +1526,15 @@ export class Fabric {
     }
   }
 
-  #claimDeferredProviderAction(runId: string, actionId: string): "claimed" | "blocked" | "stale" {
+  #claimDeferredProviderAction(
+    runId: string,
+    adapterId: string,
+    actionId: string,
+  ): "claimed" | "blocked" | "stale" {
     return this.#database.transaction(() => {
       const action = this.#database.prepare(`
-        SELECT status FROM provider_actions WHERE run_id=? AND action_id=?
-      `).get(runId, actionId);
+        SELECT status FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?
+      `).get(runId, adapterId, actionId);
       if (!isRow(action) || action.status !== "prepared") return "stale";
       const active = rowOrNotFound(this.#database.prepare(`
         SELECT
@@ -1464,8 +1549,8 @@ export class Fabric {
         UPDATE provider_actions
            SET status='dispatched',history_json='["prepared","dispatched"]',
                execution_count=1,updated_at=?
-         WHERE run_id=? AND action_id=? AND status='prepared'
-      `).run(this.#clock(), runId, actionId);
+         WHERE run_id=? AND adapter_id=? AND action_id=? AND status='prepared'
+      `).run(this.#clock(), runId, adapterId, actionId);
       return claimed.changes === 1 ? "claimed" : "stale";
     })();
   }
@@ -1477,7 +1562,7 @@ export class Fabric {
       while (this.#deferredProviderActions.length > 0) {
         const work = this.#deferredProviderActions[0];
         if (work === undefined) return;
-        const claim = this.#claimDeferredProviderAction(work.runId, work.actionId);
+        const claim = this.#claimDeferredProviderAction(work.runId, work.adapterId, work.actionId);
         if (claim === "blocked") return;
         this.#deferredProviderActions.shift();
         if (claim === "stale") {
@@ -1515,37 +1600,36 @@ export class Fabric {
 
   #settleProviderTurnAndPump(
     runId: string,
+    adapterId: string,
     actionId: string,
     status: "terminal" | "ambiguous" | "quarantined",
   ): void {
-    this.#providerSessions.settleTurn(runId, actionId, status);
+    this.#providerSessions.settleTurn(runId, adapterId, actionId, status);
     this.#pumpDeferredProviderActions();
   }
 
-  #assertGenericProviderAction(runId: string, actionId: string): void {
+  #assertGenericProviderAction(runId: string, adapterId: string, actionId: string): void {
     if (this.#database.prepare(`
-      SELECT 1
-        FROM provider_actions p
-        JOIN project_session_launch_custody c
-          ON c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
-       WHERE p.run_id=? AND p.action_id=?
-    `).get(runId, actionId) !== undefined) {
+      SELECT 1 FROM project_session_launch_custody
+       WHERE coordination_run_id=? AND provider_adapter_id=? AND provider_action_id=?
+    `).get(runId, adapterId, actionId) !== undefined) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "launch provider actions mutate only through launch custody");
     }
     if (this.#database.prepare(`
-      SELECT 1 FROM provider_agent_custody WHERE run_id=? AND action_id=?
-    `).get(runId, actionId) !== undefined) {
+      SELECT 1 FROM provider_agent_custody
+       WHERE run_id=? AND adapter_id=? AND action_id=?
+    `).get(runId, adapterId, actionId) !== undefined) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "agent provider actions mutate only through provider-session custody");
     }
     if (this.#database.prepare(`
-      SELECT 1 FROM lifecycle_rotation_custody WHERE run_id=? AND action_id=?
-    `).get(runId, actionId) !== undefined) {
+      SELECT 1 FROM lifecycle_rotation_custodies
+       WHERE run_id=? AND provider_action_adapter_id=? AND provider_action_id=?
+    `).get(runId, adapterId, actionId) !== undefined) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "lifecycle provider actions mutate only through lifecycle custody");
     }
-    if (this.#database.prepare(`
-      SELECT 1 FROM provider_actions
-       WHERE run_id=? AND action_id=? AND adapter_id=?
-    `).get(runId, actionId, HERDR_CONTROL_ADAPTER_ID) !== undefined) {
+    if (adapterId === HERDR_CONTROL_ADAPTER_ID && this.#database.prepare(`
+      SELECT 1 FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?
+    `).get(runId, adapterId, actionId) !== undefined) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "Herdr actions mutate only through Herdr integration custody");
     }
     if (this.#database.prepare(`
@@ -1553,8 +1637,8 @@ export class Fabric {
         FROM provider_actions p
         JOIN chair_bridge_recovery_custody c
           ON c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
-       WHERE p.run_id=? AND p.action_id=?
-    `).get(runId, actionId) !== undefined) {
+       WHERE p.run_id=? AND p.adapter_id=? AND p.action_id=?
+    `).get(runId, adapterId, actionId) !== undefined) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "chair recovery provider actions mutate only through chair recovery custody");
     }
   }
@@ -1827,6 +1911,7 @@ export class Fabric {
   }> {
     this.#results.recover();
     this.#notifications.recover();
+    await this.#recoverLifecycleRotations();
     await this.#launchCustody?.recover();
     await this.#externalEffects?.recover();
     await this.#herdr.recover();
@@ -1863,6 +1948,12 @@ export class Fabric {
             WHERE c.adapter_id=p.adapter_id AND c.action_id=p.action_id
          )
          AND NOT EXISTS (
+           SELECT 1 FROM lifecycle_rotation_custodies custody
+            WHERE custody.run_id=p.run_id
+              AND custody.provider_action_adapter_id=p.adapter_id
+              AND custody.provider_action_id=p.action_id
+         )
+         AND NOT EXISTS (
            SELECT 1 FROM chair_bridge_recovery_custody c
             WHERE c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
          )
@@ -1874,25 +1965,54 @@ export class Fabric {
       const actionId = stringField(action, "action_id");
       try {
         const result = await this.reconcileProviderAction(runId, stringField(action, "chair_agent_id"), {
+          adapterId: stringField(action, "adapter_id"),
           actionId,
           commandId: `startup-recovery:${actionId}:${stringField(action, "status")}:${numberField(action, "updated_at")}`,
         });
         if (result.status === "quarantined") actionsQuarantined += 1;
         else actionsReconciled += 1;
       } catch (error: unknown) {
-        this.#database.prepare("UPDATE provider_actions SET status = 'quarantined', updated_at = ? WHERE run_id = ? AND action_id = ?").run(now, runId, actionId);
+        this.#database.prepare("UPDATE provider_actions SET status = 'quarantined', updated_at = ? WHERE run_id = ? AND adapter_id = ? AND action_id = ?")
+          .run(now, runId, stringField(action, "adapter_id"), actionId);
         this.#event(runId, "startup-provider-action-quarantined", null, { actionId, adapterId: stringField(action, "adapter_id"), reason: error instanceof Error ? error.message : String(error) });
         actionsQuarantined += 1;
       }
     }
     let sessionsDegraded = 0;
     const sessions = this.#database.prepare(`
-      SELECT a.run_id, a.agent_id, a.provider_session_ref, b.adapter_id
-        FROM agents a JOIN agent_adapter_bindings b ON b.run_id = a.run_id AND b.agent_id = a.agent_id
+      SELECT a.run_id,a.agent_id,a.provider_session_ref,b.adapter_id,
+             run.project_session_id,bridge.action_id,bridge.bridge_generation,
+             bridge.revision AS bridge_revision,bridge.capability_hash,
+             custody.bridge_contract_digest,capability.principal_generation,
+             provider.provider_session_generation,
+             CAST(provider.context_revision AS TEXT) AS context_revision
+        FROM agents a
+        JOIN runs run ON run.run_id=a.run_id
+        JOIN agent_adapter_bindings b ON b.run_id=a.run_id AND b.agent_id=a.agent_id
+        JOIN agent_bridge_state bridge
+          ON bridge.run_id=a.run_id AND bridge.agent_id=a.agent_id
+         AND bridge.adapter_id=b.adapter_id AND bridge.bridge_state='active'
+         AND bridge.provider_session_ref=a.provider_session_ref
+        JOIN provider_agent_custody custody
+          ON custody.run_id=bridge.run_id AND custody.adapter_id=bridge.adapter_id
+         AND custody.action_id=bridge.action_id AND custody.target_agent_id=bridge.agent_id
+         AND custody.capability_hash=bridge.capability_hash
+        JOIN capabilities capability
+          ON capability.token_hash=bridge.capability_hash AND capability.run_id=a.run_id
+         AND capability.agent_id=a.agent_id AND capability.revoked_at IS NULL
+        JOIN provider_state provider ON provider.run_id=a.run_id AND provider.agent_id=a.agent_id
        WHERE a.provider_session_ref IS NOT NULL AND a.lifecycle NOT IN ('archived', 'suspended')
          AND NOT EXISTS (
            SELECT 1 FROM project_session_launch_custody launch
             WHERE launch.coordination_run_id=a.run_id AND launch.chair_agent_id=a.agent_id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM lifecycle_rotation_custody_heads rotation
+            WHERE rotation.run_id=a.run_id AND rotation.agent_id=a.agent_id AND rotation.terminal=0
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM lifecycle_generation_loss_heads loss
+            WHERE loss.run_id=a.run_id AND loss.agent_id=a.agent_id AND loss.terminal=0
          )
     `).all();
     for (const value of sessions) {
@@ -1913,8 +2033,92 @@ export class Fabric {
           throw new Error("adapter no longer manages the persisted provider session");
         }
       } catch (error: unknown) {
-        this.#database.prepare("UPDATE agents SET lifecycle = 'context-unreconciled' WHERE run_id = ? AND agent_id = ?").run(runId, agentId);
-        this.#event(runId, "startup-provider-session-degraded", null, { agentId, reason: error instanceof Error ? error.message : String(error) });
+        const reason = error instanceof Error ? error.message : String(error);
+        const storedContextRevision = session.context_revision;
+        const currentContextRevision = storedContextRevision === null
+          ? 0
+          : typeof storedContextRevision === "bigint"
+          ? Number(storedContextRevision)
+          : typeof storedContextRevision === "number"
+            ? storedContextRevision
+            : typeof storedContextRevision === "string"
+              ? Number(storedContextRevision)
+              : Number.NaN;
+        if (!Number.isSafeInteger(currentContextRevision) || currentContextRevision < 0) {
+          throw new Error("startup provider context revision is invalid");
+        }
+        const contextRevision = currentContextRevision + 1;
+        const evidence = {
+          schemaVersion: 1,
+          kind: "startup-provider-session-loss",
+          runId,
+          agentId,
+          adapterId: stringField(session, "adapter_id"),
+          providerSessionRef: stringField(session, "provider_session_ref"),
+          providerSessionGeneration: numberField(session, "provider_session_generation"),
+          contextRevision,
+          reason,
+        };
+        const evidenceDigest = sha256Digest(canonicalJson(evidence));
+        this.#database.transaction(() => {
+          this.#generationLosses.recordObservationInCurrentTransaction({
+            sourceEventId: `startup-provider-session-loss:${runId}:${agentId}:${contextRevision}`,
+            projectSessionId: stringField(session, "project_session_id"),
+            runId,
+            agentId,
+            providerGeneration: numberField(session, "provider_session_generation"),
+            contextRevision,
+            evidenceDigest,
+            observedAt: this.#clock(),
+            lossSource: {
+              oldProviderSessionRef: stringField(session, "provider_session_ref"),
+              newProviderSessionRef: stringField(session, "provider_session_ref"),
+              sourceActionRef: {
+                adapterId: stringField(session, "adapter_id"),
+                actionId: stringField(session, "action_id"),
+              },
+              sourceAdapterContractDigest: stringField(session, "bridge_contract_digest"),
+              sourcePrincipalGeneration: numberField(session, "principal_generation"),
+              sourceBridgeGeneration: numberField(session, "bridge_generation"),
+              bridgeOwnerKind: "child",
+              sourceBridgeRowId: `${runId}:${agentId}`,
+              sourceBridgeRevision: numberField(session, "bridge_revision"),
+              sourceCapabilityHash: stringField(session, "capability_hash"),
+              sourceProjectSessionGeneration: null,
+              sourceRunGeneration: null,
+              sourceChairLeaseGeneration: null,
+              checkpoint: { state: "absent", ref: null, digest: null },
+            },
+          });
+          const provider = this.#database.prepare(`
+            UPDATE provider_state SET context_revision=?,reconciled_checkpoint_sha256=NULL
+             WHERE run_id=? AND agent_id=? AND provider_session_generation=?
+               AND COALESCE(CAST(context_revision AS INTEGER),0)=?
+          `).run(
+            contextRevision, runId, agentId,
+            numberField(session, "provider_session_generation"), contextRevision - 1,
+          );
+          if (provider.changes !== 1) throw new Error("startup provider context changed before generation-loss commit");
+          const agent = this.#database.prepare(`
+            UPDATE agents SET lifecycle='context-unreconciled'
+             WHERE run_id=? AND agent_id=? AND lifecycle NOT IN ('archived','suspended','context-unreconciled')
+          `).run(runId, agentId);
+          if (agent.changes !== 1) throw new Error("startup provider agent changed before generation-loss commit");
+          this.#database.prepare(`
+            INSERT INTO delivery_freezes(run_id,agent_id,reason,created_at)
+            VALUES (?,?,'context-unreconciled',?)
+            ON CONFLICT(run_id,agent_id) DO UPDATE SET reason=excluded.reason,created_at=excluded.created_at
+          `).run(runId, agentId, this.#clock());
+          this.#database.prepare(`
+            UPDATE leases SET status='quarantined',updated_at=?
+             WHERE run_id=? AND holder_agent_id=? AND status='active'
+          `).run(this.#clock(), runId, agentId);
+          this.#database.prepare(`
+            UPDATE provider_session_turn_leases SET status='quarantined',updated_at=?
+             WHERE run_id=? AND agent_id=? AND status='active'
+          `).run(this.#clock(), runId, agentId);
+        }).immediate();
+        this.#event(runId, "startup-provider-session-degraded", null, { agentId, reason, evidenceDigest });
         sessionsDegraded += 1;
       }
     }
@@ -4200,8 +4404,8 @@ export class Fabric {
       `).get(runId, taskId, actorAgentId, actorAgentId);
       if (!isRow(bound)) throw new FabricError("CAPABILITY_FORBIDDEN", "write lease task is outside the actor task scope");
     }
-    const lifecycle = this.getAgentLifecycle(runId, actorAgentId).lifecycle;
-    if (lifecycle === "context-unreconciled") {
+    const lifecycle = this.getAgentLifecycle(runId, actorAgentId);
+    if (lifecycle.contextState === "context-unreconciled") {
       throw new FabricError("CONTEXT_UNRECONCILED", "unreconciled provider context cannot acquire a write lease");
     }
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, commandPayload, isLeaseResult, () => {
@@ -4439,65 +4643,285 @@ export class Fabric {
     });
   }
 
-  getAgentLifecycle(runId: string, agentId: string): LifecycleResult {
+  getAgentLifecycle(runId: string, agentId: string): LifecycleCurrentStateV1 {
     const agent = rowOrNotFound(
-      this.#database
-        .prepare(
-          "SELECT a.lifecycle, COALESCE(p.provider_session_generation, 1) AS provider_session_generation FROM agents a LEFT JOIN provider_state p ON p.run_id = a.run_id AND p.agent_id = a.agent_id WHERE a.run_id = ? AND a.agent_id = ?",
-        )
-        .get(runId, agentId),
+      this.#database.prepare(`
+        SELECT a.lifecycle,
+               COALESCE(p.provider_session_generation,1) AS provider_session_generation,
+               COALESCE(CAST(p.context_revision AS INTEGER),0) AS context_revision,
+               COALESCE((
+                 SELECT capability.principal_generation FROM capabilities capability
+                  WHERE capability.run_id=a.run_id AND capability.agent_id=a.agent_id
+                    AND capability.revoked_at IS NULL
+                  ORDER BY capability.principal_generation DESC LIMIT 1
+               ),1) AS principal_generation,
+               COALESCE(bridge.bridge_generation,1) AS bridge_generation
+          FROM agents a
+          LEFT JOIN provider_state p ON p.run_id=a.run_id AND p.agent_id=a.agent_id
+          LEFT JOIN agent_bridge_state bridge
+            ON bridge.run_id=a.run_id AND bridge.agent_id=a.agent_id
+         WHERE a.run_id=? AND a.agent_id=?
+      `).get(runId, agentId),
       "agent",
     );
-    return {
+    const custodySource = this.#database.prepare(`
+      SELECT head.current_revision,head.state,head.disposition_code,head.terminal,
+             revision.terminal_evidence_digest,
+             custody.provider_action_adapter_id,custody.provider_action_id,
+             custody.source_provider_generation,custody.source_principal_generation,
+             custody.source_bridge_generation,custody.target_provider_generation,
+             custody.target_principal_generation,custody.target_bridge_generation,
+             custody.checkpoint_digest,custody.custody_id
+        FROM lifecycle_rotation_custody_heads head
+        JOIN lifecycle_rotation_custodies custody
+          ON custody.run_id=head.run_id AND custody.agent_id=head.agent_id
+         AND custody.custody_id=head.custody_id
+        JOIN lifecycle_rotation_custody_revisions revision
+          ON revision.run_id=head.run_id AND revision.agent_id=head.agent_id
+         AND revision.custody_id=head.custody_id
+         AND revision.revision=head.current_revision
+       WHERE head.run_id=? AND head.agent_id=?
+       ORDER BY custody.created_at DESC LIMIT 1
+    `).get(runId, agentId);
+    const lossSource = this.#database.prepare(`
+      SELECT head.current_revision,head.state,head.abandon_kind_code,head.terminal,
+             revision.terminal_evidence_digest,loss.generation_loss_id,loss.loss_kind,
+             loss.old_provider_generation,loss.new_provider_generation,
+             loss.old_context_revision,loss.new_context_revision,loss.checkpoint_state,
+             loss.checkpoint_digest,loss.loss_evidence_digest,
+             revision.recovery_action_adapter_id,revision.recovery_action_id
+        FROM lifecycle_generation_loss_heads head
+        JOIN lifecycle_generation_losses loss
+          ON loss.run_id=head.run_id AND loss.agent_id=head.agent_id
+         AND loss.generation_loss_id=head.generation_loss_id
+        JOIN lifecycle_generation_loss_revisions revision
+          ON revision.run_id=head.run_id AND revision.agent_id=head.agent_id
+         AND revision.generation_loss_id=head.generation_loss_id
+         AND revision.revision=head.current_revision
+       WHERE head.run_id=? AND head.agent_id=?
+       ORDER BY loss.created_at DESC LIMIT 1
+    `).get(runId, agentId);
+    const storedLifecycle = stringField(agent, "lifecycle");
+    const lifecycle = storedLifecycle === "context-unreconciled"
+      ? "suspended"
+      : storedLifecycle === "completion-ready"
+        ? "idle"
+        : storedLifecycle as LifecycleCurrentStateV1["lifecycle"];
+    const custodyCurrentSource = isRow(custodySource) ? {
+      schemaVersion: 1 as const,
+      sourceKind: "custody" as const,
       agentId,
-      lifecycle: stringField(agent, "lifecycle"),
-      providerSessionGeneration: numberField(agent, "provider_session_generation"),
+      custodyId: stringField(custodySource, "custody_id"),
+      custodyRevision: numberField(custodySource, "current_revision"),
+      actionRef: {
+        adapterId: stringField(custodySource, "provider_action_adapter_id"),
+        actionId: stringField(custodySource, "provider_action_id"),
+      },
+      sourceProviderGeneration: numberField(custodySource, "source_provider_generation"),
+      sourcePrincipalGeneration: numberField(custodySource, "source_principal_generation"),
+      sourceBridgeGeneration: numberField(custodySource, "source_bridge_generation"),
+      targetProviderGeneration: numberField(custodySource, "target_provider_generation"),
+      targetPrincipalGeneration: numberField(custodySource, "target_principal_generation"),
+      targetBridgeGeneration: numberField(custodySource, "target_bridge_generation"),
+      checkpointDigest: stringField(custodySource, "checkpoint_digest"),
+      state: stringField(custodySource, "state") as LifecycleCustodyRowV1["state"],
+      disposition: custodySource.disposition_code === "none"
+        ? null
+        : stringField(custodySource, "disposition_code") as Exclude<LifecycleCustodyRowV1["disposition"], null>,
+      terminalEvidenceDigest: typeof custodySource.terminal_evidence_digest === "string"
+        ? custodySource.terminal_evidence_digest
+        : null,
+    } as LifecycleCustodyRowV1 : null;
+    const lossCurrentSource = isRow(lossSource) ? {
+      schemaVersion: 1 as const,
+      sourceKind: "generation-loss" as const,
+      agentId,
+      generationLossId: stringField(lossSource, "generation_loss_id"),
+      generationLossRevision: numberField(lossSource, "current_revision"),
+      lossKind: stringField(lossSource, "loss_kind") as LifecycleGenerationLossRowV1["lossKind"],
+      recoveryActionRef: lossSource.recovery_action_id === null
+        ? null
+        : {
+            adapterId: stringField(lossSource, "recovery_action_adapter_id"),
+            actionId: stringField(lossSource, "recovery_action_id"),
+          },
+      abandonKind: stringField(lossSource, "abandon_kind_code") as LifecycleGenerationLossRowV1["abandonKind"],
+      state: stringField(lossSource, "state") as LifecycleGenerationLossRowV1["state"],
+      disposition: lossSource.state === "recovered-adopted"
+        ? "recovered-adopted" as const
+        : lossSource.state === "abandoned"
+          ? "abandoned" as const
+          : null,
+      oldProviderGeneration: numberField(lossSource, "old_provider_generation"),
+      newProviderGeneration: numberField(lossSource, "new_provider_generation"),
+      oldContextRevision: typeof lossSource.old_context_revision === "number"
+        ? lossSource.old_context_revision
+        : null,
+      newContextRevision: numberField(lossSource, "new_context_revision"),
+      checkpointState: stringField(lossSource, "checkpoint_state") as LifecycleGenerationLossRowV1["checkpointState"],
+      checkpointDigest: typeof lossSource.checkpoint_digest === "string" ? lossSource.checkpoint_digest : null,
+      lossEvidenceDigest: stringField(lossSource, "loss_evidence_digest"),
+      terminalEvidenceDigest: typeof lossSource.terminal_evidence_digest === "string"
+        ? lossSource.terminal_evidence_digest
+        : null,
+    } as LifecycleGenerationLossRowV1 : null;
+    const custodyIsNonfinal = isRow(custodySource) && numberField(custodySource, "terminal") === 0;
+    const lossIsNonfinal = isRow(lossSource) && numberField(lossSource, "terminal") === 0;
+    const currentSource = custodyIsNonfinal
+      ? custodyCurrentSource
+      : lossIsNonfinal
+        ? lossCurrentSource
+        : custodyCurrentSource ?? lossCurrentSource;
+    const sourceIsNonfinal = custodyIsNonfinal;
+    const state = {
+      schemaVersion: 1 as const,
+      kind: "current-state" as const,
+      agentId,
+      lifecycle,
+      contextState: storedLifecycle === "context-unreconciled"
+        ? "context-unreconciled" as const
+        : "current" as const,
+      principalGeneration: sourceIsNonfinal
+        ? numberField(custodySource, "source_principal_generation")
+        : numberField(agent, "principal_generation"),
+      providerSessionGeneration: sourceIsNonfinal
+        ? numberField(custodySource, "source_provider_generation")
+        : numberField(agent, "provider_session_generation"),
+      bridgeGeneration: sourceIsNonfinal
+        ? numberField(custodySource, "source_bridge_generation")
+        : numberField(agent, "bridge_generation"),
+      contextRevision: numberField(agent, "context_revision"),
+      currentSource,
     };
+    return LIFECYCLE_CURRENT_STATE_V1_CODEC.parse({
+      ...state,
+      stateDigest: sha256Digest(canonicalJson(state)),
+    }, "lifecycleCurrentState");
   }
 
   reportProviderState(
     runId: string,
     actorAgentId: string,
     input: {
+      sourceEventId: string;
+      providerSessionRef: string;
       agentId: string;
       providerSessionGeneration: number;
-      contextRevision: string;
+      contextRevision: number;
+      evidenceDigest: `sha256:${string}`;
       checkpointSha256?: string;
       commandId: string;
     },
   ): LifecycleResult {
     return this.#commandJournal.execute(runId, actorAgentId, input.commandId, input, isLifecycleResult, () => {
       this.#assertChair(runId, actorAgentId);
-      rowOrNotFound(
-        this.#database.prepare("SELECT 1 FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, input.agentId),
-        "agent",
-      );
-      const previous = this.#database
-        .prepare("SELECT provider_session_generation, context_revision FROM provider_state WHERE run_id = ? AND agent_id = ?")
-        .get(runId, input.agentId);
-      const providerContextChanged = isRow(previous) &&
-        (numberField(previous, "provider_session_generation") !== input.providerSessionGeneration ||
-          previous.context_revision !== input.contextRevision);
       const checkpointValidated = input.checkpointSha256 !== undefined &&
         this.#hasCurrentValidatedCheckpoint(runId, input.agentId, input.checkpointSha256);
-      const changedWithoutCheckpoint = providerContextChanged && !checkpointValidated;
-      const lifecycle = changedWithoutCheckpoint ? "context-unreconciled" : this.getAgentLifecycle(runId, input.agentId).lifecycle;
-      this.#database
-        .prepare(
-          "INSERT INTO provider_state(run_id, agent_id, provider_session_generation, context_revision, reconciled_checkpoint_sha256) VALUES (?, ?, ?, ?, ?) ON CONFLICT(run_id, agent_id) DO UPDATE SET provider_session_generation = excluded.provider_session_generation, context_revision = excluded.context_revision, reconciled_checkpoint_sha256 = excluded.reconciled_checkpoint_sha256",
-        )
-        .run(
-          runId,
-          input.agentId,
+      const source = rowOrNotFound(this.#database.prepare(`
+        SELECT run.project_session_id,run.chair_agent_id,run.revision AS run_revision,
+               run.chair_generation,session.generation AS session_generation,
+               agent.provider_session_ref,
+               COALESCE(chair_bridge.provider_adapter_id,child_bridge.adapter_id) AS adapter_id,
+               COALESCE(chair_bridge.provider_action_id,child_bridge.action_id) AS action_id,
+               COALESCE(chair_bridge.bridge_generation,child_bridge.bridge_generation) AS bridge_generation,
+               COALESCE(chair_bridge.revision,child_bridge.revision) AS bridge_revision,
+               COALESCE(chair_bridge.capability_hash,child_bridge.capability_hash) AS capability_hash,
+               COALESCE(chair_bridge.provider_contract_digest,custody.bridge_contract_digest) AS bridge_contract_digest,
+               capability.principal_generation
+          FROM runs run
+          JOIN project_sessions session ON session.project_session_id=run.project_session_id
+          JOIN agents agent ON agent.run_id=run.run_id AND agent.agent_id=?
+          LEFT JOIN launched_chair_bridge_state chair_bridge
+            ON chair_bridge.project_session_id=run.project_session_id
+           AND chair_bridge.coordination_run_id=run.run_id
+           AND chair_bridge.chair_agent_id=agent.agent_id
+           AND run.chair_agent_id=agent.agent_id AND chair_bridge.state='active'
+          LEFT JOIN agent_bridge_state child_bridge
+            ON child_bridge.run_id=agent.run_id AND child_bridge.agent_id=agent.agent_id
+           AND run.chair_agent_id<>agent.agent_id AND child_bridge.bridge_state='active'
+          LEFT JOIN provider_agent_custody custody
+            ON custody.run_id=child_bridge.run_id AND custody.adapter_id=child_bridge.adapter_id
+           AND custody.action_id=child_bridge.action_id AND custody.target_agent_id=child_bridge.agent_id
+          JOIN capabilities capability
+            ON capability.token_hash=COALESCE(chair_bridge.capability_hash,child_bridge.capability_hash)
+           AND capability.run_id=run.run_id AND capability.agent_id=agent.agent_id
+           AND capability.revoked_at IS NULL
+         WHERE run.run_id=?
+           AND (
+             (run.chair_agent_id=agent.agent_id AND chair_bridge.chair_agent_id IS NOT NULL
+              AND chair_bridge.provider_session_ref=agent.provider_session_ref)
+             OR
+             (run.chair_agent_id<>agent.agent_id AND child_bridge.agent_id IS NOT NULL
+              AND child_bridge.provider_session_ref=agent.provider_session_ref
+              AND custody.action_id IS NOT NULL)
+           )
+      `).get(input.agentId, runId), "provider context observation source");
+      const checkpointRow = checkpointValidated
+        ? rowOrNotFound(this.#database.prepare(`
+            SELECT relative_path FROM lifecycle_checkpoints
+             WHERE run_id=? AND agent_id=? AND sha256=?
+             ORDER BY created_at DESC LIMIT 1
+          `).get(runId, input.agentId, input.checkpointSha256), "provider context checkpoint")
+        : null;
+      const chairSource = source.chair_agent_id === input.agentId;
+      const lossSource: GenerationLossSource = {
+        oldProviderSessionRef: stringField(source, "provider_session_ref"),
+        newProviderSessionRef: input.providerSessionRef,
+        sourceActionRef: {
+          adapterId: stringField(source, "adapter_id"),
+          actionId: stringField(source, "action_id"),
+        },
+        sourceAdapterContractDigest: stringField(source, "bridge_contract_digest"),
+        sourcePrincipalGeneration: numberField(source, "principal_generation"),
+        sourceBridgeGeneration: numberField(source, "bridge_generation"),
+        bridgeOwnerKind: chairSource ? "chair" : "child",
+        sourceBridgeRowId: `${runId}:${input.agentId}`,
+        sourceBridgeRevision: numberField(source, "bridge_revision"),
+        sourceCapabilityHash: stringField(source, "capability_hash"),
+        sourceProjectSessionGeneration: chairSource ? numberField(source, "session_generation") : null,
+        sourceRunGeneration: chairSource ? numberField(source, "run_revision") : null,
+        sourceChairLeaseGeneration: chairSource ? numberField(source, "chair_generation") : null,
+        checkpoint: checkpointRow === null
+          ? input.checkpointSha256 === undefined
+            ? { state: "absent", ref: null, digest: null }
+            : { state: "invalid", ref: null, digest: null }
+          : {
+              state: "last-validated",
+              ref: stringField(checkpointRow, "relative_path"),
+              digest: `sha256:${input.checkpointSha256 as string}`,
+            },
+      };
+      const observation = this.#generationLosses.recordObservationInCurrentTransaction({
+        sourceEventId: input.sourceEventId,
+        projectSessionId: stringField(source, "project_session_id"),
+        runId,
+        agentId: input.agentId,
+        providerGeneration: input.providerSessionGeneration,
+        contextRevision: input.contextRevision,
+        evidenceDigest: input.evidenceDigest,
+        observedAt: this.#clock(),
+        lossSource,
+      });
+      const advanced = observation.classification === "generation-advance" ||
+        observation.classification === "context-advance";
+      if (advanced) {
+        const provider = this.#database.prepare(`
+          UPDATE provider_state
+             SET provider_session_generation=?,context_revision=?,reconciled_checkpoint_sha256=?
+           WHERE run_id=? AND agent_id=?
+        `).run(
           input.providerSessionGeneration,
           input.contextRevision,
           checkpointValidated ? input.checkpointSha256 : null,
-        );
-      if (changedWithoutCheckpoint) {
-        this.#database.prepare("UPDATE agents SET lifecycle = 'context-unreconciled' WHERE run_id = ? AND agent_id = ?").run(
           runId,
           input.agentId,
         );
+        if (provider.changes !== 1) throw new Error("provider context state changed before loss commit");
+        const agent = this.#database.prepare(`
+          UPDATE agents SET lifecycle='context-unreconciled',provider_session_ref=?
+           WHERE run_id=? AND agent_id=?
+        `).run(input.providerSessionRef, runId, input.agentId);
+        if (agent.changes !== 1) throw new Error("provider context agent changed before loss commit");
         this.#database.prepare(`
           INSERT INTO delivery_freezes(run_id, agent_id, reason, created_at)
           VALUES (?, ?, 'context-unreconciled', ?)
@@ -4513,8 +4937,8 @@ export class Fabric {
            WHERE run_id=? AND agent_id=? AND status='active'
         `).run(this.#clock(), runId, input.agentId);
       }
-      const result = { agentId: input.agentId, lifecycle, providerSessionGeneration: input.providerSessionGeneration };
-      this.#event(runId, "provider-state-reported", actorAgentId, result);
+      const result = this.getAgentLifecycle(runId, input.agentId);
+      this.#event(runId, "provider-state-reported", actorAgentId, { ...result, observation });
       return result;
     });
   }
@@ -4557,7 +4981,10 @@ export class Fabric {
     if (!isLifecycleCheckpoint(input.checkpoint)) {
       throw new FabricError("CHECKPOINT_INCOMPLETE", "lifecycle checkpoint lacks a portable recovery field");
     }
-    if (this.getAgentLifecycle(runId, input.agentId).lifecycle === "context-unreconciled" && input.action !== "rotate") {
+    if (
+      this.getAgentLifecycle(runId, input.agentId).contextState === "context-unreconciled" &&
+      input.action !== "rotate"
+    ) {
       throw new FabricError("CONTEXT_UNRECONCILED", "unreconciled provider context requires explicit rotation");
     }
     this.#verifyCheckpoint(runId, input.agentId, input.taskId, input.taskRevision, input.checkpoint);
@@ -4585,14 +5012,42 @@ export class Fabric {
       }
       const adapterId = this.#adapterIdForAgent(runId, actorAgentId);
       const state = this.getAgentLifecycle(runId, actorAgentId);
-      const action = await this.#executeAdapterOperation({
+      const actionId = `${input.commandId}:release`;
+      const payload = { agentId: actorAgentId, resumeReference, generation: state.providerSessionGeneration };
+      const providerActionTicket = this.#providerActionAdmission.preflightAgentAction({
         runId,
-        adapterId,
-        actionId: `${input.commandId}:release`,
-        operation: "release",
-        method: "release",
-        payload: { agentId: actorAgentId, resumeReference, generation: state.providerSessionGeneration },
+        actorAgentId,
+        actionRef: { adapterId, actionId },
+        canonicalInput: {
+          schemaVersion: 1,
+          owner: "lifecycle-release",
+          operation: "release",
+          payload,
+        },
       });
+      let action: ProviderActionResult;
+      try {
+        action = await this.#executeAdapterOperation({
+          runId,
+          adapterId,
+          actionId,
+          operation: "release",
+          method: "release",
+          payload,
+          providerActionTicket,
+        });
+      } catch (error: unknown) {
+        const actionExists = this.#database.prepare(`
+          SELECT 1 FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?
+        `).get(runId, adapterId, actionId) !== undefined;
+        if (
+          providerActionTicket.disposition === "resolving" && !actionExists &&
+          !(error instanceof ProviderActionAdmissionTransactionError)
+        ) {
+          this.#providerActionAdmission.release(providerActionTicket, error);
+        }
+        throw error;
+      }
       if (!isRow(action.result) || action.result.released !== true || action.result.deleted === true) {
         throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "adapter did not prove non-destructive release");
       }
@@ -4628,152 +5083,13 @@ export class Fabric {
       })();
     }
 
-    const agent = rowOrNotFound(
-      this.#database.prepare("SELECT provider_session_ref FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, actorAgentId),
-      "agent",
-    );
-    const priorReference = typeof agent.provider_session_ref === "string" ? agent.provider_session_ref : input.checkpoint.providerResumeReference;
-    const current = this.getAgentLifecycle(runId, actorAgentId);
-    const generation = current.providerSessionGeneration + 1;
-    const adapterId = this.#adapterIdForAgent(runId, actorAgentId);
-    const actionId = `${input.commandId}:spawn`;
-    const prompt = lifecycleHandoffPrompt({
-      agentId: actorAgentId,
-      taskId: input.taskId,
-      taskRevision: input.taskRevision,
-      checkpoint: input.checkpoint,
-      nextProviderSessionGeneration: generation,
+    if (input.action !== "compact" && input.action !== "rotate") {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "unsupported lifecycle rotation action");
+    }
+    return this.#acceptLifecycleRotation(runId, actorAgentId, {
+      ...input,
+      action: input.action,
     });
-    const payload = {
-      agentId: actorAgentId,
-      priorResumeReference: priorReference,
-      generation,
-      prompt,
-    };
-    this.#prepareLifecycleRotation({
-      runId,
-      agentId: actorAgentId,
-      commandId: input.commandId,
-      actionId,
-      adapterId,
-      taskId: input.taskId,
-      taskRevision: input.taskRevision,
-      checkpointSha256: input.checkpoint.sha256,
-      priorResumeReference: priorReference,
-      nextProviderSessionGeneration: generation,
-    });
-    this.#fault("lifecycle-rotation:prepared");
-    let spawnAction: ProviderActionResult;
-    try {
-      spawnAction = await this.#executeOrReconcileLifecycleRotationAction({
-        runId,
-        adapterId,
-        actionId,
-        payload,
-      });
-    } catch (error: unknown) {
-      this.#markLifecycleRotationUnreconciled(runId, actorAgentId, input.commandId);
-      throw error;
-    }
-    if (
-      spawnAction.status !== "terminal" || spawnAction.effectCount !== 1 ||
-      !isRow(spawnAction.result) || typeof spawnAction.result.resumeReference !== "string"
-    ) {
-      this.#markLifecycleRotationUnreconciled(runId, actorAgentId, input.commandId);
-      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "replacement provider action is not terminal and proved");
-    }
-    const replacementReference = spawnAction.result.resumeReference;
-    this.#database.prepare(`
-      UPDATE lifecycle_rotation_custody
-         SET state='provider-terminal',replacement_resume_reference=?,updated_at=?
-       WHERE run_id=? AND agent_id=? AND command_id=?
-         AND state IN ('prepared','unreconciled')
-    `).run(replacementReference, this.#clock(), runId, actorAgentId, input.commandId);
-    const result: LifecycleResult = {
-      agentId: actorAgentId,
-      lifecycle: "ready",
-      providerSessionGeneration: generation,
-      rotation: { kind: "replacement-session", priorResumeReference: priorReference },
-    };
-    const finalized = this.#database.transaction(() => {
-      const live = rowOrNotFound(this.#database.prepare(`
-        SELECT state,precondition_digest,freeze_reason,action_id,adapter_id,
-               task_id,task_revision,checkpoint_sha256,prior_resume_reference,
-               next_provider_session_generation
-          FROM lifecycle_rotation_custody
-         WHERE run_id=? AND agent_id=? AND command_id=?
-      `).get(runId, actorAgentId, input.commandId), "lifecycle rotation custody");
-      if (
-        live.action_id !== actionId || live.adapter_id !== adapterId ||
-        live.task_id !== input.taskId || live.task_revision !== input.taskRevision ||
-        live.checkpoint_sha256 !== input.checkpoint.sha256 ||
-        live.prior_resume_reference !== priorReference ||
-        live.next_provider_session_generation !== generation ||
-        (live.state !== "prepared" && live.state !== "provider-terminal" && live.state !== "unreconciled") ||
-        live.precondition_digest !== this.#lifecycleRotationPreconditionDigest(runId, actorAgentId, input.taskId)
-      ) return false;
-      const action = rowOrNotFound(this.#database.prepare(`
-        SELECT status,effect_count,result_json FROM provider_actions
-         WHERE run_id=? AND action_id=? AND adapter_id=?
-      `).get(runId, actionId, adapterId), "lifecycle provider action");
-      if (
-        action.status !== "terminal" || action.effect_count !== 1 ||
-        typeof action.result_json !== "string" ||
-        canonicalJson(JSON.parse(action.result_json)) !== canonicalJson(spawnAction.result)
-      ) return false;
-      const principal = rowOrNotFound(this.#database.prepare(`
-        SELECT expires_at,revoked_at FROM capabilities
-         WHERE run_id=? AND agent_id=?
-         ORDER BY principal_generation DESC LIMIT 1
-      `).get(runId, actorAgentId), "lifecycle rotation principal");
-      if (principal.revoked_at !== null || numberField(principal, "expires_at") <= this.#clock()) return false;
-      const agentState = rowOrNotFound(this.#database.prepare(`
-        SELECT lifecycle,provider_session_ref FROM agents WHERE run_id=? AND agent_id=?
-      `).get(runId, actorAgentId), "lifecycle rotation agent");
-      if (
-        (agentState.lifecycle !== "suspended" && agentState.lifecycle !== "context-unreconciled") ||
-        agentState.provider_session_ref !== priorReference
-      ) return false;
-      const ownedFreeze = this.#database.prepare(`
-        SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
-      `).get(runId, actorAgentId);
-      if (!isRow(ownedFreeze) || ownedFreeze.reason !== live.freeze_reason) return false;
-      const agentUpdated = this.#database.prepare(`
-        UPDATE agents SET lifecycle='ready',provider_session_ref=?
-         WHERE run_id=? AND agent_id=? AND lifecycle IN ('suspended','context-unreconciled')
-           AND provider_session_ref=?
-      `).run(replacementReference, runId, actorAgentId, priorReference);
-      if (agentUpdated.changes !== 1) return false;
-      const freeze = this.#database.prepare(`
-        DELETE FROM delivery_freezes
-         WHERE run_id=? AND agent_id=? AND reason=?
-      `).run(runId, actorAgentId, stringField(live, "freeze_reason"));
-      if (freeze.changes !== 1) return false;
-      this.#database.prepare(
-        "INSERT INTO provider_state(run_id, agent_id, provider_session_generation, context_revision, reconciled_checkpoint_sha256) VALUES (?, ?, ?, NULL, ?) ON CONFLICT(run_id, agent_id) DO UPDATE SET provider_session_generation = excluded.provider_session_generation, context_revision = NULL, reconciled_checkpoint_sha256 = excluded.reconciled_checkpoint_sha256",
-      ).run(runId, actorAgentId, generation, input.checkpoint.sha256);
-      this.#database.prepare(`
-        UPDATE lifecycle_rotation_custody
-           SET state='finalized',replacement_resume_reference=?,updated_at=?
-         WHERE run_id=? AND agent_id=? AND command_id=?
-      `).run(replacementReference, this.#clock(), runId, actorAgentId, input.commandId);
-      this.#recordLifecycleOperation(runId, input, priorReference, replacementReference);
-      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
-      return true;
-    })();
-    if (!finalized) {
-      const concurrentReplay = this.#commandJournal.read(
-        runId,
-        actorAgentId,
-        input.commandId,
-        input,
-        isLifecycleResult,
-      );
-      if (concurrentReplay !== undefined) return concurrentReplay;
-      this.#markLifecycleRotationUnreconciled(runId, actorAgentId, input.commandId);
-      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle custody changed while the provider effect was in flight");
-    }
-    return result;
   }
 
   recordOperatorIntervention(
@@ -4845,13 +5161,14 @@ export class Fabric {
     actorAgentId: string,
     input: ProviderActionDispatchRequest,
   ): Promise<ProviderActionResult> {
-    this.#assertChair(runId, actorAgentId);
-    this.#assertGenericProviderAction(runId, input.actionId);
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isProviderActionResult);
     if (replay !== undefined) return replay;
+    this.#assertChair(runId, actorAgentId);
+    this.#assertGenericProviderAction(runId, input.adapterId, input.actionId);
     const existingAction = this.#database.prepare(`
-      SELECT payload_json FROM provider_actions WHERE run_id=? AND action_id=?
-    `).get(runId, input.actionId);
+      SELECT payload_json FROM provider_actions
+       WHERE run_id=? AND adapter_id=? AND action_id=?
+    `).get(runId, input.adapterId, input.actionId);
     let existingPayload: Record<string, unknown> | undefined;
     if (isRow(existingAction)) {
       const value: unknown = JSON.parse(stringField(existingAction, "payload_json"));
@@ -4939,7 +5256,7 @@ export class Fabric {
         };
     let admittedInputPayload = taskBoundPayload;
     if (target !== undefined) {
-      this.#assertProviderPrincipalActive(runId, target.agentId);
+      if (existingPayload === undefined) this.#assertProviderPrincipalActive(runId, target.agentId);
       if (taskId !== undefined) {
         const taskMember = this.#database.prepare(`
           SELECT 1 FROM tasks task
@@ -4959,7 +5276,12 @@ export class Fabric {
         this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, target.agentId),
         "provider target agent",
       );
-      admittedInputPayload = this.#admitProviderPayload(runId, stringField(targetAgent, "authority_id"), taskBoundPayload);
+      admittedInputPayload = this.#admitProviderPayload(
+        runId,
+        stringField(targetAgent, "authority_id"),
+        taskBoundPayload,
+        existingPayload === undefined,
+      );
     } else {
       this.#adapter(input.adapterId);
       if (taskId !== undefined) {
@@ -4987,9 +5309,17 @@ export class Fabric {
         providerAuthorityId = input.authorityId as string;
         ephemeralProviderAuthorityId = providerAuthorityId;
       }
-      admittedInputPayload = this.#admitProviderPayload(runId, providerAuthorityId, taskBoundPayload);
+      admittedInputPayload = this.#admitProviderPayload(
+        runId,
+        providerAuthorityId,
+        taskBoundPayload,
+        existingPayload === undefined,
+      );
     }
-    if (input.operation === "spawn" || input.operation === "send_turn" || input.operation === "steer") {
+    if (
+      existingPayload === undefined &&
+      (input.operation === "spawn" || input.operation === "send_turn" || input.operation === "steer")
+    ) {
       this.#assertAdapterModel(input.adapterId, admittedInputPayload);
     }
     const identityHash = sha256(canonicalJson({
@@ -5000,7 +5330,28 @@ export class Fabric {
       ...(ephemeralSpawn ? { authorityId: input.authorityId } : {}),
       payload: admittedInputPayload,
     }));
-    const existing = this.#providerSessions.assertActionIdentity({
+    const providerActionTicket = this.#providerActionAdmission.preflightAgentAction({
+      runId,
+      actorAgentId,
+      actionRef: { adapterId: input.adapterId, actionId: input.actionId },
+      canonicalInput: {
+        schemaVersion: 1,
+        scope: { kind: "run-action", runId },
+        actionRef: { adapterId: input.adapterId, actionId: input.actionId },
+        operation: input.operation,
+        taskId: taskId ?? null,
+        authorityId: ephemeralSpawn ? input.authorityId : null,
+        targetAgentId: target?.agentId ?? null,
+        providerSessionGeneration: target?.providerSessionGeneration ?? null,
+        providerPayload: admittedInputPayload,
+        routeRequest: null,
+        certifyingBinding: null,
+      },
+    });
+    if (providerActionTicket.disposition === "admitted" && existingPayload === undefined) {
+      throw new Error("admitted provider action preflight has no durable action");
+    }
+    const existing = existingPayload !== undefined && this.#providerSessions.assertActionIdentity({
       runId,
       actionId: input.actionId,
       adapterId: input.adapterId,
@@ -5012,7 +5363,7 @@ export class Fabric {
       }),
     });
     if (existing) {
-      const result = this.getProviderAction(runId, input.actionId);
+      const result = this.getProviderAction(runId, input.adapterId, input.actionId);
       if (
         result.status === "terminal" || result.status === "quarantined" ||
         (ephemeralSpawn && ["prepared", "dispatched", "accepted"].includes(result.status))
@@ -5021,10 +5372,12 @@ export class Fabric {
         return result;
       }
       return await this.reconcileProviderAction(runId, actorAgentId, {
+        adapterId: input.adapterId,
         actionId: input.actionId,
         commandId: `${input.commandId}:reconcile`,
       });
     }
+    const genericProviderActionTicket = providerActionTicket;
     if (ephemeralSpawn) {
       if (ephemeralProviderAuthorityId === undefined || ephemeralMaxTurns === undefined || taskId === undefined) {
         throw new Error("validated ephemeral provider budget is unavailable");
@@ -5047,89 +5400,119 @@ export class Fabric {
           "terminal task cannot admit an ephemeral provider spawn",
         );
       }
-      const capabilities = await this.#requestAdapter(input.adapterId, "capabilities", {});
-      assertAdapterOperation(capabilities, "spawn");
-      if (
-        !isRow(capabilities) ||
-        capabilities.ephemeralWorker !== true ||
-        capabilities.answerBearingSpawn !== true
-      ) {
-        throw new FabricError("CAPABILITY_UNAVAILABLE", "adapter does not advertise answer-bearing ephemeral spawn");
-      }
-      if (
-        capabilities.answerBearingSpawnTurns !== "payload-max-turns" &&
-        capabilities.answerBearingSpawnTurns !== "one-shot"
-      ) {
-        throw new FabricError("CAPABILITY_UNAVAILABLE", "adapter does not advertise a bounded answer-bearing turn contract");
-      }
-      if (capabilities.answerBearingSpawnTurns === "one-shot" && ephemeralMaxTurns !== 1) {
-        throw new FabricError("CAPABILITY_UNAVAILABLE", "one-shot answer-bearing adapter accepts exactly one turn");
-      }
-      if (
-        capabilities.answerBearingUsageUnits !== undefined &&
-        (!isStringArray(capabilities.answerBearingUsageUnits) ||
-          capabilities.answerBearingUsageUnits.some((unit) => !Object.hasOwn(ephemeralAuthorityBudget.reservation, unit)))
-      ) {
-        throw new FabricError("CAPABILITY_UNAVAILABLE", "delegated authority omits an adapter-mandatory usage dimension");
-      }
-      const result = await this.#executeAdapterOperation({
-        runId,
-        adapterId: input.adapterId,
-        actionId: input.actionId,
-        operation: "spawn",
-        method: "spawn",
-        payload: admittedInputPayload,
-        requireProviderAnswer: true,
-        authorityBudget: ephemeralAuthorityBudget,
-        taskId,
-        deferCompletion: true,
-        deferredCommand: {
-          actorAgentId,
-          commandId: input.commandId,
-          payload: input,
-        },
-        revalidateAdmission: () => {
-          if (this.#closing) {
-            throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider admission changed while Fabric was closing");
-          }
-          this.#assertChair(runId, actorAgentId);
-          this.#assertProviderPrincipalActive(runId, actorAgentId);
-          const reboundTaskId = resolveTaskBindingForActiveWork(
-            this.#database,
-            runId,
+      const joined = await this.#providerActionAdmission.join(providerActionTicket, async () => {
+        try {
+        this.#fault("provider-action:before-capability-inspection");
+        const capabilities = await this.#requestAdapter(input.adapterId, "capabilities", {});
+        assertAdapterOperation(capabilities, "spawn");
+        if (
+          !isRow(capabilities) ||
+          capabilities.ephemeralWorker !== true ||
+          capabilities.answerBearingSpawn !== true
+        ) {
+          throw new FabricError("CAPABILITY_UNAVAILABLE", "adapter does not advertise answer-bearing ephemeral spawn");
+        }
+        if (
+          capabilities.answerBearingSpawnTurns !== "payload-max-turns" &&
+          capabilities.answerBearingSpawnTurns !== "one-shot"
+        ) {
+          throw new FabricError("CAPABILITY_UNAVAILABLE", "adapter does not advertise a bounded answer-bearing turn contract");
+        }
+        if (capabilities.answerBearingSpawnTurns === "one-shot" && ephemeralMaxTurns !== 1) {
+          throw new FabricError("CAPABILITY_UNAVAILABLE", "one-shot answer-bearing adapter accepts exactly one turn");
+        }
+        if (
+          capabilities.answerBearingUsageUnits !== undefined &&
+          (!isStringArray(capabilities.answerBearingUsageUnits) ||
+            capabilities.answerBearingUsageUnits.some((unit) => !Object.hasOwn(ephemeralAuthorityBudget.reservation, unit)))
+        ) {
+          throw new FabricError("CAPABILITY_UNAVAILABLE", "delegated authority omits an adapter-mandatory usage dimension");
+        }
+        return await this.#executeAdapterOperation({
+          runId,
+          adapterId: input.adapterId,
+          actionId: input.actionId,
+          operation: "spawn",
+          method: "spawn",
+          payload: admittedInputPayload,
+          requireProviderAnswer: true,
+          authorityBudget: ephemeralAuthorityBudget,
+          taskId,
+          deferCompletion: true,
+          deferredCommand: {
             actorAgentId,
-            taskValue,
-          );
-          if (reboundTaskId !== taskId) {
-            throw new FabricError("CAPABILITY_FORBIDDEN", "provider task binding changed before dispatch");
+            commandId: input.commandId,
+            payload: input,
+          },
+          providerActionTicket,
+          revalidateAdmission: () => {
+            if (this.#closing) {
+              throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider admission changed while Fabric was closing");
+            }
+            this.#assertChair(runId, actorAgentId);
+            this.#assertProviderPrincipalActive(runId, actorAgentId);
+            const reboundTaskId = resolveTaskBindingForActiveWork(
+              this.#database,
+              runId,
+              actorAgentId,
+              taskValue,
+            );
+            if (reboundTaskId !== taskId) {
+              throw new FabricError("CAPABILITY_FORBIDDEN", "provider task binding changed before dispatch");
+            }
+            assertScopedOperationAllowed(
+              this.#database,
+              runId,
+              FABRIC_OPERATIONS.dispatchProviderAction,
+              operationTarget,
+            );
+            assertScopedTaskReadinessAllowed(this.#database, runId, taskId);
+            assertRunAcceptingWork(this.#database, runId);
+            this.#assertEphemeralProviderAuthority(runId, actorAgentId, ephemeralProviderAuthorityId as string);
+            this.#admitProviderPayload(runId, ephemeralProviderAuthorityId as string, taskBoundPayload);
+          },
+        });
+        } catch (error: unknown) {
+          if (
+            providerActionTicket.disposition === "resolving" &&
+            !(error instanceof ProviderActionAdmissionTransactionError)
+          ) {
+            this.#providerActionAdmission.release(providerActionTicket, error);
           }
-          assertScopedOperationAllowed(
-            this.#database,
-            runId,
-            FABRIC_OPERATIONS.dispatchProviderAction,
-            operationTarget,
-          );
-          assertScopedTaskReadinessAllowed(this.#database, runId, taskId);
-          assertRunAcceptingWork(this.#database, runId);
-          this.#assertEphemeralProviderAuthority(runId, actorAgentId, ephemeralProviderAuthorityId as string);
-          this.#admitProviderPayload(runId, ephemeralProviderAuthorityId as string, taskBoundPayload);
-        },
+          throw error;
+        }
       });
-      return result;
+      if (joined.joined) {
+        this.#commandJournal.write(runId, actorAgentId, input.commandId, input, joined.value);
+      }
+      return joined.value;
     }
     let providerPayload = admittedInputPayload;
     let turnLeaseGeneration: number | null = null;
     let actionPrepared = false;
     if (input.operation === "send_turn" && target !== undefined) {
-      const admission = this.#providerSessions.prepareTurnAction({
-        runId,
-        actionId: input.actionId,
-        adapterId: input.adapterId,
-        operation: "send_turn",
-        identityHash,
-        target,
-        payload: admittedInputPayload,
-      });
+      if (genericProviderActionTicket === undefined) throw new Error("provider action ticket is unavailable");
+      let admission;
+      try {
+        admission = this.#providerSessions.prepareTurnAction({
+          runId,
+          actionId: input.actionId,
+          adapterId: input.adapterId,
+          operation: "send_turn",
+          identityHash,
+          target,
+          payload: admittedInputPayload,
+          providerActionTicket: genericProviderActionTicket,
+        });
+      } catch (error: unknown) {
+        if (
+          genericProviderActionTicket.disposition === "resolving" &&
+          !(error instanceof ProviderActionAdmissionTransactionError)
+        ) {
+          this.#providerActionAdmission.release(genericProviderActionTicket, error);
+        }
+        throw error;
+      }
       providerPayload = admission.payload;
       turnLeaseGeneration = admission.turnLeaseGeneration;
       actionPrepared = true;
@@ -5146,24 +5529,36 @@ export class Fabric {
       };
     }
     if (!actionPrepared) {
+      if (genericProviderActionTicket === undefined) throw new Error("provider action ticket is unavailable");
       const payloadJson = canonicalJson(providerPayload);
-      this.#database
-        .prepare(
-          "INSERT INTO provider_actions(run_id, action_id, adapter_id, operation, target_agent_id, provider_session_generation, turn_lease_generation, identity_hash, payload_hash, payload_json, status, history_json, execution_count, effect_count, idempotency_proven, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', '[\"prepared\"]', 0, 0, 0, ?)",
-        )
-        .run(
-          runId,
-          input.actionId,
-          input.adapterId,
-          input.operation,
-          target?.agentId ?? null,
-          target?.providerSessionGeneration ?? null,
-          turnLeaseGeneration,
-          identityHash,
-          sha256(payloadJson),
-          payloadJson,
-          this.#clock(),
-        );
+      try {
+        this.#database.transaction(() => {
+          this.#providerActionAdmission.admitUnroutedInCurrentTransaction(genericProviderActionTicket, {
+            runId,
+            actionId: input.actionId,
+            adapterId: input.adapterId,
+            operation: input.operation,
+            targetAgentId: target?.agentId ?? null,
+            providerSessionGeneration: target?.providerSessionGeneration ?? null,
+            turnLeaseGeneration,
+            identityHash,
+            payloadHash: sha256(payloadJson),
+            payloadJson,
+            status: "prepared",
+            historyJson: '["prepared"]',
+            executionCount: 0,
+            updatedAt: this.#clock(),
+          });
+        }).immediate();
+      } catch (error: unknown) {
+        if (
+          genericProviderActionTicket.disposition === "resolving" &&
+          !(error instanceof ProviderActionAdmissionTransactionError)
+        ) {
+          this.#providerActionAdmission.release(genericProviderActionTicket, error);
+        }
+        throw error;
+      }
     }
     const persistedProviderPayload: unknown = JSON.parse(canonicalJson(providerPayload));
     if (!isRow(persistedProviderPayload)) throw new Error("provider action payload is invalid");
@@ -5171,13 +5566,13 @@ export class Fabric {
     const capabilities = await this.#requestAdapter(input.adapterId, "capabilities", {});
     assertAdapterOperation(capabilities, input.operation);
     this.#database
-      .prepare("UPDATE provider_actions SET status = 'dispatched', history_json = '[\"prepared\",\"dispatched\"]', execution_count = 1, updated_at = ? WHERE run_id = ? AND action_id = ?")
-      .run(this.#clock(), runId, input.actionId);
+      .prepare("UPDATE provider_actions SET status = 'dispatched', history_json = '[\"prepared\",\"dispatched\"]', execution_count = 1, updated_at = ? WHERE run_id = ? AND adapter_id = ? AND action_id = ?")
+      .run(this.#clock(), runId, input.adapterId, input.actionId);
     try {
       const response = await this.#requestAdapter(input.adapterId, "dispatch", { actionId: input.actionId, operation: input.operation, payload: providerPayload });
       const result = providerActionResult(response, input.actionId);
-      this.#persistProviderAction(runId, input.actionId, response, result);
-      this.#settleProviderTurnAndPump(runId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
+      this.#persistProviderAction(runId, input.adapterId, input.actionId, response, result);
+      this.#settleProviderTurnAndPump(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     } catch {
@@ -5188,8 +5583,8 @@ export class Fabric {
         executionCount: 1,
         effectCount: 0,
       };
-      this.#persistProviderAction(runId, input.actionId, { idempotencyProven: false }, result);
-      this.#settleProviderTurnAndPump(runId, input.actionId, "ambiguous");
+      this.#persistProviderAction(runId, input.adapterId, input.actionId, { idempotencyProven: false }, result);
+      this.#settleProviderTurnAndPump(runId, input.adapterId, input.actionId, "ambiguous");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
@@ -5198,12 +5593,10 @@ export class Fabric {
   async reconcileProviderAction(
     runId: string,
     actorAgentId: string,
-    input: { actionId: string; commandId: string },
+    input: { adapterId: string; actionId: string; commandId: string },
   ): Promise<ProviderActionResult> {
     return await this.#trackProviderOperation(
       async () => {
-        this.#assertChair(runId, actorAgentId);
-        this.#assertGenericProviderAction(runId, input.actionId);
         const replay = this.#commandJournal.read(
           runId,
           actorAgentId,
@@ -5212,12 +5605,12 @@ export class Fabric {
           isProviderActionResult,
         );
         if (replay !== undefined) return replay;
-        const key = this.#providerActionOwnershipKey(runId, input.actionId);
+        this.#assertChair(runId, actorAgentId);
+        this.#assertGenericProviderAction(runId, input.adapterId, input.actionId);
+        const key = this.#providerActionOwnershipKey(runId, input.adapterId, input.actionId);
         const existing = this.#providerActionReconciliations.get(key);
         if (existing !== undefined) {
           await existing;
-          this.#assertChair(runId, actorAgentId);
-          this.#assertGenericProviderAction(runId, input.actionId);
           const concurrentReplay = this.#commandJournal.read(
             runId,
             actorAgentId,
@@ -5226,7 +5619,9 @@ export class Fabric {
             isProviderActionResult,
           );
           if (concurrentReplay !== undefined) return concurrentReplay;
-          const current = this.getProviderAction(runId, input.actionId);
+          this.#assertChair(runId, actorAgentId);
+          this.#assertGenericProviderAction(runId, input.adapterId, input.actionId);
+          const current = this.getProviderAction(runId, input.adapterId, input.actionId);
           if (current.status === "terminal" || current.status === "quarantined") {
             this.#commandJournal.write(runId, actorAgentId, input.commandId, input, current);
             return current;
@@ -5249,16 +5644,16 @@ export class Fabric {
   async #reconcileProviderAction(
     runId: string,
     actorAgentId: string,
-    input: { actionId: string; commandId: string },
+    input: { adapterId: string; actionId: string; commandId: string },
   ): Promise<ProviderActionResult> {
     this.#assertChair(runId, actorAgentId);
-    this.#assertGenericProviderAction(runId, input.actionId);
+    this.#assertGenericProviderAction(runId, input.adapterId, input.actionId);
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isProviderActionResult);
     if (replay !== undefined) return replay;
     const stored = rowOrNotFound(
       this.#database
-        .prepare("SELECT adapter_id, operation, payload_json, status, idempotency_proven, target_agent_id, budget_state FROM provider_actions WHERE run_id = ? AND action_id = ?")
-        .get(runId, input.actionId),
+        .prepare("SELECT adapter_id, operation, payload_json, status, idempotency_proven, target_agent_id, budget_state FROM provider_actions WHERE run_id = ? AND adapter_id = ? AND action_id = ?")
+        .get(runId, input.adapterId, input.actionId),
       "provider action",
     );
     const storedPayload: unknown = JSON.parse(stringField(stored, "payload_json"));
@@ -5271,13 +5666,13 @@ export class Fabric {
       };
       delete quarantined.providerAnswer;
       if (answerBearing) delete quarantined.result;
-      this.#persistProviderAction(runId, input.actionId, { idempotencyProven: false }, quarantined);
-      this.#settleProviderTurnAndPump(runId, input.actionId, "quarantined");
+      this.#persistProviderAction(runId, input.adapterId, input.actionId, { idempotencyProven: false }, quarantined);
+      this.#settleProviderTurnAndPump(runId, input.adapterId, input.actionId, "quarantined");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, quarantined);
       return quarantined;
     };
-    let result = this.getProviderAction(runId, input.actionId);
-    if (this.#ownedProviderActions.has(this.#providerActionOwnershipKey(runId, input.actionId))) {
+    let result = this.getProviderAction(runId, input.adapterId, input.actionId);
+    if (this.#ownedProviderActions.has(this.#providerActionOwnershipKey(runId, input.adapterId, input.actionId))) {
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
@@ -5286,6 +5681,7 @@ export class Fabric {
         const adapterId = stringField(stored, "adapter_id");
         this.#enqueueDeferredProviderAction({
           runId,
+          adapterId,
           actionId: input.actionId,
           execute: async () => await this.#completeAdapterOperation({
             runId,
@@ -5297,7 +5693,7 @@ export class Fabric {
             requireProviderAnswer: true,
           }),
         });
-        result = this.getProviderAction(runId, input.actionId);
+        result = this.getProviderAction(runId, input.adapterId, input.actionId);
         this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
         return result;
       }
@@ -5306,12 +5702,12 @@ export class Fabric {
       }
       const adapterId = stringField(stored, "adapter_id");
       this.#database
-        .prepare("UPDATE provider_actions SET status = 'dispatched', history_json = '[\"prepared\",\"dispatched\"]', execution_count = 1, updated_at = ? WHERE run_id = ? AND action_id = ?")
-        .run(this.#clock(), runId, input.actionId);
+        .prepare("UPDATE provider_actions SET status = 'dispatched', history_json = '[\"prepared\",\"dispatched\"]', execution_count = 1, updated_at = ? WHERE run_id = ? AND adapter_id = ? AND action_id = ?")
+        .run(this.#clock(), runId, input.adapterId, input.actionId);
       try {
         const response = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload: storedPayload });
         result = providerActionResultWithRequiredAnswer(response, answerBearing, input.actionId);
-        this.#persistProviderAction(runId, input.actionId, response, result);
+        this.#persistProviderAction(runId, input.adapterId, input.actionId, response, result);
       } catch {
         result = {
           actionId: input.actionId,
@@ -5320,9 +5716,9 @@ export class Fabric {
           executionCount: 1,
           effectCount: 0,
         };
-        this.#persistProviderAction(runId, input.actionId, { idempotencyProven: false }, result);
+        this.#persistProviderAction(runId, input.adapterId, input.actionId, { idempotencyProven: false }, result);
       }
-      this.#settleProviderTurnAndPump(runId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
+      this.#settleProviderTurnAndPump(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
@@ -5333,6 +5729,7 @@ export class Fabric {
     const preserveResolvedEffect = (): ProviderActionResult => {
       this.#settleProviderTurnAndPump(
         runId,
+        input.adapterId,
         input.actionId,
         resolvedEffectResult.status === "terminal" ? "terminal" : "quarantined",
       );
@@ -5340,7 +5737,7 @@ export class Fabric {
       return resolvedEffectResult;
     };
     if (result.status !== "ambiguous" && result.status !== "dispatched" && !resolvedEffectWithUnknownUsage) {
-      this.#settleProviderTurnAndPump(runId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
+      this.#settleProviderTurnAndPump(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
@@ -5364,10 +5761,10 @@ export class Fabric {
     if (lookedUp.status === "terminal") {
       result = lookedUp;
       try {
-        this.#persistProviderAction(runId, input.actionId, lookup, result);
+        this.#persistProviderAction(runId, input.adapterId, input.actionId, lookup, result);
       } catch {
         if (resolvedEffectWithUnknownUsage) return preserveResolvedEffect();
-        return quarantine(this.getProviderAction(runId, input.actionId));
+        return quarantine(this.getProviderAction(runId, input.adapterId, input.actionId));
       }
     } else if (resolvedEffectWithUnknownUsage) {
       return preserveResolvedEffect();
@@ -5382,23 +5779,23 @@ export class Fabric {
         return quarantine(result);
       }
       try {
-        this.#persistProviderAction(runId, input.actionId, replayed, result);
+        this.#persistProviderAction(runId, input.adapterId, input.actionId, replayed, result);
       } catch {
-        return quarantine(this.getProviderAction(runId, input.actionId));
+        return quarantine(this.getProviderAction(runId, input.adapterId, input.actionId));
       }
     } else {
       return quarantine(lookedUp);
     }
-    this.#settleProviderTurnAndPump(runId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
+    this.#settleProviderTurnAndPump(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
     this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
     return result;
   }
 
-  getProviderAction(runId: string, actionId: string): ProviderActionResult {
+  getProviderAction(runId: string, adapterId: string, actionId: string): ProviderActionResult {
     const row = rowOrNotFound(
       this.#database
-        .prepare("SELECT operation, payload_json, status, history_json, execution_count, effect_count, result_json FROM provider_actions WHERE run_id = ? AND action_id = ?")
-        .get(runId, actionId),
+        .prepare("SELECT operation, payload_json, status, history_json, execution_count, effect_count, result_json FROM provider_actions WHERE run_id = ? AND adapter_id = ? AND action_id = ?")
+        .get(runId, adapterId, actionId),
       "provider action",
     );
     const history: unknown = JSON.parse(stringField(row, "history_json"));
@@ -5420,38 +5817,6 @@ export class Fabric {
       ...(result === undefined ? {} : { result }),
       ...(providerAnswer === undefined ? {} : { providerAnswer }),
     };
-  }
-
-  recordModelRoutingEvidence(
-    runId: string,
-    actorAgentId: string,
-    input: ModelRoutingEvidenceInput,
-  ): void {
-    this.#assertChair(runId, actorAgentId);
-    this.#providerSessions.recordModelRoutingEvidence(runId, input);
-    this.#event(runId, "model-routing-evidence-recorded", actorAgentId, {
-      evidenceId: input.evidenceId,
-      actionId: input.actionId,
-      relativePath: input.relativePath,
-      sha256: input.sha256,
-    });
-  }
-
-  recordCrossFamilyReviewEvidence(
-    runId: string,
-    actorAgentId: string,
-    input: CrossFamilyReviewEvidenceInput,
-  ): void {
-    this.#assertChair(runId, actorAgentId);
-    this.#providerSessions.recordCrossFamilyReviewEvidence(runId, input);
-    this.#event(runId, "cross-family-review-evidence-recorded", actorAgentId, {
-      evidenceId: input.evidenceId,
-      reviewerAgentId: input.reviewerAgentId,
-      providerFamily: input.providerFamily,
-      independent: input.independent,
-      relativePath: input.relativePath,
-      sha256: input.sha256,
-    });
   }
 
   createTeam(runId: string, actorAgentId: string, input: TeamCreateInput): TeamResult {
@@ -6538,18 +6903,19 @@ export class Fabric {
     runId: string,
     authorityId: string,
     payload: Record<string, unknown>,
+    validateCurrent = true,
   ): Record<string, unknown> {
     const row = rowOrNotFound(
       this.#database.prepare("SELECT authority_json FROM authorities WHERE run_id = ? AND authority_id = ?").get(runId, authorityId),
       "provider authority",
     );
     const authority = parseAuthority(stringField(row, "authority_json"));
-    if (Date.parse(authority.expiresAt) <= this.#clock()) {
+    if (validateCurrent && Date.parse(authority.expiresAt) <= this.#clock()) {
       throw new FabricError("AUTHENTICATION_FAILED", "provider authority has expired");
     }
     const providerDisclosure = authority.disclosure.level === "allowed" ||
       (authority.disclosure.level === "scoped" && authority.disclosure.scopes.includes("approved-provider"));
-    if (!providerDisclosure) {
+    if (validateCurrent && !providerDisclosure) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "authority does not permit disclosure to an approved provider");
     }
     const forbiddenControls = [
@@ -6650,6 +7016,7 @@ export class Fabric {
       payload: unknown;
     };
     revalidateAdmission?: () => void;
+    providerActionTicket?: ProviderActionTicket;
   }): Promise<ProviderActionResult> {
     const payloadJson = canonicalJson(input.payload);
     const targetAgentId = typeof input.payload.agentId === "string" ? input.payload.agentId : undefined;
@@ -6664,7 +7031,11 @@ export class Fabric {
       ...(input.authorityBudget === undefined ? {} : { authorityId: input.authorityBudget.authorityId }),
       payload: input.payload,
     }));
-    const existing = this.#providerSessions.assertActionIdentity({
+    const existingAction = this.#database.prepare(`
+      SELECT 1 FROM provider_actions
+       WHERE run_id=? AND adapter_id=? AND action_id=?
+    `).get(input.runId, input.adapterId, input.actionId);
+    const existing = existingAction !== undefined && this.#providerSessions.assertActionIdentity({
       runId: input.runId,
       actionId: input.actionId,
       adapterId: input.adapterId,
@@ -6674,7 +7045,7 @@ export class Fabric {
       ...(providerSessionGeneration === undefined ? {} : { providerSessionGeneration }),
     });
     if (existing) {
-      return this.getProviderAction(input.runId, input.actionId);
+      return this.getProviderAction(input.runId, input.adapterId, input.actionId);
     }
     const deferred = input.deferCompletion === true;
     if (deferred && input.deferredCommand === undefined) {
@@ -6703,40 +7074,42 @@ export class Fabric {
             );
           }
         }
-        this.#database
-          .prepare(
-            "INSERT INTO provider_actions(run_id, action_id, adapter_id, operation, target_agent_id, provider_session_generation, turn_lease_generation, identity_hash, payload_hash, payload_json, status, history_json, execution_count, effect_count, idempotency_proven, updated_at, task_id, budget_authority_id, budget_reservation_json, budget_settlement_json, budget_state, budget_started_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, NULL, ?, ?)",
-          )
-          .run(
-            input.runId,
-            input.actionId,
-            input.adapterId,
-            input.operation,
-            targetAgentId ?? null,
-            providerSessionGeneration ?? null,
-            identityHash,
-            sha256(payloadJson),
-            payloadJson,
-            receipt.status,
-            canonicalJson(receipt.history),
-            receipt.executionCount,
-            this.#clock(),
-            input.taskId ?? null,
-            input.authorityBudget?.authorityId ?? null,
-            input.authorityBudget === undefined ? null : canonicalJson(input.authorityBudget.reservation),
-            input.authorityBudget === undefined ? null : "reserved",
-            input.authorityBudget === undefined ? null : this.#clock(),
-          );
-        if (input.deferredCommand !== undefined) {
-          this.#commandJournal.write(
-            input.runId,
-            input.deferredCommand.actorAgentId,
-            input.deferredCommand.commandId,
-            input.deferredCommand.payload,
-            receipt,
-          );
+        if (input.providerActionTicket === undefined) {
+          throw new Error("provider action admission ticket is required");
         }
-      })();
+        this.#providerActionAdmission.admitUnroutedInCurrentTransaction(input.providerActionTicket, {
+          runId: input.runId,
+          actionId: input.actionId,
+          adapterId: input.adapterId,
+          operation: input.operation,
+          targetAgentId: targetAgentId ?? null,
+          providerSessionGeneration: providerSessionGeneration ?? null,
+          identityHash,
+          payloadHash: sha256(payloadJson),
+          payloadJson,
+          status: receipt.status,
+          historyJson: canonicalJson(receipt.history),
+          executionCount: receipt.executionCount,
+          updatedAt: this.#clock(),
+          taskId: input.taskId ?? null,
+          budgetAuthorityId: input.authorityBudget?.authorityId ?? null,
+          budgetReservationJson: input.authorityBudget === undefined
+            ? null
+            : canonicalJson(input.authorityBudget.reservation),
+          budgetState: input.authorityBudget === undefined ? null : "reserved",
+          budgetStartedAt: input.authorityBudget === undefined ? null : this.#clock(),
+        }, () => {
+          if (input.deferredCommand !== undefined) {
+            this.#commandJournal.write(
+              input.runId,
+              input.deferredCommand.actorAgentId,
+              input.deferredCommand.commandId,
+              input.deferredCommand.payload,
+              receipt,
+            );
+          }
+        });
+      }).immediate();
     } catch (error: unknown) {
       if (
         input.authorityBudget !== undefined && error instanceof Error &&
@@ -6748,11 +7121,12 @@ export class Fabric {
              WHERE authority_id=? AND unit_key=? AND usage_unknown=1
           `).get(input.authorityBudget?.authorityId, unit),
         ));
-        throw new FabricError(
+        const budgetError = new FabricError(
           unknown ? "BUDGET_USAGE_UNKNOWN" : "BUDGET_EXCEEDED",
           unknown ? "delegated provider usage became unknown before admission" : "delegated provider budget was concurrently exhausted",
           { cause: error },
         );
+        throw new ProviderActionAdmissionTransactionError(budgetError);
       }
       throw error;
     }
@@ -6760,6 +7134,7 @@ export class Fabric {
     if (deferred) {
       this.#enqueueDeferredProviderAction({
         runId: input.runId,
+        adapterId: input.adapterId,
         actionId: input.actionId,
         execute: complete,
       });
@@ -6795,7 +7170,7 @@ export class Fabric {
         result: response,
         ...(providerAnswer === undefined ? {} : { providerAnswer }),
       };
-      this.#persistProviderAction(input.runId, input.actionId, { idempotencyProven: true }, result);
+      this.#persistProviderAction(input.runId, input.adapterId, input.actionId, { idempotencyProven: true }, result);
       return result;
     } catch (error: unknown) {
       const ambiguous: ProviderActionResult = {
@@ -6805,7 +7180,7 @@ export class Fabric {
         executionCount: 1,
         effectCount: 0,
       };
-      this.#persistProviderAction(input.runId, input.actionId, { idempotencyProven: false }, ambiguous);
+      this.#persistProviderAction(input.runId, input.adapterId, input.actionId, { idempotencyProven: false }, ambiguous);
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", `adapter ${input.operation} result is ambiguous`, { cause: error });
     }
   }
@@ -6886,223 +7261,1565 @@ export class Fabric {
     }));
   }
 
-  #prepareLifecycleRotation(input: {
-    runId: string;
-    agentId: string;
-    commandId: string;
-    actionId: string;
-    adapterId: string;
-    taskId: string;
-    taskRevision: number;
-    checkpointSha256: string;
-    priorResumeReference: string;
-    nextProviderSessionGeneration: number;
-  }): void {
+  #acceptLifecycleRotation(
+    runId: string,
+    agentId: string,
+    input: {
+      action: "compact" | "rotate";
+      agentId: string;
+      taskId: string;
+      taskRevision: number;
+      checkpoint: LifecycleCheckpoint;
+      commandId: string;
+    },
+  ): LifecycleAcceptedSuspendedV1 {
+    if (this.#fabricSocketPath === undefined) {
+      throw new FabricError("CAPABILITY_UNAVAILABLE", "retained lifecycle rotation requires the Fabric daemon socket");
+    }
+    const source = rowOrNotFound(this.#database.prepare(`
+      SELECT run.project_session_id,run.revision AS run_revision,
+             COALESCE(run.chair_generation,1) AS chair_generation,
+             session.generation AS session_generation,agent.authority_id,
+             CASE WHEN agent.agent_id=run.chair_agent_id
+               THEN chair_bridge.provider_session_ref ELSE child_bridge.provider_session_ref END AS provider_session_ref,
+             CASE WHEN agent.agent_id=run.chair_agent_id
+               THEN chair_bridge.provider_adapter_id ELSE child_bridge.adapter_id END AS adapter_id,
+             CASE WHEN agent.agent_id=run.chair_agent_id
+               THEN chair_bridge.provider_action_id ELSE child_bridge.action_id END AS source_action_id,
+             CASE WHEN agent.agent_id=run.chair_agent_id
+               THEN chair_bridge.provider_session_generation ELSE child_bridge.provider_session_generation END AS provider_session_generation,
+             CASE WHEN agent.agent_id=run.chair_agent_id
+               THEN chair_bridge.bridge_generation ELSE child_bridge.bridge_generation END AS bridge_generation,
+             CASE WHEN agent.agent_id=run.chair_agent_id
+               THEN chair_bridge.revision ELSE child_bridge.revision END AS bridge_revision,
+             CASE WHEN agent.agent_id=run.chair_agent_id
+               THEN chair_bridge.capability_hash ELSE child_bridge.capability_hash END AS capability_hash,
+             CASE WHEN agent.agent_id=run.chair_agent_id
+               THEN chair_bridge.provider_contract_digest ELSE custody.bridge_contract_digest END AS bridge_contract_digest,
+             CASE WHEN agent.agent_id=run.chair_agent_id THEN 'chair' ELSE 'child' END AS bridge_owner_kind,
+             capability.principal_generation,capability.expires_at,
+             turn.action_id AS caller_action_id,turn.turn_lease_generation,
+             mailbox.contiguous_watermark
+        FROM runs run
+        JOIN project_sessions session ON session.project_session_id=run.project_session_id
+        JOIN agents agent ON agent.run_id=run.run_id AND agent.agent_id=?
+        LEFT JOIN agent_bridge_state child_bridge
+          ON child_bridge.run_id=agent.run_id AND child_bridge.agent_id=agent.agent_id
+         AND child_bridge.bridge_state='active'
+        LEFT JOIN launched_chair_bridge_state chair_bridge
+          ON chair_bridge.project_session_id=run.project_session_id
+         AND chair_bridge.coordination_run_id=run.run_id
+         AND chair_bridge.chair_agent_id=agent.agent_id
+         AND chair_bridge.state='active'
+        LEFT JOIN provider_agent_custody custody
+          ON custody.run_id=child_bridge.run_id AND custody.adapter_id=child_bridge.adapter_id
+         AND custody.action_id=child_bridge.action_id
+        JOIN capabilities capability
+          ON capability.run_id=agent.run_id AND capability.agent_id=agent.agent_id
+         AND capability.token_hash=CASE WHEN agent.agent_id=run.chair_agent_id
+           THEN chair_bridge.capability_hash ELSE child_bridge.capability_hash END
+         AND capability.revoked_at IS NULL
+        JOIN provider_session_turn_leases turn
+          ON turn.run_id=agent.run_id AND turn.agent_id=agent.agent_id
+         AND turn.adapter_id=CASE WHEN agent.agent_id=run.chair_agent_id
+           THEN chair_bridge.provider_adapter_id ELSE child_bridge.adapter_id END AND turn.status='active'
+        JOIN mailbox_state mailbox
+          ON mailbox.run_id=agent.run_id AND mailbox.recipient_id=agent.agent_id
+       WHERE run.run_id=? AND (
+         (agent.agent_id=run.chair_agent_id AND chair_bridge.state='active') OR
+         (agent.agent_id<>run.chair_agent_id AND child_bridge.bridge_state='active' AND custody.action_id IS NOT NULL)
+       )
+    `).get(agentId, runId), "active lifecycle caller turn");
+    const adapterId = stringField(source, "adapter_id");
+    const actionId = `${input.commandId}:spawn`;
+    const custodyId = `lifecycle:${sha256(canonicalJson({ runId, agentId, commandId: input.commandId }))}`;
+    const sourceProviderGeneration = numberField(source, "provider_session_generation");
+    const sourcePrincipalGeneration = numberField(source, "principal_generation");
+    const sourceBridgeGeneration = numberField(source, "bridge_generation");
+    const targetProviderGeneration = sourceProviderGeneration + 1;
+    const targetPrincipalGeneration = sourcePrincipalGeneration + 1;
+    const targetBridgeGeneration = sourceBridgeGeneration + 1;
+    const checkpointDigest = `sha256:${input.checkpoint.sha256}`;
+    const stagedCapability = `afc_${randomBytes(32).toString("base64url")}`;
+    const stagedCapabilityHash = sha256(stagedCapability);
+    const prompt = lifecycleHandoffPrompt({
+      agentId,
+      taskId: input.taskId,
+      taskRevision: input.taskRevision,
+      checkpoint: input.checkpoint,
+      nextProviderSessionGeneration: targetProviderGeneration,
+    });
+    const providerPayload = {
+      schemaVersion: 1,
+      action: input.action,
+      agentId,
+      priorResumeReference: stringField(source, "provider_session_ref"),
+      generation: targetProviderGeneration,
+      prompt,
+    };
+    const ticket = this.#providerActionAdmission.preflightAgentAction({
+      runId,
+      actorAgentId: agentId,
+      actionRef: { adapterId, actionId },
+      canonicalInput: {
+        schemaVersion: 1,
+        owner: "lifecycle-rotation",
+        action: input.action,
+        taskId: input.taskId,
+        taskRevision: input.taskRevision,
+        checkpoint: input.checkpoint,
+        sourceActionId: stringField(source, "source_action_id"),
+        callerActionId: stringField(source, "caller_action_id"),
+        targetProviderGeneration,
+        targetPrincipalGeneration,
+        targetBridgeGeneration,
+      },
+    });
+    if (ticket.disposition === "admitted") {
+      const replay = this.#commandJournal.read(runId, agentId, input.commandId, input, isLifecycleResult);
+      if (replay?.kind === "accepted-suspended") return replay;
+      throw new FabricError("DEDUPE_CONFLICT", "admitted lifecycle rotation lacks its command receipt");
+    }
+    const openWorkSetDigest = sha256Digest(canonicalJson([...input.checkpoint.openWork].sort()));
+    const predecessorTurnSetDigest = sha256Digest(canonicalJson([{
+      adapterId,
+      actionId: stringField(source, "caller_action_id"),
+      turnLeaseGeneration: numberField(source, "turn_lease_generation"),
+    }]));
+    const acceptedBase = {
+      schemaVersion: 1 as const,
+      kind: "accepted-suspended" as const,
+      projectSessionId: stringField(source, "project_session_id"),
+      coordinationRunId: runId,
+      action: input.action,
+      agentId,
+      taskId: input.taskId,
+      taskRevision: input.taskRevision,
+      lifecycle: "suspended" as const,
+      custodyRef: {
+        schemaVersion: 1 as const,
+        runId,
+        agentId,
+        custodyId,
+        custodyRevision: 1,
+      },
+      actionRef: { adapterId, actionId },
+      checkpointDigest,
+      openWorkSetDigest,
+      deliveryCutWatermark: numberField(source, "contiguous_watermark"),
+      predecessorTurnSetDigest,
+      sourceProviderGeneration,
+      sourcePrincipalGeneration,
+      sourceBridgeGeneration,
+      targetProviderGeneration,
+      targetPrincipalGeneration,
+      targetBridgeGeneration,
+    };
+    const accepted = LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC.parse({
+      ...acceptedBase,
+      acceptedReceiptDigest: sha256Digest(canonicalJson(acceptedBase)),
+    }, "lifecycleAcceptance");
     this.#database.transaction(() => {
-      const sourceAgent = rowOrNotFound(this.#database.prepare(`
-        SELECT lifecycle FROM agents WHERE run_id=? AND agent_id=?
-      `).get(input.runId, input.agentId), "lifecycle rotation agent");
-      const sourceLifecycle = stringField(sourceAgent, "lifecycle");
-      const existing = this.#database.prepare(`
-        SELECT action_id,adapter_id,task_id,task_revision,checkpoint_sha256,
-               prior_resume_reference,next_provider_session_generation,
-               precondition_digest,freeze_reason,state
-          FROM lifecycle_rotation_custody
-         WHERE run_id=? AND agent_id=? AND command_id=?
-      `).get(input.runId, input.agentId, input.commandId);
-      if (isRow(existing)) {
-        if (sourceLifecycle !== "suspended" && sourceLifecycle !== "context-unreconciled") {
-          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "prepared lifecycle rotation has an invalid source state");
-        }
-        if (
-          existing.action_id !== input.actionId || existing.adapter_id !== input.adapterId ||
-          existing.task_id !== input.taskId || existing.task_revision !== input.taskRevision ||
-          existing.checkpoint_sha256 !== input.checkpointSha256 ||
-          existing.prior_resume_reference !== input.priorResumeReference ||
-          existing.next_provider_session_generation !== input.nextProviderSessionGeneration
-        ) throw new FabricError("DEDUPE_CONFLICT", "lifecycle rotation command changed after prepare");
-        const ownedFreeze = this.#database.prepare(`
-          SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
-        `).get(input.runId, input.agentId);
-        if (
-          !isRow(ownedFreeze) || ownedFreeze.reason !== existing.freeze_reason ||
-          existing.precondition_digest !== this.#lifecycleRotationPreconditionDigest(
-            input.runId,
-            input.agentId,
-            input.taskId,
-          )
-        ) {
-          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "prepared lifecycle custody changed before replay");
-        }
-        return;
-      }
-      const sourceFreeze = this.#database.prepare(`
-        SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=?
-      `).get(input.runId, input.agentId);
-      const sourceFreezeReason = isRow(sourceFreeze) ? stringField(sourceFreeze, "reason") : undefined;
-      const acceptedSource =
-        (sourceLifecycle === "ready" && sourceFreezeReason === undefined) ||
-        (sourceLifecycle === "context-unreconciled" &&
-          (sourceFreezeReason === undefined || sourceFreezeReason === "context-unreconciled")) ||
-        (sourceLifecycle === "suspended" && sourceFreezeReason === "interactive-tui-lost");
-      if (!acceptedSource) {
-        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "new lifecycle rotation has an invalid lifecycle or freeze owner");
-      }
-      const active = this.#database.prepare(`
-        SELECT command_id FROM lifecycle_rotation_custody
-         WHERE run_id=? AND agent_id=?
-           AND state IN ('prepared','provider-terminal','unreconciled')
-      `).get(input.runId, input.agentId);
-      if (isRow(active)) {
-        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "agent already has an unresolved lifecycle provider action");
-      }
-      const task = rowOrNotFound(this.#database.prepare(`
-        SELECT owner_agent_id,revision FROM tasks WHERE run_id=? AND task_id=?
-      `).get(input.runId, input.taskId), "lifecycle rotation task");
-      if (task.owner_agent_id !== input.agentId || task.revision !== input.taskRevision) {
-        throw new FabricError("TASK_REVISION_CONFLICT", "lifecycle task custody changed before prepare");
-      }
-      const preconditionDigest = this.#lifecycleRotationPreconditionDigest(input.runId, input.agentId, input.taskId);
-      const custodyFreezeReason = `lifecycle-rotation:${sha256(input.actionId).slice(0, 32)}`;
-      if (sourceFreezeReason !== undefined) {
-        this.#database.prepare(`
-          UPDATE delivery_freezes SET reason=?,created_at=? WHERE run_id=? AND agent_id=?
-        `).run(custodyFreezeReason, this.#clock(), input.runId, input.agentId);
-      } else {
-        this.#database.prepare(`
-          INSERT INTO delivery_freezes(run_id,agent_id,reason,created_at) VALUES (?,?,?,?)
-        `).run(input.runId, input.agentId, custodyFreezeReason, this.#clock());
-      }
+      const payloadJson = canonicalJson(providerPayload);
+      this.#providerActionAdmission.admitUnroutedInCurrentTransaction(ticket, {
+        runId,
+        adapterId,
+        actionId,
+        operation: "spawn",
+        targetAgentId: agentId,
+        providerSessionGeneration: targetProviderGeneration,
+        identityHash: sha256(canonicalJson({ custodyId, providerPayload })),
+        payloadHash: sha256(payloadJson),
+        payloadJson,
+        status: "prepared",
+        historyJson: '["prepared"]',
+        executionCount: 0,
+        updatedAt: this.#clock(),
+      });
+      const freezeReason = `lifecycle-rotation:${sha256(custodyId).slice(0, 32)}`;
+      this.#database.prepare(`
+        INSERT INTO delivery_freezes(run_id,agent_id,reason,created_at)
+        VALUES (?,?,?,?)
+        ON CONFLICT(run_id,agent_id) DO UPDATE SET
+          reason=excluded.reason,created_at=excluded.created_at
+      `).run(runId, agentId, freezeReason, this.#clock());
       const suspended = this.#database.prepare(`
         UPDATE agents SET lifecycle='suspended'
-         WHERE run_id=? AND agent_id=? AND lifecycle=?
-      `).run(input.runId, input.agentId, sourceLifecycle);
+         WHERE run_id=? AND agent_id=? AND lifecycle IN ('ready','busy','idle','checkpointing','context-unreconciled')
+      `).run(runId, agentId);
       if (suspended.changes !== 1) {
-        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle source changed before rotation custody");
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle source changed before suspension");
       }
-      const now = this.#clock();
+      this.#lifecycleRotations.createInCurrentTransaction({
+        projectSessionId: accepted.projectSessionId,
+        runId,
+        agentId,
+        custodyId,
+        commandId: input.commandId,
+        admissionDigest: accepted.acceptedReceiptDigest,
+        actionRef: accepted.actionRef,
+        bridgeOwnerKind: stringField(source, "bridge_owner_kind") as "chair" | "child",
+        callerTurnLeaseId: stringField(source, "caller_action_id"),
+        callerTurnGeneration: numberField(source, "turn_lease_generation"),
+        predecessorTurnSetDigest,
+        quarantinedWriteSetDigest: sha256(canonicalJson([])),
+        deliveryCutWatermark: accepted.deliveryCutWatermark,
+        adoptionDeliverySetDigest: sha256(canonicalJson([])),
+        checkpointRef: input.checkpoint.relativePath,
+        checkpointDigest,
+        taskRevision: input.taskRevision,
+        mailboxRevision: accepted.deliveryCutWatermark,
+        childSetDigest: sha256(canonicalJson([...input.checkpoint.inFlightChildren].sort())),
+        openWorkSetDigest,
+        sourceProviderSessionRef: stringField(source, "provider_session_ref"),
+        sourceCapabilityHash: stringField(source, "capability_hash"),
+        sourceCustodyActionId: stringField(source, "source_action_id"),
+        sourceAdapterId: adapterId,
+        sourceAdapterContractDigest: stringField(source, "bridge_contract_digest"),
+        sourceBridgeRowId: stringField(source, "bridge_owner_kind") === "chair"
+          ? `${accepted.projectSessionId}:${runId}` : `${runId}:${agentId}`,
+        sourceBridgeRevision: numberField(source, "bridge_revision"),
+        sourceProviderGeneration,
+        sourcePrincipalGeneration,
+        sourceBridgeGeneration,
+        sourceProjectSessionGeneration: numberField(source, "session_generation"),
+        sourceRunGeneration: numberField(source, "run_revision"),
+        sourceChairLeaseGeneration: numberField(source, "chair_generation"),
+        targetProviderGeneration,
+        targetPrincipalGeneration,
+        targetBridgeGeneration,
+        replacementAdapterId: adapterId,
+        replacementContractDigest: stringField(source, "bridge_contract_digest"),
+        stagedCapabilityHash,
+        launchAttestChallengeDigest: sha256(randomBytes(32).toString("hex")),
+        preconditionDigest: this.#lifecycleRotationPreconditionDigest(runId, agentId, input.taskId),
+        createdAt: this.#clock(),
+      });
+      this.#commandJournal.write(runId, agentId, input.commandId, input, accepted);
+    }).immediate();
+    this.#fault("lifecycle-rotation:prepared");
+    this.#scheduleLifecycleContinuation({
+      runId,
+      agentId,
+      custodyId,
+      adapterId,
+      actionId,
+      authorityId: stringField(source, "authority_id"),
+      bridgeContractDigest: stringField(source, "bridge_contract_digest"),
+      sourceActionId: stringField(source, "source_action_id"),
+      sourceCapabilityHash: stringField(source, "capability_hash"),
+      sourceProviderSessionRef: stringField(source, "provider_session_ref"),
+      callerActionId: stringField(source, "caller_action_id"),
+      targetProviderGeneration,
+      targetPrincipalGeneration,
+      targetBridgeGeneration,
+      stagedCapability,
+      stagedCapabilityHash,
+      capabilityExpiresAt: numberField(source, "expires_at"),
+      providerPayload,
+      checkpointSha256: input.checkpoint.sha256,
+      lifecycleInput: input,
+    });
+    return accepted;
+  }
+
+  async #ensureLifecycleReceiptScope(runId: string, agentId: string): Promise<void> {
+    const authority = this.#lifecycleReceiptAuthority;
+    if (authority === undefined) return;
+    void agentId;
+    const source = rowOrNotFound(this.#database.prepare(`
+      SELECT session.project_id,run.project_session_id,custody.admission_digest
+        FROM runs run
+        JOIN project_sessions session ON session.project_session_id=run.project_session_id
+        JOIN lifecycle_rotation_custodies custody
+          ON custody.run_id=run.run_id
+       WHERE run.run_id=?
+       ORDER BY custody.created_at,custody.custody_id LIMIT 1
+    `).get(runId), "lifecycle receipt scope source");
+    const projectId = stringField(source, "project_id");
+    const projectSessionId = stringField(source, "project_session_id");
+    const admissionDigest = stringField(source, "admission_digest") as LifecycleDigest;
+    const existing = this.#database.prepare(`
+      SELECT authority_id,admission_digest FROM lifecycle_admitted_run_scopes
+       WHERE project_session_id=? AND run_id=?
+    `).get(projectSessionId, runId);
+    if (isRow(existing)) {
+      if (existing.authority_id !== authority.authorityId || existing.admission_digest !== admissionDigest) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt scope admission crossed");
+      }
+      return;
+    }
+    const recorded = this.#database.prepare(`
+      SELECT admission_request_id,scope_json,scope_digest,admitted_at,authority_id,admission_digest
+        FROM lifecycle_scope_admission_outbox WHERE project_session_id=? AND run_id=?
+    `).get(projectSessionId, runId);
+    let requestId: string;
+    let scopeDigest: LifecycleDigest;
+    let scope: LifecycleAdmittedRunScope;
+    if (isRow(recorded)) {
+      scope = JSON.parse(stringField(recorded, "scope_json")) as LifecycleAdmittedRunScope;
+      requestId = stringField(recorded, "admission_request_id");
+      scopeDigest = stringField(recorded, "scope_digest") as LifecycleDigest;
+      if (
+        stringField(recorded, "authority_id") !== authority.authorityId ||
+        stringField(recorded, "admission_digest") !== admissionDigest ||
+        lifecycleDigest("admitted-scope", scope) !== scopeDigest
+      ) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt scope outbox crossed");
+      }
+    } else {
+      scope = {
+        schemaVersion: 1,
+        projectId,
+        projectSessionId,
+        runId,
+        authorityId: authority.authorityId,
+        admissionDigest,
+        admittedAt: this.#clock(),
+      };
+      scopeDigest = lifecycleDigest("admitted-scope", scope) as LifecycleDigest;
+      requestId = lifecycleDigest("scope-admission-outbox", { schemaVersion: 1, scopeDigest });
       this.#database.prepare(`
-        INSERT INTO lifecycle_rotation_custody(
-          run_id,agent_id,command_id,action_id,adapter_id,task_id,task_revision,
-          checkpoint_sha256,prior_resume_reference,next_provider_session_generation,
-          precondition_digest,freeze_reason,state,created_at,updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'prepared',?,?)
+        INSERT INTO lifecycle_scope_admission_outbox(
+          admission_request_id,project_id,project_session_id,run_id,authority_id,
+          admission_digest,admitted_at,scope_json,scope_digest,created_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?)
       `).run(
+        requestId, projectId, projectSessionId, runId, authority.authorityId,
+        admissionDigest, scope.admittedAt, canonicalJson(scope), scopeDigest, this.#clock(),
+      );
+    }
+    let initial: LifecycleAuthenticatedScopeCheckpoint;
+    try {
+      initial = await authority.admitScope(scope);
+    } catch (error: unknown) {
+      throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle receipt scope admission is pending", { cause: error });
+    }
+    const initialBody = {
+      schemaVersion: 1,
+      authorityId: initial.authorityId,
+      projectSessionId: initial.projectSessionId,
+      runId: initial.runId,
+      receiptCountDec: String(initial.receiptCount),
+      headAuthoritySequenceDec: String(initial.headAuthoritySequence),
+      headReceiptDigest: initial.headReceiptDigest,
+      orderedRecordSetDigest: initial.orderedRecordSetDigest,
+    };
+    if (
+      initial.projectSessionId !== projectSessionId || initial.runId !== runId ||
+      initial.authorityId !== authority.authorityId || initial.receiptCount !== 0 ||
+      initial.headAuthoritySequence !== 0 || initial.headReceiptDigest !== null ||
+      initial.orderedRecordSetDigest !== lifecycleDigest("scope-record-set", []) ||
+      initial.checkpointDigest !== lifecycleDigest("scope-checkpoint", initialBody) ||
+      !await authority.verifyScopeCheckpoint(initial)
+    ) {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt scope admission returned an invalid zero checkpoint");
+    }
+    const namespace = await authority.readNamespaceCheckpoint(projectId);
+    if (
+      namespace.projectId !== projectId || namespace.authorityId !== authority.authorityId ||
+      !await authority.verifyNamespaceCheckpoint(namespace)
+    ) {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt namespace checkpoint is invalid");
+    }
+    const namespaceMembers: Array<Readonly<{
+      projectSessionId: string;
+      runId: string;
+      authorityId: string;
+      scopeCheckpointDigest: LifecycleDigest;
+      receiptCountDec: string;
+      headReceiptDigest: LifecycleDigest | null;
+    }>> = [];
+    let afterScopeKey: string | null = null;
+    do {
+      const page = await authority.readNamespacePageAt(namespace.checkpointDigest, afterScopeKey, 256);
+      if (page.orderedScopeHeads.length > 256 || namespaceMembers.length + page.orderedScopeHeads.length > 65_536) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt namespace exceeds its bounded scan");
+      }
+      for (const head of page.orderedScopeHeads) {
+        const pinned = await authority.readScopeCheckpointAt(head.checkpointDigest);
+        if (
+          canonicalJson(head) !== canonicalJson(pinned) || head.authorityId !== authority.authorityId ||
+          !await authority.verifyScopeCheckpoint(head)
+        ) {
+          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt namespace contains a crossed scope");
+        }
+        const key = `${head.projectSessionId}\0${head.runId}`;
+        const previous = namespaceMembers.at(-1);
+        if (previous !== undefined && key <= `${previous.projectSessionId}\0${previous.runId}`) {
+          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt namespace is not strictly ordered");
+        }
+        namespaceMembers.push({
+          projectSessionId: head.projectSessionId,
+          runId: head.runId,
+          authorityId: head.authorityId,
+          scopeCheckpointDigest: head.checkpointDigest,
+          receiptCountDec: String(head.receiptCount),
+          headReceiptDigest: head.headReceiptDigest,
+        });
+      }
+      if (page.nextAfter === null) break;
+      if (page.orderedScopeHeads.length === 0 || page.nextAfter.length === 0 || page.nextAfter === afterScopeKey) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt namespace pagination crossed");
+      }
+      afterScopeKey = page.nextAfter;
+    } while (true);
+    const targetMember = namespaceMembers.find((member) =>
+      member.projectSessionId === projectSessionId && member.runId === runId);
+    const namespaceBody = {
+      schemaVersion: 1,
+      authorityId: namespace.authorityId,
+      projectId: namespace.projectId,
+      scopeCountDec: String(namespace.scopeCount),
+      orderedScopeHeadSetDigest: namespace.orderedScopeHeadSetDigest,
+    };
+    if (
+      namespaceMembers.length !== namespace.scopeCount ||
+      namespace.orderedScopeHeadSetDigest !== lifecycleDigest("namespace-scope-head-set", namespaceMembers) ||
+      namespace.checkpointDigest !== lifecycleDigest("namespace-checkpoint", namespaceBody) ||
+      targetMember === undefined || targetMember.scopeCheckpointDigest !== initial.checkpointDigest ||
+      targetMember.receiptCountDec !== "0" || targetMember.headReceiptDigest !== null
+    ) {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt namespace omits the admitted zero scope");
+    }
+    const resolutionBody = {
+      schemaVersion: 1,
+      admissionRequestId: requestId,
+      scopeDigest,
+      initialScopeCheckpoint: initial,
+      namespaceCheckpointDigest: namespace.checkpointDigest,
+      namespaceMember: targetMember,
+      verifiedAt: this.#clock(),
+    };
+    const resolutionDigest = lifecycleDigest("scope-admission-resolution", resolutionBody);
+    this.#database.transaction(() => {
+      this.#database.prepare(`INSERT INTO lifecycle_admitted_run_scopes VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+        projectId, projectSessionId, runId, authority.authorityId, admissionDigest,
+        scope.admittedAt, requestId, scopeDigest, initial.checkpointDigest, resolutionDigest,
+      );
+      this.#database.prepare(`INSERT INTO lifecycle_receipt_scope_checkpoints VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+        projectSessionId, runId, authority.authorityId, 0, 0, null,
+        initial.orderedRecordSetDigest, canonicalJson(initialBody), initial.checkpointDigest,
+        initial.attestation, resolutionBody.verifiedAt,
+      );
+      this.#database.prepare(`INSERT INTO lifecycle_receipt_scope_heads VALUES (?,?,?,1)`).run(
+        projectSessionId, runId, initial.checkpointDigest,
+      );
+      this.#database.prepare(`INSERT OR IGNORE INTO lifecycle_receipt_namespace_checkpoints VALUES (?,?,?,?,?,?,?,?)`).run(
+        projectId, authority.authorityId, namespace.scopeCount, namespace.orderedScopeHeadSetDigest,
+        canonicalJson(namespaceBody), namespace.checkpointDigest, namespace.attestation, resolutionBody.verifiedAt,
+      );
+      const insertMember = this.#database.prepare(`
+        INSERT OR IGNORE INTO lifecycle_receipt_namespace_members VALUES (?,?,?,?,?,?,?,?,?)
+      `);
+      namespaceMembers.forEach((member, index) => insertMember.run(
+        projectId, namespace.checkpointDigest, index + 1, member.projectSessionId, member.runId,
+        member.authorityId, member.scopeCheckpointDigest, Number(member.receiptCountDec), member.headReceiptDigest,
+      ));
+      const namespaceHead = this.#database.prepare(`
+        SELECT checkpoint_digest,head_revision FROM lifecycle_receipt_namespace_heads WHERE project_id=?
+      `).get(projectId);
+      if (!isRow(namespaceHead)) {
+        this.#database.prepare(`INSERT INTO lifecycle_receipt_namespace_heads VALUES (?,?,?,?,?,1)`).run(
+          projectId, authority.authorityId, namespace.scopeCount,
+          namespace.orderedScopeHeadSetDigest, namespace.checkpointDigest,
+        );
+      } else if (namespaceHead.checkpoint_digest !== namespace.checkpointDigest) {
+        const changed = this.#database.prepare(`
+          UPDATE lifecycle_receipt_namespace_heads
+             SET authority_id=?,scope_count=?,ordered_scope_head_set_digest=?,checkpoint_digest=?,head_revision=head_revision+1
+           WHERE project_id=? AND checkpoint_digest=? AND head_revision=?
+        `).run(
+          authority.authorityId, namespace.scopeCount, namespace.orderedScopeHeadSetDigest,
+          namespace.checkpointDigest, projectId, namespaceHead.checkpoint_digest,
+          numberField(namespaceHead, "head_revision"),
+        );
+        if (changed.changes !== 1) throw new Error("lifecycle receipt namespace head changed");
+      }
+      this.#database.prepare(`INSERT INTO lifecycle_scope_admission_resolutions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        requestId, projectId, projectSessionId, runId, authority.authorityId,
+        admissionDigest, scope.admittedAt, scopeDigest, 0, 0, initial.orderedRecordSetDigest,
+        canonicalJson(initialBody), initial.checkpointDigest, 1, namespace.checkpointDigest,
+        canonicalJson(targetMember), resolutionBody.verifiedAt, canonicalJson(resolutionBody), resolutionDigest,
+      );
+    }).immediate();
+  }
+
+  async #recoverLifecycleRotations(): Promise<void> {
+    const pending = this.#database.prepare(`
+      SELECT head.state,head.current_revision,custody.*,
+             action.status AS action_status,action.history_json,action.execution_count,
+             action.effect_count,action.idempotency_proven,action.payload_json,action.result_json,
+             agent.authority_id,capability.expires_at,checkpoint.checkpoint_json,
+             checkpoint.task_id AS checkpoint_task_id,
+             (
+               SELECT 'sha256:' || observed.sha256 FROM lifecycle_checkpoints observed
+                WHERE observed.run_id=custody.run_id AND observed.agent_id=custody.agent_id
+                  AND observed.relative_path=custody.checkpoint_ref
+                ORDER BY observed.created_at DESC,observed.checkpoint_id DESC LIMIT 1
+             ) AS observed_checkpoint_digest
+        FROM lifecycle_rotation_custody_heads head
+        JOIN lifecycle_rotation_custodies custody
+          ON custody.run_id=head.run_id AND custody.agent_id=head.agent_id
+         AND custody.custody_id=head.custody_id
+        LEFT JOIN provider_actions action
+          ON action.run_id=custody.run_id
+         AND action.adapter_id=custody.provider_action_adapter_id
+         AND action.action_id=custody.provider_action_id
+        JOIN agents agent ON agent.run_id=custody.run_id AND agent.agent_id=custody.agent_id
+        LEFT JOIN capabilities capability ON capability.token_hash=custody.staged_capability_hash
+        LEFT JOIN lifecycle_checkpoints checkpoint
+          ON checkpoint.run_id=custody.run_id AND checkpoint.agent_id=custody.agent_id
+         AND checkpoint.relative_path=custody.checkpoint_ref
+         AND ('sha256:' || checkpoint.sha256)=custody.checkpoint_digest
+       WHERE head.terminal=0
+       ORDER BY custody.created_at,custody.custody_id
+    `).all();
+    for (const value of pending) {
+      const row = rowOrNotFound(value, "recoverable lifecycle rotation");
+      try {
+      const runId = stringField(row, "run_id");
+      const adapterId = stringField(row, "provider_action_adapter_id");
+      const actionId = stringField(row, "provider_action_id");
+      const agentId = stringField(row, "agent_id");
+      const bridgeContractDigest = stringField(row, "replacement_contract_digest");
+      const targetBridgeGeneration = numberField(row, "target_bridge_generation");
+      const minimalInput = {
+        runId,
+        agentId,
+        custodyId: stringField(row, "custody_id"),
+        adapterId,
+        actionId,
+        sourceActionId: stringField(row, "source_custody_action_id"),
+        sourceCapabilityHash: stringField(row, "source_capability_hash"),
+        sourceProviderSessionRef: stringField(row, "source_provider_session_ref"),
+        stagedCapabilityHash: stringField(row, "staged_capability_hash"),
+      };
+      let head = this.#lifecycleRotations.readHead(runId, agentId, minimalInput.custodyId);
+      const finalizeQuarantine = async (reason: string, evidence: unknown): Promise<void> => {
+        const proof = {
+          schemaVersion: 1,
+          kind: "integrity-quarantine",
+          sourceState: head.state,
+          reason,
+          providerActionRef: { runId, adapterId, actionId },
+          evidenceDigest: sha256Digest(canonicalJson(evidence)),
+        };
+        const digest = sha256Digest(canonicalJson(proof));
+        await this.#ensureLifecycleReceiptScope(runId, agentId);
+        await this.#finalizeLifecycleRotationAdopted(minimalInput, head, digest, null, {
+          disposition: "quarantined",
+          proofKind: "integrity-quarantine",
+          transitionProof: proof,
+        });
+      };
+      const lifecycleDrift = (): Readonly<Record<string, unknown>> | null => {
+        const expectedCheckpointDigest = stringField(row, "checkpoint_digest");
+        const observedCheckpointDigest = typeof row.observed_checkpoint_digest === "string"
+          ? row.observed_checkpoint_digest
+          : null;
+        const checkpointChanged = typeof row.checkpoint_json !== "string" &&
+          observedCheckpointDigest !== null && observedCheckpointDigest !== expectedCheckpointDigest;
+        const sourceOwned = this.#database.prepare(`
+          SELECT 1 FROM provider_agent_custody
+           WHERE run_id=? AND adapter_id=? AND action_id=?
+        `).get(runId, stringField(row, "source_adapter_id"), stringField(row, "source_custody_action_id"));
+        const expectedSource = {
+          projectSessionGeneration: numberField(row, "source_project_session_generation"),
+          runGeneration: numberField(row, "source_run_generation"),
+          chairLeaseGeneration: numberField(row, "source_chair_lease_generation"),
+          adapterId: stringField(row, "source_adapter_id"),
+          actionId: stringField(row, "source_custody_action_id"),
+          providerSessionRef: stringField(row, "source_provider_session_ref"),
+          providerGeneration: numberField(row, "source_provider_generation"),
+          principalGeneration: numberField(row, "source_principal_generation"),
+          bridgeGeneration: numberField(row, "source_bridge_generation"),
+          bridgeRevision: numberField(row, "source_bridge_revision"),
+          capabilityHash: stringField(row, "source_capability_hash"),
+          bridgeContractDigest: stringField(row, "source_adapter_contract_digest"),
+        };
+        const observedSource = this.#database.prepare(`
+          SELECT session.generation AS projectSessionGeneration,
+                 run.revision AS runGeneration,
+                 COALESCE(run.chair_generation,1) AS chairLeaseGeneration,
+                 bridge.adapter_id AS adapterId,bridge.action_id AS actionId,
+                 bridge.provider_session_ref AS providerSessionRef,
+                 bridge.provider_session_generation AS providerGeneration,
+                 capability.principal_generation AS principalGeneration,
+                 bridge.bridge_generation AS bridgeGeneration,
+                 bridge.revision AS bridgeRevision,bridge.capability_hash AS capabilityHash,
+                 source.bridge_contract_digest AS bridgeContractDigest
+            FROM runs run
+            JOIN project_sessions session ON session.project_session_id=run.project_session_id
+            JOIN agent_bridge_state bridge
+              ON bridge.run_id=run.run_id AND bridge.agent_id=? AND bridge.bridge_state='active'
+            JOIN provider_agent_custody source
+              ON source.run_id=bridge.run_id AND source.adapter_id=bridge.adapter_id
+             AND source.action_id=bridge.action_id
+            JOIN capabilities capability
+              ON capability.token_hash=bridge.capability_hash AND capability.revoked_at IS NULL
+           WHERE run.run_id=?
+        `).get(agentId, runId);
+        const sourceChanged = sourceOwned !== undefined &&
+          (!isRow(observedSource) || canonicalJson(observedSource) !== canonicalJson(expectedSource));
+        if (!checkpointChanged && !sourceChanged) return null;
+        return {
+          driftKind: checkpointChanged ? "checkpoint" : "source",
+          expectedCheckpointDigest,
+          observedCheckpointDigest,
+          expectedSource,
+          observedSource: observedSource ?? null,
+        };
+      };
+      const finalizeSuperseded = async (
+        drift: Readonly<Record<string, unknown>>,
+        terminalObservation: unknown = null,
+      ): Promise<void> => {
+        const postterminal = head.state === "provider-terminal" || head.state === "committing";
+        const expectedSourceJournalDigest = sha256Digest(canonicalJson(drift.expectedSource));
+        const observedSourceJournalDigest = sha256Digest(canonicalJson(drift.observedSource));
+        const base = {
+          schemaVersion: 1,
+          sourceState: head.state,
+          expectedSourceJournalDigest,
+          observedSourceJournalDigest,
+          expectedCheckpointDigest: drift.expectedCheckpointDigest,
+          observedCheckpointDigest: drift.observedCheckpointDigest ?? drift.expectedCheckpointDigest,
+        };
+        const proof = postterminal ? {
+          ...base,
+          kind: "postterminal-adoption-cas-superseded",
+          terminalObservationDigest: sha256Digest(canonicalJson(terminalObservation)),
+          replacementCandidateDigest: sha256Digest(canonicalJson(terminalObservation)),
+          expectedMutationPreconditionDigest: stringField(row, "precondition_digest"),
+          failedCasEvidenceDigest: sha256Digest(canonicalJson(drift)),
+        } : {
+          ...base,
+          kind: "predispatch-superseded",
+          driftKind: drift.driftKind,
+        };
+        const digest = sha256Digest(canonicalJson(proof));
+        await this.#ensureLifecycleReceiptScope(runId, agentId);
+        await this.#finalizeLifecycleRotationAdopted(minimalInput, head, digest, null, {
+          disposition: "superseded",
+          proofKind: postterminal
+            ? "postterminal-adoption-cas-superseded"
+            : "predispatch-superseded",
+          transitionProof: proof,
+        });
+      };
+      if (head.state === "awaiting-boundary" || head.state === "prepared") {
+        const drift = lifecycleDrift();
+        if (drift !== null) {
+          await finalizeSuperseded(drift);
+          continue;
+        }
+        const providerCustody = this.#database.prepare(`
+          SELECT 1 FROM provider_agent_custody
+           WHERE run_id=? AND adapter_id=? AND action_id=?
+        `).get(runId, adapterId, actionId);
+        if (
+          row.action_status !== "prepared" || numberField(row, "execution_count") !== 0 ||
+          numberField(row, "effect_count") !== 0 || providerCustody !== undefined
+        ) {
+          await finalizeQuarantine("zero-dispatch-evidence-conflict", {
+            status: row.action_status ?? null,
+            executionCount: row.execution_count ?? null,
+            effectCount: row.effect_count ?? null,
+            providerCustodyPresent: providerCustody !== undefined,
+          });
+          continue;
+        }
+        const proof = {
+          schemaVersion: 1,
+          kind: "zero-dispatch-no-effect",
+          sourceState: head.state,
+          providerActionRef: { runId, adapterId, actionId },
+          dispatchCountDec: "0",
+          effectCountDec: "0",
+          journalDigest: sha256Digest(canonicalJson({
+            status: row.action_status,
+            historyJson: row.history_json,
+            executionCount: row.execution_count,
+            effectCount: row.effect_count,
+          })),
+        };
+        const digest = sha256Digest(canonicalJson(proof));
+        await this.#ensureLifecycleReceiptScope(runId, agentId);
+        await this.#finalizeLifecycleRotationAdopted(minimalInput, head, digest, null, {
+          disposition: "no-effect",
+          proofKind: "zero-dispatch-no-effect",
+          transitionProof: proof,
+        });
+        continue;
+      }
+      let rawResult: unknown;
+      if (head.state === "dispatched" || head.state === "accepted" || head.state === "ambiguous") {
+        let lookup: unknown;
+        try {
+          lookup = await this.#requestAdapter(adapterId, "lookup_action", { actionId });
+        } catch (error: unknown) {
+          if (error instanceof Error && error.name === "ACTION_NOT_FOUND") {
+            await finalizeQuarantine("provider-action-absent", { message: error.message });
+            continue;
+          }
+          throw new FabricError(
+            "CAPABILITY_UNAVAILABLE",
+            "lifecycle provider action lookup is unavailable",
+            { cause: error },
+          );
+        }
+        if (
+          !isRow(lookup) || lookup.actionId !== actionId || lookup.status !== "terminal" ||
+          lookup.executionCount !== 1 || lookup.effectCount !== 1 || lookup.idempotencyProven !== true ||
+          !Array.isArray(lookup.history) || !lookup.history.every((entry) => typeof entry === "string") ||
+          !("result" in lookup)
+        ) {
+          await finalizeQuarantine("provider-action-terminal-evidence-malformed", lookup);
+          continue;
+        }
+        rawResult = lookup.result;
+        try {
+          parseAgentProvisionProviderResult(rawResult, {
+            adapterId, actionId, targetAgentId: agentId, bridgeGeneration: targetBridgeGeneration,
+            bridgeContractDigest,
+          });
+        } catch {
+          await finalizeQuarantine("provider-action-terminal-evidence-crossed", lookup);
+          continue;
+        }
+        const terminalEvidenceDigest = sha256Digest(canonicalJson(rawResult));
+        this.#database.transaction(() => {
+          const changed = this.#database.prepare(`
+            UPDATE provider_actions
+               SET status='terminal',history_json=?,execution_count=1,effect_count=1,
+                   idempotency_proven=1,result_json=?,journal_revision=journal_revision+1,updated_at=?
+             WHERE run_id=? AND adapter_id=? AND action_id=?
+               AND status IN ('dispatched','accepted','ambiguous')
+          `).run(canonicalJson(lookup.history), canonicalJson(rawResult), this.#clock(), runId, adapterId, actionId);
+          if (changed.changes !== 1) throw new Error("lifecycle provider action changed during recovery");
+          head = this.#lifecycleRotations.appendInCurrentTransaction({
+            runId, agentId, custodyId: minimalInput.custodyId, expectedRevision: head.revision,
+            state: "provider-terminal", terminalEvidenceDigest, recordedAt: this.#clock(),
+          });
+          head = this.#lifecycleRotations.appendInCurrentTransaction({
+            runId, agentId, custodyId: minimalInput.custodyId, expectedRevision: head.revision,
+            state: "committing", terminalEvidenceDigest, recordedAt: this.#clock(),
+          });
+        }).immediate();
+      } else {
+        let storedHistory: unknown;
+        try {
+          storedHistory = JSON.parse(stringField(row, "history_json"));
+        } catch {
+          storedHistory = null;
+        }
+        if (
+          row.action_status !== "terminal" || numberField(row, "execution_count") !== 1 ||
+          numberField(row, "effect_count") !== 1 || numberField(row, "idempotency_proven") !== 1 ||
+          !Array.isArray(storedHistory) || storedHistory.at(-1) !== "terminal" ||
+          !storedHistory.every((entry) => typeof entry === "string")
+        ) {
+          await finalizeQuarantine("stored-provider-action-journal-conflict", {
+            status: row.action_status ?? null,
+            history: storedHistory,
+            executionCount: row.execution_count ?? null,
+            effectCount: row.effect_count ?? null,
+            idempotencyProven: row.idempotency_proven ?? null,
+          });
+          continue;
+        }
+        try {
+          rawResult = JSON.parse(stringField(row, "result_json"));
+        } catch {
+          await finalizeQuarantine("stored-provider-terminal-evidence-malformed", row.result_json ?? null);
+          continue;
+        }
+      }
+      let result: AgentProvisionProviderResult;
+      try {
+        result = parseAgentProvisionProviderResult(rawResult, {
+          adapterId, actionId, targetAgentId: agentId, bridgeGeneration: targetBridgeGeneration,
+          bridgeContractDigest,
+        });
+      } catch {
+        await finalizeQuarantine("stored-provider-terminal-evidence-crossed", rawResult);
+        continue;
+      }
+      const postterminalDrift = lifecycleDrift();
+      if (postterminalDrift !== null) {
+        await finalizeSuperseded(postterminalDrift, result);
+        continue;
+      }
+      let payload: unknown;
+      let checkpoint: unknown;
+      try {
+        payload = JSON.parse(stringField(row, "payload_json"));
+        checkpoint = JSON.parse(stringField(row, "checkpoint_json"));
+      } catch {
+        await finalizeQuarantine("immutable-lifecycle-input-malformed", null);
+        continue;
+      }
+      if (!isRow(payload) || !isLifecycleCheckpoint(checkpoint) || typeof row.expires_at !== "number") {
+        await finalizeQuarantine("immutable-lifecycle-input-conflict", { payload, checkpoint });
+        continue;
+      }
+      const input = {
+        ...minimalInput,
+        authorityId: stringField(row, "authority_id"),
+        bridgeContractDigest,
+        callerActionId: stringField(row, "caller_turn_lease_id"),
+        targetProviderGeneration: numberField(row, "target_provider_generation"),
+        targetPrincipalGeneration: numberField(row, "target_principal_generation"),
+        targetBridgeGeneration,
+        stagedCapability: "",
+        capabilityExpiresAt: numberField(row, "expires_at"),
+        providerPayload: payload,
+        checkpointSha256: checkpoint.sha256,
+        lifecycleInput: {
+          action: payload.action === "compact" ? "compact" as const : "rotate" as const,
+          agentId,
+          taskId: stringField(row, "checkpoint_task_id"),
+          taskRevision: numberField(row, "task_revision"),
+          checkpoint,
+          commandId: stringField(row, "command_id"),
+        },
+      };
+      const terminalEvidenceDigest = sha256Digest(canonicalJson(result));
+      if (head.state === "provider-terminal") {
+        head = this.#database.transaction(() => this.#lifecycleRotations.appendInCurrentTransaction({
+          runId, agentId, custodyId: input.custodyId, expectedRevision: head.revision,
+          state: "committing", terminalEvidenceDigest, recordedAt: this.#clock(),
+        })).immediate();
+      }
+      await this.#ensureLifecycleReceiptScope(runId, agentId);
+      await this.#finalizeLifecycleRotationAdopted(input, head, terminalEvidenceDigest, result);
+      } catch (error: unknown) {
+        if (typeof row.run_id === "string" && typeof row.agent_id === "string") {
+          this.#event(row.run_id, "lifecycle-recovery-custody-failed", row.agent_id, {
+            custodyId: typeof row.custody_id === "string" ? row.custody_id : null,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+  }
+
+  #scheduleLifecycleContinuation(input: Readonly<{
+    runId: string;
+    agentId: string;
+    custodyId: string;
+    adapterId: string;
+    actionId: string;
+    authorityId: string;
+    bridgeContractDigest: string;
+    sourceActionId: string;
+    sourceCapabilityHash: string;
+    sourceProviderSessionRef: string;
+    callerActionId: string;
+    targetProviderGeneration: number;
+    targetPrincipalGeneration: number;
+    targetBridgeGeneration: number;
+    stagedCapability: string;
+    stagedCapabilityHash: string;
+    capabilityExpiresAt: number;
+    providerPayload: Record<string, unknown>;
+    checkpointSha256: string;
+    lifecycleInput: {
+      action: "compact" | "rotate";
+      agentId: string;
+      taskId: string;
+      taskRevision: number;
+      checkpoint: LifecycleCheckpoint;
+      commandId: string;
+    };
+  }>): void {
+    const key = `lifecycle\0${input.runId}\0${input.agentId}\0${input.custodyId}`;
+    if (this.#ownedProviderActions.has(key)) return;
+    const predecessor = this.#ownedProviderActions.get(
+      this.#providerActionOwnershipKey(input.runId, input.adapterId, input.callerActionId),
+    );
+    const continuation = (async () => {
+      if (predecessor !== undefined) await predecessor;
+      if (!this.#closing) await this.#continueLifecycleRotation(input);
+    })();
+    this.#ownedProviderActions.set(key, continuation);
+    void continuation.catch((error: unknown) => {
+      this.#event(input.runId, "lifecycle-continuation-failed", input.agentId, {
+        custodyId: input.custodyId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }).finally(() => {
+      if (this.#ownedProviderActions.get(key) === continuation) this.#ownedProviderActions.delete(key);
+    });
+  }
+
+  async #continueLifecycleRotation(input: Readonly<{
+    runId: string;
+    agentId: string;
+    custodyId: string;
+    adapterId: string;
+    actionId: string;
+    authorityId: string;
+    bridgeContractDigest: string;
+    sourceActionId: string;
+    sourceCapabilityHash: string;
+    sourceProviderSessionRef: string;
+    callerActionId: string;
+    targetProviderGeneration: number;
+    targetPrincipalGeneration: number;
+    targetBridgeGeneration: number;
+    stagedCapability: string;
+    stagedCapabilityHash: string;
+    capabilityExpiresAt: number;
+    providerPayload: Record<string, unknown>;
+    checkpointSha256: string;
+    lifecycleInput: {
+      action: "compact" | "rotate";
+      agentId: string;
+      taskId: string;
+      taskRevision: number;
+      checkpoint: LifecycleCheckpoint;
+      commandId: string;
+    };
+  }>): Promise<void> {
+    await this.#ensureLifecycleReceiptScope(input.runId, input.agentId);
+    let head = this.#database.transaction(() => this.#lifecycleRotations.appendInCurrentTransaction({
+      runId: input.runId,
+      agentId: input.agentId,
+      custodyId: input.custodyId,
+      expectedRevision: 1,
+      state: "prepared",
+      recordedAt: this.#clock(),
+    })).immediate();
+    this.#database.transaction(() => {
+      this.#database.prepare(`
+        INSERT INTO capabilities(token_hash,run_id,agent_id,principal_generation,expires_at)
+        VALUES (?,?,?,?,?)
+      `).run(
+        input.stagedCapabilityHash,
         input.runId,
         input.agentId,
-        input.commandId,
-        input.actionId,
-        input.adapterId,
-        input.taskId,
-        input.taskRevision,
-        input.checkpointSha256,
-        input.priorResumeReference,
-        input.nextProviderSessionGeneration,
-        preconditionDigest,
-        custodyFreezeReason,
-        now,
-        now,
+        input.targetPrincipalGeneration,
+        input.capabilityExpiresAt,
       );
-    })();
-  }
-
-  async #executeOrReconcileLifecycleRotationAction(input: {
-    runId: string;
-    adapterId: string;
-    actionId: string;
-    payload: Record<string, unknown>;
-  }): Promise<ProviderActionResult> {
-    const key = this.#providerActionOwnershipKey(input.runId, input.actionId);
-    const existing = this.#lifecycleProviderActions.get(key);
-    if (existing !== undefined) return await existing;
-    const owned = this.#executeOrReconcileLifecycleRotationActionOwned(input);
-    this.#lifecycleProviderActions.set(key, owned);
-    try {
-      return await owned;
-    } finally {
-      if (this.#lifecycleProviderActions.get(key) === owned) this.#lifecycleProviderActions.delete(key);
-    }
-  }
-
-  async #executeOrReconcileLifecycleRotationActionOwned(input: {
-    runId: string;
-    adapterId: string;
-    actionId: string;
-    payload: Record<string, unknown>;
-  }): Promise<ProviderActionResult> {
-    const stored = this.#database.prepare(`
-      SELECT status FROM provider_actions WHERE run_id=? AND action_id=?
-    `).get(input.runId, input.actionId);
-    if (!isRow(stored)) {
-      return await this.#executeAdapterOperation({
-        runId: input.runId,
-        adapterId: input.adapterId,
-        actionId: input.actionId,
-        operation: "spawn",
-        method: "spawn",
-        payload: input.payload,
-      });
-    }
-    const current = this.getProviderAction(input.runId, input.actionId);
-    if (current.status === "terminal") return current;
-    if (current.status === "quarantined") {
-      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle provider action is quarantined");
-    }
-    if (current.status === "prepared") {
+      this.#database.prepare(`
+        INSERT INTO provider_agent_custody(
+          run_id,action_id,operation,actor_agent_id,target_agent_id,authority_id,
+          adapter_id,bridge_contract_digest,bridge_capable,capability_hash,
+          capability_expires_at,principal_generation,requested_provider_session_ref,
+          intent_digest,created_at
+        ) VALUES (?,?, 'spawn',?,?,?,?,?,1,?,?,?,?,?,?)
+      `).run(
+        input.runId, input.actionId, input.agentId, input.agentId,
+        input.authorityId, input.adapterId, input.bridgeContractDigest,
+        input.stagedCapabilityHash, input.capabilityExpiresAt,
+        input.targetPrincipalGeneration, null,
+        sha256Digest(canonicalJson(input.providerPayload)), this.#clock(),
+      );
       const dispatched = this.#database.prepare(`
         UPDATE provider_actions
            SET status='dispatched',history_json='["prepared","dispatched"]',
                execution_count=1,updated_at=?
-         WHERE run_id=? AND action_id=? AND status='prepared'
-      `).run(this.#clock(), input.runId, input.actionId);
-      if (dispatched.changes === 1) {
-        return await this.#completeAdapterOperation({
-          runId: input.runId,
-          adapterId: input.adapterId,
-          actionId: input.actionId,
-          operation: "spawn",
-          method: "spawn",
-          payload: input.payload,
-        });
-      }
-    }
-    let lookup: unknown;
-    try {
-      lookup = await this.#requestAdapter(input.adapterId, "lookup_action", { actionId: input.actionId });
-    } catch (error: unknown) {
-      this.#persistProviderAction(
-        input.runId,
-        input.actionId,
-        { idempotencyProven: false },
-        quarantinedProviderAction(current),
-      );
-      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle provider action cannot be reconciled", { cause: error });
-    }
-    const reconciled = providerActionResult(lookup, input.actionId);
-    if (reconciled.status !== "terminal" || reconciled.effectCount !== 1) {
-      this.#persistProviderAction(
-        input.runId,
-        input.actionId,
-        { idempotencyProven: false },
-        quarantinedProviderAction(reconciled),
-      );
-      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle provider action remains unresolved");
-    }
-    this.#persistProviderAction(input.runId, input.actionId, lookup, reconciled);
-    return reconciled;
+         WHERE run_id=? AND adapter_id=? AND action_id=? AND status='prepared'
+      `).run(this.#clock(), input.runId, input.adapterId, input.actionId);
+      if (dispatched.changes !== 1) throw new Error("lifecycle replacement dispatch claim failed");
+      head = this.#lifecycleRotations.appendInCurrentTransaction({
+        runId: input.runId,
+        agentId: input.agentId,
+        custodyId: input.custodyId,
+        expectedRevision: head.revision,
+        state: "dispatched",
+        recordedAt: this.#clock(),
+      });
+    }).immediate();
+    const result = await this.#adapterSupervisor.provisionAgent(input.adapterId, {
+      schemaVersion: 1,
+      runId: input.runId,
+      operation: "spawn",
+      actionId: input.actionId,
+      targetAgentId: input.agentId,
+      authorityId: input.authorityId,
+      bridgeGeneration: input.targetBridgeGeneration,
+      bridgeContractDigest: input.bridgeContractDigest,
+      payload: input.providerPayload,
+    }, {
+      capability: input.stagedCapability,
+      socketPath: this.#fabricSocketPath as string,
+      expectedPrincipal: {
+        agentId: input.agentId,
+        projectSessionId: stringField(
+          rowOrNotFound(
+            this.#database.prepare("SELECT project_session_id FROM runs WHERE run_id=?").get(input.runId),
+            "lifecycle rotation run",
+          ),
+          "project_session_id",
+        ),
+        runId: input.runId,
+        principalGeneration: input.targetPrincipalGeneration,
+      },
+    });
+    const terminalEvidenceDigest = sha256Digest(canonicalJson(result));
+    this.#database.transaction(() => {
+      const terminalized = this.#database.prepare(`
+        UPDATE provider_actions
+           SET status='terminal',history_json='["prepared","dispatched","accepted","terminal"]',
+               effect_count=1,idempotency_proven=1,result_json=?,updated_at=?
+         WHERE run_id=? AND adapter_id=? AND action_id=? AND status='dispatched'
+      `).run(canonicalJson(result), this.#clock(), input.runId, input.adapterId, input.actionId);
+      if (terminalized.changes !== 1) throw new Error("lifecycle replacement action changed before terminal commit");
+      head = this.#lifecycleRotations.appendInCurrentTransaction({
+        runId: input.runId,
+        agentId: input.agentId,
+        custodyId: input.custodyId,
+        expectedRevision: head.revision,
+        state: "provider-terminal",
+        terminalEvidenceDigest,
+        recordedAt: this.#clock(),
+      });
+      head = this.#lifecycleRotations.appendInCurrentTransaction({
+        runId: input.runId,
+        agentId: input.agentId,
+        custodyId: input.custodyId,
+        expectedRevision: head.revision,
+        state: "committing",
+        terminalEvidenceDigest,
+        recordedAt: this.#clock(),
+      });
+    }).immediate();
+    await this.#finalizeLifecycleRotationAdopted(input, head, terminalEvidenceDigest, result);
   }
 
-  #markLifecycleRotationUnreconciled(runId: string, agentId: string, commandId: string): void {
+  async #finalizeLifecycleRotationAdopted(
+    input: Readonly<{
+      runId: string;
+      agentId: string;
+      custodyId: string;
+      adapterId: string;
+      actionId: string;
+      sourceActionId: string;
+      sourceCapabilityHash: string;
+      sourceProviderSessionRef: string;
+      stagedCapabilityHash: string;
+      checkpointSha256?: string;
+      lifecycleInput?: {
+        action: "compact" | "rotate";
+        agentId: string;
+        taskId: string;
+        taskRevision: number;
+        checkpoint: LifecycleCheckpoint;
+        commandId: string;
+      };
+    }>,
+    head: LifecycleCustodyHead,
+    terminalEvidenceDigest: string,
+    result: AgentProvisionProviderResult | null,
+    terminal: Readonly<{
+      disposition: "adopted" | "no-effect" | "superseded" | "quarantined";
+      proofKind: "provider-terminal" | "zero-dispatch-no-effect" | "predispatch-superseded" |
+        "postterminal-adoption-cas-superseded" | "integrity-quarantine";
+      transitionProof: Readonly<Record<string, unknown>>;
+    }> = {
+      disposition: "adopted",
+      proofKind: "provider-terminal",
+      transitionProof: { schemaVersion: 1, kind: "provider-terminal" },
+    },
+  ): Promise<void> {
+    if (terminal.disposition === "adopted" && (result === null || input.lifecycleInput === undefined || input.checkpointSha256 === undefined)) {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle adoption lost its immutable input");
+    }
+    const authority = this.#lifecycleReceiptAuthority;
+    if (authority === undefined) {
+      throw new FabricError(
+        "CAPABILITY_UNAVAILABLE",
+        "lifecycle terminal apply requires an external receipt authority",
+      );
+    }
+    const scopeHead = rowOrNotFound(this.#database.prepare(`
+      SELECT scope.authority_id,head.checkpoint_digest,head.revision
+        FROM lifecycle_admitted_run_scopes scope
+        JOIN lifecycle_receipt_scope_heads head
+          ON head.project_session_id=scope.project_session_id AND head.run_id=scope.run_id
+       WHERE scope.project_session_id=? AND scope.run_id=?
+    `).get(head.projectSessionId, input.runId), "admitted lifecycle receipt scope");
+    const applyId = `${input.custodyId}:apply`;
+    const transitionProof = {
+      ...terminal.transitionProof,
+      actionRef: { adapterId: input.adapterId, actionId: input.actionId },
+      terminalEvidenceDigest,
+    };
+    const custodyOwner = rowOrNotFound(this.#database.prepare(`
+      SELECT bridge_owner_kind,target_principal_generation,
+             source_adapter_id,source_custody_action_id,source_adapter_contract_digest,
+             source_provider_session_ref,source_provider_generation,
+             source_principal_generation,source_bridge_generation,source_bridge_revision
+        FROM lifecycle_rotation_custodies
+       WHERE run_id=? AND agent_id=? AND custody_id=?
+    `).get(input.runId, input.agentId, input.custodyId), "lifecycle custody owner");
+    const bridgeOwnerKind = stringField(custodyOwner, "bridge_owner_kind") as "chair" | "child";
+    const targetPrincipalGeneration = numberField(custodyOwner, "target_principal_generation");
+    const mutationWrite = (
+      relation: string,
+      key: string,
+      operation: "insert" | "update" | "delete",
+    ) => {
+      const after = operation === "delete" ? null : { schemaVersion: 1, relation, key, operation };
+      return {
+        relation,
+        keyDigest: sha256Digest(`${relation}:${key}`),
+        operation,
+        expectedSemanticDigest: operation === "insert" ? null : sha256Digest(`before:${relation}:${key}`),
+        afterSemanticJcs: after === null ? null : canonicalJson(after),
+        afterSemanticDigest: after === null ? null : lifecycleDigest("mutation-after", after),
+      };
+    };
+    const mutationWrites = [
+      mutationWrite("agent-state", `${input.runId}:${input.agentId}`, "update"),
+      mutationWrite("provider-session", `${input.runId}:${input.agentId}`, "update"),
+      mutationWrite(bridgeOwnerKind === "chair" ? "chair-bridge" : "agent-bridge", `${input.runId}:${input.agentId}`, "update"),
+      mutationWrite("principal-capability", input.sourceCapabilityHash, "update"),
+      mutationWrite("freeze-owner", `${input.runId}:${input.agentId}`, "delete"),
+      mutationWrite("custody-revision", `${input.runId}:${input.agentId}:${input.custodyId}`, "insert"),
+      mutationWrite("custody-head", `${input.runId}:${input.agentId}:${input.custodyId}`, "update"),
+      ...(terminal.disposition === "adopted" && bridgeOwnerKind === "chair" ? [
+        mutationWrite("review-cut", `${input.runId}:${input.custodyId}`, "insert"),
+        mutationWrite("review-binding", `${input.runId}:${input.custodyId}`, "insert"),
+        mutationWrite("review-binding-pointer", `${input.runId}:${input.custodyId}`, "update"),
+      ] : []),
+      mutationWrite("audit", `${input.runId}:${input.custodyId}`, "insert"),
+    ].sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
+    const exactMutationPlan = {
+      schemaVersion: 1 as const,
+      writes: mutationWrites,
+      writeSetDigest: lifecycleDigest("mutation-plan", { schemaVersion: 1, writes: mutationWrites }),
+    };
+    const lifecycleAdoptionEvidenceDigest = terminal.disposition === "adopted" && result !== null
+      ? lifecycleDigest("lifecycle-adoption-evidence", {
+          schemaVersion: 1,
+          runId: input.runId,
+          agentId: input.agentId,
+          custodyId: input.custodyId,
+          bridgeOwnerKind,
+          sourceActionId: input.sourceActionId,
+          targetActionId: input.actionId,
+          targetProviderSessionRef: result.providerSessionRef,
+          targetProviderGeneration: result.providerSessionGeneration,
+          targetBridgeGeneration: result.bridgeGeneration,
+          activationEvidenceDigest: result.activationEvidenceDigest,
+        })
+      : null;
+    const mutationPlan = terminal.disposition === "adopted" ? {
+      schemaVersion: 1,
+      writes: mutationWrites,
+      writeSetDigest: exactMutationPlan.writeSetDigest,
+    } : {
+      schemaVersion: 1,
+      writes: mutationWrites,
+      writeSetDigest: exactMutationPlan.writeSetDigest,
+    };
+    const recordedAt = this.#clock();
+    const prepared = this.#lifecycleRotations.readPreparedChildCustodyTerminal(
+      input.runId,
+      input.agentId,
+      input.custodyId,
+    ) ?? this.#database.transaction(() =>
+      this.#lifecycleRotations.prepareChildCustodyTerminalInCurrentTransaction({
+        runId: input.runId,
+        agentId: input.agentId,
+        custodyId: input.custodyId,
+        expectedRevision: head.revision,
+        applyId,
+        transitionProof,
+        mutationPlan,
+        recordedAt,
+        ...(bridgeOwnerKind === "chair" && terminal.disposition === "adopted"
+          ? {
+              review: {
+                commandId: input.lifecycleInput!.commandId,
+                lifecycleAdoptionEvidenceDigest: lifecycleAdoptionEvidenceDigest!,
+                recordedAt,
+              },
+            }
+          : {}),
+        terminal: {
+          disposition: terminal.disposition,
+          proofKind: terminal.proofKind,
+          terminalEvidenceDigest,
+        },
+      })
+    ).immediate();
+    if (prepared.applyId !== applyId || prepared.preRevision !== head.revision) {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "prepared lifecycle terminal apply changed");
+    }
+    const lookup = {
+      kind: "custody-terminal" as const,
+      projectSessionId: prepared.projectSessionId,
+      runId: prepared.runId,
+      agentId: prepared.agentId,
+      ownerRefDigest: prepared.ownerRefDigest as LifecycleDigest,
+      ownerRevision: prepared.finalRevision,
+    };
+    let record: LifecycleReceiptRecord | null;
+    try {
+      record = await authority.readReceipt(lookup);
+    } catch (error: unknown) {
+      throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle receipt authority read failed", { cause: error });
+    }
+    if (record === null) {
+      try {
+        await authority.appendReceipt(
+          prepared.intentDigest as LifecycleDigest,
+          prepared.subject,
+        );
+      } catch {
+        // Lost append responses are reconciled by the authoritative point read below.
+      }
+      try {
+        record = await authority.readReceipt(lookup);
+      } catch (error: unknown) {
+        throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle receipt authority reconciliation failed", { cause: error });
+      }
+    }
+    if (
+      record === null ||
+      canonicalJson(record.subject) !== prepared.subjectJson ||
+      record.receipt.intentDigest !== prepared.intentDigest ||
+      record.receipt.subjectDigest !== prepared.subjectDigest ||
+      !await authority.verifyReceipt(prepared.subject, record.receipt)
+    ) {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt authority returned crossed evidence");
+    }
+    let reviewRecord: LifecycleReceiptRecord | null = null;
+    if (prepared.review !== null) {
+      const review = prepared.review;
+      const reviewLookup = {
+        kind: "review-adoption-decision" as const,
+        projectSessionId: prepared.projectSessionId,
+        runId: prepared.runId,
+        agentId: prepared.agentId,
+        ownerRefDigest: prepared.ownerRefDigest as LifecycleDigest,
+        ownerRevision: prepared.finalRevision,
+      };
+      try {
+        reviewRecord = await authority.readReceipt(reviewLookup);
+      } catch (error: unknown) {
+        throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle review receipt authority read failed", { cause: error });
+      }
+      if (reviewRecord === null) {
+        try {
+          await authority.appendReceipt(review.intentDigest as LifecycleDigest, review.subject);
+        } catch {
+          // Lost append responses are reconciled by the authoritative point read below.
+        }
+        try {
+          reviewRecord = await authority.readReceipt(reviewLookup);
+        } catch (error: unknown) {
+          throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle review receipt authority reconciliation failed", { cause: error });
+        }
+      }
+      if (
+        reviewRecord === null ||
+        canonicalJson(reviewRecord.subject) !== review.subjectJson ||
+        reviewRecord.receipt.intentDigest !== review.intentDigest ||
+        reviewRecord.receipt.subjectDigest !== review.subjectDigest ||
+        !await authority.verifyReceipt(reviewRecord.subject, reviewRecord.receipt)
+      ) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle review receipt authority returned crossed evidence");
+      }
+    }
+    const checkpoint = await authority.readScopeCheckpoint(prepared.projectSessionId, prepared.runId);
+    const pinnedCheckpoint = await authority.readScopeCheckpointAt(checkpoint.checkpointDigest);
+    if (
+      canonicalJson(checkpoint) !== canonicalJson(pinnedCheckpoint) ||
+      !await authority.verifyScopeCheckpoint(checkpoint) ||
+      checkpoint.authorityId !== record.receipt.authorityId ||
+      (reviewRecord !== null && checkpoint.authorityId !== reviewRecord.receipt.authorityId) ||
+      checkpoint.receiptCount < record.receipt.authoritySequence ||
+      checkpoint.headReceiptDigest === null
+    ) {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt checkpoint is invalid");
+    }
+    let after = 0;
+    let receiptCovered = false;
+    let reviewReceiptCovered = false;
+    let previousReceiptDigest: LifecycleDigest | null = null;
+    const orderedRecordSet: Array<ReturnType<typeof lifecycleReceiptSetMember>> = [];
+    do {
+      const page = await authority.readScopePageAt(checkpoint.checkpointDigest, after, 256);
+      if (page.orderedRecords.length > 256 || orderedRecordSet.length + page.orderedRecords.length > 65_536) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt checkpoint exceeds its bounded scan");
+      }
+      for (const candidate of page.orderedRecords) {
+        const expectedSequence = orderedRecordSet.length + 1;
+        if (
+          candidate.receipt.authorityId !== checkpoint.authorityId ||
+          candidate.receipt.authoritySequence !== expectedSequence ||
+          candidate.receipt.previousReceiptDigest !== previousReceiptDigest ||
+          candidate.subject.projectSessionId !== prepared.projectSessionId ||
+          candidate.subject.runId !== prepared.runId ||
+          candidate.subject.kind !== candidate.receipt.kind ||
+          !await authority.verifyReceipt(candidate.subject, candidate.receipt)
+        ) {
+          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt checkpoint page is crossed");
+        }
+        orderedRecordSet.push(lifecycleReceiptSetMember(candidate));
+        previousReceiptDigest = candidate.receipt.receiptDigest;
+        receiptCovered ||= candidate.receipt.receiptDigest === record.receipt.receiptDigest &&
+          canonicalJson(candidate.subject) === prepared.subjectJson;
+        reviewReceiptCovered ||= reviewRecord !== null &&
+          candidate.receipt.receiptDigest === reviewRecord.receipt.receiptDigest &&
+          canonicalJson(candidate.subject) === prepared.review?.subjectJson;
+      }
+      if (page.nextAfter === null) {
+        if (orderedRecordSet.length !== checkpoint.receiptCount) {
+          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt checkpoint ended before its authenticated count");
+        }
+        break;
+      }
+      if (
+        page.orderedRecords.length === 0 ||
+        page.nextAfter !== orderedRecordSet.length ||
+        page.nextAfter <= after ||
+        page.nextAfter > checkpoint.receiptCount
+      ) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt checkpoint pagination crossed");
+      }
+      after = page.nextAfter;
+    } while (true);
+    if (
+      !receiptCovered ||
+      (prepared.review !== null && !reviewReceiptCovered) ||
+      previousReceiptDigest !== checkpoint.headReceiptDigest ||
+      checkpoint.orderedRecordSetDigest !== lifecycleDigest("scope-record-set", orderedRecordSet)
+    ) {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt is absent from its pinned checkpoint");
+    }
+    const localWriteIdentities = [
+      `agent:${input.runId}:${input.agentId}`,
+      `provider-action:${input.runId}:${input.adapterId}:${input.actionId}`,
+      `delivery-freeze:${input.runId}:${input.agentId}`,
+      `capability:${input.stagedCapabilityHash}`,
+      ...(terminal.disposition === "adopted" && input.lifecycleInput !== undefined ? [
+        `${bridgeOwnerKind === "chair" ? "chair-bridge" : "agent-bridge"}:${input.runId}:${input.agentId}`,
+        `capability:${input.sourceCapabilityHash}`,
+        `provider-state:${input.runId}:${input.agentId}`,
+        `lifecycle-operation:${input.runId}:${input.lifecycleInput.commandId}`,
+        ...(bridgeOwnerKind === "chair" ? [
+          `review-cut:${input.runId}:${input.custodyId}`,
+          `review-binding:${input.runId}:${input.custodyId}`,
+          `review-binding-pointer:${input.runId}:${input.custodyId}`,
+        ] : []),
+      ] : []),
+    ];
     this.#database.transaction(() => {
-      this.#database.prepare(`
-        UPDATE lifecycle_rotation_custody SET state='unreconciled',updated_at=?
-         WHERE run_id=? AND agent_id=? AND command_id=? AND state<>'finalized'
-      `).run(this.#clock(), runId, agentId, commandId);
-      this.#database.prepare(`
-        UPDATE agents SET lifecycle='context-unreconciled'
-         WHERE run_id=? AND agent_id=? AND lifecycle<>'archived'
-      `).run(runId, agentId);
-    })();
+      this.#lifecycleRotations.applyAuthorizedChildCustodyTerminalInCurrentTransaction({
+        prepared,
+        expectedRevision: head.revision,
+        expectedScopeHead: {
+          checkpointDigest: stringField(scopeHead, "checkpoint_digest"),
+          revision: numberField(scopeHead, "revision"),
+        },
+        receipt: {
+          authorityId: record.receipt.authorityId,
+          authoritySequence: record.receipt.authoritySequence,
+          previousReceiptDigest: record.receipt.previousReceiptDigest,
+          receiptDigest: record.receipt.receiptDigest,
+          attestation: record.receipt.attestation,
+          verifiedAt: this.#clock(),
+        },
+        ...(reviewRecord === null ? {} : {
+          reviewReceipt: {
+            authorityId: reviewRecord.receipt.authorityId,
+            authoritySequence: reviewRecord.receipt.authoritySequence,
+            previousReceiptDigest: reviewRecord.receipt.previousReceiptDigest,
+            receiptDigest: reviewRecord.receipt.receiptDigest,
+            attestation: reviewRecord.receipt.attestation,
+            verifiedAt: this.#clock(),
+          },
+        }),
+        scopeCheckpoint: {
+          receiptCount: checkpoint.receiptCount,
+          headAuthoritySequence: checkpoint.headAuthoritySequence,
+          headReceiptDigest: checkpoint.headReceiptDigest as LifecycleDigest,
+          orderedRecordSetDigest: checkpoint.orderedRecordSetDigest,
+          checkpointDigest: checkpoint.checkpointDigest,
+          attestation: checkpoint.attestation,
+          verifiedAt: this.#clock(),
+        },
+        authorizedAt: this.#clock(),
+        appliedAt: this.#clock(),
+        localWriteIdentities,
+        performAdoptionWrites: () => {
+          if (terminal.disposition !== "adopted") {
+            const now = this.#clock();
+            this.#database.prepare(`
+              UPDATE capabilities SET revoked_at=?
+               WHERE token_hash=? AND revoked_at IS NULL
+            `).run(now, input.stagedCapabilityHash);
+            if (terminal.disposition === "no-effect") {
+              const proof = canonicalJson({ ...transitionProof, evidenceDigest: terminalEvidenceDigest });
+              const action = this.#database.prepare(`
+                UPDATE provider_actions
+                   SET status='terminal',history_json='["prepared","terminal"]',
+                       execution_count=0,effect_count=0,idempotency_proven=1,
+                       result_json=?,journal_revision=journal_revision+1,updated_at=?
+                 WHERE run_id=? AND adapter_id=? AND action_id=? AND status='prepared'
+                   AND execution_count=0 AND effect_count=0
+              `).run(proof, now, input.runId, input.adapterId, input.actionId);
+              if (action.changes !== 1) throw new Error("lifecycle zero-dispatch action changed before apply");
+              const agent = this.#database.prepare(`
+                UPDATE agents SET lifecycle='ready'
+                 WHERE run_id=? AND agent_id=? AND lifecycle='suspended'
+              `).run(input.runId, input.agentId);
+              if (agent.changes !== 1) throw new Error("lifecycle no-effect agent changed before apply");
+              const freeze = this.#database.prepare(`
+                DELETE FROM delivery_freezes WHERE run_id=? AND agent_id=? AND reason=?
+              `).run(
+                input.runId,
+                input.agentId,
+                `lifecycle-rotation:${sha256(input.custodyId).slice(0, 32)}`,
+              );
+              if (freeze.changes !== 1) throw new Error("lifecycle no-effect freeze changed before apply");
+              return;
+            }
+            if (terminal.disposition === "superseded") {
+              const proof = canonicalJson({ ...transitionProof, evidenceDigest: terminalEvidenceDigest });
+              const preparedAction = this.#database.prepare(`
+                UPDATE provider_actions
+                   SET status='terminal',history_json='["prepared","terminal"]',
+                       execution_count=0,effect_count=0,idempotency_proven=1,
+                       result_json=?,journal_revision=journal_revision+1,updated_at=?
+                 WHERE run_id=? AND adapter_id=? AND action_id=? AND status='prepared'
+                   AND execution_count=0 AND effect_count=0
+              `).run(proof, now, input.runId, input.adapterId, input.actionId);
+              if (preparedAction.changes === 0) {
+                const terminalAction = this.#database.prepare(`
+                  SELECT status,execution_count,effect_count,idempotency_proven
+                    FROM provider_actions
+                   WHERE run_id=? AND adapter_id=? AND action_id=?
+                `).get(input.runId, input.adapterId, input.actionId);
+                if (
+                  !isRow(terminalAction) || terminalAction.status !== "terminal" ||
+                  terminalAction.execution_count !== 1 || terminalAction.effect_count !== 1 ||
+                  terminalAction.idempotency_proven !== 1
+                ) throw new Error("lifecycle superseded action changed before apply");
+              }
+              const agent = this.#database.prepare(`
+                UPDATE agents SET lifecycle='ready'
+                 WHERE run_id=? AND agent_id=? AND lifecycle='suspended'
+              `).run(input.runId, input.agentId);
+              if (agent.changes !== 1) throw new Error("lifecycle superseded agent changed before apply");
+              const freeze = this.#database.prepare(`
+                DELETE FROM delivery_freezes WHERE run_id=? AND agent_id=? AND reason=?
+              `).run(
+                input.runId,
+                input.agentId,
+                `lifecycle-rotation:${sha256(input.custodyId).slice(0, 32)}`,
+              );
+              if (freeze.changes !== 1) throw new Error("lifecycle superseded freeze changed before apply");
+              return;
+            }
+            this.#database.prepare(`
+              UPDATE provider_actions
+                 SET status='quarantined',idempotency_proven=0,
+                     result_json=?,journal_revision=journal_revision+1,updated_at=?
+               WHERE run_id=? AND adapter_id=? AND action_id=?
+                 AND status IN ('prepared','dispatched','accepted','ambiguous','terminal')
+            `).run(
+              canonicalJson({ ...transitionProof, evidenceDigest: terminalEvidenceDigest }),
+              now,
+              input.runId,
+              input.adapterId,
+              input.actionId,
+            );
+            return;
+          }
+          const adopted = result as AgentProvisionProviderResult;
+          const lifecycleInput = input.lifecycleInput as NonNullable<typeof input.lifecycleInput>;
+          const bridge = bridgeOwnerKind === "chair"
+            ? this.#database.prepare(`
+                UPDATE launched_chair_bridge_state
+                   SET provider_adapter_id=?,provider_action_id=?,provider_session_ref=?,
+                       provider_session_generation=?,principal_generation=?,bridge_generation=?,capability_hash=?,
+                       activation_evidence_digest=?,revision=revision+1,updated_at=?
+                 WHERE project_session_id=(SELECT project_session_id FROM runs WHERE run_id=?)
+                   AND coordination_run_id=? AND chair_agent_id=? AND state='active'
+                   AND provider_adapter_id=? AND provider_action_id=?
+                   AND provider_contract_digest=? AND provider_session_ref=?
+                   AND provider_session_generation=? AND principal_generation=?
+                   AND bridge_generation=? AND capability_hash=? AND revision=?
+              `).run(
+                input.adapterId, input.actionId, adopted.providerSessionRef,
+                adopted.providerSessionGeneration, targetPrincipalGeneration, adopted.bridgeGeneration,
+                input.stagedCapabilityHash, adopted.activationEvidenceDigest, this.#clock(),
+                input.runId, input.runId, input.agentId,
+                stringField(custodyOwner, "source_adapter_id"),
+                stringField(custodyOwner, "source_custody_action_id"),
+                stringField(custodyOwner, "source_adapter_contract_digest"),
+                stringField(custodyOwner, "source_provider_session_ref"),
+                numberField(custodyOwner, "source_provider_generation"),
+                numberField(custodyOwner, "source_principal_generation"),
+                numberField(custodyOwner, "source_bridge_generation"),
+                input.sourceCapabilityHash, numberField(custodyOwner, "source_bridge_revision"),
+              )
+            : this.#database.prepare(`
+                UPDATE agent_bridge_state
+                   SET adapter_id=?,action_id=?,provider_session_ref=?,provider_session_generation=?,
+                       bridge_state='active',bridge_generation=?,capability_hash=?,
+                       activation_evidence_digest=?,revision=revision+1,updated_at=?
+                 WHERE run_id=? AND agent_id=? AND bridge_state='active'
+                   AND adapter_id=? AND action_id=? AND provider_session_ref=?
+                   AND provider_session_generation=? AND bridge_generation=?
+                   AND capability_hash=? AND revision=?
+              `).run(
+                input.adapterId, input.actionId, adopted.providerSessionRef,
+                adopted.providerSessionGeneration, adopted.bridgeGeneration,
+                input.stagedCapabilityHash, adopted.activationEvidenceDigest, this.#clock(),
+                input.runId, input.agentId,
+                stringField(custodyOwner, "source_adapter_id"),
+                stringField(custodyOwner, "source_custody_action_id"),
+                stringField(custodyOwner, "source_provider_session_ref"),
+                numberField(custodyOwner, "source_provider_generation"),
+                numberField(custodyOwner, "source_bridge_generation"),
+                input.sourceCapabilityHash, numberField(custodyOwner, "source_bridge_revision"),
+              );
+          if (bridge.changes !== 1) throw new Error("lifecycle source bridge changed before apply");
+          const capability = this.#database.prepare(`
+            UPDATE capabilities SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL
+          `).run(this.#clock(), input.sourceCapabilityHash);
+          if (capability.changes !== 1) throw new Error("lifecycle source capability changed before apply");
+          const agent = this.#database.prepare(`
+            UPDATE agents SET lifecycle='ready',provider_session_ref=?
+             WHERE run_id=? AND agent_id=? AND lifecycle='suspended'
+          `).run(adopted.providerSessionRef, input.runId, input.agentId);
+          if (agent.changes !== 1) throw new Error("lifecycle agent changed before apply");
+          this.#database.prepare(`
+            INSERT INTO provider_state(
+              run_id,agent_id,provider_session_generation,context_revision,
+              reconciled_checkpoint_sha256
+            ) VALUES (?,?,?,0,?)
+            ON CONFLICT(run_id,agent_id) DO UPDATE SET
+              provider_session_generation=excluded.provider_session_generation,
+              context_revision=excluded.context_revision,
+              reconciled_checkpoint_sha256=excluded.reconciled_checkpoint_sha256
+          `).run(input.runId, input.agentId, adopted.providerSessionGeneration, input.checkpointSha256);
+          const freeze = this.#database.prepare(`
+            DELETE FROM delivery_freezes WHERE run_id=? AND agent_id=? AND reason=?
+          `).run(
+            input.runId,
+            input.agentId,
+            `lifecycle-rotation:${sha256(input.custodyId).slice(0, 32)}`,
+          );
+          if (freeze.changes !== 1) throw new Error("lifecycle delivery freeze changed before apply");
+          this.#recordLifecycleOperation(
+            input.runId,
+            lifecycleInput,
+            input.sourceProviderSessionRef,
+            adopted.providerSessionRef,
+          );
+        },
+      });
+    }).immediate();
   }
 
   #verifyCheckpoint(
@@ -7243,7 +8960,7 @@ export class Fabric {
     );
     const barrier = this.#database.prepare("SELECT 1 FROM barriers WHERE run_id = ? AND scope = 'run' AND state = 'closed'").get(runId);
     if (
-      lifecycle !== "completion-ready" ||
+      lifecycle !== "idle" ||
       !["complete", "cancelled", "degraded"].includes(task.state) ||
       activeLeases > 0 ||
       activeChildren > 0 ||
@@ -7285,16 +9002,17 @@ export class Fabric {
 
   #persistProviderAction(
     runId: string,
+    adapterId: string,
     actionId: string,
     raw: unknown,
     result: ProviderActionResult,
   ): void {
     const idempotencyProven = isRow(raw) && raw.idempotencyProven === true ? 1 : 0;
     const now = this.#clock();
-    const budget = this.#providerBudgetSettlement(runId, actionId, result, now);
+    const budget = this.#providerBudgetSettlement(runId, adapterId, actionId, result, now);
     this.#database
       .prepare(
-        "UPDATE provider_actions SET status = ?, history_json = ?, execution_count = ?, effect_count = ?, idempotency_proven = ?, result_json = ?, updated_at = ?, budget_state = COALESCE(?, budget_state), budget_settlement_json = COALESCE(?, budget_settlement_json) WHERE run_id = ? AND action_id = ?",
+        "UPDATE provider_actions SET status = ?, history_json = ?, execution_count = ?, effect_count = ?, idempotency_proven = ?, result_json = ?, updated_at = ?, budget_state = COALESCE(?, budget_state), budget_settlement_json = COALESCE(?, budget_settlement_json) WHERE run_id = ? AND adapter_id = ? AND action_id = ?",
       )
       .run(
         result.status,
@@ -7307,12 +9025,14 @@ export class Fabric {
         budget?.state ?? null,
         budget === undefined ? null : canonicalJson(budget.settlement),
         runId,
+        adapterId,
         actionId,
       );
   }
 
   #providerBudgetSettlement(
     runId: string,
+    adapterId: string,
     actionId: string,
     result: ProviderActionResult,
     now: number,
@@ -7324,8 +9044,8 @@ export class Fabric {
       SELECT budget_authority_id,budget_reservation_json,budget_settlement_json,
              budget_state,budget_started_at
         FROM provider_actions
-       WHERE run_id=? AND action_id=?
-    `).get(runId, actionId);
+       WHERE run_id=? AND adapter_id=? AND action_id=?
+    `).get(runId, adapterId, actionId);
     if (!isRow(binding) || binding.budget_authority_id === null) return undefined;
     const reservationValue: unknown = JSON.parse(stringField(binding, "budget_reservation_json"));
     if (!isNumberRecord(reservationValue) || Object.values(reservationValue).some(

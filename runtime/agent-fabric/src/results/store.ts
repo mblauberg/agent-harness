@@ -466,8 +466,12 @@ export class AtomicDeliveryStore {
         throw new ProjectFabricCoreError("STALE_GENERATION", "result claim is not current");
       }
       const action = row(this.#database.prepare(`
-        SELECT * FROM provider_actions WHERE run_id=? AND action_id=?
-      `).get(context.coordinationRunId, request.providerActionId), "provider action");
+        SELECT * FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?
+      `).get(
+        context.coordinationRunId,
+        request.providerAdapterId,
+        request.providerActionId,
+      ), "provider action");
       if (text(action, "status") !== "accepted" && text(action, "status") !== "terminal") {
         throw new ProjectFabricCoreError("RECOVERY_REQUIRED", "provider action has not accepted the callback");
       }
@@ -493,9 +497,10 @@ export class AtomicDeliveryStore {
       this.#database.prepare(`
         UPDATE result_deliveries
            SET state='provider-accepted', revision=revision+1,
-               provider_action_id=?, provider_accepted_at=?, updated_at=?
+               provider_adapter_id=?, provider_action_id=?, provider_accepted_at=?, updated_at=?
          WHERE result_delivery_id=? AND revision=? AND state='claimed'
       `).run(
+        request.providerAdapterId,
         request.providerActionId,
         this.#clock(),
         this.#clock(),

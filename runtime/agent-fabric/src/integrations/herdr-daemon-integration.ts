@@ -18,6 +18,7 @@ import {
   type HerdrRecoverySummary,
 } from "./herdr-fabric-ports.js";
 import { canonicalJson, integer, isRow, nullableText, text } from "../project-session/store-support.js";
+import { ProviderActionAdmissionCoordinator } from "../application/provider-action-admission.js";
 
 export type HerdrDaemonRuntime = Readonly<{
   execute(actionId: ProviderActionId, intent: JsonValue): Promise<HerdrActionRecord>;
@@ -69,6 +70,7 @@ export type HerdrDirectSteerRequest = Readonly<{
 
 export type HerdrDaemonIntegrationOptions = Readonly<{
   database: Database.Database;
+  providerActionAdmission: ProviderActionAdmissionCoordinator;
   configuration?: HerdrDaemonIntegrationConfiguration;
   clock?: () => number;
 }>;
@@ -102,6 +104,7 @@ export class HerdrDaemonIntegration {
     this.#clock = options.clock ?? Date.now;
     this.#ports = new HerdrFabricPorts({
       database: options.database,
+      providerActionAdmission: options.providerActionAdmission,
       ...(options.clock === undefined ? {} : { clock: options.clock }),
     });
   }

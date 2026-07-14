@@ -13,9 +13,32 @@ import type {
 } from "@local/agent-fabric-protocol";
 import { describe, expect, it } from "vitest";
 
+import { ProviderActionAdmissionCoordinator } from "../../src/application/provider-action-admission.ts";
 import { HerdrFabricPorts } from "../../src/integrations/herdr-fabric-ports.ts";
 import { openFabric } from "../../src/index.ts";
 import { createStage1Fixture } from "../support/stage1-fixture.ts";
+
+function seedHerdrIntegrationIdentity(database: Database.Database): void {
+  database.prepare(`
+    INSERT INTO integration_availability(
+      integration_id,state,discovered_contract_json,checked_at
+    ) VALUES ('herdr-control-v1','available',?,1)
+    ON CONFLICT(integration_id) DO UPDATE SET
+      state=excluded.state,
+      discovered_contract_json=excluded.discovered_contract_json,
+      checked_at=excluded.checked_at
+  `).run(JSON.stringify({
+    schemaVersion: 1,
+    generation: 1,
+    operationFamily: "herdr-control-v1",
+    mode: "required",
+    detail: "test identity",
+    presence: [],
+    degradedRunIds: [],
+    recoveryRunIds: [],
+    recoverySessionIds: [],
+  }));
+}
 
 describe("daemon-owned Herdr Fabric ports", () => {
   it("authoritatively validates a stable task reference and journals one action lifecycle", async () => {
@@ -70,12 +93,18 @@ describe("daemon-owned Herdr Fabric ports", () => {
     const database = new Database(fixture.databasePath);
     try {
       database.pragma("foreign_keys = ON");
+      seedHerdrIntegrationIdentity(database);
       const identity = database.prepare(`
         SELECT p.project_id, s.project_session_id
           FROM projects p JOIN project_sessions s ON s.project_id=p.project_id
          WHERE s.project_session_id=(SELECT project_session_id FROM runs WHERE run_id='run-stage1')
       `).get() as { project_id: string; project_session_id: string };
-      const ports = new HerdrFabricPorts({ database, clock: () => Date.parse("2027-01-01T00:00:00Z") });
+      const clock = () => Date.parse("2027-01-01T00:00:00Z");
+      const ports = new HerdrFabricPorts({
+        database,
+        clock,
+        providerActionAdmission: new ProviderActionAdmissionCoordinator({ database, clock }),
+      });
       const reference = {
         kind: "task" as const,
         projectId: identity.project_id as ProjectId,
@@ -201,6 +230,38 @@ describe("daemon-owned Herdr Fabric ports", () => {
         status: "rejected",
         code: "unknown-reference",
       });
+      const faultActionId = "herdr-steer-admission-fault-01" as ProviderActionId;
+      const faultPorts = new HerdrFabricPorts({
+        database,
+        clock,
+        providerActionAdmission: new ProviderActionAdmissionCoordinator({
+          database,
+          clock,
+          fault: (label) => {
+            if (label === "provider-action-admission:after-action-insert") {
+              throw new Error("fault:herdr-admission");
+            }
+          },
+        }),
+      });
+      await expect(faultPorts.prepareDirectSteerAction(faultActionId, intent))
+        .rejects.toThrow("fault:herdr-admission");
+      expect(database.prepare(`
+        SELECT state FROM provider_action_pair_preflights
+         WHERE adapter_id='herdr-control-v1' AND action_id=?
+      `).get(faultActionId)).toEqual({ state: "resolving" });
+      expect(database.prepare(`
+        SELECT COUNT(*) AS count FROM provider_actions
+         WHERE adapter_id='herdr-control-v1' AND action_id=?
+      `).get(faultActionId)).toEqual({ count: 0 });
+      await expect(ports.prepareDirectSteerAction(faultActionId, intent)).resolves.toMatchObject({
+        actionId: faultActionId,
+        status: "prepared",
+      });
+      expect(database.prepare(`
+        SELECT state FROM provider_action_pair_preflights
+         WHERE adapter_id='herdr-control-v1' AND action_id=?
+      `).get(faultActionId)).toEqual({ state: "admitted" });
       await expect(ports.prepareDirectSteerAction("herdr-secret-action" as ProviderActionId, {
         ...intent,
         prompt: `afb_${"x".repeat(32)}`,
@@ -230,12 +291,18 @@ describe("daemon-owned Herdr Fabric ports", () => {
     const database = new Database(fixture.databasePath);
     try {
       database.pragma("foreign_keys = ON");
+      seedHerdrIntegrationIdentity(database);
       const identity = database.prepare(`
         SELECT p.project_id, s.project_session_id
           FROM projects p JOIN project_sessions s ON s.project_id=p.project_id
          WHERE s.project_session_id=(SELECT project_session_id FROM runs WHERE run_id='run-stage1')
       `).get() as { project_id: string; project_session_id: string };
-      const ports = new HerdrFabricPorts({ database, clock: () => fixture.clock.now().getTime() });
+      const clock = () => fixture.clock.now().getTime();
+      const ports = new HerdrFabricPorts({
+        database,
+        clock,
+        providerActionAdmission: new ProviderActionAdmissionCoordinator({ database, clock }),
+      });
       const reference = {
         kind: "task" as const,
         projectId: identity.project_id as ProjectId,
@@ -269,6 +336,7 @@ describe("daemon-owned Herdr Fabric ports", () => {
     try {
       await expect(restarted.recoverStartupState()).resolves.toMatchObject({ actionsQuarantined: 0 });
       await expect(restarted.reconcileProviderAction("run-stage1", "chair", {
+        adapterId: "herdr-control-v1",
         actionId: "herdr-restart-dispatched",
         commandId: "generic-herdr-reconcile-forbidden",
       })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });

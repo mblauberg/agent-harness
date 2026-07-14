@@ -140,6 +140,7 @@ export type ResultDeliveryProviderAcceptRequest = {
   resultDeliveryId: ResultDeliveryId;
   expectedRevision: number;
   claimGeneration: number;
+  providerAdapterId: string;
   providerActionId: string;
 };
 

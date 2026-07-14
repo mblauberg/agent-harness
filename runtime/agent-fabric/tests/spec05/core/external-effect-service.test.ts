@@ -10,6 +10,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 
 import { applyMigrations } from "../../../src/core/migrations.ts";
+import { ProviderActionAdmissionCoordinator } from "../../../src/application/provider-action-admission.ts";
 import {
   ExternalEffectService,
   type ExternalEffectEvidencePort,
@@ -304,6 +305,8 @@ describe("registered external-effect and promotion custody", () => {
     const { database, service } = fixture({ registry: [port] });
     const production = createProductionOperatorActionPorts({
       database,
+      clock: () => Date.now(),
+      providerActionAdmission: new ProviderActionAdmissionCoordinator({ database, clock: () => Date.now() }),
       adapter: {
         capabilities: async () => { throw new Error("provider adapter is not used"); },
         dispatch: async () => { throw new Error("provider adapter is not used"); },

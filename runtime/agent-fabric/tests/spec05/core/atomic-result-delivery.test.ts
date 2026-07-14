@@ -18,6 +18,7 @@ import {
   openSpec05Database,
   workerContext,
 } from "./restart-recovery-fixtures.ts";
+import { admitProviderActionFixture } from "../../support/provider-action-fixture.ts";
 
 const databases: Database.Database[] = [];
 afterEach(() => {
@@ -203,44 +204,75 @@ describe("atomic request, result, and callback delivery", () => {
     } as unknown as ResultDeliveryClaimRequest);
     expect(claimed).toMatchObject({ state: "claimed", revision: 2, claimGeneration: 1 });
 
-    database.prepare(`
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, updated_at
-      ) VALUES (
-        'run_01', 'provider_action_wrong', 'adapter', 'inject', 'chair_01',
-        1, 1, 'identity-wrong', 'payload-wrong', '{}', 'accepted', '[]', 1, 0, 1, 1
-      )
-    `).run();
+    admitProviderActionFixture(database, {
+      runId: "run_01",
+      actionId: "provider_action_wrong",
+      adapterId: "adapter",
+      operation: "inject",
+      targetAgentId: "chair_01",
+      providerSessionGeneration: 1,
+      turnLeaseGeneration: 1,
+      identityHash: "identity-wrong",
+      payloadHash: "payload-wrong",
+      payloadJson: "{}",
+      status: "accepted",
+      historyJson: "[]",
+      executionCount: 1,
+      idempotencyProven: true,
+      updatedAt: 1,
+    });
     expect(() => store.providerAccept(integrationContext, {
       commandId: "accept_wrong_command",
       resultDeliveryId,
       expectedRevision: 2,
       claimGeneration: 1,
+      providerAdapterId: "adapter",
       providerActionId: "provider_action_wrong",
     } as unknown as ResultDeliveryProviderAcceptRequest)).toThrow(/exact result callback/u);
 
     const providerPayload = JSON.stringify({
       fabricResultDelivery: resultDeliveryProviderActionBinding(claimed),
     });
-    database.prepare(`
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, updated_at
-      ) VALUES (
-        'run_01', 'provider_action_result', 'adapter', 'inject', 'chair_01',
-        1, 1, 'identity', 'payload', ?, 'accepted', '[]', 1, 0, 1, 1
-      )
-    `).run(providerPayload);
+    admitProviderActionFixture(database, {
+      runId: "run_01",
+      actionId: "provider_action_result",
+      adapterId: "adapter-secondary",
+      operation: "inject",
+      targetAgentId: "chair_01",
+      providerSessionGeneration: 1,
+      turnLeaseGeneration: 1,
+      identityHash: "identity-sibling",
+      payloadHash: "payload-sibling",
+      payloadJson: "{}",
+      status: "accepted",
+      historyJson: "[]",
+      executionCount: 1,
+      idempotencyProven: true,
+      updatedAt: 1,
+    });
+    admitProviderActionFixture(database, {
+      runId: "run_01",
+      actionId: "provider_action_result",
+      adapterId: "adapter",
+      operation: "inject",
+      targetAgentId: "chair_01",
+      providerSessionGeneration: 1,
+      turnLeaseGeneration: 1,
+      identityHash: "identity",
+      payloadHash: "payload",
+      payloadJson: providerPayload,
+      status: "accepted",
+      historyJson: "[]",
+      executionCount: 1,
+      idempotencyProven: true,
+      updatedAt: 1,
+    });
     const accepted = store.providerAccept(integrationContext, {
       commandId: "accept_command",
       resultDeliveryId,
       expectedRevision: 2,
       claimGeneration: 1,
+      providerAdapterId: "adapter",
       providerActionId: "provider_action_result",
     } as unknown as ResultDeliveryProviderAcceptRequest);
     expect(accepted).toMatchObject({ state: "provider-accepted", revision: 3 });

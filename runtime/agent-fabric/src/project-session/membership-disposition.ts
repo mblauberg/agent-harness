@@ -43,6 +43,7 @@ export function membershipSourceDisposition(
   runId: string,
   kind: MembershipSourceKind,
   memberId: string,
+  memberAdapterId = "",
 ): MembershipSourceDisposition {
   switch (kind) {
     case "coordination-run": {
@@ -112,8 +113,12 @@ export function membershipSourceDisposition(
       return active();
     }
     case "provider-action": {
-      const source = row(database.prepare("SELECT status FROM provider_actions WHERE run_id=? AND action_id=?")
-        .get(runId, memberId), "provider-action membership source");
+      if (memberAdapterId.length === 0) {
+        throw new ProjectFabricCoreError("NOT_FOUND", "provider-action membership adapter was not found");
+      }
+      const source = row(database.prepare(
+        "SELECT status FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?",
+      ).get(runId, memberAdapterId, memberId), "provider-action membership source");
       return text(source, "status") === "terminal" ? reconciled() : active();
     }
     case "required-message": {

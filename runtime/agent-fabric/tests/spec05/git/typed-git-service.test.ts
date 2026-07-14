@@ -10,6 +10,7 @@ import type {
 } from "@local/agent-fabric-protocol";
 
 import { applyMigrations } from "../../../src/core/migrations.ts";
+import { ProviderActionAdmissionCoordinator } from "../../../src/application/provider-action-admission.ts";
 import { readGlobalLiveness } from "../../../src/daemon/global-liveness.ts";
 import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
 import { OperatorActionStore } from "../../../src/operator/action-store.ts";
@@ -585,6 +586,7 @@ describe("typed Git effect custody", () => {
     const ports = createProductionOperatorActionPorts({
       database: value.database,
       clock: () => now,
+      providerActionAdmission: new ProviderActionAdmissionCoordinator({ database: value.database, clock: () => now }),
       adapter: {
         capabilities: () => Promise.resolve({}),
         dispatch: () => Promise.reject(new Error("provider dispatch is not expected")),
@@ -658,6 +660,7 @@ describe("typed Git effect custody", () => {
     const ports = createProductionOperatorActionPorts({
       database: value.database,
       clock: () => now,
+      providerActionAdmission: new ProviderActionAdmissionCoordinator({ database: value.database, clock: () => now }),
       adapter: {
         capabilities: () => Promise.resolve({}),
         dispatch: () => Promise.reject(new Error("provider dispatch is not expected")),

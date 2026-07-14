@@ -28,15 +28,40 @@ import {
   parseChairLaunchProviderResult,
   type ChairLaunchProviderResult,
 } from "../adapters/providers/types.js";
-import { ProjectFabricCoreError } from "./contracts.js";
+import { ProjectFabricCoreError, type AuthenticatedOperatorContext } from "./contracts.js";
 import { supersedeFinalAcceptanceGates } from "./acceptance-cycle.js";
 import { retireProjectSessionBridges } from "./bridge-retirement.js";
 import { canonicalJson, integer, isRow, row, sha256, text, type Row } from "./store-support.js";
+import {
+  ProviderActionAdmissionCoordinator,
+  type ProviderActionTicket,
+} from "../application/provider-action-admission.js";
 
 type Digest = Sha256Digest;
 type ArtifactBinding = ArtifactRef;
 type ResourceAmounts = Readonly<Record<string, number>>;
 type ChairRecoveryIntentPath = ChairBridgeRecoveryIntent["path"];
+
+const CLOSED_PREFLIGHT_FAILURE_CODES = new Set([
+  "ACTION_INPUT_CONFLICT",
+  "CAPABILITY_EXPIRED",
+  "CAPABILITY_FORBIDDEN",
+  "DEDUPE_CONFLICT",
+  "PROTOCOL_INVALID",
+  "WRONG_PROJECT",
+]);
+
+function isDeterministicClosedPreflightFailure(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current === null || typeof current !== "object") return false;
+    const record = current as { code?: unknown; cause?: unknown };
+    if (typeof record.code === "string") return CLOSED_PREFLIGHT_FAILURE_CODES.has(record.code);
+    if (record.cause === undefined || record.cause === current) return false;
+    current = record.cause;
+  }
+  return false;
+}
 
 export type LaunchCustodyIntent = ProjectSessionLaunchIntent;
 
@@ -334,6 +359,7 @@ export type ChairLiveHandoffCurrentState = Readonly<{
 
 type LaunchCustodyServiceOptions = Readonly<{
   database: Database.Database;
+  providerActionAdmission: ProviderActionAdmissionCoordinator;
   clock?: () => number;
   fault?: (label: string) => void;
   randomCapability: () => string;
@@ -779,6 +805,7 @@ export function computeLaunchResourceStateDigest(
 
 export class LaunchCustodyService {
   readonly #database: Database.Database;
+  readonly #providerActionAdmission: ProviderActionAdmissionCoordinator;
   readonly #clock: () => number;
   readonly #fault: (label: string) => void;
   readonly #randomCapability: () => string;
@@ -796,6 +823,7 @@ export class LaunchCustodyService {
 
   constructor(options: LaunchCustodyServiceOptions) {
     this.#database = options.database;
+    this.#providerActionAdmission = options.providerActionAdmission;
     this.#clock = options.clock ?? Date.now;
     this.#fault = options.fault ?? (() => undefined);
     this.#randomCapability = options.randomCapability;
@@ -808,6 +836,20 @@ export class LaunchCustodyService {
     this.#retireVolatileChairBridge = options.retireVolatileChairBridge;
     this.#daemonInstanceGeneration = options.daemonInstanceGeneration ?? (() => 1);
     if (!isAbsolute(this.#fabricSocketPath)) throw new TypeError("Fabric socket path must be absolute");
+  }
+
+  releaseProviderActionPreflightAfterRollback(ticket: ProviderActionTicket, failure: unknown): void {
+    if (ticket.disposition !== "resolving" || ticket.scope.kind !== "run-action") return;
+    if (!isDeterministicClosedPreflightFailure(failure)) return;
+    const actionExists = this.#database.prepare(`
+      SELECT 1 FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?
+    `).get(ticket.scope.runId, ticket.actionRef.adapterId, ticket.actionRef.actionId) !== undefined;
+    if (actionExists) return;
+    try {
+      this.#providerActionAdmission.release(ticket, failure);
+    } catch {
+      // The outer preparation failure remains authoritative if release races.
+    }
   }
 
   observeChairBridgeLoss(input: ChairBridgeLossObservation): boolean {
@@ -832,10 +874,41 @@ export class LaunchCustodyService {
     return { intent, inspectionDigest };
   }
 
+  preflightChairLiveHandoff(input: Readonly<{
+    inspection: ChairLiveHandoffInspection;
+    operatorCommandId: string;
+    principal: AuthenticatedOperatorContext;
+  }>): ProviderActionTicket {
+    const intentDigest = jsonEvidenceDigest(input.inspection.intent);
+    const custodyId = `chair-live-handoff:${sha256(canonicalJson({
+      intentDigest,
+      operatorId: input.principal.operatorId,
+      operatorCommandId: input.operatorCommandId,
+    }))}`;
+    const promotionActionId = `chair-promotion:${sha256(custodyId)}`;
+    return this.#providerActionAdmission.preflight({
+      actionRef: {
+        adapterId: input.inspection.intent.providerAdapterId,
+        actionId: promotionActionId,
+      },
+      scope: {
+        kind: "run-action",
+        runId: input.inspection.intent.coordinationRunId,
+      },
+      principal: input.principal,
+      canonicalInput: {
+        schemaVersion: 1,
+        operation: "promote_retained_bridge",
+        intent: input.inspection.intent,
+      },
+    });
+  }
+
   prepareChairLiveHandoffInTransaction(input: Readonly<{
     inspection: ChairLiveHandoffInspection;
     operatorId: string;
     operatorCommandId: string;
+    providerActionTicket: ProviderActionTicket;
   }>): ChairLiveHandoffDispatchHandle {
     const { intent } = input.inspection;
     if (this.#chairLiveHandoffInspectionDigest(intent) !== input.inspection.inspectionDigest) {
@@ -931,25 +1004,22 @@ export class LaunchCustodyService {
       sourceActionId: text(successor, "action_id"),
       promotionActionId,
     };
-    this.#database.prepare(`
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, result_json, updated_at
-      ) VALUES (?, ?, ?, 'promote_retained_bridge', ?, ?, NULL, ?, ?, ?,
-                'prepared', '["prepared"]', 0, 0, 0, NULL, ?)
-    `).run(
-      intent.coordinationRunId,
-      promotionActionId,
-      intent.providerAdapterId,
-      intent.successorAgentId,
-      integer(successor, "provider_session_generation"),
-      sha256(canonicalJson({ custodyId, intentDigest })),
-      sha256(canonicalJson(payload)),
-      canonicalJson(payload),
-      now,
-    );
+    const promotionPayloadJson = canonicalJson(payload);
+    this.#providerActionAdmission.admitUnroutedInCurrentTransaction(input.providerActionTicket, {
+      runId: intent.coordinationRunId,
+      actionId: promotionActionId,
+      adapterId: intent.providerAdapterId,
+      operation: "promote_retained_bridge",
+      targetAgentId: intent.successorAgentId,
+      providerSessionGeneration: integer(successor, "provider_session_generation"),
+      identityHash: sha256(canonicalJson({ custodyId, intentDigest })),
+      payloadHash: sha256(promotionPayloadJson),
+      payloadJson: promotionPayloadJson,
+      status: "prepared",
+      historyJson: '["prepared"]',
+      executionCount: 0,
+      updatedAt: now,
+    });
     const frozenLease = this.#database.prepare(`
       UPDATE run_chair_leases SET status='frozen', updated_at=?
        WHERE project_session_id=? AND run_id=? AND lease_id=? AND generation=? AND status='active'
@@ -1127,6 +1197,30 @@ export class LaunchCustodyService {
     return { intent, inspectionDigest };
   }
 
+  preflightChairRecovery(input: Readonly<{
+    inspection: ChairRecoveryInspection;
+    principal: AuthenticatedOperatorContext;
+  }>): ProviderActionTicket | null {
+    const { intent } = input.inspection;
+    if (intent.path !== "rebind") return null;
+    const recoveryAction = row(this.#database.prepare(`
+      SELECT coordination_run_id,provider_adapter_id
+        FROM chair_bridge_losses WHERE loss_id=?
+    `).get(intent.lossId), "chair recovery provider action");
+    return this.#providerActionAdmission.preflight({
+      actionRef: {
+        adapterId: text(recoveryAction, "provider_adapter_id"),
+        actionId: intent.providerActionId,
+      },
+      scope: {
+        kind: "run-action",
+        runId: text(recoveryAction, "coordination_run_id"),
+      },
+      principal: input.principal,
+      canonicalInput: { schemaVersion: 1, operation: "recover-chair", intent },
+    });
+  }
+
   async readChairRecoveryCurrentState(intent: ChairBridgeRecoveryIntent): Promise<ChairRecoveryCurrentState> {
     return {
       revision: intent.expectedBridgeRevision,
@@ -1138,6 +1232,7 @@ export class LaunchCustodyService {
     inspection: ChairRecoveryInspection;
     operatorId: string;
     operatorCommandId: string;
+    providerActionTicket: ProviderActionTicket | null;
   }>): ChairRecoveryDispatchHandle {
     if (!this.#database.inTransaction) throw new Error("chair recovery preparation requires a transaction");
     const currentDigest = this.#chairRecoveryInspectionDigest(input.inspection.intent);
@@ -1145,6 +1240,10 @@ export class LaunchCustodyService {
       throw new ProjectFabricCoreError("STALE_REVISION", "chair recovery state changed after inspection");
     }
     const intent = input.inspection.intent;
+    const providerActionTicket = input.providerActionTicket;
+    if (intent.path === "rebind" && providerActionTicket === null) {
+      throw new Error("chair recovery provider action ticket is unavailable");
+    }
     const intentJson = canonicalJson(intent);
     const intentDigest = jsonEvidenceDigest(intent);
     const recoveryId = `chair-bridge-recovery:${sha256(canonicalJson({
@@ -1304,23 +1403,26 @@ export class LaunchCustodyService {
         providerContractDigest: intent.providerContractDigest,
       };
       const payloadJson = canonicalJson(publicPayload);
-      this.#database.prepare(`
-        INSERT INTO provider_actions(
-          run_id, action_id, adapter_id, operation, target_agent_id,
-          provider_session_generation, turn_lease_generation, identity_hash,
-          payload_hash, payload_json, status, history_json, execution_count,
-          effect_count, idempotency_proven, result_json, updated_at
-        ) SELECT coordination_run_id, ?, provider_adapter_id, 'recover-chair', chair_agent_id,
-                 NULL, NULL, ?, ?, ?, 'prepared', '["prepared"]', 0, 0, 0, NULL, ?
-            FROM chair_bridge_losses WHERE loss_id=?
-      `).run(
-        intent.providerActionId,
-        sha256(canonicalJson({ recoveryId, actionId: intent.providerActionId })),
-        sha256(payloadJson),
+      const recoveryAction = row(this.#database.prepare(`
+        SELECT coordination_run_id,provider_adapter_id,chair_agent_id,project_session_id
+          FROM chair_bridge_losses WHERE loss_id=?
+      `).get(intent.lossId), "chair recovery provider action");
+      const recoveryRunId = text(recoveryAction, "coordination_run_id");
+      const recoveryAdapterId = text(recoveryAction, "provider_adapter_id");
+      this.#providerActionAdmission.admitUnroutedInCurrentTransaction(providerActionTicket as ProviderActionTicket, {
+        runId: recoveryRunId,
+        actionId: intent.providerActionId,
+        adapterId: recoveryAdapterId,
+        operation: "recover-chair",
+        targetAgentId: text(recoveryAction, "chair_agent_id"),
+        identityHash: sha256(canonicalJson({ recoveryId, actionId: intent.providerActionId })),
+        payloadHash: sha256(payloadJson),
         payloadJson,
-        now,
-        intent.lossId,
-      );
+        status: "prepared",
+        historyJson: '["prepared"]',
+        executionCount: 0,
+        updatedAt: now,
+      });
     }
     this.#fault("chair-recovery:prepare:custody");
     return {
@@ -3142,12 +3244,28 @@ export class LaunchCustodyService {
         throw new ProjectFabricCoreError("CAPABILITY_UNAVAILABLE", "adapter cannot provision a spawn bridge");
       }
     }
-    const prepared = this.#database.transaction(() => this.prepareAgentInTransaction(input))();
+    const providerActionTicket = this.#providerActionAdmission.preflightAgentAction({
+      runId: input.runId,
+      actorAgentId: input.actorAgentId,
+      actionRef: { adapterId: input.adapterId, actionId: input.actionId },
+      canonicalInput: {
+        schemaVersion: 1,
+        operation: input.operation,
+        actorAgentId: input.actorAgentId,
+        targetAgentId: input.agentId,
+        authorityId: input.authorityId,
+        payload: input.payload,
+        providerSessionRef: input.providerSessionRef ?? null,
+      },
+    });
+    const prepared = this.#database.transaction(() => (
+      this.prepareAgentInTransaction(input, providerActionTicket)
+    )).immediate();
     if (prepared.kind === "replay") return prepared.result;
     return await this.dispatchPreparedAgent(prepared.handle);
   }
 
-  prepareAgentInTransaction(input: AgentCustodyInput):
+  prepareAgentInTransaction(input: AgentCustodyInput, providerActionTicket: ProviderActionTicket):
     | { kind: "dispatch"; handle: AgentDispatchHandle }
     | { kind: "replay"; result: AgentCustodyResult } {
     if (!this.#database.inTransaction) throw new Error("agent custody preparation requires a transaction");
@@ -3172,7 +3290,8 @@ export class LaunchCustodyService {
       SELECT c.intent_digest, p.status, p.result_json,
              b.bridge_state, b.bridge_generation
         FROM provider_agent_custody c
-        JOIN provider_actions p ON p.run_id=c.run_id AND p.action_id=c.action_id
+        JOIN provider_actions p
+          ON p.run_id=c.run_id AND p.adapter_id=c.adapter_id AND p.action_id=c.action_id
         LEFT JOIN agent_bridge_state b ON b.run_id=c.run_id AND b.agent_id=c.target_agent_id
        WHERE c.adapter_id=? AND c.action_id=?
     `).get(input.adapterId, input.actionId);
@@ -3295,24 +3414,20 @@ export class LaunchCustodyService {
       ...(input.providerSessionRef === undefined ? {} : { providerSessionRef: input.providerSessionRef }),
     };
     const payloadJson = canonicalJson(publicPayload);
-    this.#database.prepare(`
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, result_json, updated_at
-      ) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, 'prepared', '["prepared"]', 0, 0, 0, NULL, ?)
-    `).run(
-      input.runId,
-      input.actionId,
-      input.adapterId,
-      input.operation,
-      input.agentId,
-      sha256(canonicalJson({ input: publicPayload, intentDigest })),
-      sha256(payloadJson),
+    this.#providerActionAdmission.admitUnroutedInCurrentTransaction(providerActionTicket, {
+      runId: input.runId,
+      actionId: input.actionId,
+      adapterId: input.adapterId,
+      operation: input.operation,
+      targetAgentId: input.agentId,
+      identityHash: sha256(canonicalJson({ input: publicPayload, intentDigest })),
+      payloadHash: sha256(payloadJson),
       payloadJson,
-      this.#clock(),
-    );
+      status: "prepared",
+      historyJson: '["prepared"]',
+      executionCount: 0,
+      updatedAt: this.#clock(),
+    });
     this.#fault("agent:prepare:action");
     this.#database.prepare(`
       INSERT INTO provider_agent_custody(
@@ -3781,10 +3896,33 @@ export class LaunchCustodyService {
     };
   }
 
+  preflightLaunch(input: Readonly<{
+    inspection: LaunchInspection;
+    principal: AuthenticatedOperatorContext;
+  }>): ProviderActionTicket {
+    const { intent, packet, plan } = input.inspection;
+    return this.#providerActionAdmission.preflight({
+      actionRef: {
+        adapterId: intent.providerAdapterId,
+        actionId: intent.providerActionId,
+      },
+      scope: { kind: "run-action", runId: packet.runId },
+      principal: input.principal,
+      canonicalInput: {
+        schemaVersion: 1,
+        operation: "launch-chair",
+        intent,
+        packet,
+        resourcePlan: plan,
+      },
+    });
+  }
+
   prepareInTransaction(input: Readonly<{
     inspection: LaunchInspection;
     operatorId: string;
     operatorCommandId: string;
+    providerActionTicket: ProviderActionTicket;
   }>): LaunchDispatchHandle {
     if (!this.#database.inTransaction) throw new Error("launch preparation requires the operator command transaction");
     const { inspection } = input;
@@ -3913,35 +4051,39 @@ export class LaunchCustodyService {
       input: packet.provider.input,
     };
     const payloadJson = canonicalJson(publicPayload);
-    this.#database.prepare(`
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation, identity_hash,
-        payload_hash, payload_json, status, history_json, execution_count,
-        effect_count, idempotency_proven, result_json, updated_at
-      ) VALUES (?, ?, ?, 'launch-chair', ?, NULL, NULL, ?, ?, ?, 'prepared',
-                '["prepared"]', 0, 0, 0, NULL, ?)
-    `).run(
-      packet.runId,
-      intent.providerActionId,
-      intent.providerAdapterId,
-      packet.chairAgentId,
-      sha256(canonicalJson({ adapterId: intent.providerAdapterId, actionId: intent.providerActionId })),
-      sha256(payloadJson),
+    this.#providerActionAdmission.admitUnroutedInCurrentTransaction(input.providerActionTicket, {
+      runId: packet.runId,
+      actionId: intent.providerActionId,
+      adapterId: intent.providerAdapterId,
+      operation: "launch-chair",
+      targetAgentId: packet.chairAgentId,
+      identityHash: sha256(canonicalJson({ adapterId: intent.providerAdapterId, actionId: intent.providerActionId })),
+      payloadHash: sha256(payloadJson),
       payloadJson,
-      now,
-    );
+      status: "prepared",
+      historyJson: '["prepared"]',
+      executionCount: 0,
+      updatedAt: now,
+    });
     this.#fault("launch:prepare:provider-action");
 
     const insertMembership = this.#database.prepare(`
       INSERT INTO project_session_memberships(
-        project_session_id, coordination_run_id, member_kind, member_id,
+        project_session_id, coordination_run_id, member_kind, member_id, member_adapter_id,
         required, state, revision, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 1, 'active', 1, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, 1, 'active', 1, ?, ?)
     `);
-    insertMembership.run(intent.projectSessionId, packet.runId, "coordination-run", packet.runId, now, now);
-    insertMembership.run(intent.projectSessionId, packet.runId, "lease", chairLeaseId, now, now);
-    insertMembership.run(intent.projectSessionId, packet.runId, "provider-action", intent.providerActionId, now, now);
+    insertMembership.run(intent.projectSessionId, packet.runId, "coordination-run", packet.runId, "", now, now);
+    insertMembership.run(intent.projectSessionId, packet.runId, "lease", chairLeaseId, "", now, now);
+    insertMembership.run(
+      intent.projectSessionId,
+      packet.runId,
+      "provider-action",
+      intent.providerActionId,
+      intent.providerAdapterId,
+      now,
+      now,
+    );
     this.#database.prepare("INSERT INTO run_metadata(run_id, execution_profile) VALUES (?, 'headless')")
       .run(packet.runId);
     this.#fault("launch:prepare:memberships");
@@ -4333,10 +4475,21 @@ export class LaunchCustodyService {
   }, errors: unknown[]): Promise<void> {
     const prepared = this.#database.prepare(`
       SELECT c.*, p.payload_json, b.bridge_generation
-        FROM provider_agent_custody c
-        JOIN provider_actions p ON p.run_id=c.run_id AND p.action_id=c.action_id
+       FROM provider_agent_custody c
+        JOIN provider_actions p
+          ON p.run_id=c.run_id AND p.adapter_id=c.adapter_id AND p.action_id=c.action_id
         JOIN agent_bridge_state b ON b.run_id=c.run_id AND b.agent_id=c.target_agent_id
        WHERE p.status='prepared'
+         AND NOT EXISTS (
+           SELECT 1 FROM lifecycle_rotation_custodies rotation
+            WHERE rotation.run_id=c.run_id
+              AND (
+                (rotation.provider_action_adapter_id=c.adapter_id
+                  AND rotation.provider_action_id=c.action_id) OR
+                (rotation.source_adapter_id=c.adapter_id
+                  AND rotation.source_custody_action_id=c.action_id)
+              )
+         )
        ORDER BY c.created_at, c.action_id
     `).all().filter(isRow);
     for (const custody of prepared) {
@@ -4354,9 +4507,20 @@ export class LaunchCustodyService {
       const observable = this.#database.prepare(`
         SELECT c.*, p.payload_json, b.bridge_generation
           FROM provider_agent_custody c
-          JOIN provider_actions p ON p.run_id=c.run_id AND p.action_id=c.action_id
+          JOIN provider_actions p
+            ON p.run_id=c.run_id AND p.adapter_id=c.adapter_id AND p.action_id=c.action_id
           JOIN agent_bridge_state b ON b.run_id=c.run_id AND b.agent_id=c.target_agent_id
          WHERE p.status IN ('dispatched','accepted','ambiguous')
+           AND NOT EXISTS (
+             SELECT 1 FROM lifecycle_rotation_custodies rotation
+              WHERE rotation.run_id=c.run_id
+                AND (
+                  (rotation.provider_action_adapter_id=c.adapter_id
+                    AND rotation.provider_action_id=c.action_id) OR
+                  (rotation.source_adapter_id=c.adapter_id
+                    AND rotation.source_custody_action_id=c.action_id)
+                )
+           )
          ORDER BY c.created_at, c.action_id
       `).all().filter(isRow);
       for (const custody of observable) {
@@ -4415,9 +4579,21 @@ export class LaunchCustodyService {
       SELECT c.*, p.payload_json, b.bridge_generation, b.provider_session_ref,
              b.provider_session_generation, b.activation_evidence_digest
         FROM agent_bridge_state b
-        JOIN provider_agent_custody c ON c.run_id=b.run_id AND c.action_id=b.action_id
-        JOIN provider_actions p ON p.run_id=c.run_id AND p.action_id=c.action_id
+        JOIN provider_agent_custody c
+          ON c.run_id=b.run_id AND c.adapter_id=b.adapter_id AND c.action_id=b.action_id
+        JOIN provider_actions p
+          ON p.run_id=c.run_id AND p.adapter_id=c.adapter_id AND p.action_id=c.action_id
        WHERE b.bridge_state='active'
+         AND NOT EXISTS (
+           SELECT 1 FROM lifecycle_rotation_custodies rotation
+            WHERE rotation.run_id=c.run_id
+              AND (
+                (rotation.provider_action_adapter_id=c.adapter_id
+                  AND rotation.provider_action_id=c.action_id) OR
+                (rotation.source_adapter_id=c.adapter_id
+                  AND rotation.source_custody_action_id=c.action_id)
+              )
+         )
        ORDER BY c.created_at, c.action_id
     `).all().filter(isRow);
     for (const custody of active) {
@@ -4870,11 +5046,12 @@ export class LaunchCustodyService {
       UPDATE project_session_memberships
          SET state='reconciled', revision=revision+1, updated_at=?
        WHERE project_session_id=? AND coordination_run_id=?
-         AND member_kind='provider-action' AND member_id=? AND state='active'
+         AND member_kind='provider-action' AND member_adapter_id=? AND member_id=? AND state='active'
     `).run(
       now,
       text(custody, "project_session_id"),
       text(custody, "coordination_run_id"),
+      adapterId,
       actionId,
     );
     const retainedEntry: RetainedChairBridge = {

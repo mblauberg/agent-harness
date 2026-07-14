@@ -1,6 +1,13 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { createInterface } from "node:readline";
+
+import {
+  FABRIC_OPERATIONS,
+  NdjsonRpcTransport,
+  type LifecycleCheckpoint,
+} from "@local/agent-fabric-protocol";
 
 const journalPath = process.env.LIFECYCLE_FAKE_JOURNAL;
 if (journalPath === undefined) {
@@ -8,6 +15,7 @@ if (journalPath === undefined) {
 }
 const requiredJournalPath: string = journalPath;
 const spawnDelayMs = Number(process.env.LIFECYCLE_FAKE_SPAWN_DELAY_MS ?? "0");
+const adapterId = process.env.LIFECYCLE_FAKE_ADAPTER_ID ?? "fake-lifecycle";
 
 type Action = {
   actionId: string;
@@ -27,6 +35,28 @@ type Journal = {
   actions: Record<string, Action>;
   sessions: Record<string, { released: boolean; generation: number; spawnRequests?: number }>;
 };
+
+const bridgeContract = {
+  schemaVersion: 1,
+  method: "provision_agent",
+  operations: ["spawn", "attach"],
+  secretTransport: "private-handoff",
+  bridgeContract: "agent-fabric-session-bridge-v1",
+  generationBound: true,
+  providerOriginatedActivation: true,
+};
+
+let retainedProtocol: Awaited<ReturnType<typeof NdjsonRpcTransport.connect>> | undefined;
+let retainedBinding: Readonly<{
+  actionId: string;
+  agentId: string;
+  projectSessionId: string;
+  runId: string;
+  principalGeneration: number;
+  providerSessionRef: string;
+  providerSessionGeneration: number;
+  bridgeGeneration: number;
+}> | undefined;
 
 type Request = { id: string; method: string; params: Record<string, unknown> };
 
@@ -68,6 +98,144 @@ function actionFor(request: Request, journal: Journal): Action | undefined {
   return typeof actionId === "string" ? journal.actions[actionId] : undefined;
 }
 
+async function provisionRetainedAgent(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const capability = process.env.AGENT_FABRIC_CAPABILITY;
+  const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH;
+  if (capability === undefined || socketPath === undefined) throw new Error("private child handoff missing");
+  if (params.operation !== "attach" && params.operation !== "spawn") {
+    throw new Error("lifecycle fake bridge supports attach and spawn only");
+  }
+  const socket = createConnection(socketPath);
+  retainedProtocol = await NdjsonRpcTransport.connect(socket, {
+    protocolVersion: 1,
+    client: { name: "lifecycle-fake-provider", version: "1.0.0" },
+    authentication: {
+      scheme: "capability",
+      credential: capability,
+      clientNonce: `fake_${randomUUID()}`,
+    },
+    expectedPrincipalKind: "agent",
+    requiredFeatures: ["fabric-core.v1"],
+    optionalFeatures: [],
+  });
+  const expectedPrincipal = {
+    agentId: process.env.AGENT_FABRIC_EXPECTED_AGENT_ID,
+    projectSessionId: process.env.AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID,
+    runId: process.env.AGENT_FABRIC_EXPECTED_RUN_ID,
+    principalGeneration: Number(process.env.AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION),
+  };
+  if (
+    retainedProtocol.principal.kind !== "agent" ||
+    retainedProtocol.principal.agentId !== expectedPrincipal.agentId ||
+    retainedProtocol.principal.projectSessionId !== expectedPrincipal.projectSessionId ||
+    retainedProtocol.principal.runId !== expectedPrincipal.runId ||
+    retainedProtocol.principal.principalGeneration !== expectedPrincipal.principalGeneration ||
+    expectedPrincipal.agentId !== params.targetAgentId ||
+    expectedPrincipal.runId !== params.runId ||
+    (params.operation === "attach" && typeof params.providerSessionRef !== "string")
+  ) throw new Error("private child principal binding changed");
+  const payload = isRecord(params.payload) ? params.payload : {};
+  const requestedGeneration = payload.targetProviderGeneration ?? payload.generation;
+  const providerSessionGeneration = typeof requestedGeneration === "number" && Number.isSafeInteger(requestedGeneration)
+    ? requestedGeneration
+    : params.operation === "attach" ? 1 : 2;
+  const providerSessionRef = typeof params.providerSessionRef === "string"
+    ? params.providerSessionRef
+    : `fake-session:${String(params.targetAgentId)}:g${String(providerSessionGeneration)}:replacement`;
+  const activation = await retainedProtocol.call(FABRIC_OPERATIONS.getMailboxState, {});
+  const evidenceDigest = `sha256:${createHash("sha256").update(JSON.stringify({
+    actionId: params.actionId,
+    targetAgentId: params.targetAgentId,
+    providerSessionRef,
+    activation,
+  })).digest("hex")}`;
+  retainedBinding = {
+    actionId: String(params.actionId),
+    agentId: expectedPrincipal.agentId,
+    projectSessionId: expectedPrincipal.projectSessionId,
+    runId: expectedPrincipal.runId,
+    principalGeneration: expectedPrincipal.principalGeneration,
+    providerSessionRef,
+    providerSessionGeneration,
+    bridgeGeneration: Number(params.bridgeGeneration),
+  };
+  return {
+    schemaVersion: 1,
+    adapterId,
+    actionId: params.actionId,
+    targetAgentId: params.targetAgentId,
+    providerSessionRef,
+    providerSessionGeneration,
+    bridgeGeneration: params.bridgeGeneration,
+    bridgeContractDigest: params.bridgeContractDigest,
+    activationEvidenceDigest: evidenceDigest,
+  };
+}
+
+async function runRetainedLifecycleCallback(payload: Record<string, unknown>): Promise<unknown> {
+  if (retainedProtocol === undefined || retainedBinding === undefined) {
+    throw new Error("retained lifecycle bridge is unavailable");
+  }
+  const lifecycleRequest = payload.lifecycleRequest;
+  if (!isRecord(lifecycleRequest)) throw new Error("retained lifecycle request is missing");
+  const taskId = lifecycleRequest.taskId;
+  const expectedTaskRevision = lifecycleRequest.expectedTaskRevision;
+  const action = lifecycleRequest.action;
+  const checkpoint = lifecycleRequest.checkpoint;
+  const commandId = lifecycleRequest.commandId;
+  if (
+    typeof taskId !== "string" || typeof expectedTaskRevision !== "number" ||
+    (action !== "compact" && action !== "rotate" && action !== "completion-ready" && action !== "release") ||
+    !isRecord(checkpoint) || typeof commandId !== "string"
+  ) {
+    throw new Error("retained lifecycle task binding is invalid");
+  }
+  const claimed = await retainedProtocol.call(FABRIC_OPERATIONS.claimTask, {
+    taskId,
+    expectedRevision: expectedTaskRevision,
+    commandId: `${commandId}:claim`,
+  });
+  if (!isRecord(claimed) || typeof claimed.revision !== "number") {
+    throw new Error("retained lifecycle task claim is invalid");
+  }
+  return await retainedProtocol.call(FABRIC_OPERATIONS.requestLifecycle, {
+    action,
+    agentId: retainedBinding.agentId,
+    taskId,
+    taskRevision: claimed.revision,
+    checkpoint: checkpoint as LifecycleCheckpoint,
+    commandId,
+  });
+}
+
+const retainedActionOperations = Object.freeze({
+  acquireWriteLease: FABRIC_OPERATIONS.acquireWriteLease,
+  attachAgent: FABRIC_OPERATIONS.attachAgent,
+  claimTask: FABRIC_OPERATIONS.claimTask,
+  createTask: FABRIC_OPERATIONS.createTask,
+  delegateAuthority: FABRIC_OPERATIONS.delegateAuthority,
+  receiveMessages: FABRIC_OPERATIONS.receiveMessages,
+  requestLifecycle: FABRIC_OPERATIONS.requestLifecycle,
+});
+
+async function runRetainedAction(payload: Record<string, unknown>): Promise<unknown> {
+  if (retainedProtocol === undefined || retainedBinding === undefined) {
+    throw new Error("retained lifecycle bridge is unavailable");
+  }
+  const retainedAction = payload.retainedAction;
+  if (!isRecord(retainedAction) || typeof retainedAction.operation !== "string" || !isRecord(retainedAction.input)) {
+    throw new Error("retained test action is invalid");
+  }
+  if (payload.agentId !== retainedBinding.agentId) {
+    throw new Error("retained test action agent binding changed");
+  }
+  const operation = retainedActionOperations[
+    retainedAction.operation as keyof typeof retainedActionOperations
+  ];
+  if (operation === undefined) throw new Error("retained test action is not allowlisted");
+  return await retainedProtocol.call(operation, retainedAction.input as never);
+}
+
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 input.on("line", (line) => {
   const parsed: unknown = JSON.parse(line);
@@ -80,7 +248,7 @@ input.on("line", (line) => {
   if (request.method === "capabilities") {
     const result = {
       protocolVersion: 1,
-      operations: ["status", "spawn", "dispatch", "lookup_action", "cancel_action", "release"],
+      operations: ["status", "spawn", "attach", "dispatch", "lookup_action", "cancel_action", "release"],
       actionJournal: true,
       ephemeralWorker: true,
       answerBearingSpawn: true,
@@ -92,10 +260,68 @@ input.on("line", (line) => {
         : {}),
       compactInPlace: false,
       idempotencyEvidence: "per-action",
+      agentBridge: bridgeContract,
     };
     const delay = Number(process.env.LIFECYCLE_FAKE_CAPABILITIES_DELAY_MS ?? "0");
     if (Number.isSafeInteger(delay) && delay > 0) setTimeout(() => respond(request.id, result), delay);
     else respond(request.id, result);
+    return;
+  }
+  if (request.method === "provision_agent") {
+    void (async () => {
+      try {
+        const result = await provisionRetainedAgent(request.params);
+        const actionId = String(request.params.actionId);
+        const currentJournal = loadJournal();
+        const lifecycleSpawn = request.params.operation === "spawn";
+        const unresolved = lifecycleSpawn && process.env.LIFECYCLE_FAKE_SPAWN_UNRESOLVED === "1";
+        const lookupMissing = lifecycleSpawn && process.env.LIFECYCLE_FAKE_SPAWN_LOOKUP_MISSING === "1";
+        if (!lookupMissing) {
+          currentJournal.actions[actionId] = {
+            actionId,
+            payloadHash: payloadHash(Object.fromEntries(
+              Object.entries(request.params).filter(([key]) => key !== "actionId"),
+            )),
+            status: unresolved ? "ambiguous" : "terminal",
+            history: unresolved
+              ? ["prepared", "dispatched", "accepted", "ambiguous"]
+              : ["prepared", "dispatched", "accepted", "terminal"],
+            executionCount: 1,
+            effectCount: 1,
+            idempotencyProven: !unresolved,
+            ...(unresolved ? {} : { result }),
+          };
+        }
+        if (lifecycleSpawn && isRecord(result) && typeof result.providerSessionRef === "string") {
+          currentJournal.sessions[result.providerSessionRef] = {
+            released: false,
+            generation: typeof result.providerSessionGeneration === "number"
+              ? result.providerSessionGeneration
+              : 2,
+            spawnRequests: (currentJournal.sessions[result.providerSessionRef]?.spawnRequests ?? 0) + 1,
+          };
+        }
+        saveJournal(currentJournal);
+        const complete = (): void => {
+          if (lookupMissing) {
+            fail(request.id, "TRANSPORT_RESULT_UNKNOWN", "provider request began but no action lookup record exists");
+          } else if (unresolved) {
+            fail(request.id, "PROVIDER_OUTCOME_AMBIGUOUS", "provider effect cannot be reconciled");
+          } else if (lifecycleSpawn && process.env.LIFECYCLE_FAKE_SPAWN_RESULT_LOST === "1") {
+            fail(request.id, "TRANSPORT_RESULT_LOST", "provider completed but the lifecycle response was lost");
+          } else {
+            respond(request.id, result);
+          }
+        };
+        if (lifecycleSpawn && Number.isSafeInteger(spawnDelayMs) && spawnDelayMs > 0) {
+          setTimeout(complete, spawnDelayMs);
+        } else {
+          complete();
+        }
+      } catch (error: unknown) {
+        fail(request.id, "PROVISION_FAILED", error instanceof Error ? error.message : String(error));
+      }
+    })();
     return;
   }
   if (request.method === "spawn") {
@@ -244,6 +470,87 @@ input.on("line", (line) => {
       return;
     }
     const scenario = typeof payload.scenario === "string" ? payload.scenario : "terminal";
+    if (scenario === "retained-lifecycle-callback") {
+      void (async () => {
+        try {
+          const lifecycle = await runRetainedLifecycleCallback(payload);
+          const currentJournal = loadJournal();
+          const action: Action = {
+            actionId,
+            payloadHash: digest,
+            status: "terminal",
+            history: ["prepared", "dispatched", "accepted", "terminal"],
+            executionCount: 1,
+            effectCount: 1,
+            idempotencyProven: true,
+            result: { completed: true, lifecycleAcceptance: lifecycle },
+            scenario,
+          };
+          currentJournal.actions[actionId] = action;
+          saveJournal(currentJournal);
+          respond(request.id, action);
+        } catch (error: unknown) {
+          const callbackError = error instanceof Error ? error.message : String(error);
+          const currentJournal = loadJournal();
+          currentJournal.actions[actionId] = {
+            actionId,
+            payloadHash: digest,
+            status: "ambiguous",
+            history: ["prepared", "dispatched", "accepted", "ambiguous"],
+            executionCount: 1,
+            effectCount: 0,
+            idempotencyProven: false,
+            result: { callbackError },
+            scenario,
+          };
+          saveJournal(currentJournal);
+          fail(request.id, "LIFECYCLE_CALLBACK_FAILED", callbackError);
+        }
+      })();
+      return;
+    }
+    if (scenario === "retained-test-action") {
+      void (async () => {
+        try {
+          const retainedActionResult = await runRetainedAction(payload);
+          const currentJournal = loadJournal();
+          const action: Action = {
+            actionId,
+            payloadHash: digest,
+            status: "terminal",
+            history: ["prepared", "dispatched", "accepted", "terminal"],
+            executionCount: 1,
+            effectCount: 1,
+            idempotencyProven: true,
+            result: { completed: true, retainedActionResult },
+            scenario,
+          };
+          currentJournal.actions[actionId] = action;
+          saveJournal(currentJournal);
+          respond(request.id, action);
+        } catch (error: unknown) {
+          const callbackError = error instanceof Error ? error.message : String(error);
+          const callbackCode = isRecord(error) && typeof error.code === "string"
+            ? error.code
+            : "RETAINED_ACTION_FAILED";
+          const currentJournal = loadJournal();
+          currentJournal.actions[actionId] = {
+            actionId,
+            payloadHash: digest,
+            status: "ambiguous",
+            history: ["prepared", "dispatched", "accepted", "ambiguous"],
+            executionCount: 1,
+            effectCount: 0,
+            idempotencyProven: false,
+            result: { callbackError, callbackCode },
+            scenario,
+          };
+          saveJournal(currentJournal);
+          fail(request.id, callbackCode, callbackError);
+        }
+      })();
+      return;
+    }
     const ambiguous = scenario === "ambiguous-unproven" || scenario === "ambiguous-idempotent";
     const action: Action = {
       actionId,
@@ -323,5 +630,21 @@ input.on("line", (line) => {
     respond(request.id, { healthy: managed, matches: managed });
     return;
   }
+  if (request.method === "retained_bridge_health") {
+    const binding = retainedBinding;
+    const live = binding !== undefined && retainedProtocol !== undefined &&
+      request.params.kind === "child" && request.params.actionId === binding.actionId &&
+      request.params.agentId === binding.agentId && request.params.projectSessionId === binding.projectSessionId &&
+      request.params.runId === binding.runId && request.params.principalGeneration === binding.principalGeneration &&
+      request.params.providerSessionRef === binding.providerSessionRef &&
+      request.params.providerSessionGeneration === binding.providerSessionGeneration &&
+      request.params.bridgeGeneration === binding.bridgeGeneration;
+    respond(request.id, { schemaVersion: 1, kind: request.params.kind, live });
+    return;
+  }
   fail(request.id, "METHOD_NOT_FOUND", `unsupported method ${request.method}`);
+});
+
+input.on("close", () => {
+  void retainedProtocol?.close();
 });

@@ -17,9 +17,14 @@ import type Database from "better-sqlite3";
 
 import { canonicalJson, integer, isRow, nullableText, row, text } from "../project-session/store-support.js";
 import { touchProjectSessionMembershipRevision } from "../project-session/membership-store.js";
+import {
+  ProviderActionAdmissionCoordinator,
+  type ProviderActionTicket,
+} from "../application/provider-action-admission.js";
 
 export type HerdrFabricPortsOptions = Readonly<{
   database: Database.Database;
+  providerActionAdmission: ProviderActionAdmissionCoordinator;
   clock?: () => number;
 }>;
 
@@ -125,6 +130,14 @@ export type HerdrRecoverySummary = Readonly<{
 
 export const HERDR_CONTROL_ADAPTER_ID = "herdr-control-v1";
 const ADAPTER_ID = HERDR_CONTROL_ADAPTER_ID;
+const CLOSED_PREFLIGHT_FAILURE_CODES = new Set([
+  "ACTION_INPUT_CONFLICT",
+  "CAPABILITY_EXPIRED",
+  "CAPABILITY_FORBIDDEN",
+  "DEDUPE_CONFLICT",
+  "PROTOCOL_INVALID",
+  "WRONG_PROJECT",
+]);
 const SECRET_PATTERN = /\b(?:afb|afc|afop)_[A-Za-z0-9_-]{8,}|\bghp_[A-Za-z0-9_]{8,}|\bgithub_pat_[A-Za-z0-9_]{8,}/u;
 const HERDR_APPLIED_OPERATIONS = new Set<HerdrAppliedOperation>([
   "console.ensure-pane",
@@ -137,14 +150,28 @@ const HERDR_APPLIED_OPERATIONS = new Set<HerdrAppliedOperation>([
   "notification.show",
 ]);
 
+function isDeterministicClosedPreflightFailure(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current === null || typeof current !== "object") return false;
+    const record = current as { code?: unknown; cause?: unknown };
+    if (typeof record.code === "string") return CLOSED_PREFLIGHT_FAILURE_CODES.has(record.code);
+    if (record.cause === undefined || record.cause === current) return false;
+    current = record.cause;
+  }
+  return false;
+}
+
 /** Canonical daemon-side journal/reference seam for the optional Herdr package. */
 export class HerdrFabricPorts {
   readonly #database: Database.Database;
   readonly #clock: () => number;
+  readonly #providerActionAdmission: ProviderActionAdmissionCoordinator;
 
   constructor(options: HerdrFabricPortsOptions) {
     this.#database = options.database;
     this.#clock = options.clock ?? Date.now;
+    this.#providerActionAdmission = options.providerActionAdmission;
   }
 
   async validateSteerReference(reference: FabricSteerReference): Promise<FabricSteerReferenceValidation> {
@@ -159,23 +186,38 @@ export class HerdrFabricPorts {
     const parsedActionId = safeActionId(actionId);
     const payload = canonicalise(parseJsonValue(intent, "herdr.directSteer.intent"));
     assertNoCredentialLikeValue(payload, "Herdr direct-steer intent");
-    return this.#database.transaction(() => {
-      const validation = this.#validateSteerReference(intent.reference);
-      if (validation.status !== "valid") throw new TypeError(`Herdr direct-steer reference is ${validation.code}`);
+    const validation = this.#validateSteerReference(intent.reference);
+    if (validation.status !== "valid") throw new TypeError(`Herdr direct-steer reference is ${validation.code}`);
+    if (
+      validation.referenceDigest !== intent.validatedReferenceDigest ||
+      validation.targetAgentId !== intent.targetAgentId || validation.purpose !== "steer" ||
+      validation.requiresAck || validation.expectsResult || validation.dependentBarrierId !== null
+    ) throw new TypeError("Herdr direct-steer intent does not match authoritative Fabric validation");
+    const preparedInput = {
+      actionId: parsedActionId,
+      runId: intent.reference.coordinationRunId,
+      projectId: intent.reference.projectId,
+      projectSessionId: intent.reference.projectSessionId,
+      targetAgentId: intent.targetAgentId,
+      operation: intent.kind,
+      payload,
+    } as const;
+    const ticket = this.#preflightAction(preparedInput);
+    try {
+      return this.#database.transaction(() => {
+      const rebound = this.#validateSteerReference(intent.reference);
+      if (rebound.status !== "valid") throw new TypeError(`Herdr direct-steer reference is ${rebound.code}`);
       if (
-        validation.referenceDigest !== intent.validatedReferenceDigest ||
-        validation.targetAgentId !== intent.targetAgentId || validation.purpose !== "steer" ||
-        validation.requiresAck || validation.expectsResult || validation.dependentBarrierId !== null
+        rebound.referenceDigest !== intent.validatedReferenceDigest ||
+        rebound.targetAgentId !== intent.targetAgentId || rebound.purpose !== "steer" ||
+        rebound.requiresAck || rebound.expectsResult || rebound.dependentBarrierId !== null
       ) throw new TypeError("Herdr direct-steer intent does not match authoritative Fabric validation");
-      return this.#prepareAction({
-        actionId: parsedActionId,
-        runId: intent.reference.coordinationRunId,
-        projectSessionId: intent.reference.projectSessionId,
-        targetAgentId: intent.targetAgentId,
-        operation: intent.kind,
-        payload,
-      });
-    })();
+      return this.#prepareAction(preparedInput, ticket);
+      }).immediate();
+    } catch (error: unknown) {
+      this.#releaseProviderActionPreflightAfterRollback(ticket, error);
+      throw error;
+    }
   }
 
   /** Pure closed-family validation used even when the optional integration is disabled. */
@@ -186,14 +228,22 @@ export class HerdrFabricPorts {
   /** Internal daemon seam for already-authorised non-steer Herdr intents. */
   prepareAction(input: HerdrAppliedActionInput): HerdrActionRecord {
     const { actionId, intent, operation } = this.#validatedActionInput(input);
-    return this.#database.transaction(() => this.#prepareAction({
+    const preparedInput = {
       actionId,
       runId: input.coordinationRunId,
+      projectId: input.projectId,
       projectSessionId: input.projectSessionId,
       targetAgentId: input.targetAgentId,
       operation,
       payload: intent,
-    }))();
+    } as const;
+    const ticket = this.#preflightAction(preparedInput);
+    try {
+      return this.#database.transaction(() => this.#prepareAction(preparedInput, ticket)).immediate();
+    } catch (error: unknown) {
+      this.#releaseProviderActionPreflightAfterRollback(ticket, error);
+      throw error;
+    }
   }
 
   async readAction(actionId: ProviderActionId): Promise<HerdrActionRecord | null> {
@@ -249,13 +299,13 @@ export class HerdrFabricPorts {
       if (changed.changes !== 1) throw new TypeError("Herdr action completion compare-and-set failed");
       const binding = row(this.#database.prepare(`
         SELECT project_session_id FROM project_session_memberships
-         WHERE member_kind='provider-action' AND member_id=? AND state='active'
-      `).get(parsedActionId), "Herdr action membership");
+         WHERE member_kind='provider-action' AND member_adapter_id=? AND member_id=? AND state='active'
+      `).get(ADAPTER_ID, parsedActionId), "Herdr action membership");
       const membership = this.#database.prepare(`
         UPDATE project_session_memberships
            SET state='reconciled', revision=revision+1, updated_at=?
-         WHERE member_kind='provider-action' AND member_id=? AND state='active'
-      `).run(this.#clock(), parsedActionId);
+         WHERE member_kind='provider-action' AND member_adapter_id=? AND member_id=? AND state='active'
+      `).run(this.#clock(), ADAPTER_ID, parsedActionId);
       touchProjectSessionMembershipRevision(
         this.#database,
         text(binding, "project_session_id"),
@@ -525,20 +575,20 @@ export class HerdrFabricPorts {
   #prepareAction(input: Readonly<{
     actionId: ProviderActionId;
     runId: CoordinationRunId;
+    projectId: ProjectId;
     projectSessionId: ProjectSessionId;
     targetAgentId: AgentId | null;
     operation: string;
     payload: JsonValue;
-  }>): HerdrActionRecord {
+  }>, ticket: ProviderActionTicket): HerdrActionRecord {
     const intentDigest = digestJson(input.payload);
     const existing = this.#database.prepare(`
-      SELECT run_id, adapter_id FROM provider_actions WHERE action_id=?
-    `).all(input.actionId).filter(isRow);
-    if (existing.length > 0) {
+      SELECT run_id FROM provider_actions WHERE adapter_id=? AND action_id=?
+    `).get(ADAPTER_ID, input.actionId);
+    if (isRow(existing)) {
       const current = this.#readAction(input.actionId);
       if (
-        current === null || existing.length !== 1 ||
-        existing.some((value) => text(value, "adapter_id") !== ADAPTER_ID || text(value, "run_id") !== input.runId) ||
+        current === null || text(existing, "run_id") !== input.runId ||
         current.intentDigest !== intentDigest
       ) {
         throw new TypeError("Herdr stable action identity conflicts with an existing action");
@@ -552,39 +602,86 @@ export class HerdrFabricPorts {
       SELECT provider_session_generation FROM provider_state WHERE run_id=? AND agent_id=?
     `).get(input.runId, input.targetAgentId);
     const providerGeneration = isRow(generationRow) ? integer(generationRow, "provider_session_generation") : null;
-    this.#database.prepare(`
-      INSERT INTO provider_actions(
-        run_id, action_id, adapter_id, operation, target_agent_id,
-        provider_session_generation, turn_lease_generation,
-        identity_hash, payload_hash, payload_json, status, history_json,
-        execution_count, effect_count, idempotency_proven, result_json,
-        updated_at, journal_revision
-      ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'prepared', '["prepared"]', 0, 0, 0, NULL, ?, 1)
-    `).run(
-      input.runId,
-      input.actionId,
-      ADAPTER_ID,
-      `herdr:${input.operation}`,
-      input.targetAgentId,
-      providerGeneration,
-      digestJson({ runId: input.runId, projectSessionId: input.projectSessionId, targetAgentId: input.targetAgentId }),
-      intentDigest,
-      canonicalJson(input.payload),
-      this.#clock(),
-    );
-    const membership = this.#database.prepare(`
-      INSERT INTO project_session_memberships(
-        project_session_id, coordination_run_id, member_kind, member_id,
-        required, state, revision, abandoned_reason, created_at, updated_at
-      ) VALUES (?, ?, 'provider-action', ?, 1, 'active', 1, NULL, ?, ?)
-    `).run(input.projectSessionId, input.runId, input.actionId, this.#clock(), this.#clock());
-    touchProjectSessionMembershipRevision(
-      this.#database,
-      input.projectSessionId,
-      this.#clock(),
-      membership.changes,
-    );
+    this.#providerActionAdmission.admitUnroutedInCurrentTransaction(ticket, {
+      runId: input.runId,
+      actionId: input.actionId,
+      adapterId: ADAPTER_ID,
+      operation: `herdr:${input.operation}`,
+      targetAgentId: input.targetAgentId,
+      providerSessionGeneration: providerGeneration,
+      identityHash: digestJson({
+        runId: input.runId,
+        projectSessionId: input.projectSessionId,
+        targetAgentId: input.targetAgentId,
+      }),
+      payloadHash: intentDigest,
+      payloadJson: canonicalJson(input.payload),
+      status: "prepared",
+      historyJson: '["prepared"]',
+      executionCount: 0,
+      updatedAt: this.#clock(),
+    }, () => {
+      const membership = this.#database.prepare(`
+        INSERT INTO project_session_memberships(
+          project_session_id, coordination_run_id, member_kind, member_id, member_adapter_id,
+          required, state, revision, abandoned_reason, created_at, updated_at
+        ) VALUES (?, ?, 'provider-action', ?, ?, 1, 'active', 1, NULL, ?, ?)
+      `).run(input.projectSessionId, input.runId, input.actionId, ADAPTER_ID, this.#clock(), this.#clock());
+      touchProjectSessionMembershipRevision(
+        this.#database,
+        input.projectSessionId,
+        this.#clock(),
+        membership.changes,
+      );
+    });
     return requiredAction(this.#readAction(input.actionId), input.actionId);
+  }
+
+  #preflightAction(input: Readonly<{
+    actionId: ProviderActionId;
+    runId: CoordinationRunId;
+    projectId: ProjectId;
+    projectSessionId: ProjectSessionId;
+    targetAgentId: AgentId | null;
+    operation: string;
+    payload: JsonValue;
+  }>): ProviderActionTicket {
+    const project = row(this.#database.prepare(`
+      SELECT project_id FROM project_sessions WHERE project_session_id=?
+    `).get(input.projectSessionId), "Herdr project");
+    if (text(project, "project_id") !== input.projectId) {
+      throw new TypeError("Herdr project binding is stale");
+    }
+    return this.#providerActionAdmission.preflight({
+      actionRef: { adapterId: ADAPTER_ID, actionId: input.actionId },
+      scope: { kind: "run-action", runId: input.runId },
+      principal: {
+        kind: "integration",
+        integrationId: ADAPTER_ID,
+        projectId: input.projectId,
+      },
+      canonicalInput: {
+        schemaVersion: 1,
+        operation: input.operation,
+        projectSessionId: input.projectSessionId,
+        targetAgentId: input.targetAgentId,
+        intent: input.payload,
+      },
+    });
+  }
+
+  #releaseProviderActionPreflightAfterRollback(ticket: ProviderActionTicket, failure: unknown): void {
+    if (ticket.disposition !== "resolving" || ticket.scope.kind !== "run-action") return;
+    if (!isDeterministicClosedPreflightFailure(failure)) return;
+    const actionExists = this.#database.prepare(`
+      SELECT 1 FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?
+    `).get(ticket.scope.runId, ticket.actionRef.adapterId, ticket.actionRef.actionId) !== undefined;
+    if (actionExists) return;
+    try {
+      this.#providerActionAdmission.release(ticket, failure);
+    } catch {
+      // The outer preparation failure remains authoritative if release races.
+    }
   }
 
   #readAction(actionId: ProviderActionId): HerdrActionRecord | null {
