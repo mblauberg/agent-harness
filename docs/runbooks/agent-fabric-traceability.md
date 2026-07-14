@@ -1,20 +1,35 @@
 # Agent fabric traceability
 
 Status: delivery contract; implementation, integrated verification, provider
-review and final human acceptance remain pending
-Protocol source: [Spec 01 v0.36](../specs/01-agent-fabric.md)
-Daemon-hardening context: [Spec 04 v1.31](../specs/04-agent-fabric-operational-hardening.md)
-Delivery context: [Spec 05 v1.13](../specs/05-project-fabric-console.md)
+review, council adjudication and consolidated PR review remain pending
+Protocol source: [Spec 01 v0.37](../specs/01-agent-fabric.md)
+Activation context: [Spec 03 v1.3](../specs/03-agent-fabric-activation.md)
+Daemon-hardening context: [Spec 04 v1.32](../specs/04-agent-fabric-operational-hardening.md)
+Delivery context: [Spec 05 v1.14](../specs/05-project-fabric-console.md)
 Test roots: `runtime/agent-fabric/`, `runtime/agent-fabric-protocol/` and
 `runtime/agent-fabric-console/`
 
-This runbook maps the Spec 01 requirements and acceptance scenarios below to
+This runbook maps the earlier Spec 01 requirements and acceptance scenarios below to
 planned or implemented Vitest evidence. It is not a complete Spec 04 or Spec 05
 conformance receipt and does not prove integrated verification, provider review
-or human acceptance. A listed test path is mandatory from its introduction
+or programme acceptance. A listed test path is mandatory from its introduction
 stage onward. Absence, skip, todo or quarantine of a deterministic test fails
 that stage. Several requirements may share one public-behaviour test; the test
 name must identify each mapped ID.
+
+## Capability-authority freeze boundary
+
+D-023 accepts the authority design in Spec 01 section 33, Spec 03 v1.3, Spec 04
+v1.32 and Spec 05 section 18. It does not record runtime implementation. The
+direct `AuthorityEnvelopeV2` cutover, monotone compiler, immutable native-
+settings/persistence receipts and the exact per-provider Step-3 containment
+tuple still require implementation and deterministic evidence.
+
+`workspace-write-offline` therefore remains inert. Every certifying action
+continues to request and execute `review-readonly`; no generic write result can
+certify Spec 05. Spec 01 FR-089–FR-095, NFR-040–NFR-042 and AC-066–AC-070, plus
+the Spec 05 section 18 Console projections, are pending additions to this
+matrix rather than evidence supplied by its older paths.
 
 ## Functional requirements
 
@@ -73,6 +88,7 @@ name must identify each mapped ID.
 | AC-011 | 3 | `tests/acceptance/stage3/crash-after-provider-acceptance.acceptance.test.ts` | Crash after acceptance resolves one action or quarantine, never a second action. |
 | AC-012 | 2 | `tests/integration/mcp-two-proxies.integration.test.ts` | Two proxy processes share one store and identical protocol/resource results. |
 | AC-013 | 4 | `tests/acceptance/stage4/optional-adapter-degradation.acceptance.test.ts` | Unavailable optional provider times out, records degradation and leaves the required pair unblocked. |
+| AC-071 | 4 | `tests/acceptance/stage3/ambiguous-provider-action.acceptance.test.ts`, `tests/integration/daemon-adapter-composition.integration.test.ts` | A task-bound read-only ephemeral review admits only the exact current task/target/slot/head, route request and bundle/coverage inputs; persists one route-bound action plus immutable accepted dispatch receipt before provider I/O; advances immutable evidence and the reserved head before terminal read; exact replay returns the same action/route; crossed or stale input fails before provider work; and no retained agent identity, capability or hidden direct-CLI result is created. |
 
 ## Adapter-specific conformance
 
@@ -163,7 +179,9 @@ Vitest suite:
 | Registered Codex/Claude round trip | `node runtime/agent-fabric/smoke/registered-mcp-roundtrip.mjs` with `AGENT_FABRIC_PROJECT_KEY` |
 | Provider-backed adapters | Not run while compatibility entries remain disabled/unresolved |
 
-Run live smoke only after its separate human gate:
+Run live smoke only when its exact provider-use and credential authority is
+current. This is operational evidence, not a separate programme-acceptance
+gate:
 
 ```sh
 AGENT_FABRIC_PROJECT_KEY=<project-key> \
@@ -171,7 +189,8 @@ AGENT_FABRIC_PROJECT_KEY=<project-key> \
 ```
 
 A live failure may block operational activation, but cannot invalidate a
-deterministic result without a reproduced fixture or an explicit human gate.
+deterministic result without a reproduced fixture or a recorded adjudication
+bound to objective evidence.
 Unavailable credentials or quota produce `not-run` evidence, never a fabricated
 pass. Installation, daemon startup and MCP registration remain separately
 authorised actions.

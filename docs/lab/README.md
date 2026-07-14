@@ -1,4 +1,4 @@
-# Autonomous lab: {{DOMAIN}} — start here
+# Autonomous lab: Agent harness comprehensive review implementation — start here
 
 > This file is the **single human entry point**. It never hard-codes a status
 > snapshot — those drift. Live state is **generated**; see *Status & what's waiting*.
@@ -7,7 +7,7 @@
 
 This lab is the durable, filesystem-as-memory **brain** for an autonomous run over:
 
-> **{{MISSION}}**
+> **Implement the entire agent-harness comprehensive review cleanly on one comprehensive-review branch and one final PR: every substantiated finding, accepted decision, Lane A-D obligation, roadmap step, deterministic gate, live local verification, and required independent review; continue until the human sets STOP.**
 
 An AI **orchestrator** drives it: it researches every decision, forks the hard
 one-way-door calls into parallel paths, judges the options adversarially on a
@@ -70,13 +70,9 @@ The lab is driven entirely through **`GOAL.md`**.
   recover-after-compaction anchor), and the work-queue head.
   Run ONE iteration of the 8-step loop (RECONCILE → READ → SELECT → DISPATCH →
   RECORD → PROPAGATE → REORG-if-due → STATE → WAKE/STOP), obeying every rule in the
-  manual: context-protecting orchestrator, provenance-before-promotion,
-  record-before-launch, and human-only mission closure. If GOAL STATUS==STOP,
-  write a clean handoff and HALT. Otherwise self-pace while work is active and
-  use the validated idle-frontier PAUSED checkpoint when the frontier is dry.
-  Before accepting PAUSED, run
-  `python3 "${AGENTS_HOME:-$HOME/.agents}/skills/autonomous-lab/scripts/validate_idle_pause.py" "STATE.md" --runs ".orchestrator/runs.md" --queue "DECISION_QUEUE.md"`.
-  A non-zero result means re-invoke one iteration; do not exit the driver.
+  manual: context-protecting orchestrator, provenance-before-promotion, record-before-launch, never
+  self-halt. If GOAL STATUS==STOP, write a clean handoff and HALT. Otherwise self-pace
+  per the wake discipline and end the turn when all selectable work is in-flight.
   ```
 
   `/loop` with no interval **self-paces** (it schedules its own wake-ups).
@@ -84,17 +80,16 @@ The lab is driven entirely through **`GOAL.md`**.
   **Codex operator variant:** an eligible GPT-5.6 lead uses Ultra/native
   multi-agent for the same portable one-iteration stage graph; lower efforts
   use explicit waves. Codex still has no Claude `/loop`/Stop hook, so invoke the
-  iteration from the validated external driver in the autonomous-lab skill's
-  `references/codex-operator.md`; it rejects premature pauses and stops
-  self-waking after a valid dry-frontier checkpoint.
+  iteration from an external driver — a `while STATUS != STOP; do codex exec
+  …; sleep; done` shell loop. Full driver + wave mapping: the autonomous-lab skill's
+  `references/codex-operator.md`.
 - **Steer:** add bullets under *Active directives* in `GOAL.md`. Empty = follow the
   default traversal order.
 - **Answer a gate:** resolve the item in `STATE.md` Blockers (or add a directive /
   fill the relevant `GOAL.md` field). Your answer unblocks the dependent work.
-- **Pause / stop:** a dry frontier creates a resumable `STATE.md` PAUSED idle
-  checkpoint without changing human-owned `GOAL.md`. Set `GOAL.md` →
-  `STATUS: STOP` only to close the mission; the operator then refreshes the
-  terminal handoff before halting.
+- **Pause / stop:** set `GOAL.md` → `STATUS: STOP` for a clean halt. The orchestrator
+  checks this **every iteration**, writes a handoff in `STATE.md`, and refreshes
+  `HANDOFF.md` before halting.
 - **Watch:** `/workflows` for live progress; `STATE.md` is the human-readable
   heartbeat (a fresh session resumes from it alone). **Alt modes:** paste the prompt
   once per iteration for manual control, or use the `schedule` skill for unattended

@@ -2,12 +2,12 @@
   "schemaVersion": 1,
   "registryId": "spec05-evidence-selector-registry-v1",
   "sources": [
-    {"sourceRef":"spec05-project-fabric-console-v1.13","sourceRole":"spec","artifactRef":"docs/specs/05-project-fabric-console.md","version":"1.13"}
+    {"sourceRef":"spec05-project-fabric-console-v1.14","sourceRole":"spec","artifactRef":"docs/specs/05-project-fabric-console.md","version":"1.14"}
   ],
   "selectors": [
     {"selectorId":"spec05-test-console-protocol-inside-outside-herdr-v1","requirementId":"SPEC05-AC-001","proofDomain":"console-protocol-inside-outside-herdr","owner":"agent-fabric-console","state":"planned-test","artifactRef":null},
     {"selectorId":"spec05-test-console-restart-active-work-v1","requirementId":"SPEC05-AC-002","proofDomain":"console-restart-work-noninterference","owner":"agent-fabric-console","state":"planned-test","artifactRef":null},
-    {"selectorId":"spec05-human-gate-console-10s-orientation-v1","requirementId":"SPEC05-AC-003","proofDomain":"timed-console-orientation","owner":"human-acceptance","state":"human-gate","artifactRef":null},
+    {"selectorId":"spec05-review-gate-console-10s-orientation-v1","requirementId":"SPEC05-AC-003","proofDomain":"timed-console-orientation","owner":"llm-council","state":"gate-pending","artifactRef":null},
     {"selectorId":"spec05-test-consequential-gate-latency-projection-v1","requirementId":"SPEC05-AC-004","proofDomain":"consequential-gate-projection-latency","owner":"agent-fabric-runtime-console","state":"planned-test","artifactRef":null},
     {"selectorId":"spec05-test-authenticated-gate-input-confirmation-v1","requirementId":"SPEC05-AC-005","proofDomain":"authenticated-gate-input-and-confirmation","owner":"agent-fabric-runtime-console","state":"planned-test","artifactRef":null},
     {"selectorId":"spec05-test-minor-major-session-escalation-v1","requirementId":"SPEC05-AC-006","proofDomain":"routine-vs-substantial-session-escalation","owner":"agent-fabric-runtime","state":"planned-test","artifactRef":null},
@@ -25,7 +25,7 @@
     {"selectorId":"spec05-test-daemon-start-attach-project-concurrency-v1","requirementId":"SPEC05-AC-018","proofDomain":"daemon-start-attach-project-concurrency","owner":"agent-fabric-runtime","state":"planned-test","artifactRef":null},
     {"selectorId":"spec05-test-control-lifecycle-restart-reconciliation-v1","requirementId":"SPEC05-AC-019","proofDomain":"control-lifecycle-restart-reconciliation","owner":"agent-fabric-runtime","state":"planned-test","artifactRef":null},
     {"selectorId":"spec05-test-notification-dedup-delivery-focus-v1","requirementId":"SPEC05-AC-020","proofDomain":"notification-dedup-delivery-and-focus","owner":"agent-fabric-runtime-console","state":"planned-test","artifactRef":null},
-    {"selectorId":"spec05-human-gate-console-usability-resize-v1","requirementId":"SPEC05-AC-021","proofDomain":"timed-keyboard-mouse-resize-usability","owner":"human-acceptance","state":"human-gate","artifactRef":null},
+    {"selectorId":"spec05-review-gate-console-usability-resize-v1","requirementId":"SPEC05-AC-021","proofDomain":"timed-keyboard-mouse-resize-usability","owner":"llm-council","state":"gate-pending","artifactRef":null},
     {"selectorId":"spec05-test-project-session-lifecycle-closure-v1","requirementId":"SPEC05-AC-022","proofDomain":"project-session-lifecycle-and-closure","owner":"agent-fabric-runtime","state":"planned-test","artifactRef":null},
     {"selectorId":"spec05-test-promotion-authority-artifact-binding-v1","requirementId":"SPEC05-AC-023","proofDomain":"promotion-authority-and-artifact-binding","owner":"agent-fabric-runtime","state":"planned-test","artifactRef":null},
     {"selectorId":"skills/orchestrate/evals/spec05_skill_evaluation.py","requirementId":"SPEC05-AC-024","proofDomain":"lifecycle-skill-trigger-boundary-portability","owner":"skill-orchestration-evaluation","state":"implemented","artifactRef":"skills/orchestrate/evals/spec05_skill_evaluation.py"},
@@ -37,7 +37,7 @@
     {"selectorId":"spec05-test-scoping-intake-restart-compaction-v1","requirementId":"SPEC05-AC-030","proofDomain":"scoping-intake-restart-and-compaction","owner":"agent-fabric-runtime-console","state":"planned-test","artifactRef":null},
     {"selectorId":"spec05-test-harness-pairing-single-chair-stage-owner-v1","requirementId":"SPEC05-AC-031","proofDomain":"harness-pairing-single-chair-stage-owner","owner":"harness-governance","state":"planned-test","artifactRef":null},
     {"selectorId":"spec05-test-project-budget-atomicity-reconciliation-v1","requirementId":"SPEC05-AC-032","proofDomain":"project-budget-atomicity-and-reconciliation","owner":"agent-fabric-runtime-console","state":"planned-test","artifactRef":null},
-    {"selectorId":"spec05-post-review-acceptance-four-family-final-review-v1","requirementId":"SPEC05-AC-033","proofDomain":"current-four-family-clean-review","owner":"review-completion-gate","state":"post-review-gate","artifactRef":null},
+    {"selectorId":"spec05-post-review-council-four-family-adjudication-v1","requirementId":"SPEC05-AC-033","proofDomain":"current-four-family-clean-review","owner":"llm-council","state":"post-review-gate","artifactRef":null},
     {"selectorId":"spec05-test-evidence-content-pagination-acceptance-safety-v1","requirementId":"SPEC05-AC-034","proofDomain":"evidence-content-pagination-and-acceptance-safety","owner":"agent-fabric-runtime-console","state":"planned-test","artifactRef":null},
     {"selectorId":"spec05-test-project-multi-session-selection-projection-v1","requirementId":"SPEC05-AC-035","proofDomain":"project-multi-session-selection-and-projection","owner":"agent-fabric-runtime-console","state":"planned-test","artifactRef":null},
     {"selectorId":"spec05-test-review-routing-singleflight-v1","requirementId":"SPEC05-AC-036","proofDomain":"review-routing-replay-singleflight-admission","owner":"agent-fabric-runtime","state":"planned-test","artifactRef":null},

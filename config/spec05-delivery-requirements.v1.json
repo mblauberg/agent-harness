@@ -19,7 +19,7 @@
     {
       "requirementId": "SPEC05-AC-001",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -33,7 +33,7 @@
     {
       "requirementId": "SPEC05-AC-002",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -47,12 +47,12 @@
     {
       "requirementId": "SPEC05-AC-003",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "gate-decision",
-          "registryKind": "human-gate-decision.v1",
-          "selectorId": "spec05-human-gate-console-10s-orientation-v1",
+          "registryKind": "review-gate-decision.v1",
+          "selectorId": "spec05-review-gate-console-10s-orientation-v1",
           "cardinality": "complete-nonempty-current-set",
           "requiredStatus": "approved"
         }
@@ -61,7 +61,7 @@
     {
       "requirementId": "SPEC05-AC-004",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -75,7 +75,7 @@
     {
       "requirementId": "SPEC05-AC-005",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -89,7 +89,7 @@
     {
       "requirementId": "SPEC05-AC-006",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -103,7 +103,7 @@
     {
       "requirementId": "SPEC05-AC-007",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -117,7 +117,7 @@
     {
       "requirementId": "SPEC05-AC-008",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -131,7 +131,7 @@
     {
       "requirementId": "SPEC05-AC-009",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -145,7 +145,7 @@
     {
       "requirementId": "SPEC05-AC-010",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -159,7 +159,7 @@
     {
       "requirementId": "SPEC05-AC-011",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -173,7 +173,7 @@
     {
       "requirementId": "SPEC05-AC-012",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -187,7 +187,7 @@
     {
       "requirementId": "SPEC05-AC-013",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -201,7 +201,7 @@
     {
       "requirementId": "SPEC05-AC-014",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -215,7 +215,7 @@
     {
       "requirementId": "SPEC05-AC-015",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -229,7 +229,7 @@
     {
       "requirementId": "SPEC05-AC-016",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -243,7 +243,7 @@
     {
       "requirementId": "SPEC05-AC-017",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -257,7 +257,7 @@
     {
       "requirementId": "SPEC05-AC-018",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -271,7 +271,7 @@
     {
       "requirementId": "SPEC05-AC-019",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -285,7 +285,7 @@
     {
       "requirementId": "SPEC05-AC-020",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -299,12 +299,12 @@
     {
       "requirementId": "SPEC05-AC-021",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "gate-decision",
-          "registryKind": "human-gate-decision.v1",
-          "selectorId": "spec05-human-gate-console-usability-resize-v1",
+          "registryKind": "review-gate-decision.v1",
+          "selectorId": "spec05-review-gate-console-usability-resize-v1",
           "cardinality": "complete-nonempty-current-set",
           "requiredStatus": "approved"
         }
@@ -313,7 +313,7 @@
     {
       "requirementId": "SPEC05-AC-022",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -327,7 +327,7 @@
     {
       "requirementId": "SPEC05-AC-023",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -341,7 +341,7 @@
     {
       "requirementId": "SPEC05-AC-024",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "evaluation",
@@ -355,7 +355,7 @@
     {
       "requirementId": "SPEC05-AC-025",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -369,7 +369,7 @@
     {
       "requirementId": "SPEC05-AC-026",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -383,7 +383,7 @@
     {
       "requirementId": "SPEC05-AC-027",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -397,7 +397,7 @@
     {
       "requirementId": "SPEC05-AC-028",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -411,7 +411,7 @@
     {
       "requirementId": "SPEC05-AC-029",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -425,7 +425,7 @@
     {
       "requirementId": "SPEC05-AC-030",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -439,7 +439,7 @@
     {
       "requirementId": "SPEC05-AC-031",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -453,7 +453,7 @@
     {
       "requirementId": "SPEC05-AC-032",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -467,12 +467,12 @@
     {
       "requirementId": "SPEC05-AC-033",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "post-review-acceptance",
           "registryKind": "post-review-acceptance-decision.v1",
-          "selectorId": "spec05-post-review-acceptance-four-family-final-review-v1",
+          "selectorId": "spec05-post-review-council-four-family-adjudication-v1",
           "cardinality": "complete-nonempty-current-set",
           "requiredStatus": "approved"
         }
@@ -481,7 +481,7 @@
     {
       "requirementId": "SPEC05-AC-034",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -495,7 +495,7 @@
     {
       "requirementId": "SPEC05-AC-035",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -509,7 +509,7 @@
     {
       "requirementId": "SPEC05-AC-036",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -523,7 +523,7 @@
     {
       "requirementId": "SPEC05-AC-037",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -537,7 +537,7 @@
     {
       "requirementId": "SPEC05-AC-038",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -551,7 +551,7 @@
     {
       "requirementId": "SPEC05-AC-039",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -565,7 +565,7 @@
     {
       "requirementId": "SPEC05-AC-040",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -579,7 +579,7 @@
     {
       "requirementId": "SPEC05-AC-041",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -593,7 +593,7 @@
     {
       "requirementId": "SPEC05-AC-042",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -607,7 +607,7 @@
     {
       "requirementId": "SPEC05-AC-043",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -621,7 +621,7 @@
     {
       "requirementId": "SPEC05-AC-044",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",
@@ -635,7 +635,7 @@
     {
       "requirementId": "SPEC05-AC-045",
       "sourceRole": "spec",
-      "sourceRef": "spec05-project-fabric-console-v1.13",
+      "sourceRef": "spec05-project-fabric-console-v1.14",
       "evidenceSelectors": [
         {
           "role": "test",

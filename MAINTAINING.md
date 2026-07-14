@@ -101,11 +101,39 @@ scripts/public-release-check
 git diff --check
 ```
 
-Before a public push, also run:
+To audit every ref reachable in the local clone, run:
 
 ```sh
 scripts/public-release-check --history
 ```
+
+Before a public push, prove the exact commit range selected for publication:
+
+```sh
+scripts/public-release-check --publication-range \
+  "$(git rev-parse --verify --end-of-options 'origin/main^{commit}')" \
+  "$(git rev-parse --verify --end-of-options 'HEAD^{commit}')"
+```
+
+The range must be non-empty and `origin/main` must be an ancestor of `HEAD`.
+This target-scoped proof deliberately ignores the checked-out tree, index and
+unrelated private refs. It applies the complete public-tree policy to the
+selected `HEAD`, then scans every selected commit's tree paths, content, full
+message and author email for forbidden paths, home paths and secret patterns.
+Both evidence modes bind Git to the repository discovered from this script's
+root under a closed child environment. They ignore replacement objects in any
+namespace and inherited Git directory, index, config, graft, shallow and object
+directory overrides; reject native graft or shallow state; and traverse stored
+commit parent headers with raw object reads instead of virtualized revision
+walks. Every consumed commit, annotated tag, tree and blob is rehashed from its
+canonical bytes using the repository's SHA-1 or SHA-256 storage format; paths
+and modes come from those same verified tree bytes. Evidence commands disable
+repository fsmonitor execution and optional index locking. Repository-native
+common directories, linked worktrees and object alternates remain supported.
+The default no-flag mode is unchanged and keeps checking the checkout/index.
+`--history` reads the native index through the hardened endpoint, applies the
+complete public-tree policy to verified raw `HEAD`, and adds every raw commit
+reachable from the bound local refs.
 
 The first public release must use a fresh root commit. Never push private
 pre-publication refs merely because the current tree is clean.

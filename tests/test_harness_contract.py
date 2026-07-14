@@ -140,6 +140,24 @@ def test_default_agent_run_directory_is_ignored_in_the_harness_repo():
     assert ".agent-run/" in (ROOT / ".gitignore").read_text().splitlines()
 
 
+def test_private_receipts_project_durable_public_evidence_without_being_tracked():
+    # The comprehensive-review programme restated this doctrine in its KICKOFF and
+    # CHAIR-CHARTER. That programme is superseded and deleted (701d663); its durable
+    # owner is the run contract, which is what this gate now binds.
+    run_contract = (
+        ROOT / "skills" / "implement" / "references" / "run-contract.md"
+    ).read_text()
+    maintaining = (ROOT / "MAINTAINING.md").read_text()
+
+    for text in (run_contract,):
+        assert "validator-readable" in text
+        assert "force-track" in text
+        assert "tested-tree facts" in text
+    assert "scripts/public-release-check --publication-range" in maintaining
+    assert "origin/main^{commit}" in maintaining
+    assert "HEAD^{commit}" in maintaining
+
+
 def test_context_hygiene_is_owned_by_session_and_delivery_checkpoints():
     harness = " ".join((ROOT / "HARNESS.md").read_text().split())
     implementation = (ROOT / "skills" / "implement" / "references" / "run-contract.md").read_text()

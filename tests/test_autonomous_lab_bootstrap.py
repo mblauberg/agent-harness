@@ -1,9 +1,61 @@
-from pathlib import Path
+import re
 import subprocess
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TEMPLATE = ROOT / "skills" / "autonomous-lab" / "templates" / "README.template.md"
 BOOTSTRAP = ROOT / "skills" / "autonomous-lab" / "scripts" / "bootstrap-lab.sh"
+HOME_PATH = re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+/")
+
+
+def assert_portable_loop_prompt(text: str) -> None:
+    assert "{{LAB_DIR}}" not in text
+    assert "this lab root" in text
+    assert "Read OPERATING_MANUAL.md IN FULL first" in text
+    assert HOME_PATH.search(text) is None
+
+
+def inline_readme(script: str) -> str:
+    start = script.index("gen_readme() {")
+    end = script.index("# install each memory file", start)
+    return script[start:end]
+
+
+def test_readme_sources_use_a_lab_root_relative_loop_prompt():
+    assert_portable_loop_prompt(TEMPLATE.read_text())
+    assert_portable_loop_prompt(inline_readme(BOOTSTRAP.read_text()))
+
+
+def test_bootstrap_generates_a_machine_portable_readme(tmp_path):
+    lab = tmp_path / "portable-lab"
+    lab.mkdir()
+    (lab / "GOAL.md").write_text(
+        """# Test goal
+
+```config-knobs
+DOMAIN = Portability test
+MISSION = Prove portable bootstrap output
+LOCKED_CONSTRAINTS = no machine paths
+HARD_GATES = deterministic tests
+ESCALATION_GATES = none
+BUILD_CEILING = scaffold only
+```
+"""
+    )
+    result = subprocess.run(
+        [str(BOOTSTRAP), "--dir", str(lab), "--domain", "Portability test"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    readme = (lab / "README.md").read_text()
+    assert str(lab) not in readme
+    assert_portable_loop_prompt(readme)
 
 
 def test_bootstrap_creates_a_resumable_incomplete_lab_without_self_wake_loop(tmp_path):
@@ -41,6 +93,7 @@ def test_bootstrap_creates_a_resumable_incomplete_lab_without_self_wake_loop(tmp
     assert "non-zero" in readme
     assert "never self-halt" not in readme
     assert "while STATUS != STOP" not in readme
+    assert str(lab) not in readme
     queue = (lab / "DECISION_QUEUE.md").read_text()
     assert queue.count("| Item | Status | Depends on | Scope / next evidence |") == 2
     state = (lab / "STATE.md").read_text()

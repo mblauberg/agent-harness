@@ -24,5 +24,14 @@ Validate from the project root:
   .agent-run/<id>/RUN.json --workspace-root "$PWD" --verify-hashes
 ```
 
+## Receipt portability
+
+The exact `.agent-run/<id>/` receipt and its raw operational artifacts stay
+local, ignored and validator-readable. Never force-track them, even when a
+programme requires per-lane receipts. Project the durable tested-tree facts,
+review verdicts, artifact digests and pending gates into tracked project docs,
+fixtures and the PR evidence index. That curated projection is public evidence;
+it does not replace or weaken validation of the private canonical receipt.
+
 `awaiting_acceptance` is machine-ready, not complete. Human acceptance and any
 production promotion remain separate gates.

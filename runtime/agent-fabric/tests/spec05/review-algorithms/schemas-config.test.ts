@@ -34,7 +34,7 @@ describe("Spec 05 review schemas and checked-in catalogues", () => {
     expect(validate(crossedRisk)).toBe(false);
   });
 
-  it("catalogues every one of the 45 binding Spec 05 acceptance IDs exactly once", () => {
+  it("catalogues every Spec 05 v1.14 acceptance ID under the D-021 council gates", () => {
     const ajv = new Ajv2020({ allErrors: true, strict: true });
     const validate = ajv.compile(read("runtime/agent-fabric/schemas/spec05-delivery-requirements.v1.schema.json"));
     const catalogue = read("config/spec05-delivery-requirements.v1.json");
@@ -44,6 +44,12 @@ describe("Spec 05 review schemas and checked-in catalogues", () => {
     const registeredSelectors = new Map(selectorRegistry.selectors.map((selector: any) => [selector.selectorId, selector]));
     const registeredSources = new Map(selectorRegistry.sources.map((source: any) => [source.sourceRef, source]));
     expect(registeredSelectors.size).toBe(selectorRegistry.selectors.length);
+    expect(selectorRegistry.sources).toEqual([{
+      sourceRef: "spec05-project-fabric-console-v1.14",
+      sourceRole: "spec",
+      artifactRef: "docs/specs/05-project-fabric-console.md",
+      version: "1.14",
+    }]);
     expect(validate(catalogue), JSON.stringify(validate.errors)).toBe(true);
     expect(catalogue.entries.map((entry: any) => entry.requirementId)).toEqual(
       Array.from({ length: 45 }, (_, index) => `SPEC05-AC-${String(index + 1).padStart(3, "0")}`),
@@ -57,7 +63,7 @@ describe("Spec 05 review schemas and checked-in catalogues", () => {
     expect(finalReview.evidenceSelectors).toEqual([{
       role: "post-review-acceptance",
       registryKind: "post-review-acceptance-decision.v1",
-      selectorId: "spec05-post-review-acceptance-four-family-final-review-v1",
+      selectorId: "spec05-post-review-council-four-family-adjudication-v1",
       cardinality: "complete-nonempty-current-set",
       requiredStatus: "approved",
     }]);
@@ -81,7 +87,7 @@ describe("Spec 05 review schemas and checked-in catalogues", () => {
     const expectedProofs = [
       ["SPEC05-AC-001", "console-protocol-inside-outside-herdr", "agent-fabric-console"],
       ["SPEC05-AC-002", "console-restart-work-noninterference", "agent-fabric-console"],
-      ["SPEC05-AC-003", "timed-console-orientation", "human-acceptance"],
+      ["SPEC05-AC-003", "timed-console-orientation", "llm-council"],
       ["SPEC05-AC-004", "consequential-gate-projection-latency", "agent-fabric-runtime-console"],
       ["SPEC05-AC-005", "authenticated-gate-input-and-confirmation", "agent-fabric-runtime-console"],
       ["SPEC05-AC-006", "routine-vs-substantial-session-escalation", "agent-fabric-runtime"],
@@ -99,7 +105,7 @@ describe("Spec 05 review schemas and checked-in catalogues", () => {
       ["SPEC05-AC-018", "daemon-start-attach-project-concurrency", "agent-fabric-runtime"],
       ["SPEC05-AC-019", "control-lifecycle-restart-reconciliation", "agent-fabric-runtime"],
       ["SPEC05-AC-020", "notification-dedup-delivery-and-focus", "agent-fabric-runtime-console"],
-      ["SPEC05-AC-021", "timed-keyboard-mouse-resize-usability", "human-acceptance"],
+      ["SPEC05-AC-021", "timed-keyboard-mouse-resize-usability", "llm-council"],
       ["SPEC05-AC-022", "project-session-lifecycle-and-closure", "agent-fabric-runtime"],
       ["SPEC05-AC-023", "promotion-authority-and-artifact-binding", "agent-fabric-runtime"],
       ["SPEC05-AC-024", "lifecycle-skill-trigger-boundary-portability", "skill-orchestration-evaluation"],
@@ -111,7 +117,7 @@ describe("Spec 05 review schemas and checked-in catalogues", () => {
       ["SPEC05-AC-030", "scoping-intake-restart-and-compaction", "agent-fabric-runtime-console"],
       ["SPEC05-AC-031", "harness-pairing-single-chair-stage-owner", "harness-governance"],
       ["SPEC05-AC-032", "project-budget-atomicity-and-reconciliation", "agent-fabric-runtime-console"],
-      ["SPEC05-AC-033", "current-four-family-clean-review", "review-completion-gate"],
+      ["SPEC05-AC-033", "current-four-family-clean-review", "llm-council"],
       ["SPEC05-AC-034", "evidence-content-pagination-and-acceptance-safety", "agent-fabric-runtime-console"],
       ["SPEC05-AC-035", "project-multi-session-selection-and-projection", "agent-fabric-runtime-console"],
       ["SPEC05-AC-036", "review-routing-replay-singleflight-admission", "agent-fabric-runtime"],
@@ -131,7 +137,11 @@ describe("Spec 05 review schemas and checked-in catalogues", () => {
       expect(registrations.map((selector: any) => [selector.proofDomain, selector.owner]), requirementId)
         .toEqual([[proofDomain, owner]]);
     }
-    expect((registeredSelectors.get("spec05-human-gate-console-usability-resize-v1") as any).state).toBe("human-gate");
+    expect((registeredSelectors.get("spec05-review-gate-console-10s-orientation-v1") as any).state).toBe("gate-pending");
+    expect((registeredSelectors.get("spec05-review-gate-console-usability-resize-v1") as any).state).toBe("gate-pending");
+    expect(selectorRegistry.selectors.some((selector: any) =>
+      selector.owner === "human-acceptance" || selector.state === "human-gate" || selector.selectorId.includes("human-gate"),
+    )).toBe(false);
   });
 
   it("compiles the closed bundle, diff, finding and terminal-result schemas", () => {
