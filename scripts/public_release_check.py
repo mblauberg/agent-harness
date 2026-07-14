@@ -864,19 +864,28 @@ class _CommitObjectConsumer:
 
     def feed(self, raw: memoryview) -> None:
         position = 0
+        continuation_start = 0 if self.continuation else None
         if self.in_headers:
             while position < len(raw):
                 value = raw[position]
                 position += 1
                 if value != ord("\n"):
                     self._feed_header_byte(value)
+                    if self.continuation and continuation_start is None:
+                        continuation_start = position - 1
                     continue
                 if self.line_length == 0:
                     self.in_headers = False
                     self.boundary_seen = True
                     break
+                if continuation_start is not None:
+                    self.scanner.feed(raw[continuation_start:position - 1])
+                    self.scanner.feed(memoryview(b"\n"))
+                    continuation_start = None
                 self._finish_line()
                 self._reset_line()
+        if self.in_headers and continuation_start is not None:
+            self.scanner.feed(raw[continuation_start:position])
         if not self.in_headers and position < len(raw):
             self.scanner.feed(raw[position:])
 
@@ -1036,6 +1045,7 @@ class _TagObjectConsumer:
         if not self.in_headers:
             self.scanner.feed(raw)
             return
+        continuation_start = 0 if self.continuation else None
         for position, value in enumerate(raw):
             if self.raw_previous_lf and value == ord("\n"):
                 self.in_headers = False
@@ -1051,11 +1061,19 @@ class _TagObjectConsumer:
             if value in self._LINE_BREAKS:
                 if self.line_length == 0:
                     raise self._error()
+                if continuation_start is not None:
+                    self.scanner.feed(raw[continuation_start:position])
+                    self.scanner.feed(memoryview(b"\n"))
+                    continuation_start = None
                 self._finish_line()
                 self._reset_line()
                 self.previous_break_was_cr = value == ord("\r")
             else:
                 self._feed_byte(value)
+                if self.continuation and continuation_start is None:
+                    continuation_start = position
+        if continuation_start is not None:
+            self.scanner.feed(raw[continuation_start:])
 
     def finish(self) -> RawTag:
         if not self.boundary_seen or any(
