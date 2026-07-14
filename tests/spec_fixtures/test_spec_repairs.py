@@ -35,7 +35,11 @@ CREATE TABLE lifecycle_receipt_batch_completions(
   primary_custody_effect_digest TEXT,
   primary_loss_effect_role TEXT, primary_loss_effect_digest TEXT,
   primary_retirement_effect_digest TEXT,
-  linked_loss_effect_role TEXT, linked_loss_effect_digest TEXT
+  linked_loss_effect_role TEXT, linked_loss_effect_digest TEXT,
+  primary_fresh_effect_ordinal INTEGER, primary_fresh_effect_role TEXT,
+  primary_fresh_effect_digest TEXT,
+  secondary_fresh_effect_ordinal INTEGER, secondary_fresh_effect_role TEXT,
+  secondary_fresh_effect_digest TEXT
 );
 CREATE TABLE lifecycle_receipt_custody_effects(
   batch_id TEXT, effect_digest TEXT, project_session_id TEXT, run_id TEXT,
@@ -50,6 +54,9 @@ CREATE TABLE lifecycle_receipt_generation_loss_effects(
 );
 CREATE TABLE lifecycle_receipt_recovery_retirement_effects(
   batch_id TEXT, effect_digest TEXT, retirement_id TEXT
+);
+CREATE TABLE lifecycle_receipt_fresh_origin_effects(
+  batch_id TEXT, ordinal INTEGER, role TEXT, effect_digest TEXT
 );
 CREATE TABLE lifecycle_transition_applies(
   apply_id TEXT, apply_digest TEXT, apply_kind TEXT,
@@ -115,6 +122,7 @@ def trigger_database() -> sqlite3.Connection:
         "lifecycle_custody_effect_set_closed",
         "lifecycle_loss_effect_set_closed",
         "lifecycle_retirement_effect_set_closed",
+        "lifecycle_fresh_origin_effect_set_closed",
         "lifecycle_apply_post_state_complete",
     ):
         db.executescript(trigger_sql(SPEC_04, name))
@@ -122,6 +130,697 @@ def trigger_database() -> sqlite3.Connection:
 
 
 class SpecRepairTests(unittest.TestCase):
+    def test_fresh_origin_subject_batch_and_apply_are_receipt_backed(self) -> None:
+        batch = ddl_block(SPEC_04, "lifecycle_receipt_batches")
+        effect = ddl_block(
+            SPEC_04, "lifecycle_receipt_fresh_origin_effects"
+        )
+        intent = ddl_block(SPEC_04, "lifecycle_receipt_intents")
+        completion = ddl_block(
+            SPEC_04, "lifecycle_receipt_batch_completions"
+        )
+        apply = ddl_block(SPEC_04, "lifecycle_transition_applies")
+
+        self.assertIn("'custody-recovery-retirement','fresh-origin'", batch)
+        self.assertIn(
+            "('none','fresh-origin','review-adoption-decision')", batch
+        )
+        self.assertIn(
+            "planned_apply_kind='terminal-fresh'", batch
+        )
+        self.assertIn(
+            "secondary_intent_kind='fresh-origin'", batch
+        )
+        self.assertIn(
+            "transition_kind='fresh-origin' AND planned_apply_kind='fresh'",
+            batch,
+        )
+        self.assertIn(
+            "transition_kind='fresh-origin' AND ordinal=1 AND role='primary'",
+            effect,
+        )
+        self.assertIn(
+            "transition_kind='custody-terminal' AND ordinal=2 AND role='secondary'",
+            effect,
+        )
+        self.assertIn("fresh_origin_effect_digest", intent)
+        self.assertIn("secondary_fresh_effect_digest", completion)
+        fresh_arm = apply[apply.index("(apply_kind='fresh'") :]
+        self.assertIn("batch_transition_kind='fresh-origin'", fresh_arm)
+        for receipt_field in (
+            "receipt_batch_id IS NOT NULL",
+            "batch_completion_digest IS NOT NULL",
+            "ordered_authority_receipt_set_digest IS NOT NULL",
+            "verified_scope_checkpoint_digest IS NOT NULL",
+        ):
+            self.assertIn(receipt_field, fresh_arm)
+
+        normalized = " ".join(SPEC_01.split())
+        self.assertIn(
+            "Every fresh-created custody is authenticated by exactly one "
+            "`fresh-origin` subject before its apply.",
+            normalized,
+        )
+        self.assertNotIn("the fresh arm has no receipt-derived values", SPEC_01)
+
+    def test_scope_discovery_hydrates_authenticated_zero_receipt_members(self) -> None:
+        outbox = ddl_block(SPEC_04, "lifecycle_scope_admission_outbox")
+        resolution = ddl_block(
+            SPEC_04, "lifecycle_scope_admission_resolutions"
+        )
+        member = ddl_block(
+            SPEC_04, "lifecycle_receipt_namespace_members"
+        )
+
+        self.assertIn("scope_digest UNIQUE", outbox)
+        self.assertIn("initial_receipt_count CHECK(initial_receipt_count=0)", resolution)
+        self.assertIn("namespace_checkpoint_digest NOT NULL", resolution)
+        self.assertIn(
+            "initial_head_receipt_digest CHECK(initial_head_receipt_digest IS NULL)",
+            resolution,
+        )
+        self.assertIn("CHECK(receipt_count >= 0)", member)
+        self.assertIn(
+            "CHECK((receipt_count=0)=(head_receipt_digest IS NULL))", member
+        )
+        self.assertIn(
+            "CREATE TRIGGER lifecycle_scope_admission_outbox_no_update",
+            SPEC_04,
+        )
+        self.assertIn(
+            "CREATE TRIGGER lifecycle_scope_admission_outbox_no_delete",
+            SPEC_04,
+        )
+        for trigger in (
+            "lifecycle_scope_admission_resolution_requires_initial_head",
+            "lifecycle_scope_admission_resolution_requires_complete_namespace",
+            "lifecycle_scope_admission_resolution_no_update",
+            "lifecycle_scope_admission_resolution_no_delete",
+            "lifecycle_receipt_namespace_checkpoint_no_update",
+            "lifecycle_receipt_namespace_checkpoint_no_delete",
+            "lifecycle_receipt_namespace_member_no_update",
+            "lifecycle_receipt_namespace_member_no_delete",
+        ):
+            self.assertIn(f"CREATE TRIGGER {trigger}", SPEC_04)
+        normalized = " ".join(SPEC_01.split())
+        self.assertIn(
+            "The namespace checkpoint covers every externally admitted "
+            "authority scope in the project, including a scope with zero "
+            "lifecycle receipts.",
+            normalized,
+        )
+        self.assertIn(
+            "The local finalization transaction contains exactly `5 + N` "
+            "writes for a namespace checkpoint with `N` complete ordered members",
+            normalized,
+        )
+        self.assertIn("all `N` exact namespace members", normalized)
+
+    def test_fresh_origin_effect_ddl_accepts_exact_and_rejects_crossed_arm(self) -> None:
+        self.assertIn(
+            "CREATE TRIGGER lifecycle_fresh_origin_effect_requires_exact_handoff",
+            SPEC_04,
+        )
+        db = sqlite3.connect(":memory:", isolation_level=None)
+        db.execute("PRAGMA foreign_keys=ON")
+        db.executescript(
+            """
+            CREATE TABLE lifecycle_receipt_batches(
+              batch_id TEXT, transition_kind TEXT, receipt_intent_count INTEGER,
+              secondary_intent_kind TEXT, project_session_id TEXT,
+              run_id TEXT, agent_id TEXT,
+              UNIQUE(batch_id,transition_kind,receipt_intent_count),
+              UNIQUE(batch_id,transition_kind,receipt_intent_count,
+                secondary_intent_kind),
+              UNIQUE(batch_id,project_session_id,run_id,agent_id)
+            );
+            CREATE TABLE lifecycle_fresh_recovery_handoffs(
+              handoff_id TEXT, handoff_digest TEXT, planned_apply_id TEXT,
+              project_session_id TEXT, run_id TEXT, agent_id TEXT,
+              source_mode TEXT, recovery_source_kind TEXT,
+              old_custody_id TEXT, old_custody_revision INTEGER,
+              generation_loss_id TEXT, generation_loss_revision INTEGER,
+              recovery_source_ref_digest TEXT, source_journal_digest TEXT,
+              admission_digest TEXT, fresh_apply_plan_digest TEXT,
+              new_custody_id TEXT, new_custody_semantic_digest TEXT,
+              new_custody_source_ref_digest TEXT,
+              affected_generation_loss_id TEXT,
+              affected_generation_loss_before_revision INTEGER,
+              affected_generation_loss_before_source_ref_digest TEXT,
+              affected_generation_loss_before_journal_digest TEXT,
+              affected_generation_loss_after_revision INTEGER,
+              affected_generation_loss_after_semantic_digest TEXT,
+              affected_generation_loss_after_source_ref_digest TEXT,
+              affected_generation_loss_after_key TEXT,
+              UNIQUE(handoff_id,handoff_digest,planned_apply_id,
+                project_session_id,run_id,agent_id,source_mode,
+                recovery_source_kind,old_custody_id,old_custody_revision,
+                generation_loss_id,generation_loss_revision,
+                recovery_source_ref_digest,source_journal_digest,
+                admission_digest,fresh_apply_plan_digest,new_custody_id,
+                new_custody_semantic_digest,new_custody_source_ref_digest,
+                affected_generation_loss_id,
+                affected_generation_loss_before_revision,
+                affected_generation_loss_before_source_ref_digest,
+                affected_generation_loss_before_journal_digest,
+                affected_generation_loss_after_revision,
+                affected_generation_loss_after_semantic_digest,
+                affected_generation_loss_after_source_ref_digest,
+                affected_generation_loss_after_key)
+            );
+            CREATE TABLE lifecycle_receipt_custody_effects(
+              batch_id TEXT,effect_digest TEXT,project_session_id TEXT,
+              run_id TEXT,agent_id TEXT,custody_id TEXT,final_revision INTEGER,
+              UNIQUE(batch_id,effect_digest,project_session_id,run_id,agent_id,
+                custody_id,final_revision)
+            );
+            CREATE TABLE lifecycle_receipt_generation_loss_effects(
+              batch_id TEXT,role TEXT,effect_digest TEXT,project_session_id TEXT,
+              run_id TEXT,agent_id TEXT,generation_loss_id TEXT,
+              final_revision INTEGER,
+              UNIQUE(batch_id,role,effect_digest,project_session_id,run_id,
+                agent_id,generation_loss_id,final_revision)
+            );
+            CREATE TABLE lifecycle_receipt_recovery_retirement_effects(
+              batch_id TEXT,effect_digest TEXT,project_session_id TEXT,
+              run_id TEXT,agent_id TEXT,retirement_id TEXT,
+              retirement_revision INTEGER,
+              UNIQUE(batch_id,effect_digest,project_session_id,run_id,agent_id,
+                retirement_id,retirement_revision)
+            );
+            """
+        )
+        db.execute(
+            "CREATE TABLE "
+            + ddl_block(SPEC_04, "lifecycle_receipt_fresh_origin_effects")
+        )
+        db.executescript(
+            trigger_sql(
+                SPEC_04, "lifecycle_fresh_origin_effect_requires_exact_handoff"
+            )
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_batches VALUES(?,?,?,?,?,?,?)",
+            ("batch", "fresh-origin", 1, "none", "session", "run", "agent"),
+        )
+        handoff = (
+            "handoff", "handoff-digest", "apply", "session", "run", "agent",
+            "reuse-final-custody", "custody", "old", 7, None, None,
+            "source-ref", "source-journal", "admission", "plan", "new",
+            "new-semantic", "new-source", None, None, None, None, None, None,
+            None, "none",
+        )
+        db.execute(
+            "INSERT INTO lifecycle_fresh_recovery_handoffs VALUES("
+            + ",".join("?" for _ in handoff)
+            + ")",
+            handoff,
+        )
+        columns = (
+            "batch_id,ordinal,role,transition_kind,batch_intent_count,"
+            "batch_secondary_intent_kind,planned_apply_id,project_session_id,"
+            "run_id,agent_id,handoff_id,handoff_digest,source_mode,"
+            "recovery_source_kind,recovery_from_custody_id,"
+            "recovery_from_custody_revision,recovery_from_generation_loss_id,"
+            "recovery_from_generation_loss_revision,recovery_source_ref_digest,"
+            "source_journal_digest,admission_digest,fresh_apply_plan_digest,"
+            "new_custody_id,new_custody_revision,new_custody_semantic_digest,"
+            "new_custody_source_ref_digest,affected_generation_loss_id,"
+            "affected_generation_loss_before_revision,"
+            "affected_generation_loss_before_source_ref_digest,"
+            "affected_generation_loss_before_journal_digest,"
+            "affected_generation_loss_after_revision,"
+            "affected_generation_loss_after_semantic_digest,"
+            "affected_generation_loss_after_source_ref_digest,"
+            "affected_generation_loss_after_key,effect_digest"
+        )
+        values = (
+            "batch", 1, "primary", "fresh-origin", 1, "none", "apply",
+            "session", "run", "agent", "handoff", "handoff-digest",
+            "reuse-final-custody", "custody", "old", 7, None, None,
+            "source-ref", "source-journal", "admission", "plan", "new", 1,
+            "new-semantic", "new-source", None, None, None, None, None, None,
+            None, "none", "effect",
+        )
+        statement = (
+            f"INSERT INTO lifecycle_receipt_fresh_origin_effects({columns}) "
+            f"VALUES({','.join('?' for _ in values)})"
+        )
+        db.execute(statement, values)
+        db.execute(
+            "CREATE TABLE " + ddl_block(SPEC_04, "lifecycle_receipt_intents")
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_intents("
+            "batch_id,ordinal,batch_transition_kind,batch_intent_count,"
+            "batch_secondary_intent_kind,kind,project_session_id,run_id,"
+            "agent_id,subject_owner_kind,subject_owner_id,"
+            "subject_owner_revision,fresh_origin_effect_digest,subject_json,"
+            "subject_digest,intent_digest,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("batch", 1, "fresh-origin", 1, "none", "fresh-origin", "session",
+             "run", "agent", "custody", "new", 1, "effect", "{}", "subject",
+             "intent", "created-at"),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_batches VALUES(?,?,?,?,?,?,?)",
+            ("batch-terminal", "custody-terminal", 2, "fresh-origin",
+             "session-terminal", "run-terminal", "agent-terminal"),
+        )
+        terminal_handoff = (
+            "handoff-terminal", "handoff-digest-terminal", "apply-terminal",
+            "session-terminal", "run-terminal", "agent-terminal",
+            "terminalize-nonfinal-custody", "custody", "old-terminal", 1,
+            None, None, "source-ref-terminal", "source-journal-terminal",
+            "admission-terminal", "plan-terminal", "new-terminal",
+            "new-semantic-terminal", "new-source-terminal", None, None, None,
+            None, None, None, None, "none",
+        )
+        db.execute(
+            "INSERT INTO lifecycle_fresh_recovery_handoffs VALUES("
+            + ",".join("?" for _ in terminal_handoff)
+            + ")",
+            terminal_handoff,
+        )
+        terminal_values = (
+            "batch-terminal", 2, "secondary", "custody-terminal", 2,
+            "fresh-origin", "apply-terminal", "session-terminal",
+            "run-terminal", "agent-terminal", "handoff-terminal",
+            "handoff-digest-terminal", "terminalize-nonfinal-custody",
+            "custody", "old-terminal", 1, None, None,
+            "source-ref-terminal", "source-journal-terminal",
+            "admission-terminal", "plan-terminal", "new-terminal", 1,
+            "new-semantic-terminal", "new-source-terminal", None, None, None,
+            None, None, None, None, "none", "effect-terminal",
+        )
+        db.execute(statement, terminal_values)
+        db.execute(
+            "INSERT INTO lifecycle_receipt_intents("
+            "batch_id,ordinal,batch_transition_kind,batch_intent_count,"
+            "batch_secondary_intent_kind,kind,project_session_id,run_id,"
+            "agent_id,subject_owner_kind,subject_owner_id,"
+            "subject_owner_revision,fresh_origin_effect_digest,subject_json,"
+            "subject_digest,intent_digest,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("batch-terminal", 2, "custody-terminal", 2, "fresh-origin",
+             "fresh-origin", "session-terminal", "run-terminal",
+             "agent-terminal", "custody", "new-terminal", 1,
+             "effect-terminal", "{}", "subject-terminal", "intent-terminal",
+             "created-at"),
+        )
+        additional_arms = (
+            (
+                ("batch-open", "fresh-origin", 1, "none", "session-open",
+                 "run-open", "agent-open"),
+                ("handoff-open", "handoff-digest-open", "apply-open",
+                 "session-open", "run-open", "agent-open",
+                 "open-generation-loss", "generation-loss", None, None,
+                 "loss-open", 1, "loss-before-source-open",
+                 "loss-before-journal-open", "admission-open", "plan-open",
+                 "new-open", "new-semantic-open", "new-source-open",
+                 "loss-open", 1, "loss-before-source-open",
+                 "loss-before-journal-open", 2, "loss-after-semantic-open",
+                 "loss-after-source-open", "loss-after-source-open"),
+                ("batch-open", 1, "primary", "fresh-origin", 1, "none",
+                 "apply-open", "session-open", "run-open", "agent-open",
+                 "handoff-open", "handoff-digest-open",
+                 "open-generation-loss", "generation-loss", None, None,
+                 "loss-open", 1, "loss-before-source-open",
+                 "loss-before-journal-open", "admission-open", "plan-open",
+                 "new-open", 1, "new-semantic-open", "new-source-open",
+                 "loss-open", 1, "loss-before-source-open",
+                 "loss-before-journal-open", 2, "loss-after-semantic-open",
+                 "loss-after-source-open", "loss-after-source-open",
+                 "effect-open"),
+            ),
+            (
+                ("batch-terminal-linked", "custody-terminal", 2,
+                 "fresh-origin", "session-terminal-linked",
+                 "run-terminal-linked", "agent-terminal-linked"),
+                ("handoff-terminal-linked", "handoff-digest-terminal-linked",
+                 "apply-terminal-linked", "session-terminal-linked",
+                 "run-terminal-linked", "agent-terminal-linked",
+                 "terminalize-nonfinal-custody", "custody",
+                 "old-terminal-linked", 1, None, None,
+                 "source-ref-terminal-linked", "source-journal-terminal-linked",
+                 "admission-terminal-linked", "plan-terminal-linked",
+                 "new-terminal-linked", "new-semantic-terminal-linked",
+                 "new-source-terminal-linked", "loss-terminal-linked", 1,
+                 "loss-before-source-terminal-linked",
+                 "loss-before-journal-terminal-linked", 2,
+                 "loss-after-semantic-terminal-linked",
+                 "loss-after-source-terminal-linked",
+                 "loss-after-source-terminal-linked"),
+                ("batch-terminal-linked", 2, "secondary", "custody-terminal",
+                 2, "fresh-origin", "apply-terminal-linked",
+                 "session-terminal-linked", "run-terminal-linked",
+                 "agent-terminal-linked", "handoff-terminal-linked",
+                 "handoff-digest-terminal-linked",
+                 "terminalize-nonfinal-custody", "custody",
+                 "old-terminal-linked", 1, None, None,
+                 "source-ref-terminal-linked", "source-journal-terminal-linked",
+                 "admission-terminal-linked", "plan-terminal-linked",
+                 "new-terminal-linked", 1, "new-semantic-terminal-linked",
+                 "new-source-terminal-linked", "loss-terminal-linked", 1,
+                 "loss-before-source-terminal-linked",
+                 "loss-before-journal-terminal-linked", 2,
+                 "loss-after-semantic-terminal-linked",
+                 "loss-after-source-terminal-linked",
+                 "loss-after-source-terminal-linked", "effect-terminal-linked"),
+            ),
+        )
+        for batch_row, handoff_row, effect_row in additional_arms:
+            db.execute(
+                "INSERT INTO lifecycle_receipt_batches VALUES(?,?,?,?,?,?,?)",
+                batch_row,
+            )
+            db.execute(
+                "INSERT INTO lifecycle_fresh_recovery_handoffs VALUES("
+                + ",".join("?" for _ in handoff_row)
+                + ")",
+                handoff_row,
+            )
+            db.execute(statement, effect_row)
+        crossed = list(values)
+        crossed[12] = "open-generation-loss"
+        crossed[-1] = "effect-crossed"
+        crossed_effects = (
+            ("source-mode", crossed),
+            ("handoff-digest", [
+                *values[:11], "crossed-handoff-digest", *values[12:-1],
+                "effect-crossed-digest",
+            ]),
+            ("admission", [
+                *values[:20], "crossed-admission", *values[21:-1],
+                "effect-crossed-admission",
+            ]),
+            ("source-ref", [
+                *values[:18], "crossed-source-ref", *values[19:-1],
+                "effect-crossed-source-ref",
+            ]),
+            ("source-journal", [
+                *values[:19], "crossed-source-journal", *values[20:-1],
+                "effect-crossed-source-journal",
+            ]),
+            ("new-custody-source", [
+                *values[:25], "crossed-new-custody-source", *values[26:-1],
+                "effect-crossed-new-custody-source",
+            ]),
+            ("custody-loss-pair", [
+                *values[:16], "crossed-loss", 1, *values[18:-1],
+                "effect-crossed-pair",
+            ]),
+        )
+        for label, crossed_values in crossed_effects:
+            with self.subTest(crossed_handoff_field=label):
+                with self.assertRaisesRegex(
+                    sqlite3.IntegrityError,
+                    "lifecycle-fresh-origin-effect-handoff-missing-or-crossed",
+                ):
+                    db.execute(statement, crossed_values)
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute(
+                "INSERT INTO lifecycle_receipt_intents("
+                "batch_id,ordinal,batch_transition_kind,batch_intent_count,"
+                "batch_secondary_intent_kind,kind,project_session_id,run_id,"
+                "agent_id,subject_owner_kind,subject_owner_id,"
+                "subject_owner_revision,fresh_origin_effect_digest,subject_json,"
+                "subject_digest,intent_digest,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("batch-terminal", 2, "custody-terminal", 2, "fresh-origin",
+                 "fresh-origin", "session-terminal", "run-terminal",
+                 "agent-terminal", "custody", "new-terminal", 1, "effect",
+                 "{}", "subject-crossed", "intent-crossed", "created-at"),
+            )
+        self.assertEqual([], db.execute("PRAGMA foreign_key_check").fetchall())
+
+    def test_scope_admission_ddl_accepts_zero_member_and_rejects_near_valid(self) -> None:
+        db = sqlite3.connect(":memory:", isolation_level=None)
+        db.execute("PRAGMA foreign_keys=ON")
+        for table in (
+            "lifecycle_scope_admission_outbox",
+            "lifecycle_admitted_run_scopes",
+            "lifecycle_receipt_scope_checkpoints",
+            "lifecycle_receipt_namespace_checkpoints",
+            "lifecycle_receipt_namespace_members",
+            "lifecycle_scope_admission_resolutions",
+            "lifecycle_receipt_scope_heads",
+        ):
+            db.execute("CREATE TABLE " + ddl_block(SPEC_04, table))
+        for trigger in (
+            "lifecycle_scope_admission_resolution_requires_complete_namespace",
+            "lifecycle_scope_admission_outbox_no_update",
+            "lifecycle_scope_admission_outbox_no_delete",
+            "lifecycle_scope_admission_resolution_requires_initial_head",
+            "lifecycle_scope_admission_resolution_no_update",
+            "lifecycle_scope_admission_resolution_no_delete",
+            "lifecycle_receipt_namespace_checkpoint_no_update",
+            "lifecycle_receipt_namespace_checkpoint_no_delete",
+            "lifecycle_receipt_namespace_member_no_update",
+            "lifecycle_receipt_namespace_member_no_delete",
+        ):
+            db.executescript(trigger_sql(SPEC_04, trigger))
+
+        db.execute(
+            "INSERT INTO lifecycle_scope_admission_outbox("
+            "admission_request_id,project_id,project_session_id,run_id,"
+            "authority_id,admission_digest,admitted_at,scope_json,scope_digest,"
+            "created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("request", "project", "session", "run", "authority", "admission",
+             "admitted-at", "{}", "scope", "created-at"),
+        )
+        db.execute("BEGIN")
+        db.execute(
+            "INSERT INTO lifecycle_admitted_run_scopes VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("project", "session", "run", "authority", "request", "admission",
+             "scope", "scope-checkpoint", "resolution", "admitted-at"),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_scope_checkpoints("
+            "project_session_id,run_id,authority_id,receipt_count,"
+            "head_authority_sequence,head_receipt_digest,ordered_record_set_digest,"
+            "checkpoint_json,checkpoint_digest,attestation,verified_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            ("session", "run", "authority", 0, 0, None, "empty-set", "{}",
+             "scope-checkpoint", "attestation", "verified-at"),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_scope_heads VALUES(?,?,?,?,?,?,?,?,?)",
+            ("session", "run", "authority", 0, 0, None, "empty-set",
+             "scope-checkpoint", 1),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_namespace_checkpoints VALUES(?,?,?,?,?,?,?,?)",
+            ("project", "authority", 1, "scope-head-set", "{}",
+             "namespace-checkpoint", "attestation", "verified-at"),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_namespace_members VALUES(?,?,?,?,?,?,?,?,?)",
+            ("project", "namespace-checkpoint", 1, "session", "run", "authority",
+             "scope-checkpoint", 0, None),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_scope_admission_resolutions VALUES("
+            + ",".join("?" for _ in range(13))
+            + ")",
+            ("request", "project", "session", "run", "authority", "scope",
+             "scope-checkpoint", 0, None, "namespace-checkpoint", "{}",
+             "resolution", "verified-at"),
+        )
+        db.commit()
+        self.assertEqual([], db.execute("PRAGMA foreign_key_check").fetchall())
+
+        db.execute("BEGIN")
+        db.execute(
+            "INSERT INTO lifecycle_scope_admission_outbox VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("request-gap", "project-gap", "session-gap", "run-gap", "authority",
+             "admission-gap", "admitted-at", "{}", "scope-gap", "created-at"),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_admitted_run_scopes VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("project-gap", "session-gap", "run-gap", "authority", "request-gap",
+             "admission-gap", "scope-gap", "scope-checkpoint-gap", "resolution-gap",
+             "admitted-at"),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_scope_checkpoints VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            ("session-gap", "run-gap", "authority", 0, 0, None, "empty-set-gap",
+             "{}", "scope-checkpoint-gap", "attestation", "verified-at"),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_scope_heads VALUES(?,?,?,?,?,?,?,?,?)",
+            ("session-gap", "run-gap", "authority", 0, 0, None, "empty-set-gap",
+             "scope-checkpoint-gap", 1),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_namespace_checkpoints VALUES(?,?,?,?,?,?,?,?)",
+            ("project-gap", "authority", 2, "scope-head-set-gap", "{}",
+             "namespace-checkpoint-gap", "attestation", "verified-at"),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_namespace_members VALUES(?,?,?,?,?,?,?,?,?)",
+            ("project-gap", "namespace-checkpoint-gap", 1, "session-gap", "run-gap",
+             "authority", "scope-checkpoint-gap", 0, None),
+        )
+        with self.assertRaisesRegex(
+            sqlite3.IntegrityError,
+            "lifecycle-scope-admission-namespace-set-incomplete",
+        ):
+            db.execute(
+                "INSERT INTO lifecycle_scope_admission_resolutions VALUES("
+                + ",".join("?" for _ in range(13)) + ")",
+                ("request-gap", "project-gap", "session-gap", "run-gap", "authority",
+                 "scope-gap", "scope-checkpoint-gap", 0, None,
+                 "namespace-checkpoint-gap", "{}", "resolution-gap", "verified-at"),
+            )
+        db.rollback()
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute(
+                "INSERT INTO lifecycle_receipt_namespace_members VALUES("
+                "?,?,?,?,?,?,?,?,?)",
+                ("project", "namespace-checkpoint", 2, "other-session",
+                 "other-run", "authority", "scope-checkpoint", 0,
+                 "impossible-head"),
+            )
+        with self.assertRaisesRegex(
+            sqlite3.IntegrityError, "lifecycle-scope-admission-outbox-immutable"
+        ):
+            db.execute(
+                "UPDATE lifecycle_scope_admission_outbox SET created_at=created_at"
+            )
+        for statement in (
+            "UPDATE lifecycle_scope_admission_resolutions "
+            "SET verified_at=verified_at",
+            "DELETE FROM lifecycle_scope_admission_resolutions",
+        ):
+            with self.subTest(resolution_mutation=statement.split()[0]):
+                with self.assertRaisesRegex(
+                    sqlite3.IntegrityError,
+                    "lifecycle-scope-admission-resolution-immutable",
+                ):
+                    db.execute(statement)
+        for statement, marker in (
+            (
+                "UPDATE lifecycle_receipt_namespace_checkpoints "
+                "SET verified_at=verified_at",
+                "lifecycle-receipt-namespace-checkpoint-immutable",
+            ),
+            (
+                "DELETE FROM lifecycle_receipt_namespace_checkpoints",
+                "lifecycle-receipt-namespace-checkpoint-immutable",
+            ),
+            (
+                "UPDATE lifecycle_receipt_namespace_members SET ordinal=ordinal",
+                "lifecycle-receipt-namespace-member-immutable",
+            ),
+            (
+                "DELETE FROM lifecycle_receipt_namespace_members",
+                "lifecycle-receipt-namespace-member-immutable",
+            ),
+        ):
+            with self.subTest(namespace_immutability=statement.split()[0:2]):
+                with self.assertRaisesRegex(sqlite3.IntegrityError, marker):
+                    db.execute(statement)
+
+        db.execute(
+            "INSERT INTO lifecycle_scope_admission_outbox("
+            "admission_request_id,project_id,project_session_id,run_id,"
+            "authority_id,admission_digest,admitted_at,scope_json,scope_digest,"
+            "created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("request-missing", "project-missing", "session-missing",
+             "run-missing", "authority", "admission-missing", "admitted-at",
+             "{}", "scope-missing", "created-at"),
+        )
+        db.execute("BEGIN")
+        db.execute(
+            "INSERT INTO lifecycle_admitted_run_scopes VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("project-missing", "session-missing", "run-missing", "authority",
+             "request-missing", "admission-missing", "scope-missing",
+             "scope-checkpoint-missing", "resolution-missing", "admitted-at"),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_scope_checkpoints("
+            "project_session_id,run_id,authority_id,receipt_count,"
+            "head_authority_sequence,head_receipt_digest,ordered_record_set_digest,"
+            "checkpoint_json,checkpoint_digest,attestation,verified_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            ("session-missing", "run-missing", "authority", 0, 0, None,
+             "empty-set-missing", "{}", "scope-checkpoint-missing",
+             "attestation", "verified-at"),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_namespace_checkpoints "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            ("project-missing", "authority", 1, "scope-head-set-missing", "{}",
+             "namespace-checkpoint-missing", "attestation", "verified-at"),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_namespace_members "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            ("project-missing", "namespace-checkpoint-missing", 1,
+             "session-missing", "run-missing", "authority",
+             "scope-checkpoint-missing", 0, None),
+        )
+        db.execute(
+            "INSERT INTO lifecycle_receipt_scope_heads VALUES(?,?,?,?,?,?,?,?,?)",
+            ("session-missing", "run-missing", "authority", 0, 0, None,
+             "empty-set-missing", "scope-checkpoint-missing", 1),
+        )
+        resolution_insert = (
+            "INSERT INTO lifecycle_scope_admission_resolutions VALUES("
+            + ",".join("?" for _ in range(13))
+            + ")"
+        )
+        resolution_values = (
+            "request-missing", "project-missing", "session-missing",
+            "run-missing", "authority", "scope-missing",
+            "scope-checkpoint-missing", 0, None,
+            "namespace-checkpoint-missing", "{}", "resolution-missing",
+            "verified-at",
+        )
+        for namespace_case, namespace_digest in (
+            ("omitted", None),
+            ("crossed", "namespace-checkpoint"),
+        ):
+            values = list(resolution_values)
+            values[9] = namespace_digest
+            with self.subTest(namespace_member=namespace_case):
+                with self.assertRaisesRegex(
+                    sqlite3.IntegrityError,
+                    "lifecycle-scope-admission-namespace-member-"
+                    "missing-or-crossed|NOT NULL",
+                ):
+                    db.execute(resolution_insert, values)
+        self.assertEqual(
+            1,
+            db.execute(
+                "DELETE FROM lifecycle_receipt_scope_heads "
+                "WHERE project_session_id='session-missing' "
+                "AND run_id='run-missing'"
+            ).rowcount,
+        )
+        with self.subTest(initial_head="crossed-only"):
+            with self.assertRaisesRegex(
+                sqlite3.IntegrityError,
+                "lifecycle-scope-admission-initial-head-missing-or-crossed",
+            ):
+                db.execute(resolution_insert, resolution_values)
+        self.assertEqual(
+            1,
+            db.execute(
+                "DELETE FROM lifecycle_receipt_scope_heads "
+                "WHERE project_session_id='session' AND run_id='run'"
+            ).rowcount,
+        )
+        with self.subTest(initial_head="missing"):
+            with self.assertRaisesRegex(
+                sqlite3.IntegrityError,
+                "lifecycle-scope-admission-initial-head-missing-or-crossed",
+            ):
+                db.execute(resolution_insert, resolution_values)
+        db.rollback()
+
     def test_transition_apply_copies_batch_arm_with_nonnull_sentinels(self) -> None:
         batch = ddl_block(SPEC_04, "lifecycle_receipt_batches")
         apply = ddl_block(SPEC_04, "lifecycle_transition_applies")
@@ -148,6 +847,243 @@ class SpecRepairTests(unittest.TestCase):
             "applied_mutation_plan_digest=fresh_apply_plan_digest",
             terminal_fresh,
         )
+
+    def test_exact_batch_and_apply_ddl_accepts_only_complete_fresh_arms(self) -> None:
+        db = sqlite3.connect(":memory:", isolation_level=None)
+        db.execute("PRAGMA foreign_keys=ON")
+        db.executescript(
+            r"""
+            CREATE TABLE lifecycle_review_adoption_reservations(
+              reservation_id, reservation_digest, decision_loss_effect_key,
+              decision_loss_after_id, decision_loss_after_revision,
+              decision_loss_after_semantic_digest,
+              decision_loss_after_source_ref_digest,
+              UNIQUE(reservation_id,reservation_digest,decision_loss_effect_key),
+              UNIQUE(reservation_id,reservation_digest,decision_loss_effect_key,
+                decision_loss_after_id,decision_loss_after_revision,
+                decision_loss_after_semantic_digest,
+                decision_loss_after_source_ref_digest)
+            );
+            CREATE TABLE lifecycle_recovery_retirement_plans(
+              retirement_id, retirement_plan_digest, planned_apply_id,
+              project_session_id, run_id, agent_id, mutation_plan_digest,
+              UNIQUE(retirement_id,retirement_plan_digest,planned_apply_id,
+                project_session_id,run_id,agent_id,mutation_plan_digest)
+            );
+            CREATE TABLE lifecycle_receipt_generation_loss_effects(
+              batch_id, role, effect_digest, project_session_id, run_id,
+              agent_id, generation_loss_id, final_revision,
+              final_semantic_digest, final_source_ref_digest,
+              UNIQUE(batch_id,role,effect_digest,project_session_id,run_id,
+                agent_id,generation_loss_id,final_revision,
+                final_semantic_digest,final_source_ref_digest)
+            );
+            CREATE TABLE lifecycle_fresh_recovery_handoffs(
+              handoff_id, handoff_digest, planned_apply_id, project_session_id,
+              run_id, agent_id, source_mode, recovery_source_kind,
+              old_custody_id, old_custody_revision, generation_loss_id,
+              generation_loss_revision, recovery_source_ref_digest,
+              source_journal_digest, admission_digest, fresh_apply_plan_digest,
+              new_custody_id, new_custody_semantic_digest,
+              new_custody_source_ref_digest, affected_generation_loss_id,
+              affected_generation_loss_before_revision,
+              affected_generation_loss_before_source_ref_digest,
+              affected_generation_loss_before_journal_digest,
+              affected_generation_loss_after_revision,
+              affected_generation_loss_after_semantic_digest,
+              affected_generation_loss_after_source_ref_digest,
+              affected_generation_loss_after_key,
+              UNIQUE(handoff_id,handoff_digest,planned_apply_id,source_mode),
+              UNIQUE(handoff_id,handoff_digest,planned_apply_id,
+                project_session_id,run_id,agent_id,source_mode,
+                recovery_source_kind,old_custody_id,old_custody_revision,
+                generation_loss_id,generation_loss_revision,
+                recovery_source_ref_digest,source_journal_digest,
+                admission_digest,fresh_apply_plan_digest,new_custody_id,
+                new_custody_semantic_digest,new_custody_source_ref_digest,
+                affected_generation_loss_id,
+                affected_generation_loss_before_revision,
+                affected_generation_loss_before_source_ref_digest,
+                affected_generation_loss_before_journal_digest,
+                affected_generation_loss_after_revision,
+                affected_generation_loss_after_semantic_digest,
+                affected_generation_loss_after_source_ref_digest,
+                affected_generation_loss_after_key),
+              UNIQUE(handoff_id,handoff_digest,planned_apply_id,
+                project_session_id,run_id,agent_id,source_mode,new_custody_id,
+                new_custody_semantic_digest,new_custody_source_ref_digest,
+                fresh_apply_plan_digest,affected_generation_loss_after_key),
+              UNIQUE(handoff_id,planned_apply_id,affected_generation_loss_id,
+                affected_generation_loss_after_revision,
+                affected_generation_loss_after_semantic_digest,
+                affected_generation_loss_after_source_ref_digest)
+            );
+            CREATE TABLE lifecycle_receipt_batch_authorizations(
+              batch_id, batch_completion_digest,
+              ordered_authority_receipt_set_digest,
+              verified_scope_checkpoint_digest,
+              UNIQUE(batch_id,batch_completion_digest,
+                ordered_authority_receipt_set_digest,
+                verified_scope_checkpoint_digest)
+            );
+            """
+        )
+        db.execute("CREATE TABLE " + ddl_block(SPEC_04, "lifecycle_receipt_batches"))
+        db.execute("CREATE TABLE " + ddl_block(SPEC_04, "lifecycle_transition_applies"))
+
+        handoff_columns = (
+            "handoff_id,handoff_digest,planned_apply_id,project_session_id,run_id,"
+            "agent_id,source_mode,recovery_source_kind,old_custody_id,"
+            "old_custody_revision,generation_loss_id,generation_loss_revision,"
+            "recovery_source_ref_digest,source_journal_digest,admission_digest,"
+            "fresh_apply_plan_digest,new_custody_id,new_custody_semantic_digest,"
+            "new_custody_source_ref_digest,affected_generation_loss_id,"
+            "affected_generation_loss_before_revision,"
+            "affected_generation_loss_before_source_ref_digest,"
+            "affected_generation_loss_before_journal_digest,"
+            "affected_generation_loss_after_revision,"
+            "affected_generation_loss_after_semantic_digest,"
+            "affected_generation_loss_after_source_ref_digest,"
+            "affected_generation_loss_after_key"
+        )
+
+        def seed_arm(
+            suffix: str, mode: str, *, linked_loss: bool = False
+        ) -> tuple[str, ...]:
+            terminal = mode == "terminalize-nonfinal-custody"
+            open_loss = mode == "open-generation-loss"
+            affected = linked_loss or open_loss
+            handoff_id = f"handoff-{suffix}"
+            handoff_digest = f"handoff-digest-{suffix}"
+            apply_id = f"apply-{suffix}"
+            batch_id = f"batch-{suffix}"
+            fresh_plan = f"fresh-plan-{suffix}"
+            after_source = f"loss-after-source-{suffix}" if affected else None
+            handoff = (
+                handoff_id, handoff_digest, apply_id, f"session-{suffix}",
+                f"run-{suffix}", f"agent-{suffix}", mode,
+                "generation-loss" if open_loss else "custody",
+                None if open_loss else f"old-custody-{suffix}",
+                None if open_loss else 1,
+                f"loss-{suffix}" if open_loss else None,
+                1 if open_loss else None, f"source-ref-{suffix}",
+                f"source-journal-{suffix}", f"admission-{suffix}", fresh_plan,
+                f"new-custody-{suffix}", f"new-semantic-{suffix}",
+                f"new-source-{suffix}", f"loss-{suffix}" if affected else None,
+                1 if affected else None,
+                f"loss-before-source-{suffix}" if affected else None,
+                f"loss-before-journal-{suffix}" if affected else None,
+                2 if affected else None, f"loss-after-semantic-{suffix}"
+                if affected else None, after_source, after_source or "none",
+            )
+            db.execute(
+                f"INSERT INTO lifecycle_fresh_recovery_handoffs({handoff_columns}) "
+                f"VALUES({','.join('?' for _ in handoff)})",
+                handoff,
+            )
+            transition = "custody-terminal" if terminal else "fresh-origin"
+            apply_kind = "terminal-fresh" if terminal else "fresh"
+            mutation_plan = f"terminal-plan-{suffix}" if terminal else fresh_plan
+            db.execute(
+                "INSERT INTO lifecycle_receipt_batches("
+                "batch_id,planned_apply_id,project_session_id,run_id,agent_id,"
+                "transition_kind,planned_apply_kind,effects_set_digest,"
+                "mutation_plan_digest,transition_replay_json,"
+                "transition_replay_digest,ordered_subject_set_digest,"
+                "receipt_intent_count,secondary_intent_kind,"
+                "review_decision_loss_effect_key,fresh_handoff_id,"
+                "fresh_handoff_digest,fresh_handoff_source_mode,"
+                "fresh_handoff_key,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,"
+                "?,?,?,?,?,?,?,?,?)",
+                (batch_id, apply_id, f"session-{suffix}", f"run-{suffix}",
+                 f"agent-{suffix}", transition, apply_kind,
+                 f"effect-set-{suffix}", mutation_plan, "{}",
+                 f"replay-{suffix}", f"subject-set-{suffix}",
+                 2 if terminal else 1, "fresh-origin" if terminal else "none",
+                 "none", handoff_id, handoff_digest, mode, handoff_digest,
+                 "created-at"),
+            )
+            db.execute(
+                "INSERT INTO lifecycle_receipt_batch_authorizations "
+                "VALUES(?,?,?,?)",
+                (batch_id, f"completion-{suffix}", f"receipt-set-{suffix}",
+                 f"scope-checkpoint-{suffix}"),
+            )
+            return (
+                apply_id, apply_kind, transition, batch_id,
+                f"completion-{suffix}", f"replay-{suffix}",
+                f"receipt-set-{suffix}", f"scope-checkpoint-{suffix}",
+                mutation_plan, handoff_id, handoff_digest,
+                handoff_digest,
+                f"session-{suffix}", f"run-{suffix}", f"agent-{suffix}", mode,
+                fresh_plan, f"new-custody-{suffix}", f"new-semantic-{suffix}",
+                f"new-source-{suffix}", f"loss-{suffix}" if affected else None,
+                2 if affected else None,
+                f"loss-after-semantic-{suffix}" if affected else None,
+                after_source, after_source or "none", f"write-set-{suffix}",
+                "{}", f"apply-digest-{suffix}", "applied-at",
+            )
+
+        apply_columns = (
+            "apply_id,apply_kind,batch_transition_kind,receipt_batch_id,"
+            "batch_completion_digest,transition_replay_digest,"
+            "ordered_authority_receipt_set_digest,verified_scope_checkpoint_digest,"
+            "applied_mutation_plan_digest,fresh_handoff_id,fresh_handoff_digest,"
+            "fresh_handoff_key,"
+            "fresh_project_session_id,fresh_run_id,fresh_agent_id,"
+            "fresh_source_mode,fresh_apply_plan_digest,new_custody_id,"
+            "new_custody_semantic_digest,new_custody_source_ref_digest,"
+            "fresh_generation_loss_id,fresh_generation_loss_after_revision,"
+            "fresh_generation_loss_after_semantic_digest,"
+            "fresh_generation_loss_after_source_ref_digest,"
+            "fresh_generation_loss_after_key,local_write_set_digest,apply_json,"
+            "apply_digest,applied_at"
+        )
+        valid = {}
+        for suffix, mode, linked in (
+            ("reuse", "reuse-final-custody", False),
+            ("open", "open-generation-loss", False),
+            ("terminal", "terminalize-nonfinal-custody", False),
+            ("terminal-linked", "terminalize-nonfinal-custody", True),
+        ):
+            values = seed_arm(suffix, mode, linked_loss=linked)
+            valid[suffix] = values
+            db.execute(
+                f"INSERT INTO lifecycle_transition_applies({apply_columns}) "
+                f"VALUES({','.join('?' for _ in values)})",
+                values,
+            )
+
+        self.assertEqual(
+            [("terminal", None), ("terminal-linked", None)],
+            db.execute(
+                "SELECT substr(batch_id,7),review_adoption_reservation_id "
+                "FROM lifecycle_receipt_batches "
+                "WHERE planned_apply_kind='terminal-fresh' ORDER BY batch_id"
+            ).fetchall(),
+        )
+        for suffix, mutation in (
+            ("reuse", {3: None}),
+            ("open", {2: "custody-terminal"}),
+            ("terminal", {9: None, 10: None}),
+            ("terminal-linked", {23: "crossed-loss-after-source"}),
+        ):
+            with self.subTest(near_valid_arm=suffix):
+                values = list(valid[suffix])
+                db.execute(
+                    "DELETE FROM lifecycle_transition_applies WHERE apply_id=?",
+                    (values[0],),
+                )
+                for index, value in mutation.items():
+                    values[index] = value
+                with self.assertRaises(sqlite3.IntegrityError):
+                    db.execute(
+                        f"INSERT INTO lifecycle_transition_applies({apply_columns}) "
+                        f"VALUES({','.join('?' for _ in values)})",
+                        values,
+                    )
+
+        self.assertEqual([], db.execute("PRAGMA foreign_key_check").fetchall())
 
     def test_intents_bind_exact_typed_effect_and_completion_closes_set(self) -> None:
         custody = ddl_block(SPEC_04, "lifecycle_receipt_custody_effects")
@@ -213,6 +1149,17 @@ class SpecRepairTests(unittest.TestCase):
                 "VALUES ('batch-retirement','custody-recovery-retirement',"
                 "'retirement-effect')",
             ),
+            (
+                "fresh-origin",
+                "INSERT INTO lifecycle_receipt_fresh_origin_effects "
+                "(batch_id,ordinal,role,effect_digest) VALUES "
+                "('batch-fresh',1,'primary','fresh-effect')",
+                "INSERT INTO lifecycle_receipt_batch_completions "
+                "(batch_id,transition_kind,primary_fresh_effect_ordinal,"
+                "primary_fresh_effect_role,primary_fresh_effect_digest) "
+                "VALUES ('batch-fresh','fresh-origin',1,'primary',"
+                "'fresh-effect')",
+            ),
         )
         for family, effect, completion in accepted:
             with self.subTest(effect_family=family):
@@ -248,6 +1195,14 @@ class SpecRepairTests(unittest.TestCase):
                 "(batch_id,transition_kind,primary_retirement_effect_digest) "
                 "VALUES ('batch-missing','custody-recovery-retirement',"
                 "'retirement-effect')",
+            ),
+            (
+                "fresh-origin",
+                "INSERT INTO lifecycle_receipt_batch_completions "
+                "(batch_id,transition_kind,primary_fresh_effect_ordinal,"
+                "primary_fresh_effect_role,primary_fresh_effect_digest) "
+                "VALUES ('batch-missing','fresh-origin',1,'primary',"
+                "'fresh-effect')",
             ),
         )
         for name, statement in missing_effects:
@@ -383,11 +1338,7 @@ class SpecRepairTests(unittest.TestCase):
               ('batch-terminal-fresh','custody-terminal',
                'effect-terminal-fresh');
             INSERT INTO lifecycle_receipt_batches VALUES
-              ('batch-terminal-fresh','reservation-terminal-fresh',
-               'reservation-digest-terminal-fresh');
-            INSERT INTO lifecycle_review_authority_bindings VALUES
-              ('batch-terminal-fresh','apply-terminal-fresh',
-               'reservation-digest-terminal-fresh');
+              ('batch-terminal-fresh',NULL,NULL);
             INSERT INTO lifecycle_rotation_custody_revisions VALUES
               ('p','r','a','custody-terminal-fresh-old',2,
                'sem-terminal-fresh-old','src-terminal-fresh-old',
@@ -411,6 +1362,85 @@ class SpecRepairTests(unittest.TestCase):
                'digest-terminal-fresh','custody-terminal-fresh-new',
                NULL,NULL,NULL,NULL);
 
+            INSERT INTO lifecycle_receipt_custody_effects
+              (batch_id,effect_digest,project_session_id,run_id,agent_id,
+               custody_id,final_revision,final_semantic_digest,
+               final_source_ref_digest)
+            VALUES
+              ('batch-terminal-fresh-linked','effect-terminal-fresh-linked',
+               'p','r','a','custody-terminal-fresh-linked-old',2,
+               'sem-terminal-fresh-linked-old',
+               'src-terminal-fresh-linked-old');
+            INSERT INTO lifecycle_receipt_generation_loss_effects
+              (batch_id,role,effect_digest,project_session_id,run_id,agent_id,
+               generation_loss_id,final_revision,final_semantic_digest,
+               final_source_ref_digest)
+            VALUES
+              ('batch-terminal-fresh-linked','linked',
+               'effect-terminal-fresh-linked-loss','p','r','a',
+               'loss-terminal-fresh-linked',2,
+               'sem-terminal-fresh-linked-loss',
+               'src-terminal-fresh-linked-loss');
+            INSERT INTO lifecycle_receipt_batch_completions
+              (batch_id,transition_kind,primary_custody_effect_digest,
+               linked_loss_effect_role,linked_loss_effect_digest)
+            VALUES
+              ('batch-terminal-fresh-linked','custody-terminal',
+               'effect-terminal-fresh-linked','linked',
+               'effect-terminal-fresh-linked-loss');
+            INSERT INTO lifecycle_receipt_batches VALUES
+              ('batch-terminal-fresh-linked',NULL,NULL);
+            INSERT INTO lifecycle_rotation_custody_revisions VALUES
+              ('p','r','a','custody-terminal-fresh-linked-old',2,
+               'sem-terminal-fresh-linked-old',
+               'src-terminal-fresh-linked-old',
+               'journal-terminal-fresh-linked-old',
+               'batch-terminal-fresh-linked','apply-terminal-fresh-linked',
+               'digest-terminal-fresh-linked',NULL,NULL);
+            INSERT INTO lifecycle_rotation_custody_heads VALUES
+              ('p','r','a','custody-terminal-fresh-linked-old',2,
+               'sem-terminal-fresh-linked-old',
+               'src-terminal-fresh-linked-old',
+               'journal-terminal-fresh-linked-old');
+            INSERT INTO lifecycle_rotation_custody_revisions VALUES
+              ('p','r','a','custody-terminal-fresh-linked-new',1,
+               'sem-terminal-fresh-linked-new',
+               'src-terminal-fresh-linked-new',
+               'journal-terminal-fresh-linked-new',NULL,NULL,NULL,
+               'apply-terminal-fresh-linked','digest-terminal-fresh-linked');
+            INSERT INTO lifecycle_rotation_custody_heads VALUES
+              ('p','r','a','custody-terminal-fresh-linked-new',1,
+               'sem-terminal-fresh-linked-new',
+               'src-terminal-fresh-linked-new',
+               'journal-terminal-fresh-linked-new');
+            INSERT INTO lifecycle_generation_loss_revisions VALUES
+              ('p','r','a','loss-terminal-fresh-linked',2,
+               'sem-terminal-fresh-linked-loss',
+               'src-terminal-fresh-linked-loss',
+               'journal-terminal-fresh-linked-loss',
+               'batch-terminal-fresh-linked','apply-terminal-fresh-linked',
+               'digest-terminal-fresh-linked',NULL,NULL);
+            INSERT INTO lifecycle_generation_loss_heads VALUES
+              ('p','r','a','loss-terminal-fresh-linked',2,
+               'sem-terminal-fresh-linked-loss',
+               'src-terminal-fresh-linked-loss',
+               'journal-terminal-fresh-linked-loss');
+            INSERT INTO lifecycle_fresh_rotation_commits VALUES
+              ('handoff-terminal-fresh-linked','apply-terminal-fresh-linked',
+               'digest-terminal-fresh-linked',
+               'custody-terminal-fresh-linked-new',
+               'loss-terminal-fresh-linked',2,
+               'sem-terminal-fresh-linked-loss',
+               'src-terminal-fresh-linked-loss');
+
+            INSERT INTO lifecycle_receipt_fresh_origin_effects VALUES
+              ('batch-reuse',1,'primary','effect-reuse');
+            INSERT INTO lifecycle_receipt_batch_completions
+              (batch_id,transition_kind,primary_fresh_effect_ordinal,
+               primary_fresh_effect_role,primary_fresh_effect_digest)
+            VALUES ('batch-reuse','fresh-origin',1,'primary','effect-reuse');
+            INSERT INTO lifecycle_receipt_batches VALUES
+              ('batch-reuse',NULL,NULL);
             INSERT INTO lifecycle_rotation_custody_revisions VALUES
               ('p','r','a','custody-reuse',1,'sem-reuse','src-reuse',
                'journal-reuse',NULL,NULL,NULL,'apply-reuse','digest-reuse');
@@ -421,6 +1451,14 @@ class SpecRepairTests(unittest.TestCase):
               ('handoff-reuse','apply-reuse','digest-reuse','custody-reuse',
                NULL,NULL,NULL,NULL);
 
+            INSERT INTO lifecycle_receipt_fresh_origin_effects VALUES
+              ('batch-open',1,'primary','effect-open');
+            INSERT INTO lifecycle_receipt_batch_completions
+              (batch_id,transition_kind,primary_fresh_effect_ordinal,
+               primary_fresh_effect_role,primary_fresh_effect_digest)
+            VALUES ('batch-open','fresh-origin',1,'primary','effect-open');
+            INSERT INTO lifecycle_receipt_batches VALUES
+              ('batch-open',NULL,NULL);
             INSERT INTO lifecycle_rotation_custody_revisions VALUES
               ('p','r','a','custody-open',1,'sem-open','src-open',
                'journal-open',NULL,NULL,NULL,'apply-open','digest-open');
@@ -481,14 +1519,40 @@ class SpecRepairTests(unittest.TestCase):
                 "'src-terminal-fresh-new')",
             ),
             (
+                "terminal-fresh-linked-loss",
+                "INSERT INTO lifecycle_transition_applies "
+                "(apply_id,apply_digest,apply_kind,batch_transition_kind,"
+                "receipt_batch_id,fresh_generation_loss_after_key,"
+                "fresh_project_session_id,fresh_run_id,fresh_agent_id,"
+                "fresh_generation_loss_id,fresh_generation_loss_after_revision,"
+                "fresh_generation_loss_after_semantic_digest,"
+                "fresh_generation_loss_after_source_ref_digest,"
+                "fresh_handoff_id,fresh_source_mode,new_custody_id,"
+                "new_custody_semantic_digest,new_custody_source_ref_digest) "
+                "VALUES ('apply-terminal-fresh-linked',"
+                "'digest-terminal-fresh-linked','terminal-fresh',"
+                "'custody-terminal','batch-terminal-fresh-linked',"
+                "'src-terminal-fresh-linked-loss','p','r','a',"
+                "'loss-terminal-fresh-linked',2,"
+                "'sem-terminal-fresh-linked-loss',"
+                "'src-terminal-fresh-linked-loss',"
+                "'handoff-terminal-fresh-linked',"
+                "'terminalize-nonfinal-custody',"
+                "'custody-terminal-fresh-linked-new',"
+                "'sem-terminal-fresh-linked-new',"
+                "'src-terminal-fresh-linked-new')",
+            ),
+            (
                 "fresh-reuse",
                 "INSERT INTO lifecycle_transition_applies "
                 "(apply_id,apply_digest,apply_kind,batch_transition_kind,"
-                "fresh_generation_loss_after_key,fresh_project_session_id,"
+                "receipt_batch_id,fresh_generation_loss_after_key,"
+                "fresh_project_session_id,"
                 "fresh_run_id,fresh_agent_id,fresh_handoff_id,"
                 "fresh_source_mode,new_custody_id,new_custody_semantic_digest,"
                 "new_custody_source_ref_digest) VALUES "
-                "('apply-reuse','digest-reuse','fresh','none','none','p','r',"
+                "('apply-reuse','digest-reuse','fresh','fresh-origin',"
+                "'batch-reuse','none','p','r',"
                 "'a','handoff-reuse','reuse-final-custody','custody-reuse',"
                 "'sem-reuse','src-reuse')",
             ),
@@ -496,28 +1560,30 @@ class SpecRepairTests(unittest.TestCase):
                 "fresh-open-generation-loss",
                 "INSERT INTO lifecycle_transition_applies "
                 "(apply_id,apply_digest,apply_kind,batch_transition_kind,"
-                "fresh_generation_loss_after_key,fresh_project_session_id,"
+                "receipt_batch_id,fresh_generation_loss_after_key,"
+                "fresh_project_session_id,"
                 "fresh_run_id,fresh_agent_id,fresh_generation_loss_id,"
                 "fresh_generation_loss_after_revision,"
                 "fresh_generation_loss_after_semantic_digest,"
                 "fresh_generation_loss_after_source_ref_digest,"
                 "fresh_handoff_id,fresh_source_mode,new_custody_id,"
                 "new_custody_semantic_digest,new_custody_source_ref_digest) "
-                "VALUES ('apply-open','digest-open','fresh','none',"
-                "'src-loss-open','p','r','a','loss-open',2,'sem-loss-open',"
+                "VALUES ('apply-open','digest-open','fresh','fresh-origin',"
+                "'batch-open','src-loss-open','p','r','a','loss-open',2,"
+                "'sem-loss-open',"
                 "'src-loss-open','handoff-open','open-generation-loss',"
                 "'custody-open','sem-open','src-open')",
             ),
         )
 
-    def test_apply_trigger_accepts_all_six_legal_arms(self) -> None:
+    def test_apply_post_state_trigger_accepts_all_seven_materialized_branches(self) -> None:
         db = self._valid_apply_database()
         for arm, statement in self.APPLY_STATEMENTS:
             with self.subTest(apply_arm=arm):
                 db.execute(statement)
 
         self.assertEqual(
-            6,
+            7,
             db.execute(
                 "SELECT count(*) FROM lifecycle_transition_applies"
             ).fetchone()[0],
@@ -551,9 +1617,13 @@ class SpecRepairTests(unittest.TestCase):
             ),
             (
                 "terminal-fresh",
-                "UPDATE lifecycle_review_authority_bindings "
-                "SET apply_id='crossed-apply' "
-                "WHERE batch_id='batch-terminal-fresh'",
+                "DELETE FROM lifecycle_fresh_rotation_commits "
+                "WHERE apply_id='apply-terminal-fresh'",
+            ),
+            (
+                "terminal-fresh-linked-loss",
+                "DELETE FROM lifecycle_generation_loss_heads "
+                "WHERE generation_loss_id='loss-terminal-fresh-linked'",
             ),
             (
                 "fresh-reuse",

@@ -207,7 +207,24 @@ built.
   constraint. **Evidence-carry columns through plan → effect → result remain
   (deeper part of lead 2).**
 
-**Complete in the current issue-17 draft (not yet committed):**
+**Complete in the current issue-17 branch:**
+- Lead 1 — every fresh-created custody now has an authenticated `fresh-origin`
+  subject/effect before apply: pure reuse/open-loss uses a one-intent
+  `fresh-origin` batch and terminal-fresh uses ordinal two of its custody batch.
+  The fresh apply now equality-binds the batch completion, receipt set and
+  verified checkpoint, while every fresh-origin effect null-safely binds its
+  exact handoff source tuple. Scope admission has one immutable pre-authority
+  outbox,
+  an immutable idempotent local resolution that requires the exact authenticated
+  zero-receipt checkpoint/head and a complete pinned namespace checkpoint whose
+  cardinality, contiguous ordinals, ordered-set digest, attestation and exact
+  zero/null members are verified before immutable resolution finalization.
+  Hydration compares every stored namespace-checkpoint column and the complete
+  member set. The restored eight-case council oracle covers the seven legal
+  batch arms, 377 near-valid negatives, two-scope append response loss and every
+  `5 + N` local finalization boundary for both one- and two-member namespace
+  snapshots; exact-prose tests bind those repairs to the
+  normative Spec 01/04 text.
 - Lead 3 — the reservation carries a non-null decision-loss effect key without
   referencing the not-yet-materialized after revision; its same-prepare batch
   binds the exact after tuple to the linked effect, and the review binding
@@ -230,8 +247,6 @@ built.
 **Pending structural repair (needed before freeze; codex-certified):** these
 close only with multi-part DDL changes, not one-line additions, so they are
 deliberately not half-applied —
-- Lead 1 — new authenticated `fresh-origin` receipt subject/batch + zero-receipt
-  scope-discovery hydration rule (protocol addition).
 - Lead 2 (remaining) — evidence-carry columns (admission / transition-proof /
   mutation-plan / finalized-terminal-evidence / retirement-evidence) bound
   through plan → effect → result. (FK-mismatch part done above.)

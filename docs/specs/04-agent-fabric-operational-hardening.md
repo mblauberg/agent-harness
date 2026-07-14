@@ -6050,12 +6050,46 @@ CREATE UNIQUE INDEX one_nonfinal_lifecycle_custody_per_agent
   ON lifecycle_rotation_custody_heads(run_id,agent_id)
   WHERE terminal=0;
 
+lifecycle_scope_admission_outbox(
+  admission_request_id PRIMARY KEY, project_id, project_session_id, run_id,
+  authority_id, admission_digest, admitted_at, scope_json, scope_digest UNIQUE,
+  created_at,
+  UNIQUE(project_id,project_session_id,run_id,authority_id),
+  UNIQUE(admission_request_id,project_id,project_session_id,run_id,authority_id,
+    scope_digest)
+)
+
+CREATE TRIGGER lifecycle_scope_admission_outbox_no_update
+BEFORE UPDATE ON lifecycle_scope_admission_outbox
+BEGIN
+  SELECT RAISE(ABORT,'lifecycle-scope-admission-outbox-immutable');
+END;
+
+CREATE TRIGGER lifecycle_scope_admission_outbox_no_delete
+BEFORE DELETE ON lifecycle_scope_admission_outbox
+BEGIN
+  SELECT RAISE(ABORT,'lifecycle-scope-admission-outbox-immutable');
+END;
+
 lifecycle_admitted_run_scopes(
   project_id, project_session_id, run_id, authority_id,
-  admission_digest, admitted_at,
+  admission_request_id UNIQUE, admission_digest, scope_digest UNIQUE,
+  initial_scope_checkpoint_digest UNIQUE, admission_resolution_digest UNIQUE,
+  admitted_at,
   PRIMARY KEY(project_session_id,run_id),
   UNIQUE(project_id,project_session_id,run_id),
-  UNIQUE(project_session_id,run_id,authority_id)
+  UNIQUE(project_session_id,run_id,authority_id),
+  FOREIGN KEY(admission_request_id,project_id,project_session_id,run_id,
+      authority_id,scope_digest)
+    REFERENCES lifecycle_scope_admission_outbox(
+      admission_request_id,project_id,project_session_id,run_id,authority_id,
+      scope_digest),
+  FOREIGN KEY(admission_request_id,project_session_id,run_id,authority_id,
+      scope_digest,initial_scope_checkpoint_digest,admission_resolution_digest)
+    REFERENCES lifecycle_scope_admission_resolutions(
+      admission_request_id,project_session_id,run_id,authority_id,scope_digest,
+      initial_scope_checkpoint_digest,resolution_digest)
+    DEFERRABLE INITIALLY DEFERRED
 )
 
 lifecycle_receipt_scope_checkpoints(
@@ -6081,6 +6115,36 @@ lifecycle_receipt_scope_checkpoints(
       project_session_id,run_id,authority_id)
 )
 
+lifecycle_scope_admission_resolutions(
+  admission_request_id PRIMARY KEY, project_id, project_session_id, run_id,
+  authority_id, scope_digest, initial_scope_checkpoint_digest UNIQUE,
+  initial_receipt_count CHECK(initial_receipt_count=0),
+  initial_head_receipt_digest CHECK(initial_head_receipt_digest IS NULL),
+  namespace_checkpoint_digest NOT NULL, resolution_json, resolution_digest UNIQUE,
+  verified_at,
+  UNIQUE(admission_request_id,project_session_id,run_id,authority_id,
+    scope_digest,initial_scope_checkpoint_digest,resolution_digest),
+  FOREIGN KEY(admission_request_id,project_id,project_session_id,run_id,
+      authority_id,scope_digest)
+    REFERENCES lifecycle_scope_admission_outbox(
+      admission_request_id,project_id,project_session_id,run_id,authority_id,
+      scope_digest),
+  FOREIGN KEY(project_session_id,run_id,authority_id,initial_receipt_count,
+      initial_scope_checkpoint_digest,initial_head_receipt_digest)
+    REFERENCES lifecycle_receipt_scope_checkpoints(
+      project_session_id,run_id,authority_id,receipt_count,checkpoint_digest,
+      head_receipt_digest),
+  FOREIGN KEY(project_id,namespace_checkpoint_digest,authority_id)
+    REFERENCES lifecycle_receipt_namespace_checkpoints(
+      project_id,checkpoint_digest,authority_id),
+  FOREIGN KEY(project_id,namespace_checkpoint_digest,project_session_id,run_id,
+      authority_id,initial_scope_checkpoint_digest,initial_receipt_count,
+      initial_head_receipt_digest)
+    REFERENCES lifecycle_receipt_namespace_members(
+      project_id,checkpoint_digest,project_session_id,run_id,authority_id,
+      scope_checkpoint_digest,receipt_count,head_receipt_digest)
+)
+
 lifecycle_receipt_scope_heads(
   project_session_id, run_id, authority_id, receipt_count,
   head_authority_sequence, head_receipt_digest,
@@ -6098,8 +6162,49 @@ lifecycle_receipt_scope_heads(
       checkpoint_digest)
 )
 
+CREATE TRIGGER lifecycle_scope_admission_resolution_requires_initial_head
+BEFORE INSERT ON lifecycle_scope_admission_resolutions
+BEGIN
+  SELECT RAISE(
+    ABORT,'lifecycle-scope-admission-initial-head-missing-or-crossed')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM lifecycle_receipt_scope_heads h
+    WHERE h.project_session_id=NEW.project_session_id AND
+      h.run_id=NEW.run_id AND h.authority_id=NEW.authority_id AND
+      h.receipt_count=NEW.initial_receipt_count AND
+      h.head_authority_sequence=NEW.initial_receipt_count AND
+      h.head_receipt_digest IS NEW.initial_head_receipt_digest AND
+      h.checkpoint_digest=NEW.initial_scope_checkpoint_digest AND
+      h.revision=1
+  );
+  SELECT RAISE(
+    ABORT,'lifecycle-scope-admission-namespace-member-missing-or-crossed')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM lifecycle_receipt_namespace_members m
+    WHERE m.project_id=NEW.project_id AND
+      m.checkpoint_digest=NEW.namespace_checkpoint_digest AND
+      m.project_session_id=NEW.project_session_id AND
+      m.run_id=NEW.run_id AND m.authority_id=NEW.authority_id AND
+      m.scope_checkpoint_digest=NEW.initial_scope_checkpoint_digest AND
+      m.receipt_count=NEW.initial_receipt_count AND
+      m.head_receipt_digest IS NEW.initial_head_receipt_digest
+  );
+END;
+
+CREATE TRIGGER lifecycle_scope_admission_resolution_no_update
+BEFORE UPDATE ON lifecycle_scope_admission_resolutions
+BEGIN
+  SELECT RAISE(ABORT,'lifecycle-scope-admission-resolution-immutable');
+END;
+
+CREATE TRIGGER lifecycle_scope_admission_resolution_no_delete
+BEFORE DELETE ON lifecycle_scope_admission_resolutions
+BEGIN
+  SELECT RAISE(ABORT,'lifecycle-scope-admission-resolution-immutable');
+END;
+
 lifecycle_receipt_namespace_checkpoints(
-  project_id, authority_id, scope_count CHECK(scope_count >= 0),
+  project_id, authority_id, scope_count CHECK(scope_count >= 1),
   ordered_scope_head_set_digest, checkpoint_json, checkpoint_digest,
   attestation, verified_at,
   PRIMARY KEY(project_id,checkpoint_digest),
@@ -6115,7 +6220,10 @@ lifecycle_receipt_namespace_members(
   head_receipt_digest,
   PRIMARY KEY(project_id,checkpoint_digest,ordinal),
   UNIQUE(project_id,checkpoint_digest,project_session_id,run_id),
-  CHECK(receipt_count >= 1 AND head_receipt_digest IS NOT NULL),
+  UNIQUE(project_id,checkpoint_digest,project_session_id,run_id,authority_id,
+    scope_checkpoint_digest,receipt_count,head_receipt_digest),
+  CHECK(receipt_count >= 0),
+  CHECK((receipt_count=0)=(head_receipt_digest IS NULL)),
   FOREIGN KEY(project_id,checkpoint_digest,authority_id)
     REFERENCES lifecycle_receipt_namespace_checkpoints(
       project_id,checkpoint_digest,authority_id),
@@ -6128,6 +6236,56 @@ lifecycle_receipt_namespace_members(
       project_session_id,run_id,authority_id,receipt_count,checkpoint_digest,
       head_receipt_digest)
 )
+
+CREATE TRIGGER lifecycle_receipt_namespace_checkpoint_no_update
+BEFORE UPDATE ON lifecycle_receipt_namespace_checkpoints
+BEGIN
+  SELECT RAISE(ABORT,'lifecycle-receipt-namespace-checkpoint-immutable');
+END;
+
+CREATE TRIGGER lifecycle_receipt_namespace_checkpoint_no_delete
+BEFORE DELETE ON lifecycle_receipt_namespace_checkpoints
+BEGIN
+  SELECT RAISE(ABORT,'lifecycle-receipt-namespace-checkpoint-immutable');
+END;
+
+CREATE TRIGGER lifecycle_receipt_namespace_member_no_update
+BEFORE UPDATE ON lifecycle_receipt_namespace_members
+BEGIN
+  SELECT RAISE(ABORT,'lifecycle-receipt-namespace-member-immutable');
+END;
+
+CREATE TRIGGER lifecycle_receipt_namespace_member_no_delete
+BEFORE DELETE ON lifecycle_receipt_namespace_members
+BEGIN
+  SELECT RAISE(ABORT,'lifecycle-receipt-namespace-member-immutable');
+END;
+
+CREATE TRIGGER lifecycle_scope_admission_resolution_requires_complete_namespace
+BEFORE INSERT ON lifecycle_scope_admission_resolutions
+BEGIN
+  SELECT RAISE(
+    ABORT,'lifecycle-scope-admission-namespace-set-incomplete')
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM lifecycle_receipt_namespace_checkpoints c
+    WHERE c.project_id=NEW.project_id AND
+      c.authority_id=NEW.authority_id AND
+      c.checkpoint_digest=NEW.namespace_checkpoint_digest AND
+      (SELECT COUNT(*)
+       FROM lifecycle_receipt_namespace_members m
+       WHERE m.project_id=c.project_id AND
+         m.checkpoint_digest=c.checkpoint_digest)=c.scope_count AND
+      (SELECT MIN(m.ordinal)
+       FROM lifecycle_receipt_namespace_members m
+       WHERE m.project_id=c.project_id AND
+         m.checkpoint_digest=c.checkpoint_digest)=1 AND
+      (SELECT MAX(m.ordinal)
+       FROM lifecycle_receipt_namespace_members m
+       WHERE m.project_id=c.project_id AND
+         m.checkpoint_digest=c.checkpoint_digest)=c.scope_count
+  );
+END;
 
 lifecycle_receipt_namespace_heads(
   project_id PRIMARY KEY, authority_id, scope_count,
@@ -6169,13 +6327,15 @@ lifecycle_receipt_batches(
   project_session_id, run_id, agent_id,
   transition_kind CHECK(transition_kind IN
     ('custody-terminal','generation-loss-terminal',
-      'custody-recovery-retirement')),
+      'custody-recovery-retirement','fresh-origin')),
   planned_apply_kind NOT NULL CHECK(
-    planned_apply_kind IN ('terminal','terminal-fresh')),
+    planned_apply_kind IN ('terminal','terminal-fresh','fresh')),
   effects_set_digest, mutation_plan_digest,
   transition_replay_json, transition_replay_digest,
   ordered_subject_set_digest,
   receipt_intent_count CHECK(receipt_intent_count IN (1,2)),
+  secondary_intent_kind NOT NULL CHECK(secondary_intent_kind IN
+    ('none','fresh-origin','review-adoption-decision')),
   review_adoption_reservation_id, review_adoption_reservation_digest,
   review_decision_loss_effect_key NOT NULL,
   review_decision_loss_effect_role, review_decision_loss_effect_digest,
@@ -6188,6 +6348,7 @@ lifecycle_receipt_batches(
   UNIQUE(project_session_id,run_id,agent_id,transition_replay_digest),
   UNIQUE(batch_id,planned_apply_id),
   UNIQUE(batch_id,transition_kind,receipt_intent_count),
+  UNIQUE(batch_id,transition_kind,receipt_intent_count,secondary_intent_kind),
   UNIQUE(batch_id,transition_kind,planned_apply_kind),
   UNIQUE(batch_id,planned_apply_id,transition_replay_digest,
     mutation_plan_digest),
@@ -6225,13 +6386,35 @@ lifecycle_receipt_batches(
     (planned_apply_kind='terminal-fresh' AND
       transition_kind='custody-terminal' AND fresh_handoff_id IS NOT NULL AND
       fresh_handoff_source_mode='terminalize-nonfinal-custody' AND
+      fresh_handoff_key=fresh_handoff_digest) OR
+    (planned_apply_kind='fresh' AND transition_kind='fresh-origin' AND
+      fresh_handoff_id IS NOT NULL AND fresh_handoff_source_mode IN
+        ('reuse-final-custody','open-generation-loss') AND
       fresh_handoff_key=fresh_handoff_digest)),
   CHECK((recovery_retirement_id IS NULL)=
     (recovery_retirement_plan_digest IS NULL)),
   CHECK((transition_kind='custody-recovery-retirement')=
     (recovery_retirement_id IS NOT NULL)),
-  CHECK((receipt_intent_count=2)=
-    (review_adoption_reservation_id IS NOT NULL)),
+  CHECK(
+    (transition_kind='custody-terminal' AND planned_apply_kind='terminal' AND
+      secondary_intent_kind='none' AND receipt_intent_count=1 AND
+      review_adoption_reservation_id IS NULL) OR
+    (transition_kind='custody-terminal' AND planned_apply_kind='terminal' AND
+      secondary_intent_kind='review-adoption-decision' AND
+      receipt_intent_count=2 AND review_adoption_reservation_id IS NOT NULL) OR
+    (transition_kind='custody-terminal' AND
+      planned_apply_kind='terminal-fresh' AND
+      secondary_intent_kind='fresh-origin' AND receipt_intent_count=2 AND
+      review_adoption_reservation_id IS NULL) OR
+    (transition_kind='generation-loss-terminal' AND
+      planned_apply_kind='terminal' AND secondary_intent_kind='none' AND
+      receipt_intent_count=1 AND review_adoption_reservation_id IS NULL) OR
+    (transition_kind='custody-recovery-retirement' AND
+      planned_apply_kind='terminal' AND secondary_intent_kind='none' AND
+      receipt_intent_count=1 AND review_adoption_reservation_id IS NULL) OR
+    (transition_kind='fresh-origin' AND planned_apply_kind='fresh' AND
+      secondary_intent_kind='none' AND receipt_intent_count=1 AND
+      review_adoption_reservation_id IS NULL)),
   CHECK(
     (review_adoption_reservation_id IS NULL AND
       review_decision_loss_effect_key='none' AND
@@ -6379,17 +6562,168 @@ lifecycle_receipt_recovery_retirement_effects(
       custody_journal_digest,finalized_disposition,retirement_plan_digest)
 )
 
+lifecycle_receipt_fresh_origin_effects(
+  batch_id, ordinal CHECK(ordinal IN (1,2)),
+  role CHECK(role IN ('primary','secondary')),
+  transition_kind CHECK(transition_kind IN ('custody-terminal','fresh-origin')),
+  batch_intent_count, batch_secondary_intent_kind,
+  planned_apply_id, project_session_id, run_id, agent_id,
+  handoff_id, handoff_digest, source_mode CHECK(source_mode IN
+    ('terminalize-nonfinal-custody','reuse-final-custody',
+      'open-generation-loss')),
+  recovery_source_kind, recovery_from_custody_id, recovery_from_custody_revision,
+  recovery_from_generation_loss_id, recovery_from_generation_loss_revision,
+  recovery_source_ref_digest, source_journal_digest,
+  admission_digest, fresh_apply_plan_digest,
+  new_custody_id, new_custody_revision CHECK(new_custody_revision=1),
+  new_custody_semantic_digest, new_custody_source_ref_digest,
+  affected_generation_loss_id, affected_generation_loss_before_revision,
+  affected_generation_loss_before_source_ref_digest,
+  affected_generation_loss_before_journal_digest,
+  affected_generation_loss_after_revision,
+  affected_generation_loss_after_semantic_digest,
+  affected_generation_loss_after_source_ref_digest,
+  affected_generation_loss_after_key NOT NULL,
+  effect_digest UNIQUE,
+  PRIMARY KEY(batch_id,ordinal),
+  UNIQUE(batch_id,ordinal,role,effect_digest),
+  UNIQUE(batch_id,effect_digest,project_session_id,run_id,agent_id,
+    new_custody_id,new_custody_revision),
+  UNIQUE(batch_id,ordinal,effect_digest,project_session_id,run_id,agent_id,
+    new_custody_id,new_custody_revision),
+  FOREIGN KEY(batch_id,transition_kind,batch_intent_count,
+      batch_secondary_intent_kind)
+    REFERENCES lifecycle_receipt_batches(
+      batch_id,transition_kind,receipt_intent_count,secondary_intent_kind),
+  FOREIGN KEY(handoff_id,handoff_digest,planned_apply_id,project_session_id,
+      run_id,agent_id,source_mode,recovery_source_kind,
+      recovery_from_custody_id,recovery_from_custody_revision,
+      recovery_from_generation_loss_id,recovery_from_generation_loss_revision,
+      recovery_source_ref_digest,source_journal_digest,admission_digest,
+      fresh_apply_plan_digest,new_custody_id,new_custody_semantic_digest,
+      new_custody_source_ref_digest,affected_generation_loss_id,
+      affected_generation_loss_before_revision,
+      affected_generation_loss_before_source_ref_digest,
+      affected_generation_loss_before_journal_digest,
+      affected_generation_loss_after_revision,
+      affected_generation_loss_after_semantic_digest,
+      affected_generation_loss_after_source_ref_digest,
+      affected_generation_loss_after_key)
+    REFERENCES lifecycle_fresh_recovery_handoffs(
+      handoff_id,handoff_digest,planned_apply_id,project_session_id,run_id,
+      agent_id,source_mode,recovery_source_kind,old_custody_id,
+      old_custody_revision,generation_loss_id,generation_loss_revision,
+      recovery_source_ref_digest,source_journal_digest,admission_digest,
+      fresh_apply_plan_digest,
+      new_custody_id,new_custody_semantic_digest,new_custody_source_ref_digest,
+      affected_generation_loss_id,affected_generation_loss_before_revision,
+      affected_generation_loss_before_source_ref_digest,
+      affected_generation_loss_before_journal_digest,
+      affected_generation_loss_after_revision,
+      affected_generation_loss_after_semantic_digest,
+      affected_generation_loss_after_source_ref_digest,
+      affected_generation_loss_after_key),
+  CHECK((transition_kind='fresh-origin' AND ordinal=1 AND role='primary' AND
+      batch_intent_count=1 AND batch_secondary_intent_kind='none' AND
+      source_mode IN ('reuse-final-custody','open-generation-loss')) OR
+    (transition_kind='custody-terminal' AND ordinal=2 AND role='secondary' AND
+      batch_intent_count=2 AND batch_secondary_intent_kind='fresh-origin' AND
+      source_mode='terminalize-nonfinal-custody')),
+  CHECK((source_mode='terminalize-nonfinal-custody' AND
+      recovery_source_kind='custody' AND
+      recovery_from_custody_id IS NOT NULL AND
+      recovery_from_custody_revision IS NOT NULL AND
+      recovery_from_generation_loss_id IS NULL AND
+      recovery_from_generation_loss_revision IS NULL) OR
+    (source_mode='reuse-final-custody' AND recovery_source_kind='custody' AND
+      recovery_from_custody_id IS NOT NULL AND
+      recovery_from_custody_revision IS NOT NULL AND
+      recovery_from_generation_loss_id IS NULL AND
+      recovery_from_generation_loss_revision IS NULL AND
+      affected_generation_loss_after_key='none') OR
+    (source_mode='open-generation-loss' AND
+      recovery_source_kind='generation-loss' AND
+      recovery_from_custody_id IS NULL AND
+      recovery_from_custody_revision IS NULL AND
+      recovery_from_generation_loss_id=affected_generation_loss_id AND
+      recovery_from_generation_loss_revision=
+        affected_generation_loss_before_revision AND
+      affected_generation_loss_after_key<>'none')),
+  CHECK((affected_generation_loss_after_key='none' AND
+      affected_generation_loss_id IS NULL AND
+      affected_generation_loss_before_revision IS NULL AND
+      affected_generation_loss_before_source_ref_digest IS NULL AND
+      affected_generation_loss_before_journal_digest IS NULL AND
+      affected_generation_loss_after_revision IS NULL AND
+      affected_generation_loss_after_semantic_digest IS NULL AND
+      affected_generation_loss_after_source_ref_digest IS NULL) OR
+    (affected_generation_loss_after_key<>'none' AND
+      affected_generation_loss_id IS NOT NULL AND
+      affected_generation_loss_before_revision IS NOT NULL AND
+      affected_generation_loss_before_source_ref_digest IS NOT NULL AND
+      affected_generation_loss_before_journal_digest IS NOT NULL AND
+      affected_generation_loss_after_revision=
+        affected_generation_loss_before_revision+1 AND
+      affected_generation_loss_after_semantic_digest IS NOT NULL AND
+      affected_generation_loss_after_source_ref_digest=
+        affected_generation_loss_after_key))
+)
+
+CREATE TRIGGER lifecycle_fresh_origin_effect_requires_exact_handoff
+BEFORE INSERT ON lifecycle_receipt_fresh_origin_effects
+BEGIN
+  SELECT RAISE(
+    ABORT,'lifecycle-fresh-origin-effect-handoff-missing-or-crossed')
+  WHERE NOT EXISTS (
+    SELECT 1 FROM lifecycle_fresh_recovery_handoffs h
+    WHERE h.handoff_id=NEW.handoff_id AND
+      h.handoff_digest=NEW.handoff_digest AND
+      h.planned_apply_id=NEW.planned_apply_id AND
+      h.project_session_id=NEW.project_session_id AND
+      h.run_id=NEW.run_id AND h.agent_id=NEW.agent_id AND
+      h.source_mode=NEW.source_mode AND
+      h.recovery_source_kind=NEW.recovery_source_kind AND
+      h.old_custody_id IS NEW.recovery_from_custody_id AND
+      h.old_custody_revision IS NEW.recovery_from_custody_revision AND
+      h.generation_loss_id IS NEW.recovery_from_generation_loss_id AND
+      h.generation_loss_revision IS
+        NEW.recovery_from_generation_loss_revision AND
+      h.recovery_source_ref_digest=NEW.recovery_source_ref_digest AND
+      h.source_journal_digest=NEW.source_journal_digest AND
+      h.admission_digest=NEW.admission_digest AND
+      h.fresh_apply_plan_digest=NEW.fresh_apply_plan_digest AND
+      h.new_custody_id=NEW.new_custody_id AND
+      h.new_custody_semantic_digest=NEW.new_custody_semantic_digest AND
+      h.new_custody_source_ref_digest=NEW.new_custody_source_ref_digest AND
+      h.affected_generation_loss_id IS NEW.affected_generation_loss_id AND
+      h.affected_generation_loss_before_revision IS
+        NEW.affected_generation_loss_before_revision AND
+      h.affected_generation_loss_before_source_ref_digest IS
+        NEW.affected_generation_loss_before_source_ref_digest AND
+      h.affected_generation_loss_before_journal_digest IS
+        NEW.affected_generation_loss_before_journal_digest AND
+      h.affected_generation_loss_after_revision IS
+        NEW.affected_generation_loss_after_revision AND
+      h.affected_generation_loss_after_semantic_digest IS
+        NEW.affected_generation_loss_after_semantic_digest AND
+      h.affected_generation_loss_after_source_ref_digest IS
+        NEW.affected_generation_loss_after_source_ref_digest AND
+      h.affected_generation_loss_after_key=NEW.affected_generation_loss_after_key
+  );
+END;
+
 lifecycle_receipt_intents(
   batch_id, ordinal CHECK(ordinal IN (1,2)),
-  batch_transition_kind, batch_intent_count,
+  batch_transition_kind, batch_intent_count, batch_secondary_intent_kind,
   kind CHECK(kind IN ('custody-terminal','generation-loss-terminal',
-    'custody-recovery-retirement','review-adoption-decision')),
+    'custody-recovery-retirement','fresh-origin','review-adoption-decision')),
   project_session_id, run_id, agent_id,
   subject_owner_kind CHECK(subject_owner_kind IN
     ('custody','generation-loss','recovery-retirement')),
   subject_owner_id, subject_owner_revision CHECK(subject_owner_revision >= 1),
   custody_effect_digest, generation_loss_effect_role,
   generation_loss_effect_digest, recovery_retirement_effect_digest,
+  fresh_origin_effect_digest,
   subject_json, subject_digest, intent_digest, created_at,
   PRIMARY KEY(batch_id,ordinal), UNIQUE(intent_digest),
   UNIQUE(intent_digest,batch_id,ordinal,project_session_id,run_id,agent_id,
@@ -6403,6 +6737,10 @@ lifecycle_receipt_intents(
   FOREIGN KEY(batch_id,batch_transition_kind,batch_intent_count)
     REFERENCES lifecycle_receipt_batches(
       batch_id,transition_kind,receipt_intent_count),
+  FOREIGN KEY(batch_id,batch_transition_kind,batch_intent_count,
+      batch_secondary_intent_kind)
+    REFERENCES lifecycle_receipt_batches(
+      batch_id,transition_kind,receipt_intent_count,secondary_intent_kind),
   FOREIGN KEY(batch_id,custody_effect_digest,project_session_id,run_id,
       agent_id,subject_owner_id,subject_owner_revision)
     REFERENCES lifecycle_receipt_custody_effects(
@@ -6419,27 +6757,42 @@ lifecycle_receipt_intents(
     REFERENCES lifecycle_receipt_recovery_retirement_effects(
       batch_id,effect_digest,project_session_id,run_id,agent_id,retirement_id,
       retirement_revision),
+  FOREIGN KEY(batch_id,ordinal,fresh_origin_effect_digest,project_session_id,
+      run_id,agent_id,subject_owner_id,subject_owner_revision)
+    REFERENCES lifecycle_receipt_fresh_origin_effects(
+      batch_id,ordinal,effect_digest,project_session_id,run_id,agent_id,
+      new_custody_id,new_custody_revision),
   CHECK((ordinal=1 AND kind=batch_transition_kind) OR
     (ordinal=2 AND batch_transition_kind='custody-terminal' AND
-      batch_intent_count=2 AND kind='review-adoption-decision')),
+      batch_intent_count=2 AND
+      kind=batch_secondary_intent_kind AND
+      kind IN ('fresh-origin','review-adoption-decision'))),
   CHECK(
     (kind IN ('custody-terminal','review-adoption-decision') AND
       subject_owner_kind='custody' AND custody_effect_digest IS NOT NULL AND
       generation_loss_effect_role IS NULL AND
       generation_loss_effect_digest IS NULL AND
-      recovery_retirement_effect_digest IS NULL) OR
+      recovery_retirement_effect_digest IS NULL AND
+      fresh_origin_effect_digest IS NULL) OR
     (kind='generation-loss-terminal' AND
       subject_owner_kind='generation-loss' AND
       custody_effect_digest IS NULL AND
       generation_loss_effect_role='primary' AND
       generation_loss_effect_digest IS NOT NULL AND
-      recovery_retirement_effect_digest IS NULL) OR
+      recovery_retirement_effect_digest IS NULL AND
+      fresh_origin_effect_digest IS NULL) OR
     (kind='custody-recovery-retirement' AND
       subject_owner_kind='recovery-retirement' AND
       custody_effect_digest IS NULL AND
       generation_loss_effect_role IS NULL AND
       generation_loss_effect_digest IS NULL AND
-      recovery_retirement_effect_digest IS NOT NULL))
+      recovery_retirement_effect_digest IS NOT NULL AND
+      fresh_origin_effect_digest IS NULL) OR
+    (kind='fresh-origin' AND subject_owner_kind='custody' AND
+      custody_effect_digest IS NULL AND generation_loss_effect_role IS NULL AND
+      generation_loss_effect_digest IS NULL AND
+      recovery_retirement_effect_digest IS NULL AND
+      fresh_origin_effect_digest IS NOT NULL))
 )
 
 lifecycle_authority_receipts(
@@ -6482,6 +6835,7 @@ lifecycle_authority_receipts(
 
 lifecycle_receipt_batch_completions(
   batch_id PRIMARY KEY, transition_kind, receipt_intent_count,
+  secondary_intent_kind,
   ordinal_one CHECK(ordinal_one=1), ordinal_one_intent_digest,
   ordinal_one_subject_digest,
   ordinal_one_receipt_digest,
@@ -6494,12 +6848,18 @@ lifecycle_receipt_batch_completions(
   primary_loss_effect_digest, primary_retirement_effect_digest,
   linked_loss_effect_role CHECK(
     linked_loss_effect_role IS NULL OR linked_loss_effect_role='linked'),
-  linked_loss_effect_digest, ordered_authority_receipt_set_digest,
+  linked_loss_effect_digest,
+  primary_fresh_effect_ordinal, primary_fresh_effect_role,
+  primary_fresh_effect_digest,
+  secondary_fresh_effect_ordinal, secondary_fresh_effect_role,
+  secondary_fresh_effect_digest,
+  ordered_authority_receipt_set_digest,
   completion_json, completion_digest UNIQUE, completed_at,
   UNIQUE(batch_id,completion_digest,ordered_authority_receipt_set_digest),
-  FOREIGN KEY(batch_id,transition_kind,receipt_intent_count)
+  FOREIGN KEY(batch_id,transition_kind,receipt_intent_count,
+      secondary_intent_kind)
     REFERENCES lifecycle_receipt_batches(
-      batch_id,transition_kind,receipt_intent_count),
+      batch_id,transition_kind,receipt_intent_count,secondary_intent_kind),
   FOREIGN KEY(batch_id,ordinal_one,ordinal_one_intent_digest,
       ordinal_one_subject_digest,ordinal_one_receipt_digest)
     REFERENCES lifecycle_authority_receipts(
@@ -6519,10 +6879,19 @@ lifecycle_receipt_batch_completions(
   FOREIGN KEY(batch_id,linked_loss_effect_role,linked_loss_effect_digest)
     REFERENCES lifecycle_receipt_generation_loss_effects(
       batch_id,role,effect_digest),
-  CHECK((receipt_intent_count=1 AND ordinal_two IS NULL AND
+  FOREIGN KEY(batch_id,primary_fresh_effect_ordinal,
+      primary_fresh_effect_role,primary_fresh_effect_digest)
+    REFERENCES lifecycle_receipt_fresh_origin_effects(
+      batch_id,ordinal,role,effect_digest),
+  FOREIGN KEY(batch_id,secondary_fresh_effect_ordinal,
+      secondary_fresh_effect_role,secondary_fresh_effect_digest)
+    REFERENCES lifecycle_receipt_fresh_origin_effects(
+      batch_id,ordinal,role,effect_digest),
+  CHECK((secondary_intent_kind='none' AND receipt_intent_count=1 AND
+      ordinal_two IS NULL AND
       ordinal_two_intent_digest IS NULL AND
       ordinal_two_subject_digest IS NULL AND ordinal_two_receipt_digest IS NULL) OR
-    (receipt_intent_count=2 AND ordinal_two=2 AND
+    (secondary_intent_kind<>'none' AND receipt_intent_count=2 AND ordinal_two=2 AND
       ordinal_two_intent_digest IS NOT NULL AND
       ordinal_two_subject_digest IS NOT NULL AND
       ordinal_two_receipt_digest IS NOT NULL)),
@@ -6530,18 +6899,49 @@ lifecycle_receipt_batch_completions(
   CHECK((transition_kind='custody-terminal' AND
       primary_custody_effect_digest IS NOT NULL AND
       primary_loss_effect_role IS NULL AND primary_loss_effect_digest IS NULL AND
-      primary_retirement_effect_digest IS NULL) OR
+      primary_retirement_effect_digest IS NULL AND
+      primary_fresh_effect_ordinal IS NULL AND
+      primary_fresh_effect_role IS NULL AND primary_fresh_effect_digest IS NULL AND
+      ((secondary_intent_kind='fresh-origin' AND
+          secondary_fresh_effect_ordinal=2 AND
+          secondary_fresh_effect_role='secondary' AND
+          secondary_fresh_effect_digest IS NOT NULL) OR
+        (secondary_intent_kind<>'fresh-origin' AND
+          secondary_fresh_effect_ordinal IS NULL AND
+          secondary_fresh_effect_role IS NULL AND
+          secondary_fresh_effect_digest IS NULL))) OR
     (transition_kind='generation-loss-terminal' AND
       primary_custody_effect_digest IS NULL AND
       primary_loss_effect_role='primary' AND
       primary_loss_effect_digest IS NOT NULL AND
       primary_retirement_effect_digest IS NULL AND
-      linked_loss_effect_digest IS NULL) OR
+      linked_loss_effect_digest IS NULL AND
+      primary_fresh_effect_ordinal IS NULL AND
+      primary_fresh_effect_role IS NULL AND primary_fresh_effect_digest IS NULL AND
+      secondary_fresh_effect_ordinal IS NULL AND
+      secondary_fresh_effect_role IS NULL AND
+      secondary_fresh_effect_digest IS NULL) OR
     (transition_kind='custody-recovery-retirement' AND
       primary_custody_effect_digest IS NULL AND
       primary_loss_effect_role IS NULL AND primary_loss_effect_digest IS NULL AND
       primary_retirement_effect_digest IS NOT NULL AND
-      linked_loss_effect_digest IS NULL))
+      linked_loss_effect_digest IS NULL AND
+      primary_fresh_effect_ordinal IS NULL AND
+      primary_fresh_effect_role IS NULL AND primary_fresh_effect_digest IS NULL AND
+      secondary_fresh_effect_ordinal IS NULL AND
+      secondary_fresh_effect_role IS NULL AND
+      secondary_fresh_effect_digest IS NULL) OR
+    (transition_kind='fresh-origin' AND
+      primary_custody_effect_digest IS NULL AND
+      primary_loss_effect_role IS NULL AND primary_loss_effect_digest IS NULL AND
+      primary_retirement_effect_digest IS NULL AND
+      linked_loss_effect_digest IS NULL AND
+      primary_fresh_effect_ordinal=1 AND
+      primary_fresh_effect_role='primary' AND
+      primary_fresh_effect_digest IS NOT NULL AND
+      secondary_fresh_effect_ordinal IS NULL AND
+      secondary_fresh_effect_role IS NULL AND
+      secondary_fresh_effect_digest IS NULL))
 )
 
 lifecycle_review_authority_bindings(
@@ -6651,8 +7051,8 @@ lifecycle_transition_applies(
   apply_id PRIMARY KEY,
   apply_kind CHECK(apply_kind IN ('terminal','terminal-fresh','fresh')),
   batch_transition_kind NOT NULL CHECK(batch_transition_kind IN
-    ('none','custody-terminal','generation-loss-terminal',
-      'custody-recovery-retirement')),
+    ('custody-terminal','generation-loss-terminal',
+      'custody-recovery-retirement','fresh-origin')),
   receipt_batch_id UNIQUE, batch_completion_digest, transition_replay_digest,
   ordered_authority_receipt_set_digest, verified_scope_checkpoint_digest,
   applied_mutation_plan_digest,
@@ -6754,12 +7154,12 @@ lifecycle_transition_applies(
           fresh_generation_loss_after_semantic_digest IS NOT NULL AND
           fresh_generation_loss_after_source_ref_digest=
             fresh_generation_loss_after_key))) OR
-    (apply_kind='fresh' AND batch_transition_kind='none' AND
-      receipt_batch_id IS NULL AND
-      batch_completion_digest IS NULL AND
-      transition_replay_digest IS NULL AND
-      ordered_authority_receipt_set_digest IS NULL AND
-      verified_scope_checkpoint_digest IS NULL AND
+    (apply_kind='fresh' AND batch_transition_kind='fresh-origin' AND
+      receipt_batch_id IS NOT NULL AND
+      batch_completion_digest IS NOT NULL AND
+      transition_replay_digest IS NOT NULL AND
+      ordered_authority_receipt_set_digest IS NOT NULL AND
+      verified_scope_checkpoint_digest IS NOT NULL AND
       applied_mutation_plan_digest IS NOT NULL AND fresh_handoff_id IS NOT NULL AND
       fresh_handoff_digest IS NOT NULL AND
       fresh_handoff_key=fresh_handoff_digest AND
@@ -7003,6 +7403,19 @@ lifecycle_fresh_recovery_handoffs(
   UNIQUE(handoff_id,handoff_digest,planned_apply_id,project_session_id,run_id,
     agent_id,source_mode,new_custody_id,new_custody_semantic_digest,
     new_custody_source_ref_digest,fresh_apply_plan_digest,
+    affected_generation_loss_after_key),
+  UNIQUE(handoff_id,handoff_digest,planned_apply_id,project_session_id,run_id,
+    agent_id,source_mode,recovery_source_kind,old_custody_id,
+    old_custody_revision,generation_loss_id,generation_loss_revision,
+    recovery_source_ref_digest,source_journal_digest,admission_digest,
+    fresh_apply_plan_digest,
+    new_custody_id,new_custody_semantic_digest,new_custody_source_ref_digest,
+    affected_generation_loss_id,affected_generation_loss_before_revision,
+    affected_generation_loss_before_source_ref_digest,
+    affected_generation_loss_before_journal_digest,
+    affected_generation_loss_after_revision,
+    affected_generation_loss_after_semantic_digest,
+    affected_generation_loss_after_source_ref_digest,
     affected_generation_loss_after_key),
   UNIQUE(handoff_id,preparation_id,attempt_id,issue_id,project_session_id,
     run_id,agent_id,source_mode,recovery_source_kind,recovery_source_ref_digest,
@@ -7541,6 +7954,17 @@ BEGIN
           effect_digest=NEW.primary_custody_effect_digest) AND
       (SELECT count(*) FROM lifecycle_receipt_recovery_retirement_effects
         WHERE batch_id=NEW.batch_id)=0 AND
+      ((NEW.secondary_fresh_effect_digest IS NULL AND
+          (SELECT count(*) FROM lifecycle_receipt_fresh_origin_effects
+            WHERE batch_id=NEW.batch_id)=0) OR
+        (NEW.secondary_fresh_effect_ordinal=2 AND
+          NEW.secondary_fresh_effect_role='secondary' AND
+          NEW.secondary_fresh_effect_digest IS NOT NULL AND
+          (SELECT count(*) FROM lifecycle_receipt_fresh_origin_effects
+            WHERE batch_id=NEW.batch_id)=1 AND
+          EXISTS (SELECT 1 FROM lifecycle_receipt_fresh_origin_effects
+            WHERE batch_id=NEW.batch_id AND ordinal=2 AND role='secondary' AND
+              effect_digest=NEW.secondary_fresh_effect_digest))) AND
       ((NEW.linked_loss_effect_role IS NULL AND
           NEW.linked_loss_effect_digest IS NULL AND
           (SELECT count(*) FROM lifecycle_receipt_generation_loss_effects
@@ -7567,6 +7991,8 @@ BEGIN
         WHERE batch_id=NEW.batch_id AND role='primary' AND
           effect_digest=NEW.primary_loss_effect_digest) AND
       (SELECT count(*) FROM lifecycle_receipt_recovery_retirement_effects
+        WHERE batch_id=NEW.batch_id)=0 AND
+      (SELECT count(*) FROM lifecycle_receipt_fresh_origin_effects
         WHERE batch_id=NEW.batch_id)=0) OR
     (NEW.transition_kind='custody-recovery-retirement' AND
       NEW.primary_custody_effect_digest IS NULL AND
@@ -7583,7 +8009,33 @@ BEGIN
         WHERE batch_id=NEW.batch_id)=1 AND
       EXISTS (SELECT 1 FROM lifecycle_receipt_recovery_retirement_effects
         WHERE batch_id=NEW.batch_id AND
-          effect_digest=NEW.primary_retirement_effect_digest))
+          effect_digest=NEW.primary_retirement_effect_digest) AND
+      (SELECT count(*) FROM lifecycle_receipt_fresh_origin_effects
+        WHERE batch_id=NEW.batch_id)=0) OR
+    (NEW.transition_kind='fresh-origin' AND
+      NEW.primary_custody_effect_digest IS NULL AND
+      NEW.primary_loss_effect_role IS NULL AND
+      NEW.primary_loss_effect_digest IS NULL AND
+      NEW.primary_retirement_effect_digest IS NULL AND
+      NEW.linked_loss_effect_role IS NULL AND
+      NEW.linked_loss_effect_digest IS NULL AND
+      NEW.primary_fresh_effect_ordinal=1 AND
+      NEW.primary_fresh_effect_role='primary' AND
+      NEW.primary_fresh_effect_digest IS NOT NULL AND
+      NEW.secondary_fresh_effect_ordinal IS NULL AND
+      NEW.secondary_fresh_effect_role IS NULL AND
+      NEW.secondary_fresh_effect_digest IS NULL AND
+      (SELECT count(*) FROM lifecycle_receipt_custody_effects
+        WHERE batch_id=NEW.batch_id)=0 AND
+      (SELECT count(*) FROM lifecycle_receipt_generation_loss_effects
+        WHERE batch_id=NEW.batch_id)=0 AND
+      (SELECT count(*) FROM lifecycle_receipt_recovery_retirement_effects
+        WHERE batch_id=NEW.batch_id)=0 AND
+      (SELECT count(*) FROM lifecycle_receipt_fresh_origin_effects
+        WHERE batch_id=NEW.batch_id)=1 AND
+      EXISTS (SELECT 1 FROM lifecycle_receipt_fresh_origin_effects
+        WHERE batch_id=NEW.batch_id AND ordinal=1 AND role='primary' AND
+          effect_digest=NEW.primary_fresh_effect_digest))
   );
 END;
 
@@ -7605,6 +8057,14 @@ END;
 
 CREATE TRIGGER lifecycle_retirement_effect_set_closed
 BEFORE INSERT ON lifecycle_receipt_recovery_retirement_effects
+BEGIN
+  SELECT RAISE(ABORT,'lifecycle-effect-set-closed')
+  WHERE EXISTS (SELECT 1 FROM lifecycle_receipt_batch_completions
+    WHERE batch_id=NEW.batch_id);
+END;
+
+CREATE TRIGGER lifecycle_fresh_origin_effect_set_closed
+BEFORE INSERT ON lifecycle_receipt_fresh_origin_effects
 BEGIN
   SELECT RAISE(ABORT,'lifecycle-effect-set-closed')
   WHERE EXISTS (SELECT 1 FROM lifecycle_receipt_batch_completions
@@ -7934,7 +8394,8 @@ no predecessor, every successor names revision minus one and its journal digest,
 and no terminal head accepts another successor. All shown tables are `STRICT`;
 the generated DDL marks every field nonnull except the exact discriminator/null
 arms shown here and in Spec 01. UPDATE/DELETE is denied for identity, revision,
-batch, effect, intent, authority-receipt, checkpoint, authorization,
+scope-admission outbox/resolution, batch, effect, intent, authority-receipt,
+checkpoint, authorization,
 reservation, handoff, commit and apply rows. Only head pointers use guarded
 UPDATE.
 
@@ -7947,13 +8408,25 @@ No trigger invokes a JavaScript hash UDF: production keeps
 an unsafe/unavailable application-defined trigger function. Direct-SQL negative
 fixtures still prove every relational and state invariant.
 
+Before the first lifecycle identity or issue for a project/session/run, the
+daemon writes only one immutable `lifecycle_scope_admission_outbox` row. Its
+worker point-reads or idempotently admits that exact scope at the external
+authority, verifies the returned authenticated zero-receipt checkpoint and
+project-namespace membership, then atomically inserts the local admitted scope,
+checkpoint/head and admission resolution. Return loss and every local insert
+boundary replay from the retained outbox; changed scope bytes conflict. No
+custody, loss, issue, handoff, receipt batch or apply may precede that verified
+resolution.
+
 The prepare transaction locks the exact current head/source rows, verifies one
 closed proof, and writes an immutable review reservation or fresh handoff first
 when applicable. It then writes one immutable batch, its exact primary/linked
 effects and one or two immutable intents. A custody batch has exactly one primary
 custody effect and at most one linked loss effect; a standalone direct-open loss
-batch has exactly one primary loss effect. Adopted true-chair custody alone has
-ordinal-two review intent/reservation. No lifecycle, provider, review, archive,
+batch has exactly one primary loss effect. Adopted true-chair custody has
+ordinal-two review intent/reservation; terminal-fresh instead has ordinal-two
+fresh-origin, and pure fresh has ordinal-one fresh-origin. No lifecycle,
+provider, review, archive,
 history, audit or issue-consumption mutation occurs before authority. No external
 call occurs while SQLite is locked.
 
@@ -7961,11 +8434,13 @@ Each intent equality-binds its subject owner kind, identity and revision to the
 exact typed effect in the same batch. The generated SQLite DDL declares
 `lifecycle_completion_effect_set_exact` as a `BEFORE INSERT` guard on completion:
 custody has exactly one primary custody effect plus only its declared optional
-linked loss; standalone loss has exactly one primary loss effect; retirement has
-exactly one primary retirement effect; every other effect table is empty for
+linked loss and terminal-fresh secondary fresh-origin effect; standalone loss
+has exactly one primary loss effect; retirement has exactly one primary
+retirement effect; pure fresh has exactly one primary fresh-origin effect; every
+other effect table is empty for
 that arm. A missing, crossed or extra effect aborts with
-`lifecycle-effect-set-incomplete`. Every custody, generation-loss and retirement
-effect table also rejects insertion after completion with
+`lifecycle-effect-set-incomplete`. Every custody, generation-loss, retirement
+and fresh-origin effect table also rejects insertion after completion with
 `lifecycle-effect-set-closed`. Completion is therefore both membership proof and
 an anti-extra fence; the daemon independently validates the canonical effect-set
 digest without a trigger hash UDF.
@@ -8001,7 +8476,9 @@ audit and linked loss state are never changed before apply.
 Hydration is read-only and starts at the authenticated project namespace, not
 local custody rows. It resolves every historical scope checkpoint named by that
 pinned namespace, pages each immutable checkpoint through the 256-row API and
-reconciles the exact external set against local pending/applied intents. Whole-
+reconciles every zero-receipt member to its exact local immutable admission
+outbox/resolution/scope tuple before reconciling the external set against local
+pending/applied intents. Whole-
 custody/run deletion, extra external rows, missing committed receipts, chain/
 head/count/set drift, crossed authority or invalid attestation is
 `SNAPSHOT_INVALID`. A pending intent alone may be externally absent. Only after
@@ -8026,7 +8503,8 @@ prepared custody with zero dispatch uses `fresh-handoff-superseded`: the source
 and issue remain unchanged while its custody-terminal batch is pending, then one
 `terminal-fresh` apply finalizes the source, creates new custody revision one,
 inserts the commit and derives issue consumption. A finalized custody or open
-generation loss uses one `fresh` apply from the same handoff; the loss moves to
+generation loss uses one externally authenticated `fresh-origin` batch and one
+`fresh` apply from the same handoff; the loss moves to
 recovery-in-progress, not terminal. Issue state is derived as active, commit-
 pending, consumed, revoked or expired; a handoff freezes later revoke/expiry.
 Composite keys enforce the preparation/handoff/commit/issue/source/custody/

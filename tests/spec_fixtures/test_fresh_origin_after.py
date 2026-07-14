@@ -974,8 +974,19 @@ CREATE TABLE scope_admission_resolutions(
   FOREIGN KEY(admission_request_id,scope_key,scope_digest)
     REFERENCES scope_admission_outbox(admission_request_id,scope_key,scope_digest),
   FOREIGN KEY(scope_key,initial_checkpoint_digest)
-    REFERENCES scope_checkpoints(scope_key,checkpoint_digest)
+    REFERENCES scope_checkpoints(scope_key,checkpoint_digest),
+  FOREIGN KEY(namespace_checkpoint_digest)
+    REFERENCES namespace_checkpoints(checkpoint_digest),
+  FOREIGN KEY(namespace_checkpoint_digest,scope_key,initial_checkpoint_digest)
+    REFERENCES namespace_members(
+      checkpoint_digest,scope_key,scope_checkpoint_digest)
 );
+CREATE TRIGGER scope_resolution_no_update
+BEFORE UPDATE ON scope_admission_resolutions
+BEGIN SELECT RAISE(ABORT,'SCOPE_ADMISSION_RESOLUTION_IMMUTABLE'); END;
+CREATE TRIGGER scope_resolution_no_delete
+BEFORE DELETE ON scope_admission_resolutions
+BEGIN SELECT RAISE(ABORT,'SCOPE_ADMISSION_RESOLUTION_IMMUTABLE'); END;
 
 CREATE TABLE admitted_scopes(
   scope_key TEXT PRIMARY KEY,
@@ -1009,6 +1020,44 @@ CREATE TABLE scope_heads(
   FOREIGN KEY(scope_key,checkpoint_digest)
     REFERENCES scope_checkpoints(scope_key,checkpoint_digest)
 );
+
+CREATE TABLE namespace_checkpoints(
+  project_id TEXT NOT NULL,
+  authority_id TEXT NOT NULL,
+  scope_count INTEGER NOT NULL CHECK(scope_count>=1),
+  ordered_scope_head_set_digest TEXT NOT NULL,
+  checkpoint_json TEXT NOT NULL,
+  checkpoint_digest TEXT PRIMARY KEY,
+  attestation TEXT NOT NULL
+);
+CREATE TRIGGER namespace_checkpoint_no_update
+BEFORE UPDATE ON namespace_checkpoints
+BEGIN SELECT RAISE(ABORT,'NAMESPACE_CHECKPOINT_IMMUTABLE'); END;
+CREATE TRIGGER namespace_checkpoint_no_delete
+BEFORE DELETE ON namespace_checkpoints
+BEGIN SELECT RAISE(ABORT,'NAMESPACE_CHECKPOINT_IMMUTABLE'); END;
+
+CREATE TABLE namespace_members(
+  checkpoint_digest TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal>=1),
+  scope_key TEXT NOT NULL,
+  scope_checkpoint_digest TEXT NOT NULL,
+  receipt_count INTEGER NOT NULL CHECK(receipt_count=0),
+  head_receipt_digest TEXT CHECK(head_receipt_digest IS NULL),
+  PRIMARY KEY(checkpoint_digest,ordinal),
+  UNIQUE(checkpoint_digest,scope_key,scope_checkpoint_digest),
+  FOREIGN KEY(checkpoint_digest)
+    REFERENCES namespace_checkpoints(checkpoint_digest),
+  FOREIGN KEY(scope_key) REFERENCES admitted_scopes(scope_key),
+  FOREIGN KEY(scope_key,scope_checkpoint_digest)
+    REFERENCES scope_checkpoints(scope_key,checkpoint_digest)
+);
+CREATE TRIGGER namespace_member_no_update
+BEFORE UPDATE ON namespace_members
+BEGIN SELECT RAISE(ABORT,'NAMESPACE_MEMBER_IMMUTABLE'); END;
+CREATE TRIGGER namespace_member_no_delete
+BEFORE DELETE ON namespace_members
+BEGIN SELECT RAISE(ABORT,'NAMESPACE_MEMBER_IMMUTABLE'); END;
 """
 
 
@@ -1027,8 +1076,35 @@ CREATE TABLE authority_namespace_members(
   receipt_count INTEGER NOT NULL CHECK(receipt_count=0),
   head_receipt_digest TEXT CHECK(head_receipt_digest IS NULL),
   namespace_checkpoint_digest TEXT NOT NULL,
+  namespace_checkpoint_json TEXT NOT NULL,
   FOREIGN KEY(scope_key) REFERENCES authority_scopes(scope_key),
   FOREIGN KEY(checkpoint_digest) REFERENCES authority_scopes(checkpoint_digest)
+);
+CREATE TABLE authority_namespace_checkpoints(
+  project_id TEXT NOT NULL,
+  authority_id TEXT NOT NULL,
+  scope_count INTEGER NOT NULL CHECK(scope_count>=1),
+  ordered_scope_head_set_digest TEXT NOT NULL,
+  checkpoint_json TEXT NOT NULL,
+  checkpoint_digest TEXT PRIMARY KEY,
+  attestation TEXT NOT NULL
+);
+CREATE TABLE authority_namespace_snapshot_members(
+  checkpoint_digest TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal>=1),
+  scope_key TEXT NOT NULL,
+  project_session_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  authority_id TEXT NOT NULL,
+  scope_checkpoint_digest TEXT NOT NULL,
+  receipt_count INTEGER NOT NULL CHECK(receipt_count=0),
+  head_receipt_digest TEXT CHECK(head_receipt_digest IS NULL),
+  PRIMARY KEY(checkpoint_digest,ordinal),
+  UNIQUE(checkpoint_digest,scope_key),
+  FOREIGN KEY(checkpoint_digest)
+    REFERENCES authority_namespace_checkpoints(checkpoint_digest),
+  FOREIGN KEY(scope_key) REFERENCES authority_scopes(scope_key),
+  FOREIGN KEY(scope_checkpoint_digest) REFERENCES authority_scopes(checkpoint_digest)
 );
 """
 
@@ -1041,6 +1117,14 @@ SCOPE = {
     "authorityId": "authority-001",
     "admissionDigest": D33,
     "admittedAt": "2026-07-14T00:00:00.000Z",
+}
+
+SCOPE_TWO = {
+    **SCOPE,
+    "projectSessionId": "session-002",
+    "runId": "run-002",
+    "admissionDigest": D44,
+    "admittedAt": "2026-07-14T00:00:10.000Z",
 }
 
 
@@ -1094,6 +1178,42 @@ def stage_outbox(local_path: Path, scope: dict[str, Any]) -> tuple[str, str]:
     return request_id, digest
 
 
+def _authority_result(
+    connection: sqlite3.Connection, key: str, scope_row: tuple[Any, ...]
+) -> dict[str, Any]:
+    admission = connection.execute(
+        "SELECT receipt_count,head_receipt_digest,namespace_checkpoint_digest,"
+        "namespace_checkpoint_json FROM authority_namespace_members WHERE scope_key=?",
+        (key,),
+    ).fetchone()
+    members = connection.execute(
+        "SELECT project_session_id,run_id,authority_id,scope_checkpoint_digest,"
+        "receipt_count,head_receipt_digest "
+        "FROM authority_namespace_snapshot_members WHERE checkpoint_digest=? "
+        "ORDER BY ordinal",
+        (admission[2],),
+    ).fetchall()
+    return {
+        "checkpointJson": scope_row[2],
+        "checkpointDigest": scope_row[3],
+        "receiptCount": admission[0],
+        "headReceiptDigest": admission[1],
+        "namespaceCheckpointDigest": admission[2],
+        "namespaceCheckpointJson": admission[3],
+        "namespaceMembers": [
+            {
+                "projectSessionId": row[0],
+                "runId": row[1],
+                "authorityId": row[2],
+                "scopeCheckpointDigest": row[3],
+                "receiptCountDec": str(row[4]),
+                "headReceiptDigest": row[5],
+            }
+            for row in members
+        ],
+    }
+
+
 def authority_admit(authority_path: Path, scope: dict[str, Any]) -> dict[str, Any]:
     key = scope_key(scope)
     scope_json = jcs(scope).decode("utf-8")
@@ -1102,30 +1222,18 @@ def authority_admit(authority_path: Path, scope: dict[str, Any]) -> dict[str, An
     connection.execute("BEGIN IMMEDIATE")
     existing = connection.execute(
         "SELECT scope_json,scope_digest,checkpoint_json,checkpoint_digest "
-        "FROM authority_scopes WHERE scope_key=?",
-        (key,),
+        "FROM authority_scopes WHERE scope_key=?", (key,),
     ).fetchone()
     if existing is not None:
         if existing[0] != scope_json or existing[1] != digest:
             connection.rollback()
             connection.close()
             raise AdmissionConflict("LIFECYCLE_SCOPE_ADMISSION_CONFLICT")
-        member = connection.execute(
-            "SELECT receipt_count,head_receipt_digest,namespace_checkpoint_digest "
-            "FROM authority_namespace_members WHERE scope_key=?",
-            (key,),
-        ).fetchone()
+        result = _authority_result(connection, key, existing)
         connection.commit()
         connection.close()
-        return {
-            "checkpointJson": existing[2],
-            "checkpointDigest": existing[3],
-            "receiptCount": member[0],
-            "headReceiptDigest": member[1],
-            "namespaceCheckpointDigest": member[2],
-        }
+        return result
 
-    record_set_digest = ld("scope-record-set", [])
     checkpoint_body = {
         "schemaVersion": 1,
         "authorityId": scope["authorityId"],
@@ -1134,7 +1242,7 @@ def authority_admit(authority_path: Path, scope: dict[str, Any]) -> dict[str, An
         "receiptCountDec": "0",
         "headAuthoritySequenceDec": "0",
         "headReceiptDigest": None,
-        "orderedRecordSetDigest": record_set_digest,
+        "orderedRecordSetDigest": ld("scope-record-set", []),
     }
     checkpoint_digest = ld("scope-checkpoint", checkpoint_body)
     checkpoint = {
@@ -1143,40 +1251,67 @@ def authority_admit(authority_path: Path, scope: dict[str, Any]) -> dict[str, An
         "attestation": "opaque-authority-attestation",
     }
     checkpoint_json = jcs(checkpoint).decode("utf-8")
-    namespace_digest = ld(
-        "namespace-checkpoint",
-        {
-            "schemaVersion": 1,
-            "projectId": scope["projectId"],
-            "members": [
-                {
-                    "projectSessionId": scope["projectSessionId"],
-                    "runId": scope["runId"],
-                    "authorityId": scope["authorityId"],
-                    "scopeCheckpointDigest": checkpoint_digest,
-                    "receiptCountDec": "0",
-                    "headReceiptDigest": None,
-                }
-            ],
-        },
-    )
     connection.execute(
         "INSERT INTO authority_scopes VALUES(?,?,?,?,?)",
         (key, scope_json, digest, checkpoint_json, checkpoint_digest),
     )
+    scope_rows = connection.execute(
+        "SELECT scope_key,scope_json,checkpoint_digest FROM authority_scopes"
+    ).fetchall()
+    scope_rows.sort(
+        key=lambda row: (
+            json.loads(row[1])["projectSessionId"], json.loads(row[1])["runId"]
+        )
+    )
+    members = [
+        {
+            "projectSessionId": json.loads(row[1])["projectSessionId"],
+            "runId": json.loads(row[1])["runId"],
+            "authorityId": json.loads(row[1])["authorityId"],
+            "scopeCheckpointDigest": row[2],
+            "receiptCountDec": "0",
+            "headReceiptDigest": None,
+        }
+        for row in scope_rows
+    ]
+    namespace_body = {
+        "schemaVersion": 1,
+        "authorityId": scope["authorityId"],
+        "projectId": scope["projectId"],
+        "scopeCountDec": str(len(members)),
+        "orderedScopeHeadSetDigest": ld("namespace-scope-head-set", members),
+    }
+    namespace_digest = ld("namespace-checkpoint", namespace_body)
+    namespace_checkpoint = {
+        **namespace_body,
+        "checkpointDigest": namespace_digest,
+        "attestation": "opaque-authority-attestation",
+    }
+    namespace_checkpoint_json = jcs(namespace_checkpoint).decode("utf-8")
     connection.execute(
-        "INSERT INTO authority_namespace_members VALUES(?,?,?,?,?)",
-        (key, checkpoint_digest, 0, None, namespace_digest),
+        "INSERT INTO authority_namespace_checkpoints VALUES(?,?,?,?,?,?,?)",
+        (scope["projectId"], scope["authorityId"], len(members),
+         namespace_body["orderedScopeHeadSetDigest"], namespace_checkpoint_json,
+         namespace_digest, namespace_checkpoint["attestation"]),
+    )
+    for ordinal, (row, member) in enumerate(zip(scope_rows, members), start=1):
+        connection.execute(
+            "INSERT INTO authority_namespace_snapshot_members VALUES(?,?,?,?,?,?,?,?,?)",
+            (namespace_digest, ordinal, row[0], member["projectSessionId"],
+             member["runId"], member["authorityId"],
+             member["scopeCheckpointDigest"], 0, None),
+        )
+    connection.execute(
+        "INSERT INTO authority_namespace_members VALUES(?,?,?,?,?,?)",
+        (key, checkpoint_digest, 0, None, namespace_digest,
+         namespace_checkpoint_json),
+    )
+    result = _authority_result(
+        connection, key, (scope_json, digest, checkpoint_json, checkpoint_digest)
     )
     connection.commit()
     connection.close()
-    return {
-        "checkpointJson": checkpoint_json,
-        "checkpointDigest": checkpoint_digest,
-        "receiptCount": 0,
-        "headReceiptDigest": None,
-        "namespaceCheckpointDigest": namespace_digest,
-    }
+    return result
 
 
 def finalize_local(
@@ -1186,51 +1321,150 @@ def finalize_local(
     authority_result: dict[str, Any],
     crash_after: int | None = None,
 ) -> None:
+    connection = connect_file(local_path)
+    outbox = connection.execute(
+        "SELECT scope_key,scope_json,scope_digest FROM scope_admission_outbox "
+        "WHERE admission_request_id=?", (request_id,),
+    ).fetchone()
+    connection.close()
+    require(outbox is not None, "missing local admission outbox")
+    stored_scope = json.loads(outbox[1])
+    key = scope_key(stored_scope)
+    require(outbox == (key, jcs(stored_scope).decode("utf-8"), digest),
+            "crossed local admission outbox")
+    require(ld("admitted-scope", stored_scope) == digest, "invalid scope digest")
     require(authority_result["receiptCount"] == 0, "initial checkpoint is nonzero")
     require(authority_result["headReceiptDigest"] is None, "zero checkpoint has a head")
-    key = scope_key(SCOPE)
     checkpoint_json = authority_result["checkpointJson"]
     checkpoint = json.loads(checkpoint_json)
-    require(checkpoint["headAuthoritySequenceDec"] == "0", "initial sequence is nonzero")
-    require(checkpoint["checkpointDigest"] == authority_result["checkpointDigest"],
-            "crossed checkpoint digest")
+    checkpoint_body = {
+        "schemaVersion": 1,
+        "authorityId": stored_scope["authorityId"],
+        "projectSessionId": stored_scope["projectSessionId"],
+        "runId": stored_scope["runId"],
+        "receiptCountDec": "0",
+        "headAuthoritySequenceDec": "0",
+        "headReceiptDigest": None,
+        "orderedRecordSetDigest": ld("scope-record-set", []),
+    }
+    require(checkpoint == {
+        **checkpoint_body,
+        "checkpointDigest": authority_result["checkpointDigest"],
+        "attestation": "opaque-authority-attestation",
+    }, "crossed initial checkpoint")
+    require(ld("scope-checkpoint", checkpoint_body) ==
+            authority_result["checkpointDigest"], "invalid checkpoint digest")
+    namespace_checkpoint_json = authority_result["namespaceCheckpointJson"]
+    namespace_checkpoint = json.loads(namespace_checkpoint_json)
+    namespace_members = authority_result.get("namespaceMembers")
+    require(isinstance(namespace_members, list), "missing complete namespace members")
+    require(1 <= len(namespace_members) <= 65_536, "namespace member bound exceeded")
+    require(namespace_members == sorted(
+        namespace_members,
+        key=lambda member: (member["projectSessionId"], member["runId"]),
+    ), "namespace members are not ordered")
+    require(len({(member["projectSessionId"], member["runId"])
+                 for member in namespace_members}) == len(namespace_members),
+            "duplicate namespace member")
+    namespace_member = {
+        "projectSessionId": stored_scope["projectSessionId"],
+        "runId": stored_scope["runId"],
+        "authorityId": stored_scope["authorityId"],
+        "scopeCheckpointDigest": authority_result["checkpointDigest"],
+        "receiptCountDec": "0",
+        "headReceiptDigest": None,
+    }
+    require(namespace_member in namespace_members, "exact admitted member is absent")
+    require(all(member["authorityId"] == stored_scope["authorityId"] and
+                member["receiptCountDec"] == "0" and
+                member["headReceiptDigest"] is None
+                for member in namespace_members), "crossed namespace member")
+    namespace_body = {
+        "schemaVersion": 1,
+        "authorityId": stored_scope["authorityId"],
+        "projectId": stored_scope["projectId"],
+        "scopeCountDec": str(len(namespace_members)),
+        "orderedScopeHeadSetDigest": ld(
+            "namespace-scope-head-set", namespace_members
+        ),
+    }
+    require(namespace_checkpoint == {
+        **namespace_body,
+        "checkpointDigest": authority_result["namespaceCheckpointDigest"],
+        "attestation": "opaque-authority-attestation",
+    }, "crossed namespace checkpoint")
+    require(
+        ld("namespace-checkpoint", namespace_body) ==
+        authority_result["namespaceCheckpointDigest"],
+        "invalid namespace checkpoint digest",
+    )
     resolution_body = {
         "schemaVersion": 1,
         "admissionRequestId": request_id,
         "scopeDigest": digest,
         "initialScopeCheckpoint": checkpoint,
         "namespaceCheckpointDigest": authority_result["namespaceCheckpointDigest"],
-        "namespaceMember": {
-            "projectSessionId": SCOPE["projectSessionId"],
-            "runId": SCOPE["runId"],
-            "authorityId": SCOPE["authorityId"],
-            "scopeCheckpointDigest": authority_result["checkpointDigest"],
-            "receiptCountDec": "0",
-            "headReceiptDigest": None,
-        },
+        "namespaceMember": namespace_member,
         "verifiedAt": "2026-07-14T00:00:02.000Z",
     }
     resolution_digest = ld("scope-admission-resolution", resolution_body)
     resolution_json = jcs(
         {**resolution_body, "resolutionDigest": resolution_digest}
     ).decode("utf-8")
+    member_rows = [
+        (
+            authority_result["namespaceCheckpointDigest"],
+            ordinal,
+            "|".join((stored_scope["projectId"], member["projectSessionId"],
+                      member["runId"], member["authorityId"])),
+            member["scopeCheckpointDigest"],
+            int(member["receiptCountDec"]),
+            member["headReceiptDigest"],
+        )
+        for ordinal, member in enumerate(namespace_members, start=1)
+    ]
 
     connection = connect_file(local_path)
     existing = connection.execute(
-        "SELECT resolution_digest,scope_digest,initial_checkpoint_digest "
+        "SELECT resolution_digest,scope_digest,initial_checkpoint_digest,"
+        "namespace_checkpoint_digest "
         "FROM scope_admission_resolutions WHERE admission_request_id=?",
         (request_id,),
     ).fetchone()
     if existing is not None:
         require(
-            existing == (resolution_digest, digest, authority_result["checkpointDigest"]),
+            existing == (
+                resolution_digest,
+                digest,
+                authority_result["checkpointDigest"],
+                authority_result["namespaceCheckpointDigest"],
+            ),
             "crossed existing local resolution",
         )
+        stored_checkpoint = connection.execute(
+            "SELECT project_id,authority_id,scope_count,"
+            "ordered_scope_head_set_digest,checkpoint_json,checkpoint_digest,"
+            "attestation FROM namespace_checkpoints WHERE checkpoint_digest=?",
+            (authority_result["namespaceCheckpointDigest"],),
+        ).fetchone()
+        require(stored_checkpoint == (
+            stored_scope["projectId"], stored_scope["authorityId"],
+            len(namespace_members), namespace_body["orderedScopeHeadSetDigest"],
+            namespace_checkpoint_json, authority_result["namespaceCheckpointDigest"],
+            namespace_checkpoint["attestation"],
+        ), "crossed stored namespace checkpoint")
+        stored_members = connection.execute(
+            "SELECT checkpoint_digest,ordinal,scope_key,scope_checkpoint_digest,"
+            "receipt_count,head_receipt_digest FROM namespace_members "
+            "WHERE checkpoint_digest=? ORDER BY ordinal",
+            (authority_result["namespaceCheckpointDigest"],),
+        ).fetchall()
+        require(stored_members == member_rows, "crossed stored namespace members")
         connection.close()
         return
 
     connection.execute("BEGIN IMMEDIATE")
-    inserts = (
+    inserts: list[tuple[str, tuple[Any, ...]]] = [
         (
             "INSERT INTO admitted_scopes VALUES(?,?,?,?,?)",
             (key, request_id, digest, authority_result["checkpointDigest"], resolution_digest),
@@ -1244,6 +1478,23 @@ def finalize_local(
             (key, authority_result["checkpointDigest"], 1),
         ),
         (
+            "INSERT INTO namespace_checkpoints VALUES(?,?,?,?,?,?,?)",
+            (
+                stored_scope["projectId"],
+                stored_scope["authorityId"],
+                len(namespace_members),
+                namespace_checkpoint["orderedScopeHeadSetDigest"],
+                namespace_checkpoint_json,
+                authority_result["namespaceCheckpointDigest"],
+                namespace_checkpoint["attestation"],
+            ),
+        ),
+    ]
+    inserts.extend(
+        ("INSERT INTO namespace_members VALUES(?,?,?,?,?,?)", row)
+        for row in member_rows
+    )
+    inserts.append((
             "INSERT INTO scope_admission_resolutions VALUES(?,?,?,?,?,?,?)",
             (
                 request_id,
@@ -1254,8 +1505,7 @@ def finalize_local(
                 resolution_json,
                 resolution_digest,
             ),
-        ),
-    )
+        ))
     for index, (statement, parameters) in enumerate(inserts, start=1):
         connection.execute(statement, parameters)
         if crash_after == index:
@@ -1545,6 +1795,8 @@ def outbox_is_the_only_pre_authority_write_and_is_immutable() -> None:
                 "admitted_scopes",
                 "scope_checkpoints",
                 "scope_heads",
+                "namespace_checkpoints",
+                "namespace_members",
             ),
         )
         require(local_counts == {
@@ -1553,6 +1805,8 @@ def outbox_is_the_only_pre_authority_write_and_is_immutable() -> None:
             "admitted_scopes": 0,
             "scope_checkpoints": 0,
             "scope_heads": 0,
+            "namespace_checkpoints": 0,
+            "namespace_members": 0,
         }, f"pre-authority semantic write: {local_counts}")
         require(table_counts(authority_path, ("authority_scopes",))["authority_scopes"] == 0,
                 "authority called before worker")
@@ -1574,13 +1828,17 @@ def outbox_is_the_only_pre_authority_write_and_is_immutable() -> None:
 
 
 @case("SA-02")
-def lost_authority_response_replays_exactly_once() -> None:
+def two_scope_lost_authority_responses_replay_exactly_once() -> None:
     with tempfile.TemporaryDirectory(prefix="capa001-sa02-") as directory:
         local_path = Path(directory) / "local.sqlite3"
         authority_path = Path(directory) / "authority.sqlite3"
         initialize_scope_databases(local_path, authority_path)
         stage_outbox(local_path, SCOPE)
         authority_admit(authority_path, SCOPE)  # Commit, then lose the response.
+        recover_scope(local_path, authority_path)
+        recover_scope(local_path, authority_path)
+        stage_outbox(local_path, SCOPE_TWO)
+        authority_admit(authority_path, SCOPE_TWO)  # Lose the second response too.
         recover_scope(local_path, authority_path)
         recover_scope(local_path, authority_path)
         local_counts = table_counts(
@@ -1591,15 +1849,32 @@ def lost_authority_response_replays_exactly_once() -> None:
                 "admitted_scopes",
                 "scope_checkpoints",
                 "scope_heads",
+                "namespace_checkpoints",
+                "namespace_members",
             ),
         )
-        require(all(value == 1 for value in local_counts.values()),
-                f"local replay multiplied rows: {local_counts}")
+        require(local_counts == {
+            "scope_admission_outbox": 2,
+            "scope_admission_resolutions": 2,
+            "admitted_scopes": 2,
+            "scope_checkpoints": 2,
+            "scope_heads": 2,
+            "namespace_checkpoints": 2,
+            "namespace_members": 3,
+        }, f"two-scope local replay multiplied rows: {local_counts}")
         authority_counts = table_counts(
-            authority_path, ("authority_scopes", "authority_namespace_members")
+            authority_path, (
+                "authority_scopes", "authority_namespace_members",
+                "authority_namespace_checkpoints",
+                "authority_namespace_snapshot_members",
+            )
         )
-        require(all(value == 1 for value in authority_counts.values()),
-                f"authority replay multiplied rows: {authority_counts}")
+        require(authority_counts == {
+            "authority_scopes": 2,
+            "authority_namespace_members": 2,
+            "authority_namespace_checkpoints": 2,
+            "authority_namespace_snapshot_members": 3,
+        }, f"two-scope authority replay multiplied rows: {authority_counts}")
 
         changed = {**SCOPE, "admittedAt": "2026-07-14T00:00:03.000Z"}
         try:
@@ -1613,7 +1888,7 @@ def lost_authority_response_replays_exactly_once() -> None:
 
 @case("SA-03")
 def every_local_finalization_crash_rolls_back_then_recovers_once() -> None:
-    for crash_after in (1, 2, 3, 4):
+    for crash_after in (1, 2, 3, 4, 5, 6):
         with tempfile.TemporaryDirectory(prefix=f"capa001-sa03-{crash_after}-") as directory:
             local_path = Path(directory) / "local.sqlite3"
             authority_path = Path(directory) / "authority.sqlite3"
@@ -1636,6 +1911,8 @@ def every_local_finalization_crash_rolls_back_then_recovers_once() -> None:
                     "admitted_scopes",
                     "scope_checkpoints",
                     "scope_heads",
+                    "namespace_checkpoints",
+                    "namespace_members",
                 ),
             )
             require(rolled_back == {
@@ -1644,6 +1921,8 @@ def every_local_finalization_crash_rolls_back_then_recovers_once() -> None:
                 "admitted_scopes": 0,
                 "scope_checkpoints": 0,
                 "scope_heads": 0,
+                "namespace_checkpoints": 0,
+                "namespace_members": 0,
             }, f"partial local commit at boundary {crash_after}: {rolled_back}")
             recover_scope(local_path, authority_path)
             recovered = table_counts(
@@ -1654,10 +1933,62 @@ def every_local_finalization_crash_rolls_back_then_recovers_once() -> None:
                     "admitted_scopes",
                     "scope_checkpoints",
                     "scope_heads",
+                    "namespace_checkpoints",
+                    "namespace_members",
                 ),
             )
             require(all(value == 1 for value in recovered.values()),
                     f"recovery not exact at boundary {crash_after}: {recovered}")
+    for crash_after in range(1, 8):  # 5 + N writes where the pinned set has N=2.
+        with tempfile.TemporaryDirectory(
+            prefix=f"capa001-sa03-multiscope-{crash_after}-"
+        ) as directory:
+            local_path = Path(directory) / "local.sqlite3"
+            authority_path = Path(directory) / "authority.sqlite3"
+            initialize_scope_databases(local_path, authority_path)
+            first_request, first_digest = stage_outbox(local_path, SCOPE)
+            finalize_local(
+                local_path, first_request, first_digest,
+                authority_admit(authority_path, SCOPE),
+            )
+            request_id, digest = stage_outbox(local_path, SCOPE_TWO)
+            result = authority_admit(authority_path, SCOPE_TWO)
+            try:
+                finalize_local(local_path, request_id, digest, result, crash_after)
+            except SimulatedCrash as error:
+                require(str(error) == f"after-local-insert-{crash_after}",
+                        "wrong multi-scope crash boundary")
+            else:
+                raise OracleFailure(f"multi-scope boundary {crash_after} committed")
+            rolled_back = table_counts(local_path, (
+                "scope_admission_outbox", "scope_admission_resolutions",
+                "admitted_scopes", "scope_checkpoints", "scope_heads",
+                "namespace_checkpoints", "namespace_members",
+            ))
+            require(rolled_back == {
+                "scope_admission_outbox": 2,
+                "scope_admission_resolutions": 1,
+                "admitted_scopes": 1,
+                "scope_checkpoints": 1,
+                "scope_heads": 1,
+                "namespace_checkpoints": 1,
+                "namespace_members": 1,
+            }, f"partial multi-scope commit at {crash_after}: {rolled_back}")
+            recover_scope(local_path, authority_path)
+            recovered = table_counts(local_path, (
+                "scope_admission_outbox", "scope_admission_resolutions",
+                "admitted_scopes", "scope_checkpoints", "scope_heads",
+                "namespace_checkpoints", "namespace_members",
+            ))
+            require(recovered == {
+                "scope_admission_outbox": 2,
+                "scope_admission_resolutions": 2,
+                "admitted_scopes": 2,
+                "scope_checkpoints": 2,
+                "scope_heads": 2,
+                "namespace_checkpoints": 2,
+                "namespace_members": 3,
+            }, f"multi-scope recovery not exact at {crash_after}: {recovered}")
 
 
 def main() -> int:

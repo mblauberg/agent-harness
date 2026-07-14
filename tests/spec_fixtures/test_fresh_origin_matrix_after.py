@@ -1436,6 +1436,8 @@ LOCAL_SCOPE_TABLES = (
     "admitted_scopes",
     "scope_checkpoints",
     "scope_heads",
+    "namespace_checkpoints",
+    "namespace_members",
 )
 
 
@@ -1450,6 +1452,8 @@ def pending_only(path: Path) -> bool:
         "admitted_scopes": 0,
         "scope_checkpoints": 0,
         "scope_heads": 0,
+        "namespace_checkpoints": 0,
+        "namespace_members": 0,
     }
 
 
@@ -1548,13 +1552,15 @@ def finalize_scope_locked(
     connection.execute("PRAGMA busy_timeout=5000")
     connection.execute("BEGIN IMMEDIATE")
     existing = connection.execute(
-        "SELECT resolution_digest,scope_digest,initial_checkpoint_digest "
+        "SELECT resolution_digest,scope_digest,initial_checkpoint_digest,"
+        "namespace_checkpoint_digest "
         "FROM scope_admission_resolutions WHERE admission_request_id=?",
         (request_id,),
     ).fetchone()
     if existing is not None:
         require(existing == (
-            resolution_digest, digest, authority_result["checkpointDigest"]
+            resolution_digest, digest, authority_result["checkpointDigest"],
+            authority_result["namespaceCheckpointDigest"]
         ), "concurrent resolution crossed")
         connection.commit()
         connection.close()
@@ -1572,6 +1578,23 @@ def finalize_scope_locked(
         (
             "INSERT INTO scope_heads VALUES(?,?,?)",
             (key, authority_result["checkpointDigest"], 1),
+        ),
+        (
+            "INSERT INTO namespace_checkpoints VALUES(?,?,?,?,?,?,?)",
+            (
+                core.SCOPE["projectId"], core.SCOPE["authorityId"], 1,
+                json.loads(authority_result["namespaceCheckpointJson"])[
+                    "orderedScopeHeadSetDigest"
+                ],
+                authority_result["namespaceCheckpointJson"],
+                authority_result["namespaceCheckpointDigest"],
+                json.loads(authority_result["namespaceCheckpointJson"])["attestation"],
+            ),
+        ),
+        (
+            "INSERT INTO namespace_members VALUES(?,?,?,?,?,?)",
+            (authority_result["namespaceCheckpointDigest"], 1, key,
+             authority_result["checkpointDigest"], 0, None),
         ),
         (
             "INSERT INTO scope_admission_resolutions VALUES(?,?,?,?,?,?,?)",
@@ -1644,6 +1667,29 @@ def hydration_status(
                 "SELECT scope_key,checkpoint_digest,revision FROM scope_heads"
             ).fetchall()
         }
+        local_namespace_checkpoints = {
+            row[5]: row
+            for row in local.execute(
+                "SELECT project_id,authority_id,scope_count,"
+                "ordered_scope_head_set_digest,checkpoint_json,checkpoint_digest,"
+                "attestation FROM namespace_checkpoints"
+            ).fetchall()
+        }
+        local_namespace_member_rows = local.execute(
+            "SELECT checkpoint_digest,ordinal,scope_key,"
+            "scope_checkpoint_digest,receipt_count,head_receipt_digest "
+            "FROM namespace_members"
+        ).fetchall()
+        local_namespace_members = {
+            (row[0], row[2]): row for row in local_namespace_member_rows
+        }
+        local_namespace_scope_keys = {row[2] for row in local_namespace_member_rows}
+        local_namespace_member_sets: dict[str, list[tuple[Any, ...]]] = {}
+        for row in local.execute(
+            "SELECT checkpoint_digest,ordinal,scope_key,scope_checkpoint_digest,"
+            "receipt_count,head_receipt_digest FROM namespace_members ORDER BY ordinal"
+        ).fetchall():
+            local_namespace_member_sets.setdefault(row[0], []).append(row)
         external_scopes = {
             row[0]: row
             for row in authority.execute(
@@ -1655,13 +1701,41 @@ def hydration_status(
             row[0]: row
             for row in authority.execute(
                 "SELECT scope_key,checkpoint_digest,receipt_count,"
-                "head_receipt_digest,namespace_checkpoint_digest "
+                "head_receipt_digest,namespace_checkpoint_digest,"
+                "namespace_checkpoint_json "
                 "FROM authority_namespace_members"
             ).fetchall()
         }
+        external_namespace_checkpoints = {
+            row[5]: row
+            for row in authority.execute(
+                "SELECT project_id,authority_id,scope_count,"
+                "ordered_scope_head_set_digest,checkpoint_json,checkpoint_digest,"
+                "attestation FROM authority_namespace_checkpoints"
+            ).fetchall()
+        }
+        external_namespace_member_sets: dict[str, list[tuple[Any, ...]]] = {}
+        external_namespace_member_bodies: dict[str, list[dict[str, Any]]] = {}
+        for row in authority.execute(
+            "SELECT checkpoint_digest,ordinal,scope_key,project_session_id,run_id,"
+            "authority_id,scope_checkpoint_digest,receipt_count,head_receipt_digest "
+            "FROM authority_namespace_snapshot_members ORDER BY ordinal"
+        ).fetchall():
+            external_namespace_member_sets.setdefault(row[0], []).append(
+                (row[0], row[1], row[2], row[6], row[7], row[8])
+            )
+            external_namespace_member_bodies.setdefault(row[0], []).append({
+                "projectSessionId": row[3],
+                "runId": row[4],
+                "authorityId": row[5],
+                "scopeCheckpointDigest": row[6],
+                "receiptCountDec": str(row[7]),
+                "headReceiptDigest": row[8],
+            })
         key_sets = (
             set(outboxes), set(resolutions), set(admitted), set(checkpoints),
-            set(heads), set(external_scopes), set(namespace),
+            set(heads), local_namespace_scope_keys, set(external_scopes),
+            set(namespace),
         )
         if not key_sets[0] or any(keys != key_sets[0] for keys in key_sets[1:]):
             return "SNAPSHOT_INVALID"
@@ -1673,6 +1747,14 @@ def hydration_status(
             head = heads[key]
             external = external_scopes[key]
             member = namespace[key]
+            local_namespace_member = local_namespace_members.get((member[4], key))
+            external_current_member = next(
+                (row for row in external_namespace_member_sets.get(member[4], [])
+                 if row[2] == key),
+                None,
+            )
+            local_namespace_checkpoint = local_namespace_checkpoints.get(member[4])
+            external_namespace_checkpoint = external_namespace_checkpoints.get(member[4])
             stored_scope = json.loads(outbox[2])
             expected_scope_digest = core.ld("admitted-scope", stored_scope)
             expected_request_id = core.ld(
@@ -1680,6 +1762,11 @@ def hydration_status(
                 {"schemaVersion": 1, "scopeDigest": expected_scope_digest},
             )
             checkpoint_json = json.loads(external[3])
+            namespace_json = json.loads(member[5])
+            namespace_body = {
+                name: value for name, value in namespace_json.items()
+                if name not in ("checkpointDigest", "attestation")
+            }
             resolution_json = json.loads(resolution[5])
             conditions = (
                 outbox[0] == expected_request_id,
@@ -1699,6 +1786,31 @@ def hydration_status(
                 head[1:] == (external[4], 1),
                 member[1] == external[4],
                 member[2:4] == (0, None),
+                local_namespace_checkpoint is not None,
+                external_namespace_checkpoint is not None,
+                external_namespace_checkpoint is not None and
+                    external_namespace_checkpoint == (
+                        namespace_json["projectId"], namespace_json["authorityId"],
+                        int(namespace_json["scopeCountDec"]),
+                        namespace_json["orderedScopeHeadSetDigest"], member[5],
+                        member[4], namespace_json["attestation"],
+                    ),
+                local_namespace_checkpoint == external_namespace_checkpoint,
+                namespace_json.get("checkpointDigest") == member[4],
+                namespace_json.get("attestation") == "opaque-authority-attestation",
+                core.ld("namespace-checkpoint", namespace_body) == member[4],
+                core.ld(
+                    "namespace-scope-head-set",
+                    external_namespace_member_bodies.get(member[4], []),
+                ) == namespace_json["orderedScopeHeadSetDigest"],
+                [row[1] for row in
+                 external_namespace_member_sets.get(member[4], [])] ==
+                    list(range(1, int(namespace_json["scopeCountDec"]) + 1)),
+                local_namespace_member_sets.get(member[4]) ==
+                    external_namespace_member_sets.get(member[4]),
+                len(local_namespace_member_sets.get(member[4], ())) ==
+                    int(namespace_json["scopeCountDec"]),
+                local_namespace_member == external_current_member,
                 resolution[4] == member[4],
                 resolution_json.get("admissionRequestId") == outbox[0],
                 resolution_json.get("scopeDigest") == outbox[3],
@@ -1775,6 +1887,19 @@ def committed_outbox_restarts_and_resolves_once() -> None:
         run_recovery_subprocess(local_path, authority_path)
         require(all(value == 1 for value in local_scope_counts(local_path).values()),
                 "restart did not finalize one scope")
+        core.stage_outbox(local_path, core.SCOPE_TWO)
+        run_recovery_subprocess(local_path, authority_path)
+        require(local_scope_counts(local_path) == {
+            "scope_admission_outbox": 2,
+            "scope_admission_resolutions": 2,
+            "admitted_scopes": 2,
+            "scope_checkpoints": 2,
+            "scope_heads": 2,
+            "namespace_checkpoints": 2,
+            "namespace_members": 3,
+        }, "two-scope restart did not persist the complete pinned namespace")
+        require(hydration_status(local_path, authority_path) == "OK",
+                "two-scope restart did not hydrate from both pinned checkpoints")
 
 
 @case("SA-03")
@@ -1802,8 +1927,9 @@ def aborted_authority_transaction_retries_to_one_external_scope() -> None:
             (key, scope_json, digest, result["checkpointJson"], result["checkpointDigest"]),
         )
         connection.execute(
-            "INSERT INTO authority_namespace_members VALUES(?,?,?,?,?)",
-            (key, result["checkpointDigest"], 0, None, result["namespaceCheckpointDigest"]),
+            "INSERT INTO authority_namespace_members VALUES(?,?,?,?,?,?)",
+            (key, result["checkpointDigest"], 0, None,
+             result["namespaceCheckpointDigest"], result["namespaceCheckpointJson"]),
         )
         connection.rollback()
         connection.close()
@@ -1865,8 +1991,8 @@ def crash_after_namespace_proof_before_local_transaction_recovers_once() -> None
 
 
 @case("SA-07")
-def each_local_insert_crash_rolls_back_then_restart_commits_all_four() -> None:
-    for boundary in (1, 2, 3, 4):
+def each_local_insert_crash_rolls_back_then_restart_commits_all_six() -> None:
+    for boundary in (1, 2, 3, 4, 5, 6):
         with tempfile.TemporaryDirectory(prefix=f"capa001-sa07-{boundary}-") as directory:
             root = Path(directory)
             local_path, authority_path, request_id, digest, result = initialize_and_admit(root)
@@ -2050,14 +2176,28 @@ def every_scope_admission_crossing_is_snapshot_invalid_and_read_only() -> None:
         baseline.mkdir()
         local_path, authority_path, request_id, digest, result = initialize_and_admit(baseline)
         core.finalize_local(local_path, request_id, digest, result)
+        second_request, second_digest = core.stage_outbox(local_path, core.SCOPE_TWO)
+        core.finalize_local(
+            local_path, second_request, second_digest,
+            core.authority_admit(authority_path, core.SCOPE_TWO),
+        )
+        require(hydration_status(local_path, authority_path) == "OK",
+                "two-scope crossing baseline is invalid")
         mutations: tuple[tuple[str, str, str], ...] = (
             ("missing-outbox", "local", "DROP TRIGGER scope_outbox_no_delete; DELETE FROM scope_admission_outbox;"),
             ("extra-outbox", "local", "INSERT INTO scope_admission_outbox VALUES('extra','extra-key','{}','sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','2026-07-14T00:00:09.000Z');"),
-            ("missing-resolution", "local", "DELETE FROM scope_admission_resolutions;"),
-            ("crossed-resolution", "local", "UPDATE scope_admission_resolutions SET scope_digest='sha256:7777777777777777777777777777777777777777777777777777777777777777';"),
+            ("missing-resolution", "local", "DROP TRIGGER scope_resolution_no_delete; DELETE FROM scope_admission_resolutions;"),
+            ("crossed-resolution", "local", "DROP TRIGGER scope_resolution_no_update; UPDATE scope_admission_resolutions SET scope_digest='sha256:7777777777777777777777777777777777777777777777777777777777777777';"),
             ("crossed-admitted", "local", "UPDATE admitted_scopes SET resolution_digest='sha256:7777777777777777777777777777777777777777777777777777777777777777';"),
             ("crossed-checkpoint", "local", "UPDATE scope_checkpoints SET checkpoint_json='{}';"),
             ("crossed-head", "local", "UPDATE scope_heads SET revision=2;"),
+            ("missing-local-namespace-checkpoint", "local", "DROP TRIGGER namespace_checkpoint_no_delete; DELETE FROM namespace_checkpoints;"),
+            ("missing-local-namespace-member", "local", "DROP TRIGGER namespace_member_no_delete; DELETE FROM namespace_members;"),
+            ("latest-namespace-missing-prior-member", "local", "DROP TRIGGER namespace_member_no_delete; DELETE FROM namespace_members WHERE checkpoint_digest=(SELECT checkpoint_digest FROM namespace_checkpoints WHERE scope_count=2) AND ordinal=1;"),
+            ("crossed-local-namespace-ordered-digest", "local", "DROP TRIGGER namespace_checkpoint_no_update; UPDATE namespace_checkpoints SET ordered_scope_head_set_digest='sha256:7777777777777777777777777777777777777777777777777777777777777777';"),
+            ("crossed-local-namespace-attestation", "local", "DROP TRIGGER namespace_checkpoint_no_update; UPDATE namespace_checkpoints SET attestation='crossed-attestation';"),
+            ("latest-namespace-crossed-prior-ordinal", "local", "DROP TRIGGER namespace_member_no_update; UPDATE namespace_members SET ordinal=3 WHERE checkpoint_digest=(SELECT checkpoint_digest FROM namespace_checkpoints WHERE scope_count=2) AND ordinal=1;"),
+            ("crossed-local-namespace-member", "local", "DROP TRIGGER namespace_member_no_update; UPDATE namespace_members SET scope_checkpoint_digest='sha256:7777777777777777777777777777777777777777777777777777777777777777';"),
             ("crossed-namespace", "authority", "UPDATE authority_namespace_members SET checkpoint_digest='sha256:7777777777777777777777777777777777777777777777777777777777777777';"),
             ("crossed-authority-scope", "authority", "UPDATE authority_scopes SET scope_digest='sha256:7777777777777777777777777777777777777777777777777777777777777777';"),
         )
