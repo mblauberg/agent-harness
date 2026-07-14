@@ -5540,9 +5540,11 @@ provider_review_terminal_journal(
   PRIMARY KEY(adapter_id,action_id),
   UNIQUE(adapter_id,action_id,target_generation,slot,attempt_generation),
   UNIQUE(run_id,terminal_sequence),
-  UNIQUE(adapter_id,action_id,terminal_sequence),
-  FOREIGN KEY(adapter_id,action_id)
-    REFERENCES provider_action_routes(adapter_id,action_id)
+  UNIQUE(adapter_id,action_id,terminal_sequence,terminal_kind),
+  FOREIGN KEY(adapter_id,action_id,run_id,target_generation,slot,
+      attempt_generation)
+    REFERENCES provider_action_routes(
+      adapter_id,action_id,run_id,target_generation,slot,attempt_generation)
 )
 
 provider_review_results(
@@ -5567,10 +5569,11 @@ provider_review_results(
   private_diagnostic_digest TEXT,
   created_at INTEGER NOT NULL,
   PRIMARY KEY(adapter_id,action_id),
-  UNIQUE(adapter_id,action_id,terminal_sequence,result_digest),
-  FOREIGN KEY(adapter_id,action_id,terminal_sequence)
+  UNIQUE(adapter_id,action_id,terminal_sequence,result_kind,
+    provider_answer_digest,result_digest),
+  FOREIGN KEY(adapter_id,action_id,terminal_sequence,result_kind)
     REFERENCES provider_review_terminal_journal(
-      adapter_id,action_id,terminal_sequence),
+      adapter_id,action_id,terminal_sequence,terminal_kind),
   CHECK((result_kind='safe-answer' AND provider_answer_digest IS NOT NULL AND
       provider_answer_length IS NOT NULL AND safe_result_json IS NOT NULL AND
       finding_set_digest IS NOT NULL AND
@@ -5644,9 +5647,10 @@ provider_review_evidence(
   CHECK(actual_route_identity_digest IS NULL OR
     route_observation_digest IS NOT NULL),
   FOREIGN KEY(action_adapter_id,action_id,terminal_sequence,
-      terminal_result_digest)
+      terminal_kind,provider_answer_digest,terminal_result_digest)
     REFERENCES provider_review_results(
-      adapter_id,action_id,terminal_sequence,result_digest),
+      adapter_id,action_id,terminal_sequence,result_kind,
+      provider_answer_digest,result_digest),
   FOREIGN KEY(action_adapter_id,action_id,route_receipt_digest,
       route_admission_digest)
     REFERENCES provider_action_routes(
@@ -9959,6 +9963,8 @@ provider_action_routes(
   ...remaining route/admission columns...,
   PRIMARY KEY(adapter_id, action_id),
   UNIQUE(run_id, route_ordinal),
+  UNIQUE(adapter_id,action_id,run_id,target_generation,slot,
+    attempt_generation),
   UNIQUE(adapter_id, action_id, deployed_route_admission_digest),
   UNIQUE(adapter_id, action_id, deployed_route_admission_digest,
     capability_body_digest, effective_configuration_id,

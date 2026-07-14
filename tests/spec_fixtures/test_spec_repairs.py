@@ -2031,7 +2031,12 @@ class SpecRepairTests(unittest.TestCase):
         ):
             self.assertIn(baseline_result_field, result)
         self.assertIn(
-            "UNIQUE(adapter_id,action_id,terminal_sequence,result_digest)",
+            "UNIQUE(adapter_id,action_id,terminal_sequence,result_kind,"
+            "\n    provider_answer_digest,result_digest)",
+            result,
+        )
+        self.assertIn(
+            "FOREIGN KEY(adapter_id,action_id,terminal_sequence,result_kind)",
             result,
         )
         for baseline_journal_field in (
@@ -2049,7 +2054,13 @@ class SpecRepairTests(unittest.TestCase):
         ):
             self.assertIn(baseline_journal_field, journal)
         self.assertIn(
-            "UNIQUE(adapter_id,action_id,terminal_sequence)", journal
+            "UNIQUE(adapter_id,action_id,terminal_sequence,terminal_kind)",
+            journal,
+        )
+        self.assertIn(
+            "FOREIGN KEY(adapter_id,action_id,run_id,target_generation,slot,\n"
+            "      attempt_generation)",
+            journal,
         )
         for required_column in (
             "task_id NOT NULL",
@@ -2073,6 +2084,11 @@ class SpecRepairTests(unittest.TestCase):
         self.assertIn(
             "CHECK(actual_route_identity_digest IS NULL OR\n"
             "    route_observation_digest IS NOT NULL)",
+            evidence,
+        )
+        self.assertIn(
+            "FOREIGN KEY(action_adapter_id,action_id,terminal_sequence,\n"
+            "      terminal_kind,provider_answer_digest,terminal_result_digest)",
             evidence,
         )
         self.assertIn(
@@ -2117,9 +2133,12 @@ class SpecRepairTests(unittest.TestCase):
               adapter_id,action_id,PRIMARY KEY(adapter_id,action_id));
             CREATE TABLE provider_action_routes(
               adapter_id,action_id,route_receipt_digest,
-              deployed_route_admission_digest,
+              deployed_route_admission_digest,run_id,target_generation,slot,
+              attempt_generation,
               PRIMARY KEY(adapter_id,action_id),
-              UNIQUE(adapter_id,action_id,deployed_route_admission_digest));
+              UNIQUE(adapter_id,action_id,deployed_route_admission_digest),
+              UNIQUE(adapter_id,action_id,run_id,target_generation,slot,
+                attempt_generation));
             CREATE TABLE review_finding_capacity_reservations(
               adapter_id,action_id,run_id,target_generation,slot,
               attempt_generation,reservation_digest,
@@ -2155,8 +2174,9 @@ class SpecRepairTests(unittest.TestCase):
             db.execute("CREATE TABLE " + ddl_block(SPEC_04, table))
         db.execute("INSERT INTO provider_actions VALUES('adapter','action')")
         db.execute(
-            "INSERT INTO provider_action_routes VALUES(?,?,?,?)",
-            ("adapter", "action", "route-receipt", "admission"),
+            "INSERT INTO provider_action_routes VALUES(?,?,?,?,?,?,?,?)",
+            ("adapter", "action", "route-receipt", "admission", "run", 1,
+             "native", 1),
         )
         db.execute(
             "INSERT INTO provider_action_route_observations VALUES(?,?,?,?,?,?)",
@@ -2183,7 +2203,134 @@ class SpecRepairTests(unittest.TestCase):
              None, "result", None, None, "classifier", "selector", None,
              None, 1),
         )
+        db.execute(
+            "INSERT INTO provider_action_routes VALUES(?,?,?,?,?,?,?,?)",
+            ("adapter-cross", "action-cross", "route-cross", "admission-cross",
+             "run-cross", 1, "native", 1),
+        )
+        db.execute(
+            "INSERT INTO provider_review_terminal_journal "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("adapter-cross", "action-cross", "run-cross", 1, "native", 1,
+             "terminal-no-effect", 1, "terminal-input-cross", None, None,
+             None, None, None, "projection-cross", None, 2),
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute(
+                "INSERT INTO provider_review_results "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("adapter-cross", "action-cross", 1, "safe-answer",
+                 "answer-cross", 1, "{}", "result-cross", "finding-cross",
+                 "resolved-cross", "classifier-cross", "selector-cross",
+                None, None, 2),
+            )
+        db.execute(
+            "INSERT INTO provider_action_routes VALUES(?,?,?,?,?,?,?,?)",
+            ("adapter-scope", "action-scope", "route-scope", "admission-scope",
+             "run-scope", 1, "native", 1),
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute(
+                "INSERT INTO provider_review_terminal_journal "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("adapter-scope", "action-scope", "run-scope", 2, "native", 1,
+                 "unusable-answer", 1, "terminal-input-scope", "answer-scope",
+                 None, None, None, None, "projection-scope", None, 3),
+            )
         db.execute("INSERT INTO review_finding_sets VALUES('empty-set')")
+        db.execute(
+            "INSERT INTO review_finding_capacity_reservations "
+            "VALUES(?,?,?,?,?,?,?)",
+            ("adapter", "action", "run", 1, "native", 1, "reservation"),
+        )
+        db.execute(
+            "INSERT INTO review_completion_targets VALUES(?,?,?,?,?,?)",
+            ("run", 1, "task", "bundle", "coverage", "profile"),
+        )
+        db.execute(
+            "INSERT INTO review_target_chair_bindings VALUES(?,?,?,?,?,?,?)",
+            ("run", 1, 1, "chair-binding", "task", "bundle", "profile"),
+        )
+
+        evidence = {
+            "run_id": "run",
+            "evidence_id": "evidence",
+            "target_generation": 1,
+            "slot": "native",
+            "task_id": "task",
+            "action_adapter_id": "adapter",
+            "action_id": "action",
+            "terminal_sequence": 1,
+            "terminal_kind": "unusable-answer",
+            "verdict": "UNUSABLE",
+            "answer_safety": "unusable",
+            "provider_answer_digest": "answer",
+            "terminal_result_digest": "result",
+            "review_result_digest": None,
+            "route_receipt_digest": "route-receipt",
+            "route_admission_digest": "admission",
+            "route_observation_digest": "observation",
+            "actual_route_identity_digest": "actual-route",
+            "final_prompt_digest": "prompt",
+            "endpoint_provider": "provider",
+            "provider_family": "family",
+            "model": "model",
+            "bundle_digest": "bundle",
+            "coverage_digest": "coverage",
+            "profile_digest": "profile",
+            "chair_binding_generation": 1,
+            "chair_binding_digest": "chair-binding",
+            "prior_head_generation": 0,
+            "new_head_generation": 1,
+            "attempt_generation": 1,
+            "prior_evidence_id": None,
+            "prior_open_finding_set_digest": "empty-set",
+            "reported_resolved_finding_set_digest": "empty-set",
+            "accepted_resolved_finding_set_digest": "empty-set",
+            "finding_set_digest": "empty-set",
+            "new_open_finding_set_digest": "empty-set",
+            "repair_required_finding_set_digest": "empty-set",
+            "finding_window_digest": "finding-window",
+            "finding_capacity_reservation_digest": "reservation",
+            "read_coverage_digest": "read-coverage",
+            "coverage_summary_digest": "coverage-summary",
+            "reviewer_family_relation": "family-unproved",
+            "certification_basis_at_terminal_digest": "certification-basis",
+            "mutation_receipt_digest": "mutation-receipt",
+            "evidence_json": "{}",
+            "evidence_digest": "evidence-digest",
+            "created_at": 3,
+        }
+
+        def insert_evidence(row: dict[str, object]) -> None:
+            columns = ",".join(row)
+            placeholders = ",".join("?" for _ in row)
+            db.execute(
+                f"INSERT INTO provider_review_evidence({columns}) "
+                f"VALUES({placeholders})",
+                tuple(row.values()),
+            )
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            insert_evidence({
+                **evidence,
+                "evidence_id": "evidence-crossed-answer",
+                "provider_answer_digest": "crossed-answer",
+                "mutation_receipt_digest": "mutation-crossed-answer",
+                "evidence_digest": "evidence-crossed-answer-digest",
+            })
+        with self.assertRaises(sqlite3.IntegrityError):
+            insert_evidence({
+                **evidence,
+                "evidence_id": "evidence-crossed-kind",
+                "terminal_kind": "safe-answer",
+                "verdict": "CLEAN",
+                "answer_safety": "safe",
+                "review_result_digest": "review-result",
+                "mutation_receipt_digest": "mutation-crossed-kind",
+                "evidence_digest": "evidence-crossed-kind-digest",
+            })
+        insert_evidence(evidence)
         db.execute(
             "INSERT INTO review_slot_heads VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             ("run", 1, "native", 0, None, 0, None, None, None,

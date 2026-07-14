@@ -259,8 +259,11 @@ fixtures described below.
   immutable review-evidence relation publishes every receipt-record identity,
   binds result, route, observation, proved actual-route identity, reservation,
   prior evidence and all finding-set roots, while `review_slot_heads` has a
-  real generation/evidence foreign key. Executable fixtures reject null-vacuous
-  heads, fabricated/crossed evidence and skipped generations.
+  real generation/evidence foreign key. Result and evidence parents also bind
+  the exact terminal/result discriminator, so a no-effect terminal cannot
+  become certifying answer evidence. Executable fixtures reject null-vacuous
+  heads, fabricated/crossed evidence, crossed terminal kinds and skipped
+  generations.
 - Lead 8 — `agent_lifecycle_recovery_source_heads` now owns the immutable
   current-issue pointer, monotonic reissue and current-head handoff FK; exact
   issue/handoff/revocation triggers close both race orders and all three
