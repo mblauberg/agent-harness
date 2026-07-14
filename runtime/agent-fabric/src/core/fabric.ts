@@ -30,6 +30,7 @@ import {
   parseAgentProvisionProviderResult,
   type AgentProvisionProviderResult,
 } from "../adapters/providers/types.js";
+import { compileProviderPayload } from "../authority/authority-compiler.js";
 
 import type {
   AuthorityInput,
@@ -6915,51 +6916,14 @@ export class Fabric {
       "provider authority",
     );
     const authority = parseAuthority(stringField(row, "authority_json"));
-    if (validateCurrent && Date.parse(authority.expiresAt) <= this.#clock()) {
-      throw new FabricError("AUTHENTICATION_FAILED", "provider authority has expired");
-    }
-    const providerDisclosure = authority.disclosure.level === "allowed" ||
-      (authority.disclosure.level === "scoped" && authority.disclosure.scopes.includes("approved-provider"));
-    if (validateCurrent && !providerDisclosure) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "authority does not permit disclosure to an approved provider");
-    }
-    const forbiddenControls = [
-      "allowedTools",
-      "disallowedTools",
-      "approvalPolicy",
-      "permissions",
-      "permissionMode",
-      "sandbox",
-      "dangerouslySkipPermissions",
-      "developerInstructions",
-      "baseInstructions",
-      "modelProvider",
-      "serviceTier",
-      "readOnlyRoot",
-    ];
-    const forbidden = forbiddenControls.find((field) => Object.hasOwn(payload, field));
-    if (forbidden !== undefined) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", `provider payload cannot override trusted control ${forbidden}`);
-    }
-    if (payload.cwd !== undefined && typeof payload.cwd !== "string") {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "provider cwd must be a workspace-relative path");
-    }
-    const root = this.#workspaceRootForRun(runId);
-    const relativeCwd = canonicalAuthorityPath(root, payload.cwd ?? authority.sourcePaths[0] ?? ".");
-    if (
-      !authority.sourcePaths.some((allowed) => pathContains(allowed, relativeCwd)) ||
-      authority.deniedPaths.some((denied) => scopesOverlap(denied, relativeCwd))
-    ) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "provider cwd is outside delegated authority");
-    }
-    return {
-      ...payload,
-      cwd: resolve(root, relativeCwd),
-      readOnlyRoot: resolve(root, relativeCwd),
-      allowedTools: ["Read", "Glob", "Grep"],
-      approvalPolicy: "never",
-      sandbox: "read-only",
-    };
+    return compileProviderPayload({
+      authority,
+      workspaceRoot: () => this.#workspaceRootForRun(runId),
+      payload,
+      ...(validateCurrent
+        ? { now: this.#clock(), validateCurrent: true }
+        : { now: null, validateCurrent: false }),
+    });
   }
 
   #assertProviderPrincipalActive(runId: string, agentId: string): void {
