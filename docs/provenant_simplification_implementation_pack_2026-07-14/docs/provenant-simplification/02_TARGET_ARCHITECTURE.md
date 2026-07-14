@@ -71,6 +71,13 @@ The kernel owns six capabilities:
    - loop ceilings;
    - required review and human gates.
 
+   The **delivery kernel is the canonical cross-domain owner** of these
+   lifecycle gates (ADR 0005): the `delivery-run` schema-v1 receipt, the
+   `deliver` skill, `config/delivery-profiles.json` and
+   `skills/deliver/scripts/validate_delivery.py`. There is no second lifecycle
+   policy model. Fabric consumes the kernel's decisions; it does not restate
+   them.
+
 5. **Evidence**
    - action and artefact digests;
    - checks and results;
@@ -191,7 +198,21 @@ The graph contains semantic tasks, not every tool call.
 
 ## 6. Recommended runtime modules
 
-Retain one process and one database. Extract only the proven hot path:
+Retain one process and one database. This target is **the completion of seams
+that already exist** (ADR 0003), not a green-field module tree. The live,
+accepted seams are:
+
+- `runtime/agent-fabric/src/application/provider-session-coordinator.ts` —
+  provider session mechanics;
+- `runtime/agent-fabric/src/application/command-journal.ts` — explicit
+  transactions and idempotent command results;
+- `runtime/agent-fabric/src/operator/external-effect-service.ts` — effect
+  custody.
+
+Extract one coherent vertical slice at a time, by change pressure, into that
+existing structure. Do not pre-install generic scaffolding. The per-file
+extraction map is owned by `08_REPOSITORY_CHANGE_MAP.md`; the picture below is
+only the destination shape:
 
 ```text
 runtime/
@@ -203,15 +224,15 @@ runtime/
     leases
     optional-work-graph
   providers/
-    provider-action-service
+    provider-action-service            # completes provider-session-coordinator
     provider-session-ports
   assurance/
-    lifecycle-kernel
+    lifecycle-projection               # projects the delivery kernel; owns no policy
     verification-service
     review-planner
     evidence-service
   effects/
-    effect-proposal
+    effect-proposal                    # completes external-effect-service
     effect-executor-ports
     reconciliation
   projections/
@@ -219,6 +240,12 @@ runtime/
     attention
     evidence
 ```
+
+`assurance/` holds **no canonical lifecycle owner**. Per ADR 0005 the
+`delivery-run` receipt, the `deliver` skill and
+`skills/deliver/scripts/validate_delivery.py` remain the single cross-domain
+lifecycle authority. Fabric protocol and runtime own only Fabric-specific
+transport projections of that kernel and the explicit mappings between them.
 
 A small composition root wires modules and database transactions.
 

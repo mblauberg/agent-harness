@@ -30,11 +30,51 @@ Create a reproducible current-head baseline.
 - establish architecture metrics and public API surface;
 - update `17_BASELINE_OBSERVATIONS.md`.
 
+### Lane adoption and supersession
+
+WP0 adopts or explicitly supersedes **every active lane** in
+`docs/efforts/EFFORT-capability-profiles.md`. No lane is silently reset,
+re-planned or dropped by renumbering it into this pack.
+
+For each of Lane A (spec authority: structural repairs, Specs 01 v0.36 / 04
+v1.31 freeze, spec-family split, write-profile amendment), Lane C (Step 1
+authority contract: goldens landed at `6748ceb`; the atomic V2 cutover is
+BLOCKED), Lane D (runtime reconciliation), Rust CI reconciliation, and Steps 2–4
+(compiler extraction, write pilot, second provider), record:
+
+- **status** — adopted into a named package here, or explicitly superseded;
+- **owner** — one owner, as for any package;
+- **gate** — the acceptance or resume gate it must still pass;
+- **evidence** — the existing artefact that carries its current state (commit,
+  receipt, handoff or effort-map checkpoint).
+
+Lane B is already promoted through PR #7; record it as complete rather than
+re-adopting it. Supersession must state what replaces the lane's obligation, not
+merely that it stopped.
+
+### Open human gate — D-021 charter carry-over
+
+WP0 also raises, and does not answer, the human adoption/supersession decision on
+the D-021 autonomous-chair charter (`24_AUTONOMOUS_CHARTER.md §1`): whether the
+D-021 authority envelope — and in particular its §7 preserved boundaries —
+carries over to this pack, or lapses with the superseded comprehensive-review
+programme.
+
+- Record it as an **open human gate**. No chair, council or agent may presume the
+  answer.
+- Until the human rules, the §7 preserved boundaries remain in force as the
+  conservative default, and §6 gate-supersession is **not** assumed to re-apply to
+  any package in this pack.
+- Record the ruling, when given, as a decision (`15_DECISION_REGISTER.md`, D-021).
+
 ### Exit
 
 - current-head status is explicit;
 - unrelated red tests are understood;
-- no later package relies on stale review assumptions.
+- no later package relies on stale review assumptions;
+- every active lane is adopted or explicitly superseded, each with a named owner,
+  gate and evidence;
+- the D-021 carry-over question stands recorded as an open human gate.
 
 ## WP1 — ratify the thin-kernel design
 
@@ -56,11 +96,16 @@ Update normative architecture before broad code changes.
 - no contradiction between root instructions and approved programme;
 - human design direction represented in repository-owned records.
 
-## WP2 — canonical contracts and lifecycle kernel
+## WP2 — canonical contracts and lifecycle projection
 
 ### Objective
 
 Create one executable source for lifecycle guards without changing provider write behaviour.
+
+The delivery kernel (`delivery-run` v1, `config/delivery-profiles.json`,
+`skills/deliver/scripts/validate_delivery.py`) is that source and stays canonical
+(ADR 0005). This work package extends it and projects it into Fabric; it does not
+open a second lifecycle owner. See `03_MINIMAL_CONTRACTS.md` §1.1.
 
 ### Work
 
@@ -81,11 +126,41 @@ No universal workflow DSL.
 - post-hoc validation and runtime admission agree;
 - duplicate transition tables are removed.
 
+### Persisted-contract minima — refusal and default rules
+
+The field definitions belong to `03_MINIMAL_CONTRACTS.md`. WP2 accepts only when
+the kernel enforces them at persistence, with the refusal or default behaviour
+stated below made executable and tested.
+
+- **Retention class (ADR-0007).** Every persisted contract carries a
+  `retention_class` validated against exactly five classes: `ephemeral`,
+  `operational`, `evidence`, `durable knowledge`, `sensitive`. An absent,
+  unrecognised or ambiguous class **refuses the write**. There is no permissive
+  default and no inferred class: the class is chosen at authoring time so that
+  later governed deletion needs no archaeology. Archive-only behaviour remains;
+  class-tagging does not enable deletion.
+- **WorkItem provenance (ADR-0006).** Every persisted WorkItem carries the
+  approval/spec digest set (governing spec and decision digests, approval digest)
+  and the identity of the authority envelope it was admitted under. Absent,
+  malformed or unresolvable digests, or an absent envelope identity, **refuse
+  persistence** and route the item back to scope as not ready. A missing digest is
+  never defaulted to current head, and an envelope identity is never synthesised.
+- Refusal is a typed contract error at the persistence boundary, not a warning,
+  and is proven by negative tests for each rule above.
+
 ## WP3 — authority compiler and one-provider offline write pilot
 
 ### Objective
 
 Implement `workspace-write-offline` for one primary provider.
+
+### Prerequisite
+
+The active spec repair and freeze finishes **before any live protocol or runtime
+mutation** in this package: Lane A's structural repairs, the Specs 01 v0.36 /
+04 v1.31 freeze and the write-profile spec amendment
+(`docs/efforts/EFFORT-capability-profiles.md`). `AuthorityEnvelopeV2` must not
+land against an unfrozen spec contract.
 
 ### Work
 
@@ -105,6 +180,39 @@ Implement `workspace-write-offline` for one primary provider.
 - independent security review is clean;
 - second provider remains read-only until separately proven.
 
+Four further acceptance gates come from ADR-0002 and are detailed in
+`25_AUTHORITY_V2_AND_CONTAINMENT.md` (§2, §5 gates 1–4, §6):
+
+- **Mechanical delivery mapping.** The delivery-to-Fabric authority mapping is
+  mechanical and golden-bound: the Python mapper maps `delivery-authority.json`
+  byte-for-byte in canonical JSON to `fabric-authority.json`, and the TypeScript
+  V2 codec accepts the result. Unknown fields and omitted required dimensions fail
+  in both lanes.
+- **Negative goldens.** Dimension negatives are proven, not asserted: secret access
+  without references; deployment without targets; irreversible authority without
+  action IDs; an empty or invalid network allowlist; a changed child approval
+  binding; each individual child widening; unknown Fabric operations;
+  non-canonical or escaping paths; expired approval; invalid evidence digest.
+- **Full real-provider containment receipt.** The adversarial matrix runs against
+  the real pinned provider (Codex App Server binary/schema, or the pinned Claude
+  Agent SDK) on the target host, and every case emits the complete receipt of
+  §6: versions, requested/effective profile, authority/approval/worktree/native-settings
+  digests, canonical roots and any temp root, effective tool and egress posture,
+  observed tool-attempt IDs, before/after marker, Git-state and listener digests,
+  and the verdict. A forbidden case passes only with an **observed tool attempt**
+  plus independently measured unchanged marker state; model refusal without a tool
+  attempt is inconclusive, not pass. An unreceipted writable, network or settings
+  surface fails the gate.
+- **Direct `AuthorityEnvelopeV2` cutover.** The cutover is atomic and direct:
+  all callers, fixtures and stored state move to V2 in one change, the pre-release
+  database baseline is squashed, and unversioned authorities fail at every public
+  and storage boundary. No V1 decoder, quarantine profile, compatibility bridge or
+  dual stored contract remains. A compatibility path or an optional
+  reset-if-convenient path is **not** an acceptable substitute; if live state is
+  proved to need migration, stop for explicit human authority and amend the plan
+  first. The `review-readonly` provider projection stays byte-exact to its
+  characterisation goldens throughout.
+
 ## WP4 — WorkItem-to-PR vertical trace
 
 ### Objective
@@ -119,10 +227,25 @@ Prove the product path.
 - allocate worktree and lease;
 - start provider-native chair/worker;
 - implement and verify;
-- derive review plan;
+- derive and consume the minimum deterministic ReviewPlan (below);
 - produce effect proposal;
 - apply human-approved PR creation through typed executor;
 - project status through CLI.
+
+### Minimum deterministic ReviewPlan
+
+WP4 owns the smallest ReviewPlan derivation the vertical trace needs, so the
+trace does not depend on WP5. It is a pure function of the WorkItem's risk tier
+and declared verification strategy, with no calibration input and no measured
+yield: it emits the required deterministic checks, whether fresh-context review is
+required, the review input boundary and the repair ceiling
+(`03_MINIMAL_CONTRACTS.md §9`). Same input, same plan. The chair may add review;
+it cannot remove required review.
+
+### Non-goal
+
+Calibration, review-yield measurement, risk-shape classification and the
+other-primary/second-provider requirement are WP5's; WP4 does not attempt them.
 
 ### Exit
 
@@ -145,7 +268,9 @@ Complete provider neutrality and remove blanket review cost.
 ### Work
 
 - independently prove the second provider's offline write profile;
-- implement ReviewPlan derivation;
+- extend — not re-implement — WP4's minimum deterministic ReviewPlan derivation:
+  keep its pure core and its outputs, and add calibration, risk-shape
+  classification and the second-provider/other-primary requirement on top;
 - implement LoopPolicy and no-progress detection;
 - distinguish routine, substantial, crucial and terminal shapes;
 - measure review yield;
@@ -155,6 +280,8 @@ Complete provider neutrality and remove blanket review cost.
 
 - both primaries can lead and write under the same neutral contract;
 - review is proportional and explainable;
+- one ReviewPlan derivation exists, WP5's being a superset of WP4's minimum, not
+  a parallel implementation;
 - loops stop predictably.
 
 ## WP6 — Skill and documentation simplification

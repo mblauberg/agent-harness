@@ -19,6 +19,13 @@ human envelope
 
 Delegation only narrows authority.
 
+That intersection is not a free-form notion. It compiles to exactly one closed
+contract — `AuthorityEnvelopeV2` (ADR 0002; dimensions, digests and containment
+receipt in `25_AUTHORITY_V2_AND_CONTAINMENT.md`, contract projection in
+`03_MINIMAL_CONTRACTS.md` §1.2 and §2). Every principle in this document is a
+statement about V2, not about a parallel authority shape. An omitted dimension is
+a refusal, not an allowance.
+
 ## 2. Initial capability profiles
 
 Implement only:

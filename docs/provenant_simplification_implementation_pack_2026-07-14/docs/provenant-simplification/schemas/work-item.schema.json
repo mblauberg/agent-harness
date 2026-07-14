@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://provenant.local/schemas/work-item.schema.json",
   "title": "Provenant vertical-slice work item",
+  "description": "Canonical backlog-item contract (ADR-0006). Authority is the delivery-side projection of AuthorityEnvelopeV2 (ADR-0002; 03_MINIMAL_CONTRACTS.md sections 1.2/2, 25_AUTHORITY_V2_AND_CONTAINMENT.md sections 1-2), never a parallel authority shape. Persisted state is class-tagged (ADR-0007).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -17,10 +18,279 @@
     "conflict_keys",
     "risk",
     "authority",
+    "authority_schema_version",
+    "authority_envelope_digest",
+    "spec_digest",
+    "approval_digest",
+    "budget",
     "evidence",
     "review",
-    "effects"
+    "effects",
+    "retention_class"
   ],
+  "$defs": {
+    "sha256_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "string_set": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "non_empty_string_set": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "retention_class": {
+      "description": "ADR-0007 retention class (03_MINIMAL_CONTRACTS.md section 1.3). Validated on admission; an absent or unknown class is refused, never defaulted.",
+      "enum": [
+        "ephemeral",
+        "operational",
+        "evidence",
+        "durable-knowledge",
+        "sensitive"
+      ]
+    },
+    "authority_envelope_v2_delivery_projection": {
+      "title": "AuthorityEnvelopeV2 (delivery-side projection)",
+      "description": "Field-for-field delivery projection of AuthorityEnvelopeV2 per 25_AUTHORITY_V2_AND_CONTAINMENT.md section 2. No dimension receives an implicit permissive default: an omitted dimension is a refusal, not an allowance.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "profile",
+        "approved_by",
+        "evidence",
+        "evidence_digest",
+        "workspace_roots",
+        "allowed_source_paths",
+        "allowed_artifact_paths",
+        "allowed_fabric_operations",
+        "denied_paths",
+        "denied_fabric_operations",
+        "prohibited_actions",
+        "disclosure",
+        "secrets_access",
+        "deployment",
+        "irreversible_actions",
+        "network",
+        "expires_at"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 2
+        },
+        "profile": {
+          "description": "Requested capability profile. Only these two exist initially (ADR-0002).",
+          "enum": [
+            "review-readonly",
+            "workspace-write-offline"
+          ]
+        },
+        "approved_by": {
+          "description": "Maps to V2 approval.approvedBy.",
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "description": "Maps to V2 approval.evidenceId; the passing authority-approval evidence of the delivery authority.",
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_digest": {
+          "description": "Maps to V2 approval.evidenceDigest: digest of the artefact linked by the passing authority-approval evidence, so the grant is independently bindable. A child authority keeps this binding exactly.",
+          "$ref": "#/$defs/sha256_digest"
+        },
+        "workspace_roots": {
+          "$ref": "#/$defs/string_set"
+        },
+        "allowed_source_paths": {
+          "description": "Readable source scope. Maps to V2 sourcePaths.",
+          "$ref": "#/$defs/string_set"
+        },
+        "allowed_artifact_paths": {
+          "description": "Maximum writable/output scope. Maps to V2 artifactPaths.",
+          "$ref": "#/$defs/string_set"
+        },
+        "allowed_fabric_operations": {
+          "description": "Exact IDs from the protocol operation registry. Maps to V2 actions.",
+          "$ref": "#/$defs/string_set"
+        },
+        "denied_paths": {
+          "$ref": "#/$defs/string_set"
+        },
+        "denied_fabric_operations": {
+          "$ref": "#/$defs/string_set"
+        },
+        "prohibited_actions": {
+          "$ref": "#/$defs/string_set"
+        },
+        "disclosure": {
+          "enum": [
+            "local-only",
+            "approved-providers",
+            "public"
+          ]
+        },
+        "secrets_access": {
+          "enum": [
+            "none",
+            "use-without-disclosure"
+          ]
+        },
+        "secret_refs": {
+          "description": "Required and non-empty when secrets_access is use-without-disclosure. Identifiers only, never secret values.",
+          "$ref": "#/$defs/non_empty_string_set"
+        },
+        "deployment": {
+          "type": "boolean"
+        },
+        "deployment_targets": {
+          "description": "Required and non-empty when deployment is true.",
+          "$ref": "#/$defs/non_empty_string_set"
+        },
+        "irreversible_actions": {
+          "type": "boolean"
+        },
+        "irreversible_action_ids": {
+          "description": "Required and non-empty when irreversible_actions is true.",
+          "$ref": "#/$defs/non_empty_string_set"
+        },
+        "network": {
+          "description": "Governs model-invoked tool and subprocess egress, not the provider control plane. There is no unrestricted-network variant.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tool_egress"
+          ],
+          "properties": {
+            "tool_egress": {
+              "enum": [
+                "none",
+                "allowlist"
+              ]
+            },
+            "allowed_hosts": {
+              "description": "Required and non-empty when tool_egress is allowlist.",
+              "$ref": "#/$defs/non_empty_string_set"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "required": [
+                  "tool_egress"
+                ],
+                "properties": {
+                  "tool_egress": {
+                    "const": "allowlist"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "allowed_hosts"
+                ]
+              },
+              "else": {
+                "not": {
+                  "required": [
+                    "allowed_hosts"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "secrets_access"
+            ],
+            "properties": {
+              "secrets_access": {
+                "const": "use-without-disclosure"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "secret_refs"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "secret_refs"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "deployment"
+            ],
+            "properties": {
+              "deployment": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "deployment_targets"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "deployment_targets"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "irreversible_actions"
+            ],
+            "properties": {
+              "irreversible_actions": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "irreversible_action_ids"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "irreversible_action_ids"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
   "properties": {
     "schema_version": {
       "const": 1
@@ -165,36 +435,44 @@
       }
     },
     "authority": {
+      "$ref": "#/$defs/authority_envelope_v2_delivery_projection"
+    },
+    "authority_schema_version": {
+      "description": "Version of the bound authority contract. V2 is the only authority contract (ADR-0002).",
+      "const": 2
+    },
+    "authority_envelope_digest": {
+      "description": "Identity of the exact bound AuthorityEnvelopeV2 (03_MINIMAL_CONTRACTS.md section 5). Canonical, not derived from a pluggable store.",
+      "$ref": "#/$defs/sha256_digest"
+    },
+    "spec_digest": {
+      "description": "Canonical governing spec digest (ADR-0006).",
+      "$ref": "#/$defs/sha256_digest"
+    },
+    "approval_digest": {
+      "description": "Canonical human approval digest (ADR-0006). The envelope's own approval.evidenceDigest is its internal binding and is not a substitute for this field.",
+      "$ref": "#/$defs/sha256_digest"
+    },
+    "budget": {
+      "description": "Binds to the V2 budget map (03_MINIMAL_CONTRACTS.md section 2). Every unit is reduced, never raised, by a contained child authority.",
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "charter_digest",
-        "write_paths",
-        "prohibited_actions",
-        "expires_at"
-      ],
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      },
       "properties": {
-        "charter_digest": {
-          "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
+        "maximum_turns": {
+          "type": "integer",
+          "minimum": 1
         },
-        "write_paths": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "uniqueItems": true
+        "maximum_wall_time_minutes": {
+          "type": "integer",
+          "minimum": 1
         },
-        "prohibited_actions": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "uniqueItems": true
-        },
-        "expires_at": {
-          "type": "string",
-          "format": "date-time"
+        "maximum_repair_cycles": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
@@ -273,6 +551,10 @@
         "direct-commit",
         "undecided"
       ]
+    },
+    "retention_class": {
+      "description": "Default class for a WorkItem is durable-knowledge; a record carrying secret-bearing content is reclassified sensitive. The value is always explicit.",
+      "$ref": "#/$defs/retention_class"
     }
   }
 }

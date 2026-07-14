@@ -101,7 +101,23 @@ Do not checkpoint raw reasoning unless it is required evidence.
 
 ## 6. Review planner
 
-Review is derived from:
+### Binding gates today
+
+Risk/oracle-adjusted review is **accepted in principle but not yet in force**
+(ADR 0008). Two gates bind every delivery now and are not weakened by anything
+in this pack:
+
+| Surface | Binding rule today |
+|---|---|
+| `HARNESS.md` coverage table (lines 78-90) | The other primary is load-bearing for **substantial and above**; blanket other-primary review for substantial work |
+| Spec 05 deliveries (`docs/specs/05-project-fabric-console.md §15`) | The mandated **four-slot certifying review profile** (`native`, other-primary, Cursor/Grok, Agy/Gemini), resolved as `spec05-four-slot-v1` |
+
+Neither gate may be relaxed by chair judgement, by the target table below, or
+by a per-run exception.
+
+### Deriving pressure (target)
+
+Review pressure is derived from:
 
 - risk;
 - blast radius;
@@ -113,9 +129,16 @@ Review is derived from:
 - change size and dependency cone;
 - prior reviewer yield.
 
-### Minimum patterns
+### Minimum patterns — FUTURE STATE, not in force
 
-| Pattern | Required review |
+**This table is the target, not current policy.** It does not authorise reduced
+review today. It activates only when the single atomic review-policy migration
+lands as a unit — the coordinated `HARNESS.md` coverage-table amendment plus the
+Spec 05 review-profile amendment, defined in `08_REPOSITORY_CHANGE_MAP.md §4`.
+Until then the binding gates above apply, and any pattern below that implies
+*less* review than they require is inert.
+
+| Pattern | Required review (target) |
 |---|---|
 | Routine, strong oracle, local reversible change | deterministic checks; review optional |
 | Substantial, mixed oracle | fresh-context independent review |

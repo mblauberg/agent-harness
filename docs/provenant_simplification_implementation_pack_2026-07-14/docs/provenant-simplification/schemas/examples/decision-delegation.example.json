@@ -78,5 +78,6 @@
     "soft_default_allowed": true,
     "cut_point_required": true,
     "post_cut_override": "rework-issue"
-  }
+  },
+  "retention_class": "evidence"
 }

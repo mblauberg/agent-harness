@@ -44,20 +44,58 @@
     ]
   },
   "authority": {
-    "charter_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "write_paths": [
-      "docs/**",
-      "skills/engineering-docs/**",
+    "schema_version": 2,
+    "profile": "workspace-write-offline",
+    "approved_by": "human-maintainer",
+    "evidence": "authority-approval",
+    "evidence_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "workspace_roots": [
+      ".worktrees/prov-doc-1"
+    ],
+    "allowed_source_paths": [
+      "docs",
       "scripts/check-docs",
-      "tests/**"
+      "skills/engineering-docs",
+      "tests"
     ],
+    "allowed_artifact_paths": [
+      "docs",
+      "scripts/check-docs",
+      "skills/engineering-docs",
+      "tests"
+    ],
+    "allowed_fabric_operations": [
+      "fabric.v1.task.claim",
+      "fabric.v1.task.read"
+    ],
+    "denied_paths": [
+      ".git",
+      ".worktrees/sibling"
+    ],
+    "denied_fabric_operations": [],
     "prohibited_actions": [
-      "merge",
-      "release",
+      "delete-unknown-files",
       "deploy",
-      "delete-unknown-files"
+      "merge",
+      "release"
     ],
+    "disclosure": "local-only",
+    "secrets_access": "none",
+    "deployment": false,
+    "irreversible_actions": false,
+    "network": {
+      "tool_egress": "none"
+    },
     "expires_at": "2026-07-27T00:00:00Z"
+  },
+  "authority_schema_version": 2,
+  "authority_envelope_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "spec_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "approval_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "budget": {
+    "maximum_turns": 40,
+    "maximum_wall_time_minutes": 90,
+    "maximum_repair_cycles": 2
   },
   "evidence": {
     "deterministic": [
@@ -83,5 +121,6 @@
       "pull-request-open"
     ]
   },
-  "pr_strategy": "independent"
+  "pr_strategy": "independent",
+  "retention_class": "durable-knowledge"
 }

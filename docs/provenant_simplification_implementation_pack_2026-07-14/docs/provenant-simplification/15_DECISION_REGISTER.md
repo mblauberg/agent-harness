@@ -20,6 +20,76 @@ Use this file as the programme-level decision record. Promote durable architectu
 | PS-014 | Keep one process and one SQLite authority initially. | Accepted | Distributed infrastructure is not justified by current use. | Modular monolith and explicit transaction boundaries. |
 | PS-015 | Direct pre-release cutover is preferred. | Accepted | Dual implementations create drift without known consumers. | Compatibility requires evidence and deletion conditions. |
 | PS-016 | Skills guide methods; the kernel governs lifecycle. | Accepted | Prevents policy duplication and preserves model adaptability. | Shrink lifecycle Skills and demote non-distinct specialists. |
+| PS-017 | `DecisionRequest` modes and Class A/B/C scope-delta semantics become pack policy. | **Pending human decision** | Delegation needs a typed surface, but it changes who may resolve a decision — a human-only call. | Until ruled, the conservative default below is in force; no Class B default may consume a human gate. |
+| PS-018 | `WorkItem` conflict keys gate parallel write dispatch. | Proposed — decision to be taken (WP1) | Nominal issue boundaries do not prevent write conflicts. | Shared key forces serialise, integration owner, stack or consolidate. |
+| PS-019 | PR topology is adaptive and derived from the dependency/conflict graph. | Proposed — decision to be taken (WP1) | A universal one-PR-per-package rule mismatches slice independence. | Four shapes: independent, stacked, consolidated, direct commit. |
+| PS-020 | Exactly one canonical backlog/work store per project; Provenant selects GitHub Issues. | Proposed — decision to be taken (WP1) | ADR 0006 left store selection open; two mutable mirrors drift. | Selecting Issues retires `docs/efforts/` as the live work truth. |
+
+## Open dispositions — PS-017 to PS-020
+
+These four are recorded here because they are decided nowhere else. None is
+human-approved. Do not treat any of them as ratified.
+
+### PS-017 — `DecisionRequest` / scope-delta semantics (PENDING HUMAN DECISION)
+
+- **Question:** accept or reject the `DecisionRequest` modes
+  (`notice`/`soft`/`hard`) and the Class A/B/C scope-delta typing drafted in
+  `21_DECISION_DELEGATION.md` (§5, §6) as pack policy.
+- **Status:** open human question 4 in `../../review/ADJUDICATION.md`
+  ("Open questions for the human"). Human-only; no chair or council may resolve
+  it, because the proposal changes *who resolves decisions*.
+- **Conservative default in force meanwhile:** delegation is constrained to
+  **reversible, non-material** changes inside the already-approved outcome, risk
+  and authority envelope. **Material acceptance stays human-gated.** A soft
+  `DecisionRequest` default may never consume a human gate, and the non-delegable
+  boundaries in `21_DECISION_DELEGATION.md` §4 remain absolute.
+- **Consequence if accepted:** `03_MINIMAL_CONTRACTS.md` subcontracts and the
+  `schemas/decision-request.schema.json` / `schemas/decision-delegation.schema.json`
+  drafts become normative, and a project charter must be approved and
+  digest-bound before any Class B default applies.
+
+### PS-018 — `WorkItem` conflict keys
+
+- **Proposed disposition (already settled in the drafts, not ratified):**
+  `conflict_keys` is a required unique string array on
+  `schemas/work-item.schema.json`; the key set and the resolution rule are the
+  "Conflict-graph rule" in `09_WORK_PACKAGES_AND_SEQUENCE.md` — exact paths,
+  generated outputs, package lock/workspace graph, database
+  migration/baseline, protocol schemas, central spec/ADR/index files, shared
+  test fixtures, release manifests.
+- **Rule:** if two slices share a conflict key, serialise them, designate one
+  integration owner, stack them, or consolidate the PR. Never rely on nominal
+  issue boundaries alone.
+- **Take the decision at:** WP1 ratification, with the schema.
+
+### PS-019 — Adaptive PR topology
+
+- **Proposed disposition (already settled in the drafts, not ratified):** the
+  "PR topology selection" section of `09_WORK_PACKAGES_AND_SEQUENCE.md` plus the
+  `pr_strategy` field on `schemas/work-item.schema.json`. PR shape is a planning
+  output of the conflict graph, not a per-package convention.
+- **Constraint:** PR topology is an authority surface while D-021's
+  "PR review is the only human gate" reading stands (see below). A topology
+  change may never reduce the number of human review gates; splitting or
+  consolidating PRs does not create or remove human approval.
+- **Take the decision at:** WP1 ratification, jointly with PS-018.
+
+### PS-020 — Backlog store identity
+
+- **Residual of:** D-009 / PS-013 / ADR 0006, which made the backlog
+  **schema-first** and left the **store per-project convention** (repo markdown
+  with YAML frontmatter *or* GitHub Issues, lossless bidirectional migration;
+  agent-driven Issue mutations route through the staged-effect gate).
+- **Proposed disposition (already settled in the drafts, not ratified):**
+  `22_DOCUMENT_GOVERNANCE.md` §7 — each project selects **exactly one** canonical
+  work store, never two mutable mirrors, and Provenant selects **GitHub Issues**
+  as canonical work truth. An issue grants no implementation authority.
+  `22_DOCUMENT_GOVERNANCE.md` §2 makes the corollary explicit: `docs/efforts/`
+  is replaced by Issues/milestones.
+- **Until ratified:** `docs/efforts/EFFORT-*.md` remain the live work truth. Do
+  not begin a migration on the strength of this entry.
+- **Take the decision at:** WP1 ratification; it is a prerequisite for the WP6
+  documentation move.
 
 ## New decision template
 
