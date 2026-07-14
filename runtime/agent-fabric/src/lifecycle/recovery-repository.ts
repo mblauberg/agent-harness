@@ -98,13 +98,21 @@ export type SettleGenerationLossAttemptInput = Readonly<{
   recordedAt: number;
 }>;
 
-export type AbandonGenerationLossInput = Readonly<{
+type AbandonGenerationLossBaseInput = Readonly<{
   runId: string;
   agentId: string;
   generationLossId: string;
   receiptApplyId: string;
   recordedAt: number;
 }>;
+
+export type AbandonGenerationLossInput = AbandonGenerationLossBaseInput & (
+  | Readonly<{ provenance: "confirmed-direct"; recoveryActionRef: null }>
+  | Readonly<{
+      provenance: "attempted-recovery";
+      recoveryActionRef: Readonly<{ adapterId: string; actionId: string }>;
+    }>
+);
 
 type ExactRecoverySourceBinding = Readonly<{
   projectId: string;
@@ -1036,6 +1044,28 @@ export class LifecycleRecoveryRepository {
     requiredId(input.receiptApplyId, "receiptApplyId");
     nonnegativeInteger(input.recordedAt, "recordedAt");
     const before = this.readGenerationLossHead(input.runId, input.agentId, input.generationLossId);
+    const expectedProvenance = before.state === "open" || before.abandonKind === "direct-open"
+      ? "confirmed-direct" as const
+      : before.state === "recovery-in-progress" || before.abandonKind === "recovery-attempt"
+        ? "attempted-recovery" as const
+        : null;
+    const recoveryActionMatches = input.recoveryActionRef === null
+      ? before.recoveryActionRef === null
+      : before.recoveryActionRef !== null &&
+        input.recoveryActionRef.adapterId === before.recoveryActionRef.adapterId &&
+        input.recoveryActionRef.actionId === before.recoveryActionRef.actionId;
+    if (
+      expectedProvenance === null || input.provenance !== expectedProvenance ||
+      (input.provenance === "confirmed-direct" && input.recoveryActionRef !== null) ||
+      (input.provenance === "attempted-recovery" && input.recoveryActionRef === null) ||
+      !recoveryActionMatches
+    ) {
+      throw new Error("generation-loss abandonment provenance is crossed");
+    }
+    if (input.recoveryActionRef !== null) {
+      requiredId(input.recoveryActionRef.adapterId, "recoveryActionRef.adapterId");
+      requiredId(input.recoveryActionRef.actionId, "recoveryActionRef.actionId");
+    }
     if (before.state === "abandoned") {
       const replay = row(this.#database.prepare(`
         SELECT receipt_apply_id,recorded_at FROM lifecycle_generation_loss_revisions
@@ -1052,7 +1082,9 @@ export class LifecycleRecoveryRepository {
     if (before.terminal || !["open", "recovery-in-progress"].includes(before.state)) {
       throw new Error("generation-loss abandonment requires an unresolved loss");
     }
-    const abandonKind = before.state === "open" ? "direct-open" as const : "recovery-attempt" as const;
+    const abandonKind = input.provenance === "confirmed-direct"
+      ? "direct-open" as const
+      : "recovery-attempt" as const;
     let sourceCustodyRevision: number | null = null;
     let sourceTerminalEvidenceDigest: string | null = null;
     if (abandonKind === "recovery-attempt") {
@@ -1135,8 +1167,9 @@ export class LifecycleRecoveryRepository {
       generationLossId: input.generationLossId,
       beforeRevision: before.revision,
       abandonKind,
+      abandonProvenance: input.provenance,
       sourceCustodyId: before.activeRecoveryCustodyId,
-      sourceActionRef: before.recoveryActionRef,
+      recoveryActionRef: input.recoveryActionRef,
       confirmedAt: input.recordedAt,
     });
     if (confirmationDigest !== expectedConfirmationDigest) {
@@ -1177,6 +1210,7 @@ export class LifecycleRecoveryRepository {
       recoveryActionRef: before.recoveryActionRef,
       activeRecoveryCustodyId: before.activeRecoveryCustodyId,
       terminalEvidenceDigest,
+      abandonProvenance: input.provenance,
     });
     const semanticJson = canonicalJson(body);
     const semanticDigest = lifecycleDigest("generation-loss-semantic", body);
@@ -1186,9 +1220,10 @@ export class LifecycleRecoveryRepository {
       generationLossId: input.generationLossId,
       beforeRevision: before.revision,
       abandonKind,
+      abandonProvenance: input.provenance,
       sourceCustodyId: before.activeRecoveryCustodyId,
       sourceCustodyRevision,
-      sourceActionRef: before.recoveryActionRef,
+      recoveryActionRef: input.recoveryActionRef,
       sourceTerminalEvidenceDigest,
       operatorId,
       parentCapabilityId,
@@ -1203,6 +1238,8 @@ export class LifecycleRecoveryRepository {
       generationLossId: input.generationLossId,
       beforeRevision: before.revision,
       afterRevision: nextRevision,
+      abandonProvenance: input.provenance,
+      recoveryActionRef: input.recoveryActionRef,
       afterSemanticDigest: semanticDigest,
       afterSourceRefDigest: sourceRefDigest,
     });
@@ -1210,6 +1247,8 @@ export class LifecycleRecoveryRepository {
       generationLossId: input.generationLossId,
       beforeRevision: before.revision,
       afterRevision: nextRevision,
+      abandonProvenance: input.provenance,
+      recoveryActionRef: input.recoveryActionRef,
       afterSemanticDigest: semanticDigest,
       afterSourceRefDigest: sourceRefDigest,
     });
@@ -1250,6 +1289,8 @@ export class LifecycleRecoveryRepository {
       freshOriginEffectDigest: null,
       appliedMutationPlanDigest: text(authorization, "mutation_plan_digest"),
       localWriteSetDigest,
+      abandonProvenance: input.provenance,
+      recoveryActionRef: input.recoveryActionRef,
     };
     const applyJson = canonicalJson(applyBody);
     const applyDigest = lifecycleDigest("transition-apply", applyBody);
@@ -1264,6 +1305,8 @@ export class LifecycleRecoveryRepository {
       authorityBatchId: text(authorization, "batch_id"),
       authorityApplyId: input.receiptApplyId,
       authorityApplyDigest: applyDigest,
+      abandonProvenance: input.provenance,
+      recoveryActionRef: input.recoveryActionRef,
       recordedAt: input.recordedAt,
     });
     const journalJson = canonicalJson(journal);
@@ -1335,6 +1378,7 @@ export class LifecycleRecoveryRepository {
     recoveryActionRef: GenerationLossRecoveryHead["recoveryActionRef"];
     activeRecoveryCustodyId: string | null;
     terminalEvidenceDigest: string | null;
+    abandonProvenance?: AbandonGenerationLossInput["provenance"];
   }>): Readonly<Record<string, unknown>> {
     return {
       schemaVersion: 1,
@@ -1346,6 +1390,7 @@ export class LifecycleRecoveryRepository {
       recoveryActionRef: input.recoveryActionRef,
       activeRecoveryCustodyId: input.activeRecoveryCustodyId,
       terminalEvidenceDigest: input.terminalEvidenceDigest,
+      ...(input.abandonProvenance === undefined ? {} : { abandonProvenance: input.abandonProvenance }),
     };
   }
 
@@ -1362,6 +1407,8 @@ export class LifecycleRecoveryRepository {
     authorityBatchId?: string;
     authorityApplyId?: string;
     authorityApplyDigest?: string;
+    abandonProvenance?: AbandonGenerationLossInput["provenance"];
+    recoveryActionRef?: AbandonGenerationLossInput["recoveryActionRef"];
     recordedAt: number;
   }>): Readonly<Record<string, unknown>> {
     return {
@@ -1385,6 +1432,10 @@ export class LifecycleRecoveryRepository {
       authorityApplyDigest: input.authorityApplyDigest ?? null,
       originFreshApplyId: input.originFreshApplyId ?? null,
       originFreshApplyDigest: input.originFreshApplyDigest ?? null,
+      ...(input.abandonProvenance === undefined ? {} : {
+        abandonProvenance: input.abandonProvenance,
+        recoveryActionRef: input.recoveryActionRef ?? null,
+      }),
       recordedAt: input.recordedAt,
     };
   }

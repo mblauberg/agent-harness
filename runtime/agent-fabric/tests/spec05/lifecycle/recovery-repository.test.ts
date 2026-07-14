@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { applyMigrations } from "../../../src/core/migrations.ts";
 import {
   LifecycleRecoveryRepository,
+  type AbandonGenerationLossInput,
   type CreateLifecycleRecoveryIssueInput,
 } from "../../../src/lifecycle/recovery-repository.ts";
 import { LifecycleRotationRepository } from "../../../src/lifecycle/rotation-repository.ts";
@@ -27,6 +28,7 @@ function lossRevisionBody(input: Readonly<{
   actionRef?: Readonly<{ adapterId: string; actionId: string }> | null;
   custodyId?: string | null;
   terminalEvidenceDigest?: string | null;
+  abandonProvenance?: "confirmed-direct" | "attempted-recovery";
 }>): Readonly<Record<string, unknown>> {
   return {
     schemaVersion: 1,
@@ -38,6 +40,7 @@ function lossRevisionBody(input: Readonly<{
     recoveryActionRef: input.actionRef ?? null,
     activeRecoveryCustodyId: input.custodyId ?? null,
     terminalEvidenceDigest: input.terminalEvidenceDigest ?? null,
+    ...(input.abandonProvenance === undefined ? {} : { abandonProvenance: input.abandonProvenance }),
   };
 }
 
@@ -764,6 +767,9 @@ function seedAbandonAuthorization(
   const actionRef = abandonKind === "recovery-attempt"
     ? { adapterId: "recovery-adapter", actionId: "recovery-action" }
     : null;
+  const abandonProvenance = abandonKind === "recovery-attempt"
+    ? "attempted-recovery" as const
+    : "confirmed-direct" as const;
   const custodyId = abandonKind === "recovery-attempt" ? "recovery-custody" : null;
   const confirmationDigest = lifecycleDigest("generation-loss-abandon-confirmation", {
     operatorId: "operator",
@@ -772,8 +778,9 @@ function seedAbandonAuthorization(
     generationLossId: "loss",
     beforeRevision: loss.current_revision,
     abandonKind,
+    abandonProvenance,
     sourceCustodyId: custodyId,
-    sourceActionRef: actionRef,
+    recoveryActionRef: actionRef,
     confirmedAt: 140,
   });
   let sourceCustodyRevision: number | null = null;
@@ -859,6 +866,7 @@ function seedAbandonAuthorization(
     actionRef,
     custodyId,
     terminalEvidenceDigest,
+    abandonProvenance,
   });
   const targetSemanticDigest = lifecycleDigest("generation-loss-semantic", targetBody);
   const transitionReplay = {
@@ -866,9 +874,10 @@ function seedAbandonAuthorization(
     generationLossId: "loss",
     beforeRevision: loss.current_revision,
     abandonKind,
+    abandonProvenance,
     sourceCustodyId: custodyId,
     sourceCustodyRevision,
-    sourceActionRef: actionRef,
+    recoveryActionRef: actionRef,
     sourceTerminalEvidenceDigest,
     operatorId: "operator",
     parentCapabilityId: "parent-capability",
@@ -885,6 +894,8 @@ function seedAbandonAuthorization(
     generationLossId: "loss",
     beforeRevision: loss.current_revision,
     afterRevision: loss.current_revision + 1,
+    abandonProvenance,
+    recoveryActionRef: actionRef,
     afterSemanticDigest: targetSemanticDigest,
     afterSourceRefDigest: targetSemanticDigest,
   });
@@ -892,6 +903,8 @@ function seedAbandonAuthorization(
     generationLossId: "loss",
     beforeRevision: loss.current_revision,
     afterRevision: loss.current_revision + 1,
+    abandonProvenance,
+    recoveryActionRef: actionRef,
     afterSemanticDigest: targetSemanticDigest,
     afterSourceRefDigest: targetSemanticDigest,
   });
@@ -1163,6 +1176,8 @@ describe("lifecycle recovery repository", () => {
       runId: "run",
       agentId: "chair",
       generationLossId: "loss",
+      provenance: "confirmed-direct",
+      recoveryActionRef: null,
       receiptApplyId: terminal.applyId,
       recordedAt: 140,
     })).immediate();
@@ -1179,6 +1194,8 @@ describe("lifecycle recovery repository", () => {
       runId: "run",
       agentId: "chair",
       generationLossId: "loss",
+      provenance: "confirmed-direct",
+      recoveryActionRef: null,
       receiptApplyId: terminal.applyId,
       recordedAt: 140,
     })).immediate()).toEqual(first);
@@ -1207,6 +1224,8 @@ describe("lifecycle recovery repository", () => {
       runId: "run",
       agentId: "chair",
       generationLossId: "loss",
+      provenance: "attempted-recovery",
+      recoveryActionRef: attempt.actionRef,
       receiptApplyId: terminal.applyId,
       recordedAt: 140,
     })).immediate()).toMatchObject({
@@ -1233,6 +1252,8 @@ describe("lifecycle recovery repository", () => {
         runId: "run",
         agentId: "chair",
         generationLossId: "loss",
+        provenance: "confirmed-direct",
+        recoveryActionRef: null,
         receiptApplyId: terminal.applyId,
         recordedAt: 140,
       });
@@ -1248,5 +1269,123 @@ describe("lifecycle recovery repository", () => {
     `).get(terminal.applyId)).toEqual({ count: 0 });
 
     database.close();
+  });
+
+  it("rejects crossed abandonment provenance and recovery-action arms", () => {
+    const direct = openDatabase();
+    seedOpenGenerationLoss(direct);
+    const directRepository = new LifecycleRecoveryRepository(direct);
+    const directAuthorization = seedAbandonAuthorization(direct, "direct-open");
+    const pair = { adapterId: "recovery-adapter", actionId: "recovery-action" };
+
+    for (const input of [
+      { provenance: "confirmed-direct", recoveryActionRef: pair },
+      { provenance: "attempted-recovery", recoveryActionRef: null },
+      { provenance: "attempted-recovery", recoveryActionRef: pair },
+    ] as const) {
+      expect(() => direct.transaction(() => directRepository.abandonGenerationLossInCurrentTransaction({
+        runId: "run",
+        agentId: "chair",
+        generationLossId: "loss",
+        receiptApplyId: directAuthorization.applyId,
+        recordedAt: 140,
+        ...input,
+      } as unknown as AbandonGenerationLossInput)).immediate()).toThrow("abandonment provenance");
+    }
+    direct.close();
+
+    const attempted = openDatabase();
+    seedOpenGenerationLoss(attempted);
+    const attemptedRepository = new LifecycleRecoveryRepository(attempted);
+    attempted.transaction(() => attemptedRepository.createIssueInCurrentTransaction(issueInput())).immediate();
+    const recovery = seedFreshRecoveryApply(attempted);
+    attempted.transaction(() => attemptedRepository.beginGenerationLossRecoveryInCurrentTransaction({
+      runId: "run",
+      agentId: "chair",
+      generationLossId: "loss",
+      custodyId: recovery.custodyId,
+      actionRef: recovery.actionRef,
+      originFreshApplyId: recovery.applyId,
+      recordedAt: 120,
+    })).immediate();
+    const attemptedAuthorization = seedAbandonAuthorization(attempted, "recovery-attempt");
+    for (const input of [
+      { provenance: "confirmed-direct", recoveryActionRef: null },
+      { provenance: "confirmed-direct", recoveryActionRef: recovery.actionRef },
+      { provenance: "attempted-recovery", recoveryActionRef: null },
+      { provenance: "attempted-recovery", recoveryActionRef: { ...recovery.actionRef, actionId: "crossed" } },
+    ] as const) {
+      expect(() => attempted.transaction(() => attemptedRepository.abandonGenerationLossInCurrentTransaction({
+        runId: "run",
+        agentId: "chair",
+        generationLossId: "loss",
+        receiptApplyId: attemptedAuthorization.applyId,
+        recordedAt: 140,
+        ...input,
+      } as unknown as AbandonGenerationLossInput)).immediate()).toThrow("abandonment provenance");
+    }
+    attempted.close();
+  });
+
+  it("binds direct and attempted abandonment provenance into distinct durable digests", () => {
+    const run = (kind: "direct-open" | "recovery-attempt") => {
+      const database = openDatabase();
+      seedOpenGenerationLoss(database);
+      const repository = new LifecycleRecoveryRepository(database);
+      let actionRef: Readonly<{ adapterId: string; actionId: string }> | null = null;
+      if (kind === "recovery-attempt") {
+        database.transaction(() => repository.createIssueInCurrentTransaction(issueInput())).immediate();
+        const recovery = seedFreshRecoveryApply(database);
+        actionRef = recovery.actionRef;
+        database.transaction(() => repository.beginGenerationLossRecoveryInCurrentTransaction({
+          runId: "run",
+          agentId: "chair",
+          generationLossId: "loss",
+          custodyId: recovery.custodyId,
+          actionRef: recovery.actionRef,
+          originFreshApplyId: recovery.applyId,
+          recordedAt: 120,
+        })).immediate();
+      }
+      const authorization = seedAbandonAuthorization(database, kind);
+      database.transaction(() => repository.abandonGenerationLossInCurrentTransaction({
+        runId: "run",
+        agentId: "chair",
+        generationLossId: "loss",
+        provenance: kind === "direct-open" ? "confirmed-direct" : "attempted-recovery",
+        recoveryActionRef: actionRef,
+        receiptApplyId: authorization.applyId,
+        recordedAt: 140,
+      } as AbandonGenerationLossInput)).immediate();
+      const revision = database.prepare(`
+        SELECT semantic_json,semantic_digest,journal_json,journal_digest,receipt_apply_digest
+          FROM lifecycle_generation_loss_revisions
+         WHERE generation_loss_id='loss' AND state='abandoned'
+      `).get() as {
+        semantic_json: string;
+        semantic_digest: string;
+        journal_json: string;
+        journal_digest: string;
+        receipt_apply_digest: string;
+      };
+      database.close();
+      return revision;
+    };
+
+    const direct = run("direct-open");
+    const attempted = run("recovery-attempt");
+    expect(JSON.parse(direct.semantic_json)).toMatchObject({ abandonProvenance: "confirmed-direct", recoveryActionRef: null });
+    expect(JSON.parse(attempted.semantic_json)).toMatchObject({
+      abandonProvenance: "attempted-recovery",
+      recoveryActionRef: { adapterId: "recovery-adapter", actionId: "recovery-action" },
+    });
+    expect(JSON.parse(direct.journal_json)).toMatchObject({ abandonProvenance: "confirmed-direct", recoveryActionRef: null });
+    expect(JSON.parse(attempted.journal_json)).toMatchObject({
+      abandonProvenance: "attempted-recovery",
+      recoveryActionRef: { adapterId: "recovery-adapter", actionId: "recovery-action" },
+    });
+    expect(direct.semantic_digest).not.toBe(attempted.semantic_digest);
+    expect(direct.journal_digest).not.toBe(attempted.journal_digest);
+    expect(direct.receipt_apply_digest).not.toBe(attempted.receipt_apply_digest);
   });
 });
