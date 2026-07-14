@@ -75,6 +75,9 @@ function seedLifecycleScope(database: Database.Database, input: Readonly<{
   };
   const resolutionDigest = lifecycleDigest("scope-admission-resolution", resolutionBody);
   database.transaction(() => {
+    database.prepare(`INSERT INTO lifecycle_receipt_projects VALUES (?,?,?)`).run(
+      input.projectId, input.authorityId, 1,
+    );
     database.prepare(`INSERT INTO lifecycle_scope_admission_outbox VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
       requestId, input.projectId, input.projectSessionId, input.runId, input.authorityId,
       admissionDigest, 1, canonical(scope), scopeDigest, 1,

@@ -2,14 +2,14 @@ import { createHash } from "node:crypto";
 
 import type Database from "better-sqlite3";
 
-import { canonicalJson, integer, nullableText, row, text, type Row } from "../project-session/store-support.ts";
+import { canonicalJson, integer, nullableText, row, text, type Row } from "../project-session/store-support.js";
 import type {
   LifecycleAuthenticatedNamespaceCheckpoint,
   LifecycleAuthenticatedScopeCheckpoint,
   LifecycleDigest,
   LifecycleIntegrityReceiptAuthorityPort,
   LifecycleReceiptRecord,
-} from "./receipt-authority.ts";
+} from "./receipt-authority.js";
 
 const PAGE_LIMIT = 256;
 const MAX_NAMESPACE_SCOPES = 65_536;
@@ -50,6 +50,20 @@ export type LifecycleReceiptRecoveryResult = Readonly<{
 export type LifecycleReceiptRecoveryOptions = Readonly<{
   authorityCallTimeoutMs?: number;
 }>;
+
+export function hasKnownLifecycleReceiptState(database: Database.Database): boolean {
+  return database.prepare(`
+    SELECT 1
+      FROM (
+        SELECT project_id FROM lifecycle_receipt_projects
+        UNION
+        SELECT project_id FROM lifecycle_admitted_run_scopes
+        UNION
+        SELECT project_id FROM lifecycle_scope_admission_outbox
+      )
+     LIMIT 1
+  `).get() !== undefined;
+}
 
 type NamespaceMember = Readonly<{
   projectSessionId: string;
@@ -307,6 +321,8 @@ export class LifecycleReceiptRecoveryService {
 
   async hydrateKnownProjects(): Promise<readonly LifecycleReceiptRecoveryResult[]> {
     const projects = this.#database.prepare(`
+      SELECT project_id FROM lifecycle_receipt_projects
+      UNION
       SELECT project_id FROM lifecycle_admitted_run_scopes
       UNION
       SELECT project_id FROM lifecycle_scope_admission_outbox
@@ -318,6 +334,18 @@ export class LifecycleReceiptRecoveryService {
         throw new LifecycleReceiptRecoveryError(
           "SNAPSHOT_INVALID",
           "lifecycle receipt project id is invalid",
+        );
+      }
+      const registration = this.#database.prepare(`
+        SELECT authority_id FROM lifecycle_receipt_projects WHERE project_id=?
+      `).get(project.project_id);
+      if (
+        registration !== undefined &&
+        text(row(registration, "lifecycle receipt project"), "authority_id") !== this.#authority.authorityId
+      ) {
+        throw new LifecycleReceiptRecoveryError(
+          "SNAPSHOT_INVALID",
+          "lifecycle receipt project authority crossed",
         );
       }
       results.push(await this.hydrateProject(project.project_id));

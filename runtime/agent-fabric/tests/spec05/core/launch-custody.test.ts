@@ -222,7 +222,11 @@ function createFixture(options: Readonly<{
   `);
 
   const clock = () => now;
-  const providerActionAdmission = new ProviderActionAdmissionCoordinator({ database, clock });
+  const providerActionAdmission = new ProviderActionAdmissionCoordinator({
+    database,
+    clock,
+    ...(options.fault === undefined ? {} : { fault: options.fault }),
+  });
   let capabilityGeneration = 0;
   const service = new LaunchCustodyService({
     database,
@@ -378,10 +382,6 @@ async function prepareFixture(fixture: ReturnType<typeof createFixture>): Promis
   handle: ReturnType<LaunchCustodyService["prepareInTransaction"]>;
 }> {
   const inspection = await fixture.service.inspect(fixture.intent);
-  const providerActionTicket = fixture.service.preflightLaunch({
-    inspection,
-    principal: operatorPrincipal(),
-  });
   let handle: ReturnType<LaunchCustodyService["prepareInTransaction"]> | undefined;
   fixture.database.transaction(() => {
     fixture.database.prepare(`
@@ -399,9 +399,9 @@ async function prepareFixture(fixture: ReturnType<typeof createFixture>): Promis
       inspection,
       operatorId: "operator_01",
       operatorCommandId: "commit_launch_01",
-      providerActionTicket,
+      principal: operatorPrincipal(),
     });
-  })();
+  }).immediate();
   if (handle === undefined) throw new Error("launch handle was not prepared");
   return { inspection, handle };
 }
@@ -668,6 +668,11 @@ describe("launch custody", () => {
        WHERE adapter_id='claude-agent-sdk' AND action_id='provider_launch_01'
     `).get()).toEqual({ status: "prepared", execution_count: 0, effect_count: 0 });
     expect(fixture.database.prepare(`
+      SELECT run_id, state FROM provider_action_pair_preflights
+       WHERE adapter_id='claude-agent-sdk' AND action_id='provider_launch_01'
+    `).get()).toEqual({ run_id: "run_launch_01", state: "admitted" });
+    expect(fixture.database.pragma("foreign_key_check")).toEqual([]);
+    expect(fixture.database.prepare(`
       SELECT COUNT(*) AS count FROM project_session_launch_custody
        WHERE attestation_challenge_digest=?
     `).get(attestationChallengeDigest)).toEqual({ count: 1 });
@@ -759,6 +764,7 @@ describe("launch custody", () => {
     const labels = [
       "launch:prepare:session",
       "launch:prepare:run",
+      "provider-action-admission:after-preflight-insert",
       "launch:prepare:authority",
       "launch:prepare:chair",
       "launch:prepare:scopes",
@@ -784,7 +790,7 @@ describe("launch custody", () => {
         SELECT state FROM provider_action_pair_preflights
          WHERE adapter_id=? AND action_id=?
       `).get(fixture.intent.providerAdapterId, fixture.intent.providerActionId), target)
-        .toEqual({ state: "resolving" });
+        .toBeUndefined();
       expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM resource_reservations").get(), target).toEqual({ count: 0 });
       expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM project_session_launch_custody").get(), target).toEqual({ count: 0 });
       expect(fixture.database.prepare(`
@@ -802,9 +808,10 @@ describe("launch custody", () => {
     }
   });
 
-  it("releases a deterministic closed launch preflight after rollback and replays the original failure", async () => {
+  it("leaves no launch run or preflight when the atomic operator preparation rolls back", async () => {
     const fixture = createFixture();
     const failure = new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch command is permanently reused");
+    let prepareCalls = 0;
     const actions = new OperatorActionStore({
       database: fixture.database,
       operatorStore: new OperatorStore({ database: fixture.database, clock: () => now }),
@@ -816,13 +823,13 @@ describe("launch custody", () => {
       launchCustody: {
         readCurrentState: fixture.service.readCurrentState.bind(fixture.service),
         inspect: fixture.service.inspect.bind(fixture.service),
-        preflightLaunch: fixture.service.preflightLaunch.bind(fixture.service),
-        prepareInTransaction: () => { throw failure; },
+        prepareInTransaction: () => {
+          prepareCalls += 1;
+          throw failure;
+        },
         dispatchPrepared: fixture.service.dispatchPrepared.bind(fixture.service),
         launchProviderActionJournalRefForCommand:
           fixture.service.launchProviderActionJournalRefForCommand.bind(fixture.service),
-        releaseProviderActionPreflightAfterRollback:
-          fixture.service.releaseProviderActionPreflightAfterRollback.bind(fixture.service),
       },
       clock: () => now,
     });
@@ -863,11 +870,10 @@ describe("launch custody", () => {
     expect(fixture.database.prepare(`
       SELECT state FROM provider_action_pair_preflights
        WHERE adapter_id=? AND action_id=?
-    `).get(fixture.intent.providerAdapterId, fixture.intent.providerActionId)).toEqual({ state: "released" });
-    await expect(actions.commit(context, commit)).rejects.toMatchObject({
-      code: "DEDUPE_CONFLICT",
-      message: "launch command is permanently reused",
-    });
+    `).get(fixture.intent.providerAdapterId, fixture.intent.providerActionId)).toBeUndefined();
+    expect(fixture.database.prepare("SELECT COUNT(*) AS count FROM runs").get()).toEqual({ count: 0 });
+    await expect(actions.commit(context, commit)).rejects.toBe(failure);
+    expect(prepareCalls).toBe(2);
   });
 
   it("cleans a prepared crash without adapter I/O and preserves immutable custody", async () => {
@@ -2215,6 +2221,11 @@ describe("launch custody", () => {
         JOIN provider_actions p
           ON p.adapter_id=c.provider_adapter_id AND p.action_id=c.provider_action_id
     `).get()).toEqual({ state: "launch_failed", status: "terminal", execution_count: 0 });
+    expect(preparedState.prepare(`
+      SELECT run_id, state FROM provider_action_pair_preflights
+       WHERE adapter_id='claude-agent-sdk' AND action_id='provider_launch_01'
+    `).get()).toEqual({ run_id: "run_launch_01", state: "admitted" });
+    expect(preparedState.pragma("foreign_key_check")).toEqual([]);
     preparedState.close();
 
     const dispatched = createFixture({ persistent: true });
@@ -2315,12 +2326,9 @@ describe("launch custody", () => {
         inspection,
         operatorId: "operator_01",
         operatorCommandId: "commit_launch_02",
-        providerActionTicket: fixture.service.preflightLaunch({
-          inspection,
-          principal: operatorPrincipal(),
-        }),
+        principal: operatorPrincipal(),
       });
-    })();
+    }).immediate();
     expect(fixture.database.prepare(`
       SELECT state, revision, launch_packet_path FROM project_sessions
        WHERE project_session_id='session_launch_01'
@@ -2332,6 +2340,14 @@ describe("launch custody", () => {
       SELECT retry_of_provider_action_id FROM project_session_launch_custody
        WHERE custody_attempt_generation=2
     `).get()).toEqual({ retry_of_provider_action_id: "provider_launch_01" });
+    expect(fixture.database.prepare(`
+      SELECT run_id, state FROM provider_action_pair_preflights
+       ORDER BY action_id
+    `).all()).toEqual([
+      { run_id: "run_launch_01", state: "admitted" },
+      { run_id: "run_launch_02", state: "admitted" },
+    ]);
+    expect(fixture.database.pragma("foreign_key_check")).toEqual([]);
   });
 
   it("rejects extra artifact fields and symlink escape before any launch row", async () => {

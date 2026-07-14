@@ -1672,6 +1672,17 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
     const rejected = outcomes.find((outcome) => outcome.status === "rejected");
     expect(rejected).toMatchObject({ status: "rejected", reason: { code: "BUDGET_EXCEEDED" } });
+    const database = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(database.prepare(`
+        SELECT state FROM provider_action_pair_preflights
+         WHERE adapter_id='fake-lifecycle'
+           AND action_id IN ('provider-review-concurrent:one','provider-review-concurrent:two')
+         ORDER BY state
+      `).all()).toEqual([{ state: "admitted" }, { state: "resolving" }]);
+    } finally {
+      database.close();
+    }
   });
 
   it("queues answer-bearing work within the shared provider-turn ceiling", async () => {

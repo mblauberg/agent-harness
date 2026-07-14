@@ -521,6 +521,9 @@ describe("current database baseline invariants", () => {
   it("equality-binds preflight, action, route, reservation, and evidence to one exact run", () => {
     const database = openDatabase();
 
+    expect(foreignKeySignatures(database, "provider_action_pair_preflights")).toContain(
+      "runs:run_id->run_id",
+    );
     expect(foreignKeySignatures(database, "provider_actions")).toContain(
       "provider_action_pair_preflights:run_id->run_id,adapter_id->adapter_id,action_id->action_id",
     );
@@ -537,6 +540,25 @@ describe("current database baseline invariants", () => {
     expect(foreignKeySignatures(database, "provider_review_evidence")).toContain(
       "review_finding_capacity_reservations:run_id->run_id,adapter_id->adapter_id,action_id->action_id,reservation_digest->reservation_digest",
     );
+
+    database.close();
+  });
+
+  it("requires every run-action preflight to reference a run while provider smoke remains unscoped", () => {
+    const database = openDatabase();
+
+    expect(() => database.prepare(`
+      INSERT INTO provider_action_pair_preflights(
+        adapter_id,action_id,scope_kind,run_id,owner_digest,actor_principal_digest,
+        input_digest,state,created_at,updated_at
+      ) VALUES ('adapter','missing-run-action','run-action','missing-run','owner','principal','input','resolving',1,1)
+    `).run()).toThrow("FOREIGN KEY constraint failed");
+    expect(() => database.prepare(`
+      INSERT INTO provider_action_pair_preflights(
+        adapter_id,action_id,scope_kind,run_id,owner_digest,actor_principal_digest,
+        input_digest,state,created_at,updated_at
+      ) VALUES ('adapter','provider-smoke','provider-smoke',NULL,'smoke-owner','smoke-principal','smoke-input','resolving',1,1)
+    `).run()).not.toThrow();
 
     database.close();
   });

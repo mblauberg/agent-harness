@@ -281,6 +281,12 @@ describe("LifecycleReceiptRecoveryService", () => {
       admissionDigest: digest("admission", projectId),
       admittedAt: 10,
     };
+    database.prepare(`INSERT INTO projects VALUES (?,?,NULL,1,1,?,?)`).run(
+      projectId, "/tmp/project-pending-admission", 10, 10,
+    );
+    database.prepare(`INSERT INTO lifecycle_receipt_projects VALUES (?,?,?)`).run(
+      projectId, authority.authorityId, 10,
+    );
     database.prepare(`INSERT INTO lifecycle_scope_admission_outbox VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
       digest("scope-admission-outbox", {
         schemaVersion: 1,

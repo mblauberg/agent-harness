@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openFabric, type Fabric } from "../../../src/index.ts";
+import { LifecycleReceiptAuthorityUnavailableError } from "../../../src/lifecycle/receipt-recovery.ts";
 import type {
   LifecycleAdmittedRunScope,
   LifecycleAuthenticatedNamespaceCheckpoint,
@@ -100,6 +101,9 @@ function seedLocalScope(database: Database.Database, seed: StartupSeed): void {
     scopeCountDec: String(namespace.scopeCount),
     orderedScopeHeadSetDigest: namespace.orderedScopeHeadSetDigest,
   };
+  database.prepare(`INSERT INTO lifecycle_receipt_projects VALUES (?,?,?)`).run(
+    projectId, scope.authorityId, 10,
+  );
   database.prepare(`INSERT INTO lifecycle_scope_admission_outbox VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
     requestId, projectId, scope.projectSessionId, scope.runId, scope.authorityId,
     scope.admissionDigest, scope.admittedAt, scopeJson, scopeDigest, 10,
@@ -161,6 +165,20 @@ function seedIntent(
   );
 }
 
+function deleteBehindImmutableTrigger(
+  database: Database.Database,
+  triggerName: string,
+  deletion: () => void,
+): void {
+  const stored = database.prepare(`SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?`).get(triggerName);
+  if (typeof stored !== "object" || stored === null || !("sql" in stored) || typeof stored.sql !== "string") {
+    throw new Error(`missing test trigger ${triggerName}`);
+  }
+  database.exec(`DROP TRIGGER ${triggerName}`);
+  deletion();
+  database.exec(stored.sql);
+}
+
 async function startupFixture(): Promise<StartupFixture> {
   const directory = await mkdtemp(join(tmpdir(), "fabric-startup-receipts-"));
   directories.push(directory);
@@ -217,5 +235,157 @@ describe("Fabric lifecycle receipt startup hydration", () => {
     await expect(runtime.recoverStartupState()).resolves.toMatchObject({ actionsReconciled: 0 });
     expect(namespaceReads).toBeGreaterThan(0);
     expect(fixture.authority.appendCalls).toBe(1);
+  });
+
+  it.each(["custody", "run", "scope-set"] as const)(
+    "rejects local %s deletion before any generic startup recovery",
+    async (deletion) => {
+      const fixture = await startupFixture();
+      const subject = custodySubject(fixture.seed, "custody-deleted-before-startup");
+      const intent = digest("intent", "deleted-before-startup");
+      seedIntent(fixture.database, fixture.seed, subject, intent);
+      await fixture.authority.appendReceipt(intent, subject);
+      if (deletion === "custody") {
+        deleteBehindImmutableTrigger(
+          fixture.database,
+          "lifecycle_receipt_intents_immutable_delete",
+          () => { fixture.database.prepare(`DELETE FROM lifecycle_receipt_intents WHERE intent_digest=?`).run(intent); },
+        );
+      } else if (deletion === "run") {
+        deleteBehindImmutableTrigger(
+          fixture.database,
+          "lifecycle_admitted_run_scopes_immutable_delete",
+          () => {
+            fixture.database.prepare(`DELETE FROM lifecycle_admitted_run_scopes WHERE run_id=?`)
+              .run(fixture.seed.scope.runId);
+          },
+        );
+      } else {
+        deleteBehindImmutableTrigger(
+          fixture.database,
+          "lifecycle_admitted_run_scopes_immutable_delete",
+          () => {
+            deleteBehindImmutableTrigger(
+              fixture.database,
+              "lifecycle_scope_admission_outbox_immutable_delete",
+              () => {
+                fixture.database.prepare(`DELETE FROM lifecycle_admitted_run_scopes WHERE run_id=?`)
+                  .run(fixture.seed.scope.runId);
+                fixture.database.prepare(`DELETE FROM lifecycle_scope_admission_outbox WHERE run_id=?`)
+                  .run(fixture.seed.scope.runId);
+              },
+            );
+          },
+        );
+      }
+      fixture.database.close();
+      const recoveryFaults: string[] = [];
+
+      const runtime = await openFabric({
+        databasePath: fixture.databasePath,
+        workspaceRoots: [fixture.directory],
+        lifecycleReceiptAuthority: fixture.authority,
+        fault: (label) => recoveryFaults.push(label),
+      });
+      runtimes.push(runtime);
+
+      await expect(runtime.recoverStartupState()).rejects.toMatchObject({ code: "SNAPSHOT_INVALID" });
+      expect(fixture.authority.appendCalls).toBe(1);
+      expect(recoveryFaults).toEqual([]);
+    },
+  );
+
+  it("rejects an externally advanced ledger before any generic startup recovery", async () => {
+    const fixture = await startupFixture();
+    const firstSubject = custodySubject(fixture.seed, "custody-local-snapshot");
+    const firstIntent = digest("intent", "local-snapshot");
+    seedIntent(fixture.database, fixture.seed, firstSubject, firstIntent);
+    await fixture.authority.appendReceipt(firstIntent, firstSubject);
+    await fixture.authority.appendReceipt(
+      digest("intent", "external-ledger-advance"),
+      custodySubject(fixture.seed, "custody-external-ledger-advance"),
+    );
+    fixture.database.close();
+    const recoveryFaults: string[] = [];
+
+    const runtime = await openFabric({
+      databasePath: fixture.databasePath,
+      workspaceRoots: [fixture.directory],
+      lifecycleReceiptAuthority: fixture.authority,
+      fault: (label) => recoveryFaults.push(label),
+    });
+    runtimes.push(runtime);
+
+    await expect(runtime.recoverStartupState()).rejects.toMatchObject({ code: "SNAPSHOT_INVALID" });
+    expect(fixture.authority.appendCalls).toBe(2);
+    expect(recoveryFaults).toEqual([]);
+  });
+
+  it("keeps transient authority unavailability retryable and blocks startup recovery", async () => {
+    const fixture = await startupFixture();
+    fixture.authority.readNamespaceCheckpoint = async () => {
+      throw new LifecycleReceiptAuthorityUnavailableError("authority restarting");
+    };
+    fixture.database.close();
+    const recoveryFaults: string[] = [];
+
+    const runtime = await openFabric({
+      databasePath: fixture.databasePath,
+      workspaceRoots: [fixture.directory],
+      lifecycleReceiptAuthority: fixture.authority,
+      fault: (label) => recoveryFaults.push(label),
+    });
+    runtimes.push(runtime);
+
+    await expect(runtime.recoverStartupState()).rejects.toMatchObject({ code: "RECOVERY_PENDING" });
+    expect(fixture.authority.appendCalls).toBe(0);
+    expect(recoveryFaults).toEqual([]);
+  });
+
+  it("keeps startup pending when local receipt state has no authority", async () => {
+    const fixture = await startupFixture();
+    fixture.database.close();
+    const recoveryFaults: string[] = [];
+
+    const runtime = await openFabric({
+      databasePath: fixture.databasePath,
+      workspaceRoots: [fixture.directory],
+      fault: (label) => recoveryFaults.push(label),
+    });
+    runtimes.push(runtime);
+
+    await expect(runtime.recoverStartupState()).rejects.toMatchObject({ code: "RECOVERY_PENDING" });
+    expect(recoveryFaults).toEqual([]);
+  });
+
+  it("rejects a marker-only restart under a different receipt authority", async () => {
+    const fixture = await startupFixture();
+    deleteBehindImmutableTrigger(
+      fixture.database,
+      "lifecycle_admitted_run_scopes_immutable_delete",
+      () => {
+        deleteBehindImmutableTrigger(
+          fixture.database,
+          "lifecycle_scope_admission_outbox_immutable_delete",
+          () => {
+            fixture.database.prepare(`DELETE FROM lifecycle_admitted_run_scopes WHERE run_id=?`)
+              .run(fixture.seed.scope.runId);
+            fixture.database.prepare(`DELETE FROM lifecycle_scope_admission_outbox WHERE run_id=?`)
+              .run(fixture.seed.scope.runId);
+          },
+        );
+      },
+    );
+    fixture.database.close();
+    const crossedAuthority = new TestLifecycleReceiptAuthority("other-lifecycle-receipt-authority");
+
+    const runtime = await openFabric({
+      databasePath: fixture.databasePath,
+      workspaceRoots: [fixture.directory],
+      lifecycleReceiptAuthority: crossedAuthority,
+    });
+    runtimes.push(runtime);
+
+    await expect(runtime.recoverStartupState()).rejects.toMatchObject({ code: "SNAPSHOT_INVALID" });
   });
 });

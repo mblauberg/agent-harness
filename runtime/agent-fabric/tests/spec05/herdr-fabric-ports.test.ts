@@ -179,6 +179,22 @@ describe("daemon-owned Herdr Fabric ports", () => {
         canCloseBarrier: false,
       });
       expect(terminal).toMatchObject({ actionId, revision: 3, status: "terminal" });
+      const admittedPrincipal = database.prepare(`
+        SELECT actor_principal_digest FROM provider_action_pair_preflights
+         WHERE adapter_id='herdr-control-v1' AND action_id=?
+      `).get(actionId);
+      seedHerdrIntegrationIdentity(database);
+      database.prepare(`
+        UPDATE integration_availability
+           SET discovered_contract_json=json_set(discovered_contract_json, '$.generation', 2),
+               checked_at=2
+         WHERE integration_id='herdr-control-v1'
+      `).run();
+      await expect(ports.prepareDirectSteerAction(actionId, intent)).resolves.toEqual(terminal);
+      expect(database.prepare(`
+        SELECT actor_principal_digest FROM provider_action_pair_preflights
+         WHERE adapter_id='herdr-control-v1' AND action_id=?
+      `).get(actionId)).toEqual(admittedPrincipal);
       expect(database.prepare(`
         SELECT state FROM project_session_memberships
          WHERE project_session_id=? AND coordination_run_id='run-stage1'
@@ -266,6 +282,24 @@ describe("daemon-owned Herdr Fabric ports", () => {
         ...intent,
         prompt: `afb_${"x".repeat(32)}`,
       })).rejects.toThrow("credential-like");
+      for (const state of ["unavailable", "stale"] as const) {
+        database.prepare(`UPDATE integration_availability SET state=? WHERE integration_id='herdr-control-v1'`)
+          .run(state);
+        const unavailableActionId = `herdr-${state}-action` as ProviderActionId;
+        await expect(ports.prepareDirectSteerAction(unavailableActionId, intent))
+          .rejects.toThrow("integration is not available");
+        expect(database.prepare(`
+          SELECT COUNT(*) AS count FROM provider_action_pair_preflights
+           WHERE adapter_id='herdr-control-v1' AND action_id=?
+        `).get(unavailableActionId)).toEqual({ count: 0 });
+      }
+      database.prepare(`DELETE FROM integration_availability WHERE integration_id='herdr-control-v1'`).run();
+      await expect(ports.prepareDirectSteerAction("herdr-unauthenticated-action" as ProviderActionId, intent))
+        .rejects.toThrow("identity is not authenticated");
+      expect(database.prepare(`
+        SELECT COUNT(*) AS count FROM provider_action_pair_preflights
+         WHERE adapter_id='herdr-control-v1' AND action_id='herdr-unauthenticated-action'
+      `).get()).toEqual({ count: 0 });
     } finally {
       database.close();
       await rm(fixture.directory, { recursive: true, force: true });

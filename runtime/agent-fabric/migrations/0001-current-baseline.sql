@@ -1135,6 +1135,13 @@ CREATE TABLE lifecycle_rotation_custody_heads (
 CREATE UNIQUE INDEX one_nonfinal_lifecycle_custody_per_agent
   ON lifecycle_rotation_custody_heads(run_id,agent_id)
   WHERE terminal=0;
+CREATE TABLE lifecycle_receipt_projects (
+  project_id TEXT PRIMARY KEY,
+  authority_id TEXT NOT NULL,
+  registered_at INTEGER NOT NULL,
+  UNIQUE(project_id,authority_id),
+  FOREIGN KEY(project_id) REFERENCES projects(project_id)
+) STRICT;
 CREATE TABLE lifecycle_scope_admission_outbox (
   admission_request_id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,
@@ -1148,7 +1155,9 @@ CREATE TABLE lifecycle_scope_admission_outbox (
   created_at INTEGER NOT NULL,
   UNIQUE(project_session_id,run_id),
   UNIQUE(admission_request_id,project_id,project_session_id,run_id,authority_id,
-      admission_digest,admitted_at,scope_digest)
+      admission_digest,admitted_at,scope_digest),
+  FOREIGN KEY(project_id,authority_id)
+      REFERENCES lifecycle_receipt_projects(project_id,authority_id)
 ) STRICT;
 CREATE TABLE lifecycle_admitted_run_scopes (
   project_id TEXT,
@@ -3472,6 +3481,16 @@ BEGIN
 END;
 CREATE TRIGGER lifecycle_receipt_namespace_members_immutable_delete
 BEFORE DELETE ON lifecycle_receipt_namespace_members
+BEGIN
+  SELECT RAISE(ABORT,'lifecycle-immutable-row');
+END;
+CREATE TRIGGER lifecycle_receipt_projects_immutable_update
+BEFORE UPDATE ON lifecycle_receipt_projects
+BEGIN
+  SELECT RAISE(ABORT,'lifecycle-immutable-row');
+END;
+CREATE TRIGGER lifecycle_receipt_projects_immutable_delete
+BEFORE DELETE ON lifecycle_receipt_projects
 BEGIN
   SELECT RAISE(ABORT,'lifecycle-immutable-row');
 END;
@@ -8349,6 +8368,7 @@ CREATE TABLE provider_action_pair_preflights (
   UNIQUE (adapter_id, action_id, owner_digest),
   UNIQUE (run_id, adapter_id, action_id),
   UNIQUE (run_id, adapter_id, action_id, owner_digest),
+  FOREIGN KEY (run_id) REFERENCES runs(run_id),
   CHECK (
     (scope_kind='provider-smoke' AND run_id IS NULL) OR
     (scope_kind='run-action' AND run_id IS NOT NULL)

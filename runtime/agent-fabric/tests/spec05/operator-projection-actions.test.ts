@@ -1724,7 +1724,6 @@ describe("operator action store", () => {
         return current.state;
       },
       inspect: async () => ({} as never),
-      preflightLaunch: () => ({} as never),
       prepareInTransaction: () => ({
         schemaVersion: 1,
         providerAdapterId: "claude-agent-sdk",

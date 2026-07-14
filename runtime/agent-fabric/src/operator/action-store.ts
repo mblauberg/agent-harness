@@ -132,22 +132,17 @@ export interface OperatorActionEffectPort {
 export interface OperatorLaunchCustodyPort {
   readCurrentState(intent: LaunchCustodyIntent): Promise<ProjectSessionLaunchCurrentState>;
   inspect(intent: LaunchCustodyIntent): Promise<LaunchInspection>;
-  preflightLaunch(input: Readonly<{
-    inspection: LaunchInspection;
-    principal: AuthenticatedOperatorContext;
-  }>): ProviderActionTicket;
   prepareInTransaction(input: Readonly<{
     inspection: LaunchInspection;
     operatorId: string;
     operatorCommandId: string;
-    providerActionTicket: ProviderActionTicket;
+    principal: AuthenticatedOperatorContext;
   }>): LaunchDispatchHandle;
   dispatchPrepared(handle: LaunchDispatchHandle): Promise<unknown>;
   launchProviderActionJournalRefForCommand(
     operatorId: string,
     commandId: string,
   ): LaunchProviderActionJournalRefV1;
-  releaseProviderActionPreflightAfterRollback?(ticket: ProviderActionTicket, failure: unknown): void;
 }
 
 export interface OperatorChairRecoveryCustodyPort {
@@ -588,7 +583,6 @@ export class OperatorActionStore {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "launch custody runtime is unavailable");
     }
     const inspection = await launchCustody.inspect(intent);
-    const providerActionTicket = launchCustody.preflightLaunch({ inspection, principal: context });
     const provisionalState = {
       status: "pending" as const,
       commandId: request.command.commandId,
@@ -635,7 +629,7 @@ export class OperatorActionStore {
         inspection,
         operatorId: context.operatorId,
         operatorCommandId: request.command.commandId,
-        providerActionTicket,
+        principal: context,
       });
       const launchProviderActionJournalRef = launchCustody.launchProviderActionJournalRefForCommand(
         context.operatorId,
@@ -667,7 +661,7 @@ export class OperatorActionStore {
       );
       return { kind: "prepared", receipt, handle };
     });
-    const prepared = prepareProviderActionAfterPreflight(() => prepare.immediate(), launchCustody, providerActionTicket);
+    const prepared = prepare.immediate();
     if (prepared.kind === "replay") return prepared.receipt;
     await launchCustody.dispatchPrepared(prepared.handle);
     return {

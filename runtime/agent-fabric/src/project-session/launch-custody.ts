@@ -3896,10 +3896,11 @@ export class LaunchCustodyService {
     };
   }
 
-  preflightLaunch(input: Readonly<{
+  #preflightLaunchInCurrentTransaction(input: Readonly<{
     inspection: LaunchInspection;
     principal: AuthenticatedOperatorContext;
   }>): ProviderActionTicket {
+    if (!this.#database.inTransaction) throw new Error("launch preflight requires the operator command transaction");
     const { intent, packet, plan } = input.inspection;
     return this.#providerActionAdmission.preflight({
       actionRef: {
@@ -3922,7 +3923,7 @@ export class LaunchCustodyService {
     inspection: LaunchInspection;
     operatorId: string;
     operatorCommandId: string;
-    providerActionTicket: ProviderActionTicket;
+    principal: AuthenticatedOperatorContext;
   }>): LaunchDispatchHandle {
     if (!this.#database.inTransaction) throw new Error("launch preparation requires the operator command transaction");
     const { inspection } = input;
@@ -4007,6 +4008,10 @@ export class LaunchCustodyService {
       packet.topologyMode === "coordinated" ? 1 : null,
     );
     this.#fault("launch:prepare:run");
+    const providerActionTicket = this.#preflightLaunchInCurrentTransaction({
+      inspection,
+      principal: input.principal,
+    });
     const authorityJson = canonicalJson(packet.chairAuthority);
     this.#database.prepare(`
       INSERT INTO authorities(authority_id, run_id, parent_authority_id, authority_json, authority_hash, created_at)
@@ -4051,7 +4056,7 @@ export class LaunchCustodyService {
       input: packet.provider.input,
     };
     const payloadJson = canonicalJson(publicPayload);
-    this.#providerActionAdmission.admitUnroutedInCurrentTransaction(input.providerActionTicket, {
+    this.#providerActionAdmission.admitUnroutedInCurrentTransaction(providerActionTicket, {
       runId: packet.runId,
       actionId: intent.providerActionId,
       adapterId: intent.providerAdapterId,

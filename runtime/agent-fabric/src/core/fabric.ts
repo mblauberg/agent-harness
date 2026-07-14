@@ -208,6 +208,11 @@ import type {
   LifecycleIntegrityReceiptAuthorityPort,
   LifecycleReceiptRecord,
 } from "../lifecycle/receipt-authority.js";
+import {
+  hasKnownLifecycleReceiptState,
+  LifecycleReceiptRecoveryError,
+  LifecycleReceiptRecoveryService,
+} from "../lifecycle/receipt-recovery.js";
 
 export { FabricClient } from "./client.js";
 
@@ -923,6 +928,7 @@ export class Fabric {
   readonly #lifecycleRotations: LifecycleRotationRepository;
   readonly #generationLosses: GenerationLossRepository;
   readonly #lifecycleReceiptAuthority: LifecycleIntegrityReceiptAuthorityPort | undefined;
+  readonly #lifecycleReceiptRecovery: LifecycleReceiptRecoveryService | undefined;
   readonly #capabilityKey: string;
   readonly #fabricSocketPath: string | undefined;
   readonly #adapterSupervisor: AdapterSupervisor;
@@ -989,6 +995,9 @@ export class Fabric {
     this.#lifecycleRotations = new LifecycleRotationRepository(this.#database);
     this.#generationLosses = new GenerationLossRepository(this.#database);
     this.#lifecycleReceiptAuthority = options.lifecycleReceiptAuthority;
+    this.#lifecycleReceiptRecovery = options.lifecycleReceiptAuthority === undefined
+      ? undefined
+      : new LifecycleReceiptRecoveryService(this.#database, options.lifecycleReceiptAuthority);
     this.#artifactRegistry = new ArtifactRegistry(this.#database, this.#clock);
     this.#adapters = options.adapters ?? {};
     this.#adapterSupervisor = new AdapterSupervisor(this.#adapters);
@@ -1909,6 +1918,16 @@ export class Fabric {
     sessionsDegraded: number;
     deliveriesReleased: number;
   }> {
+    if (this.#lifecycleReceiptRecovery === undefined) {
+      if (hasKnownLifecycleReceiptState(this.#database)) {
+        throw new LifecycleReceiptRecoveryError(
+          "RECOVERY_PENDING",
+          "lifecycle receipt authority recovery is pending",
+        );
+      }
+    } else {
+      await this.#lifecycleReceiptRecovery.hydrateKnownProjects();
+    }
     this.#results.recover();
     this.#notifications.recover();
     await this.#recoverLifecycleRotations();
@@ -7539,6 +7558,16 @@ export class Fabric {
     const projectId = stringField(source, "project_id");
     const projectSessionId = stringField(source, "project_session_id");
     const admissionDigest = stringField(source, "admission_digest") as LifecycleDigest;
+    this.#database.prepare(`
+      INSERT OR IGNORE INTO lifecycle_receipt_projects(project_id,authority_id,registered_at)
+      VALUES (?,?,?)
+    `).run(projectId, authority.authorityId, this.#clock());
+    const receiptProject = rowOrNotFound(this.#database.prepare(`
+      SELECT authority_id FROM lifecycle_receipt_projects WHERE project_id=?
+    `).get(projectId), "lifecycle receipt project");
+    if (stringField(receiptProject, "authority_id") !== authority.authorityId) {
+      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt project authority crossed");
+    }
     const existing = this.#database.prepare(`
       SELECT authority_id,admission_digest FROM lifecycle_admitted_run_scopes
        WHERE project_session_id=? AND run_id=?

@@ -652,6 +652,29 @@ export class HerdrFabricPorts {
     if (text(project, "project_id") !== input.projectId) {
       throw new TypeError("Herdr project binding is stale");
     }
+    const availability = this.#database.prepare(`
+      SELECT state,discovered_contract_json FROM integration_availability
+       WHERE integration_id=?
+    `).get(ADAPTER_ID);
+    if (!isRow(availability)) {
+      throw new TypeError("Herdr integration identity is not authenticated");
+    }
+    if (text(availability, "state") !== "available") {
+      throw new TypeError("Herdr integration is not available");
+    }
+    let discoveredContract: unknown;
+    try {
+      discoveredContract = JSON.parse(text(availability, "discovered_contract_json"));
+    } catch {
+      throw new TypeError("Herdr integration identity contract is invalid");
+    }
+    if (
+      !isRow(discoveredContract) ||
+      discoveredContract.schemaVersion !== 1 ||
+      discoveredContract.operationFamily !== ADAPTER_ID
+    ) {
+      throw new TypeError("Herdr integration identity contract is invalid");
+    }
     return this.#providerActionAdmission.preflight({
       actionRef: { adapterId: ADAPTER_ID, actionId: input.actionId },
       scope: { kind: "run-action", runId: input.runId },
