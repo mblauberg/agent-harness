@@ -9572,6 +9572,73 @@ chain/authority fencing; fresh rotation versus same-history recovery;
 independent child custody;
 and content-free telemetry.
 
+Added requirements are:
+
+- **FR-077:** Each activated adapter shall publish one current immutable closed
+  capability snapshot whose source and available/unavailable arm agree.
+- **FR-078:** Capability bodies, snapshot instances and references shall use the
+  exact digest preimages and equality bindings defined above.
+- **FR-079:** Every answer-bearing provider action shall bind one immutable route
+  admission; each dispatch shall append its exact attempt row and terminal
+  evidence may append at most one observation.
+- **FR-080:** Actual review-route identity shall come only from the exact
+  admission/observation pair and shall preserve unavailable and observed-null as
+  distinct states.
+- **FR-081:** Route admission and launch shall bind the daemon-rendered discovery
+  surface manifest, its registered artifact and every displayed component
+  digest.
+- **FR-082:** Every provider dispatch shall revalidate the current capability
+  body, effective configuration, permission profile and discovery surface;
+  incompatible drift shall end the zero-effect action and require a new pair.
+- **FR-083:** Provider-action reads, receipts and operator Evidence shall reuse
+  the one closed route shape and the daemon-global provider action pair.
+- **FR-084:** Context pressure shall use the one exact, expiring,
+  non-authoritative projection and shall remain incapable of reserving spend or
+  triggering lifecycle action.
+- **FR-085:** Policy-required rotation shall create a fresh provider context and
+  inject only the daemon-validated lifecycle checkpoint; same-history resume
+  shall remain recovery-only.
+- **FR-086:** Coordination topology shall use one append-only, revisioned wave
+  plan and one CAS current pointer under the existing chair, authority and
+  policy records.
+- **FR-087:** Topology current/list reads shall expose the closed plan and
+  pointer shapes and derive stale currency without rewriting plan state.
+- **FR-088:** Operational telemetry shall use only the privacy-minimised span
+  shape and shall remain non-authoritative.
+- **NFR-034:** Capability, route, topology, pressure and telemetry records shall
+  be closed, canonically ordered and deterministically digestible.
+- **NFR-035:** Unknown capability and context values shall remain explicitly
+  unknown, never be widened to unlimited, false or inferred support.
+- **NFR-036:** Capability evidence shall not create an autonomous route learner,
+  pressure controller, compaction threshold or ambiguous-effect redispatch.
+- **NFR-037:** Topology planning shall not mint authority, expand write scope,
+  replace the chair or choose agents automatically.
+- **NFR-038:** Generic telemetry shall contain no prompt, answer, tool payload,
+  artifact bytes, private message, capability or absolute path.
+
+Acceptance additionally requires:
+
+- **AC-056:** Capability fixtures cover closed codecs, source/arm parity, exact
+  digest preimages, immutable refresh, expiry and unknown-enum rejection.
+- **AC-057:** Route fixtures cover immutable admission, contiguous dispatch,
+  one observation, actual-route proof/mismatch, honest unavailable values and
+  zero-effect drift before provider I/O.
+- **AC-058:** Discovery fixtures reproduce exact registered manifest bytes and
+  reject crossed host, version, profile, mode, permission, registry or launch
+  bindings.
+- **AC-059:** Context-pressure fixtures cover every source/confidence arm,
+  token arithmetic, exact observation joins, expiry, stale reads and the
+  absence of percentage or lifecycle authority.
+- **AC-060:** Topology append fixtures cover exact replay, changed replay,
+  contiguous predecessors, CAS conflicts and authority/policy/dependency
+  fencing.
+- **AC-061:** Topology read fixtures cover current, stale and unavailable arms,
+  intact historical predecessors, stable ordering and immutable plans.
+- **AC-062:** Lifecycle fixtures distinguish fresh rotation from same-history
+  recovery and prove independent child custody.
+- **AC-063:** Telemetry fixtures prove the closed codec and absence of content,
+  secrets and authority-bearing fields.
+
 ### 32.22 Exact Console read identity completion
 
 The Console must not guess a preparation identifier, infer a provider route
@@ -9759,7 +9826,13 @@ action pair and task run. An exact action pair with null route ordinal is not a
 route-list member and returns `NOT_FOUND`; its legitimate lack of route/
 recovery is not corruption. The present arm additionally equality-binds the
 provider-action route; missing/integrity-failed instead binds the exact live
-route-recovery evidence for that pair and task/run. List enumerates every
+route-recovery evidence for that pair and task/run.
+`GenericProviderRouteRecoveryService` is the sole owner for an otherwise-generic
+task-bound answer-bearing action whose route is missing or integrity-failed; it
+supplies that exact live evidence but gains no dispatch, reroute or certifying
+authority. Section 32.19.8's `ProviderRouteIntegrityRecoveryService` remains the
+sole owner for every certifying action, while lifecycle and launch custody
+remain with their existing dedicated owners. List enumerates every
 admitted task-bound answer-bearing action, including recovery-owned missing/
 integrity-failed states. Each page scans at most 256 consecutive unfiltered
 members strictly after the cursor's last-scanned tuple and at or below the
@@ -9898,3 +9971,52 @@ Initialize fixtures reject a missing feature, any one missing preissued/
 intersected operation and a narrowed frame limit; the positive arm contains all
 three operations, and a wrong-reason negative proves initialize never expands
 the credential.
+
+Added requirements are:
+
+- **FR-089:** The Console read-identity feature shall negotiate exactly the
+  current-preparation, provider-route read and provider-route list operations as
+  one all-or-nothing operator-read surface.
+- **FR-090:** Current-preparation lookup shall use exact project/session/run
+  scope and return only the greatest durably allocated preparation generation
+  or the closed unavailable arm.
+- **FR-091:** Provider-route read shall use the daemon-global adapter/action pair
+  and return the existing full `providerRouteV1` only in the present arm.
+- **FR-092:** Missing and integrity-failed generic routes shall expose only exact
+  live recovery evidence owned by `GenericProviderRouteRecoveryService`.
+- **FR-093:** Provider-route list shall classify contiguous immutable ordinals
+  through a fixed watermark and authenticated progress cursor before applying
+  nullable filters.
+- **FR-094:** Work, Agents and Activity items, references and details shall carry
+  exact project/session/run identity and use it in ordering and lookup.
+- **FR-095:** Evidence items, references and details shall carry one closed
+  project, session or run scope and use that scope in identity and lookup.
+- **NFR-039:** Console reads shall fail closed on missing feature, operation,
+  authority, scope or integrity and shall never guess identity or grant mutation.
+- **NFR-040:** Route pages shall return at most eight matches, scan at most 256
+  consecutive members per page and fit the negotiated 1 MiB frame by construction.
+- **NFR-041:** Route-list cursors shall bind operation, authority scope, filters,
+  watermark and progress while each returned row remains truthful at its page's
+  `readAt`.
+- **NFR-042:** No Console decoder, fallback join or pagination order shall use a
+  local task, agent, event, message or evidence identifier as global identity.
+
+Acceptance additionally requires:
+
+- **AC-064:** Initialize fixtures reject a missing feature, each missing
+  operation and a narrowed frame limit without expanding the credential.
+- **AC-065:** Current-preparation fixtures cover absent, active and terminal
+  generations plus crossed scope, high-water and stored-row integrity failures.
+- **AC-066:** Provider-route read fixtures cover exact pairs, present/stale
+  routes and generic versus certifying missing/integrity recovery ownership.
+- **AC-067:** Route-list fixtures cover stable multi-page watermarks, ordinal
+  gaps, filtered corruption, cursor/filter substitution, empty progress pages
+  and zero watermark.
+- **AC-068:** Work, Agents and Activity fixtures reuse local identifiers across
+  runs and prove summaries, details, message reads and pagination stay in the
+  exact tuple.
+- **AC-069:** Evidence fixtures cover all three scope arms and reject crossed
+  detail scope while retaining project/session evidence.
+- **AC-070:** Boundary fixtures prove stable maximal identifiers, maximal
+  request/cursor frames, eight maximal routes below 1 MiB and bounded selective
+  traversal.

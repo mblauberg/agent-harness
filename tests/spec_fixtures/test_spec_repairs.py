@@ -2545,12 +2545,36 @@ class SpecRepairTests(unittest.TestCase):
         )
 
     def test_new_route_sections_have_unique_requirement_anchors(self) -> None:
-        expected = [
-            *(f"FR-{number:03d}" for number in range(77, 96)),
-            *(f"NFR-{number:03d}" for number in range(34, 43)),
-            *(f"AC-{number:03d}" for number in range(56, 71)),
+        section_21_start = SPEC_01.index(
+            "### 32.21 Capability-backed deployed routes and operational telemetry"
+        )
+        section_22_start = SPEC_01.index(
+            "### 32.22 Exact Console read identity completion"
+        )
+        sections = {
+            SPEC_01[section_21_start:section_22_start]: [
+                *(f"FR-{number:03d}" for number in range(77, 89)),
+                *(f"NFR-{number:03d}" for number in range(34, 39)),
+                *(f"AC-{number:03d}" for number in range(56, 64)),
+            ],
+            SPEC_01[section_22_start:]: [
+                *(f"FR-{number:03d}" for number in range(89, 96)),
+                *(f"NFR-{number:03d}" for number in range(39, 43)),
+                *(f"AC-{number:03d}" for number in range(64, 71)),
+            ],
+        }
+        for section, expected in sections.items():
+            self.assertEqual(section.count("Added requirements are:"), 1)
+            self.assertEqual(
+                section.count("Acceptance additionally requires:"), 1
+            )
+            for requirement_id in expected:
+                with self.subTest(requirement_id=requirement_id):
+                    self.assertEqual(section.count(f"**{requirement_id}:**"), 1)
+        all_expected = [
+            item for expected in sections.values() for item in expected
         ]
-        for requirement_id in expected:
+        for requirement_id in all_expected:
             with self.subTest(requirement_id=requirement_id):
                 self.assertEqual(SPEC_01.count(f"**{requirement_id}:**"), 1)
 

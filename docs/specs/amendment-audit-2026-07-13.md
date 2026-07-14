@@ -187,8 +187,9 @@ on `python3` 3.14.3:
   mismatch, P0); MF04-2 ACCEPTED; MF04-3 ACCEPTED.
 
 Eleven of the substantiated defects are thus reproducible from the spec text
-alone. Lead 9 is prose (no fixture). MF04-4/5/6 and MF01-1/3/4 fixtures not yet
-built.
+alone. Lead 9 is prose (no fixture). MF01-1 and MF01-4 now have focused
+spec-structure assertions; the remaining repaired findings have the executable
+fixtures described below.
 
 ## Repair status (CAPA-001, as of commit c4eaa32)
 
@@ -298,12 +299,17 @@ built.
   deletion while pressure remains but do not block same-adapter telemetry or
   binding-revision advances. Crash/crossing fixtures prove rollback and exact
   deletion without pressure history, re-keying or synthetic observations.
+- MF01-1 — §32.21 and §32.22 now publish fresh, unique requirement and
+  acceptance anchors FR-077–FR-095, NFR-034–NFR-042 and AC-056–AC-070. The
+  focused spec fixture verifies each anchor occurs exactly once and in its
+  owning section.
+- MF01-4 — §32.22 names `GenericProviderRouteRecoveryService` as the sole owner
+  of otherwise-generic task-bound answer-bearing actions with missing or
+  integrity-failed routes, while preserving the dedicated certifying,
+  lifecycle and launch owners. This is an ownership cross-reference only; it
+  adds no recovery runtime or framework.
 
-**Pending structural repair (needed before freeze; codex-certified):** these
-close only with multi-part DDL changes, not one-line additions, so they are
-deliberately not half-applied —
-- MF01-1 (§32.21/§32.22 requirement IDs; new IDs start FR-077/NFR-034/AC-056);
-  MF01-4 (generic-route recovery owner cross-reference).
+**Pending repair (needed before freeze; codex-certified):**
 - Newly found — `lifecycleMutationPlanV1`'s closed relation enum omits
   `provider-action`, so an apply cannot name a provider-action mutation even
   where the complete write set requires one. This first Lead-3 slice records
