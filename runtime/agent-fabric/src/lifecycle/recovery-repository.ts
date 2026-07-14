@@ -137,9 +137,9 @@ type ExactRecoverySourceBinding = Readonly<{
   sourceProviderGeneration: number;
   sourcePrincipalGeneration: number;
   sourceBridgeGeneration: number;
-  sourceProjectSessionGeneration: number;
-  sourceRunGeneration: number;
-  sourceChairLeaseGeneration: number;
+  sourceProjectSessionGeneration: number | null;
+  sourceRunGeneration: number | null;
+  sourceChairLeaseGeneration: number | null;
   bridgeOwnerKind: "chair" | "child";
 }>;
 
@@ -1549,9 +1549,15 @@ export class LifecycleRecoveryRepository {
       sourceProviderGeneration: integer(stored, "source_provider_generation"),
       sourcePrincipalGeneration: integer(stored, "source_principal_generation"),
       sourceBridgeGeneration: integer(stored, "source_bridge_generation"),
-      sourceProjectSessionGeneration: integer(stored, "source_project_session_generation"),
-      sourceRunGeneration: integer(stored, "source_run_generation"),
-      sourceChairLeaseGeneration: integer(stored, "source_chair_lease_generation"),
+      sourceProjectSessionGeneration: stored.source_project_session_generation === null
+        ? null
+        : integer(stored, "source_project_session_generation"),
+      sourceRunGeneration: stored.source_run_generation === null
+        ? null
+        : integer(stored, "source_run_generation"),
+      sourceChairLeaseGeneration: stored.source_chair_lease_generation === null
+        ? null
+        : integer(stored, "source_chair_lease_generation"),
       bridgeOwnerKind,
     };
   }
@@ -1616,12 +1622,18 @@ export class LifecycleRecoveryRepository {
     ) {
       throw new Error("lifecycle recovery source capability is not exact");
     }
-    if (
+    if (source.bridgeOwnerKind === "chair" && (
       source.sourceProjectSessionGeneration !== source.sessionGeneration ||
-      source.sourceRunGeneration !== source.runRevision
-    ) {
+      source.sourceRunGeneration !== source.runRevision ||
+      source.sourceChairLeaseGeneration === null
+    )) {
       throw new Error("lifecycle recovery source generation binding is stale");
     }
+    if (source.bridgeOwnerKind === "child" && (
+      source.sourceProjectSessionGeneration !== null ||
+      source.sourceRunGeneration !== null ||
+      source.sourceChairLeaseGeneration !== null
+    )) throw new Error("child lifecycle recovery source carries chair generation bindings");
     const bridge = source.bridgeOwnerKind === "chair"
       ? this.#database.prepare(`
           SELECT 1 FROM launched_chair_bridge_state

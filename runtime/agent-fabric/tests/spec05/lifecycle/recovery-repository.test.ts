@@ -216,6 +216,132 @@ function seedOpenGenerationLoss(database: Database.Database): void {
   `).run(semanticDigest, semanticDigest, journalDigest);
 }
 
+function seedOpenChildGenerationLoss(database: Database.Database): void {
+  database.prepare(`
+    INSERT INTO authorities(authority_id,run_id,authority_json,authority_hash,created_at)
+    VALUES ('child-authority','run','{}',?,1)
+  `).run("d".repeat(64));
+  database.prepare(`
+    INSERT INTO agents(run_id,agent_id,parent_agent_id,authority_id,lifecycle)
+    VALUES ('run','child','chair','child-authority','context-unreconciled')
+  `).run();
+  database.prepare(`
+    INSERT INTO capabilities(token_hash,run_id,agent_id,principal_generation,expires_at,revoked_at)
+    VALUES ('child-source-capability','run','child',1,1000,NULL)
+  `).run();
+  admitProviderActionFixture(database, {
+    runId: "run",
+    actionId: "child-source-action",
+    adapterId: "child-adapter",
+    operation: "attach",
+    targetAgentId: "child",
+    providerSessionGeneration: 1,
+    identityHash: "child-identity",
+    payloadHash: "child-payload",
+    payloadJson: "{}",
+    status: "terminal",
+    historyJson: "[]",
+    executionCount: 1,
+    effectCount: 1,
+    idempotencyProven: true,
+    resultJson: "{}",
+    updatedAt: 1,
+  });
+  database.prepare(`
+    INSERT INTO provider_agent_custody(
+      run_id,action_id,operation,actor_agent_id,target_agent_id,authority_id,
+      adapter_id,bridge_contract_digest,bridge_capable,capability_hash,
+      capability_expires_at,principal_generation,requested_provider_session_ref,
+      intent_digest,created_at
+    ) VALUES ('run','child-source-action','attach','chair','child','child-authority',
+              'child-adapter',?,1,'child-source-capability',1000,1,
+              'child-provider-session-1',?,1)
+  `).run(SHA_A, SHA_A);
+  database.prepare(`
+    INSERT INTO agent_bridge_state(
+      run_id,agent_id,adapter_id,action_id,provider_session_ref,
+      provider_session_generation,bridge_state,bridge_generation,
+      capability_hash,activation_evidence_digest,revision,created_at,updated_at
+    ) VALUES ('run','child','child-adapter','child-source-action',
+              'child-provider-session-1',1,'active',1,
+              'child-source-capability',?,1,1,1)
+  `).run(SHA_A);
+  const body = {
+    schemaVersion: 1,
+    sourceKind: "generation-loss",
+    generationLossId: "child-loss",
+    revision: 1,
+    state: "open",
+    abandonKind: "none",
+    recoveryActionRef: null,
+    activeRecoveryCustodyId: null,
+    terminalEvidenceDigest: null,
+  };
+  const semanticJson = canonicalJson(body);
+  const semanticDigest = lifecycleDigest("generation-loss-semantic", body);
+  const journal = {
+    schemaVersion: 1,
+    ownerRef: {
+      kind: "generation-loss",
+      generationLossRef: {
+        schemaVersion: 1,
+        runId: "run",
+        agentId: "child",
+        generationLossId: "child-loss",
+        generationLossRevision: 1,
+      },
+      sourceRefDigest: semanticDigest,
+    },
+    priorJournalDigest: null,
+    semanticDigest,
+    sourceRefDigest: semanticDigest,
+    authorityBatchId: null,
+    authorityApplyId: null,
+    authorityApplyDigest: null,
+    originFreshApplyId: null,
+    originFreshApplyDigest: null,
+    recordedAt: 1,
+  };
+  const journalJson = canonicalJson(journal);
+  const journalDigest = lifecycleDigest("generation-loss-journal", journal);
+  database.prepare(`
+    INSERT INTO lifecycle_generation_losses(
+      project_session_id,run_id,agent_id,generation_loss_id,loss_kind,
+      old_provider_session_ref,new_provider_session_ref,
+      old_provider_generation,new_provider_generation,
+      old_context_revision,new_context_revision,
+      source_custody_action_id,source_adapter_id,source_adapter_contract_digest,
+      source_principal_generation,source_bridge_generation,bridge_owner_kind,
+      source_bridge_row_id,source_bridge_revision,source_capability_hash,
+      source_project_session_generation,source_run_generation,
+      source_chair_lease_generation,checkpoint_state,checkpoint_ref,
+      checkpoint_digest,loss_evidence_digest,creation_json,creation_digest,created_at
+    ) VALUES ('session','run','child','child-loss','generation-advance',
+              'child-provider-session-1','child-provider-session-2',1,2,0,1,
+              'child-source-action','child-adapter',?,1,1,'child','run:child',1,
+              'child-source-capability',NULL,NULL,NULL,'last-validated',
+              'child-checkpoint',?,?, '{}','child-loss-creation',1)
+  `).run(SHA_A, SHA_A, SHA_A);
+  database.prepare(`
+    INSERT INTO lifecycle_generation_loss_revisions(
+      project_session_id,run_id,agent_id,generation_loss_id,revision,
+      prior_revision,prior_journal_digest,state,abandon_kind_code,
+      recovery_action_adapter_id,recovery_action_id,active_recovery_custody_id,
+      terminal_evidence_digest,semantic_json,semantic_digest,source_ref_digest,
+      origin_fresh_apply_id,origin_fresh_apply_digest,receipt_batch_id,
+      receipt_apply_id,receipt_apply_digest,journal_json,journal_digest,recorded_at
+    ) VALUES ('session','run','child','child-loss',1,NULL,NULL,'open','none',
+              NULL,NULL,NULL,NULL,?,?,?,NULL,NULL,NULL,NULL,NULL,?,?,1)
+  `).run(semanticJson, semanticDigest, semanticDigest, journalJson, journalDigest);
+  database.prepare(`
+    INSERT INTO lifecycle_generation_loss_heads(
+      project_session_id,run_id,agent_id,generation_loss_id,current_revision,
+      state,abandon_kind_code,semantic_digest,source_ref_digest,journal_digest,
+      terminal,head_revision
+    ) VALUES ('session','run','child','child-loss',1,'open','none',?,?,?,0,1)
+  `).run(semanticDigest, semanticDigest, journalDigest);
+}
+
 function issueInput(): CreateLifecycleRecoveryIssueInput {
   return {
     issueId: "issue",
@@ -980,6 +1106,47 @@ function seedAbandonAuthorization(
 }
 
 describe("lifecycle recovery repository", () => {
+  it("issues one exact child recovery without fabricating chair generation bindings", () => {
+    const database = openDatabase();
+    seedOpenGenerationLoss(database);
+    seedOpenChildGenerationLoss(database);
+    const repository = new LifecycleRecoveryRepository(database);
+
+    const issue = database.transaction(() => repository.createIssueInCurrentTransaction({
+      issueId: "child-issue",
+      capabilityHash: "e".repeat(64),
+      operatorId: "operator",
+      projectSessionId: "session",
+      runId: "run",
+      agentId: "child",
+      source: { kind: "generation-loss", generationLossId: "child-loss" },
+      parentCapabilityId: "parent-capability",
+      consequentialGateId: "recovery-gate",
+      issuedAt: 100,
+      expiresAt: 200,
+    })).immediate();
+
+    expect(issue).toMatchObject({
+      issueId: "child-issue",
+      agentId: "child",
+      source: { kind: "generation-loss", generationLossId: "child-loss" },
+      status: "active",
+    });
+    const stored = database.prepare(`
+      SELECT source_project_session_generation,source_run_generation,
+             source_chair_lease_generation,bridge_owner_kind
+        FROM agent_lifecycle_recovery_capability_issues WHERE issue_id='child-issue'
+    `).get();
+    expect(stored).toEqual({
+      source_project_session_generation: null,
+      source_run_generation: null,
+      source_chair_lease_generation: null,
+      bridge_owner_kind: "child",
+    });
+
+    database.close();
+  });
+
   it("creates one immutable exact-source issue and replays only the identical issuance", () => {
     const database = openDatabase();
     seedOpenGenerationLoss(database);
