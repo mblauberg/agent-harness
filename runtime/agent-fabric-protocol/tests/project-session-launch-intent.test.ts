@@ -207,6 +207,19 @@ describe("launch packet v1", () => {
     })).toThrowError(/executable|unknown field/iu);
   });
 
+  it.each([
+    ["operator-only", FABRIC_OPERATIONS.operatorActionPreview],
+    ["integration-only", FABRIC_OPERATIONS.integrationInputAttest],
+    ["provider-launch-only", FABRIC_OPERATIONS.launchAttest],
+  ] as const)("rejects %s operations from chair authority", (_kind, operation) => {
+    expect(parseLaunchPacketV1(launchPacket).chairAuthority.actions)
+      .toStrictEqual([FABRIC_OPERATIONS.createTask]);
+    expect(() => parseLaunchPacketV1({
+      ...launchPacket,
+      chairAuthority: { ...launchPacket.chairAuthority, actions: [operation] },
+    })).toThrow(/agent authority operation/u);
+  });
+
   it.each(["workspaceRoots", "sourcePaths", "artifactPaths", "deniedPaths"] as const)(
     "permits the exact project root in chairAuthority.%s only",
     (field) => {

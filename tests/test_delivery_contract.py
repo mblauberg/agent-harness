@@ -119,6 +119,25 @@ def test_delivery_authority_v2_is_closed_and_rejects_unknown_operations():
 
 
 @pytest.mark.parametrize(
+    ("operation_class", "operation"),
+    [
+        ("operator-only", "fabric.v1.operator-action.preview"),
+        ("integration-only", "fabric.v1.integration.input-attest"),
+        ("provider-launch-only", "fabric.v1.launch.attest"),
+    ],
+)
+def test_delivery_authority_rejects_non_grantable_operation_classes(
+    operation_class, operation,
+):
+    module = load_validator()
+    candidate = fixture()
+    candidate["authority"]["allowed_fabric_operations"] = [operation]
+
+    with pytest.raises(module.Invalid, match="unknown Fabric operation"):
+        module.validate(candidate, ROOT)
+
+
+@pytest.mark.parametrize(
     "budget",
     [
         {"turns": -1},

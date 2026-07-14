@@ -10,7 +10,12 @@ import {
   timestamp,
   unionOf,
 } from "./codec.js";
-import { FABRIC_OPERATIONS, OPERATION_REGISTRY, type FabricOperation } from "./operations.js";
+import {
+  FABRIC_OPERATIONS,
+  isDaemonGrantableOperation,
+  operationsForPrincipal,
+  type FabricOperation,
+} from "./operations.js";
 import { relativePath } from "./codec.js";
 import { budgetUnitKey } from "./resource-unit-keys.js";
 import { sha256 } from "./codec.js";
@@ -53,7 +58,9 @@ export type AuthorityEnvelopeV2 = Readonly<{
   budget: Readonly<Record<string, number>>;
 }>;
 
-const operationValues = Object.keys(OPERATION_REGISTRY) as FabricOperation[];
+const operationValues: FabricOperation[] = [...operationsForPrincipal("agent")]
+  .filter(isDaemonGrantableOperation);
+const operationSet: ReadonlySet<string> = new Set(operationValues);
 const firstOperation = operationValues[0];
 if (firstOperation === undefined) throw new Error("AuthorityEnvelopeV2 requires at least one Fabric operation");
 
@@ -61,8 +68,8 @@ const operationCodec = defineCodec<FabricOperation>(
   { type: "string", enum: operationValues },
   firstOperation,
   (value, path) => {
-    if (typeof value !== "string" || !(value in OPERATION_REGISTRY)) {
-      throw new TypeError(`${path} must be a current Fabric operation`);
+    if (typeof value !== "string" || !operationSet.has(value)) {
+      throw new TypeError(`${path} must be a daemon-grantable agent authority operation`);
     }
     return value as FabricOperation;
   },

@@ -54,6 +54,22 @@ describe("AuthorityEnvelopeV2", () => {
     expect(AUTHORITY_ENVELOPE_V2_CODEC.parse(input, "authority")).toEqual(input);
   });
 
+  it.each([
+    ["operator-only", FABRIC_OPERATIONS.operatorActionPreview],
+    ["integration-only", FABRIC_OPERATIONS.integrationInputAttest],
+    ["provider-launch-only", FABRIC_OPERATIONS.launchAttest],
+  ] as const)("rejects %s operations from both the authority codec and schema", (_kind, operation) => {
+    const validate = new Ajv2020({ strict: false, allErrors: true })
+      .compile(AUTHORITY_ENVELOPE_V2_CODEC.schema);
+    const ordinary = authority({ actions: [FABRIC_OPERATIONS.getTask] });
+    const excluded = authority({ actions: [operation] });
+
+    expect(validate(ordinary)).toBe(true);
+    expect(() => AUTHORITY_ENVELOPE_V2_CODEC.parse(ordinary, "authority")).not.toThrow();
+    expect(validate(excluded)).toBe(false);
+    expect(() => AUTHORITY_ENVELOPE_V2_CODEC.parse(excluded, "authority")).toThrow(/agent authority operation/u);
+  });
+
   it("keeps the generated budget schema at the codec safe-integer boundary", () => {
     const validate = new Ajv2020({ strict: false, allErrors: true })
       .compile(AUTHORITY_ENVELOPE_V2_CODEC.schema);
