@@ -1,7 +1,8 @@
 # Agent Fabric review portal supervisor
 
 This dependency-free Rust crate owns the narrow native boundary required by
-Spec 04 section 9.21.3 and Spec 05 section 6:
+[review-bundle and portal custody](../../docs/specs/agent-fabric/review-custody.md)
+and Console [artifact review and attention](../../docs/specs/console/artifact-review.md):
 
 - the binary accepts only `portal-stdio-v1` and exactly
   `AGENT_FABRIC_REVIEW_SOCKET`, `AGENT_FABRIC_REVIEW_ACTION` and

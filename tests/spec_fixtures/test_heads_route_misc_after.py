@@ -2,8 +2,8 @@
 """Executable SQLite oracle for Lane A heads, routes, and MF repairs.
 
 The main schema is an isolated transliteration of the keys, checks, update
-guards, and owner predicates needed by Spec 04 sections 9.21.4, 9.21.6, 9.22,
-and 9.23.  The adapter-integrity test additionally executes the two exact
+guards, and owner predicates in the review, lifecycle-custody and
+observability modules. The adapter-integrity test additionally executes the two exact
 normative table definitions it covers. This remains deliberately narrower than
 the complete generated baseline schema.
 
@@ -19,10 +19,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from spec_sources import AGENT_FABRIC_HARDENING, read_specs
+
 
 CASES_RUN = 0
 ROOT = Path(__file__).resolve().parents[2]
-SPEC_04 = (ROOT / "docs/specs/04-agent-fabric-operational-hardening.md").read_text()
+SPEC_04 = read_specs(AGENT_FABRIC_HARDENING)
 
 
 def normative_table_sql(table: str) -> str:

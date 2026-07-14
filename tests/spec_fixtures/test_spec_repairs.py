@@ -5,16 +5,20 @@ from pathlib import Path
 import sqlite3
 import unittest
 
+from spec_sources import (
+    AGENT_FABRIC_BEHAVIOUR,
+    AGENT_FABRIC_HARDENING,
+    read_spec,
+    read_specs,
+)
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def load_family_text(root: Path, family: str) -> str:
-    """Read the still-authoritative monolithic draft for this repair lane."""
-    return (root / "docs" / "specs" / f"{family}.md").read_text()
-
-
-SPEC_01 = load_family_text(ROOT, "01-agent-fabric")
-SPEC_04 = load_family_text(ROOT, "04-agent-fabric-operational-hardening")
+SPEC_01 = read_specs(AGENT_FABRIC_BEHAVIOUR)
+SPEC_04 = read_specs(AGENT_FABRIC_HARDENING)
+SPEC_01_ROUTE = read_spec("agent-fabric/provider-actions-and-adapters.md")
+SPEC_01_READ = read_spec("agent-fabric/messaging-and-public-protocol.md")
 
 
 def ddl_block(text: str, table: str) -> str:
@@ -2677,7 +2681,7 @@ class SpecRepairTests(unittest.TestCase):
         )
 
     def test_generic_route_integrity_has_a_separate_named_owner(self) -> None:
-        start = SPEC_01.index("### 32.22 Exact Console read identity completion")
+        start = SPEC_01.index("### Exact Console read identity completion")
         section = SPEC_01[start:]
         self.assertIn(
             "`GenericProviderRouteRecoveryService` is the sole owner for an "
@@ -2692,19 +2696,19 @@ class SpecRepairTests(unittest.TestCase):
         )
 
     def test_new_route_sections_have_unique_requirement_anchors(self) -> None:
-        section_21_start = SPEC_01.index(
-            "### 32.21 Capability-backed deployed routes and operational telemetry"
+        section_21_start = SPEC_01_ROUTE.index(
+            "### Capability-backed deployed routes and operational telemetry"
         )
-        section_22_start = SPEC_01.index(
-            "### 32.22 Exact Console read identity completion"
+        section_22_start = SPEC_01_READ.index(
+            "### Exact Console read identity completion"
         )
         sections = {
-            SPEC_01[section_21_start:section_22_start]: [
+            SPEC_01_ROUTE[section_21_start:]: [
                 *(f"FR-{number:03d}" for number in range(77, 89)),
                 *(f"NFR-{number:03d}" for number in range(34, 39)),
                 *(f"AC-{number:03d}" for number in range(56, 64)),
             ],
-            SPEC_01[section_22_start:]: [
+            SPEC_01_READ[section_22_start:]: [
                 *(f"FR-{number:03d}" for number in range(89, 96)),
                 *(f"NFR-{number:03d}" for number in range(39, 43)),
                 *(f"AC-{number:03d}" for number in range(64, 71)),

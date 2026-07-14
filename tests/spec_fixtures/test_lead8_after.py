@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Executable Lead 8 after-repair SQLite race oracle.
 
-The source-head table and every Lead 8 trigger are extracted from Spec 04.
+The source-head table and every Lead 8 trigger are extracted from the recovery contract.
 Only unrelated issue, handoff and revocation columns are reduced to stubs.  The
 oracle intentionally uses a file-backed database and separate connections for
 writer races.  Every writer starts with ``BEGIN IMMEDIATE``; the second writer
@@ -19,6 +19,8 @@ import threading
 import unittest
 from collections.abc import Callable
 from pathlib import Path
+
+from spec_sources import AGENT_FABRIC_HARDENING, read_specs
 
 
 SOURCE_BUSY = "LIFECYCLE_RECOVERY_SOURCE_BUSY"
@@ -49,7 +51,7 @@ T30 = "2026-07-14T00:00:30.000Z"
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC_04 = (ROOT / "docs/specs/04-agent-fabric-operational-hardening.md").read_text()
+SPEC_04 = read_specs(AGENT_FABRIC_HARDENING)
 
 
 def ddl_block(text: str, table: str) -> str:

@@ -6,7 +6,7 @@ Status: awaiting human acceptance
 ## Destination
 
 Deliver the accepted cross-domain harness refactor defined in
-`docs/specs/02-adaptive-agent-harness.md`, grounded in
+`docs/specs/harness/lifecycle.md`, grounded in
 `docs/research/agentic-sdlc-harness-2026.md`. The result must retain the mature
 software loop while adding a domain-neutral delivery kernel, measurable and
 privacy-safe improvement, stronger design/security/observation evidence and

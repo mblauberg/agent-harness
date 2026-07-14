@@ -3,7 +3,7 @@
 
 The oracle is intentionally isolated and Python-stdlib only. Its original
 12-case crossing checks remain stable, while its NULL-vacuity checks execute
-the current Spec 04 plan/effect/result DDL directly with only unrelated parent
+the current plan/effect/result DDL directly with only unrelated parent
 tables reduced to fixtures.
 
 Stable output reports L2-A/B/C/D, the aggregate crossing case count, and a
@@ -16,6 +16,8 @@ import sqlite3
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
+
+from spec_sources import AGENT_FABRIC_HARDENING, read_specs
 
 
 class OracleFailure(AssertionError):
@@ -31,7 +33,7 @@ EVIDENCE_FIELDS = (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC_04 = (ROOT / "docs/specs/04-agent-fabric-operational-hardening.md").read_text()
+SPEC_04 = read_specs(AGENT_FABRIC_HARDENING)
 
 
 def ddl_block(text: str, table: str) -> str:

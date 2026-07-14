@@ -4,10 +4,12 @@ Status: Durable research reference
 
 Evidence snapshot: [July 2026 continuity and routing evidence](evidence-snapshots/agent-continuity-routing-2026-07.md)
 
-Normative owners: [Spec 01 sections 32.19 and 32.21](../specs/01-agent-fabric.md),
-[Spec 02 section 22](../specs/02-adaptive-agent-harness.md),
-[Spec 03 capability amendment](../specs/03-agent-fabric-activation.md),
-[Spec 04 sections 9.21.3 and 9.23](../specs/04-agent-fabric-operational-hardening.md)
+Normative owners: [evidence and review](../specs/agent-fabric/evidence-and-review.md)
+and [provider actions and adapters](../specs/agent-fabric/provider-actions-and-adapters.md),
+the [harness route and topology evidence contract](../specs/harness/lifecycle.md#route-and-topology-evaluation-evidence),
+the [activation capability contract](../specs/agent-fabric/activation.md),
+and [review-bundle custody](../specs/agent-fabric/review-custody.md)
+and [operational observation](../specs/agent-fabric/observability.md).
 
 ## Conclusions
 

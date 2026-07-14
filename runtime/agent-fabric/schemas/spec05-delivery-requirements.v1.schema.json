@@ -59,7 +59,7 @@
           "const": "spec"
         },
         "sourceRef": {
-          "const": "spec05-project-fabric-console-v1.14"
+          "const": "spec05-project-fabric-console-v1.13"
         },
         "evidenceSelectors": {
           "type": "array",

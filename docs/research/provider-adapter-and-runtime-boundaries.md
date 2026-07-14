@@ -4,9 +4,9 @@ Status: Durable research reference
 
 Evidence snapshot: [July 2026 continuity and routing evidence](evidence-snapshots/agent-continuity-routing-2026-07.md)
 
-Normative owners: [Spec 01 adapter/route contracts](../specs/01-agent-fabric.md),
-[Spec 03 activation](../specs/03-agent-fabric-activation.md),
-[Spec 04 daemon hardening](../specs/04-agent-fabric-operational-hardening.md)
+Normative owners: [provider actions and adapters](../specs/agent-fabric/provider-actions-and-adapters.md),
+[activation](../specs/agent-fabric/activation.md), and
+[daemon and wire hardening](../specs/agent-fabric/daemon-and-wire.md)
 
 ## Conclusions
 
@@ -41,7 +41,7 @@ Normative owners: [Spec 01 adapter/route contracts](../specs/01-agent-fabric.md)
 | Current provider capability differences | Actual model/effort/context/native-mode evidence must be source-labelled and may remain unknown. | Provider state is volatile and must be rediscovered. |
 | OpenCode ACP and server documentation | ACP/stdio is the preferred first optional seam; loopback HTTP requires authentication and isolation. | No login, subscription or activation is authorised by research. |
 | GitHub Agentic Workflows | Separate stochastic proposal from constrained privileged apply. | Does not add another workflow schema or state owner. |
-| Spec 05 portal supervisor | Rust is justified for bounded opaque framing, FD/process/peer identity and crash custody while TypeScript owns JSON semantics. | No general Rust daemon rewrite follows. |
+| Console review-portal supervisor | Rust is justified for bounded opaque framing, FD/process/peer identity and crash custody while TypeScript owns JSON semantics. | No general Rust daemon rewrite follows. |
 
 ## Adapter admission checklist
 

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "registryId": "spec05-evidence-selector-registry-v1",
   "sources": [
-    {"sourceRef":"spec05-project-fabric-console-v1.14","sourceRole":"spec","artifactRef":"docs/specs/05-project-fabric-console.md","version":"1.14"}
+    {"sourceRef":"spec05-project-fabric-console-v1.13","sourceRole":"spec","artifactRef":"docs/specs/console/acceptance.md","version":"1.13"}
   ],
   "selectors": [
     {"selectorId":"spec05-test-console-protocol-inside-outside-herdr-v1","requirementId":"SPEC05-AC-001","proofDomain":"console-protocol-inside-outside-herdr","owner":"agent-fabric-console","state":"planned-test","artifactRef":null},

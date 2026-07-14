@@ -1,26 +1,12 @@
 # Adaptive agent harness lifecycle
 
-Status: Base implementation machine verified; v1.2 route-evidence and v1.3
-local-first evidence amendments implemented; final human acceptance pending
-Version: 1.3
-Date: 14 July 2026
+Status: Base implementation machine verified; final human acceptance pending
 Chair: Codex
 Paired design peer: Claude Code, Fable 5 (Opus fallback)
 
-Version 1.3 makes a direct request sufficient authority for read-only analysis
-of local session history, retains a separate sharing/export gate and retires a
-collector that accepted only synthetic `skill_event` rows and had no
-provider-native adapter or producer. Unsupported or unattributable evidence
-remains `N/A`; it is never reported as zero.
+The current contract permits direct read-only analysis of local session history, keeps sharing and export separately gated, and treats unsupported or unattributable evidence as `N/A`, never zero. It does not retain the synthetic collector, which had no provider-native adapter or producer. Route evaluation remains task-local, receipt-bound and content-free; it does not approve a learned or Pareto router.
 
-Version 1.2 registers route-evaluation payloads as artifacts behind conforming
-delivery evidence rows, freezes the evaluated route identity preimage, and uses
-the shared topology-wave record rather than an untyped rationale. Version 1.1 binds route and topology evaluation references to the neutral
-delivery receipt, requires task-local repeated evidence with expiry and an
-explicit baseline/promotion state, and keeps exported aggregates content-free.
-It does not approve a learned or Pareto router.
-
-## 1. Authority and decision
+## Authority and decision
 
 The human instruction on 10 July 2026 approved this specification, authorised
 the complete harness refactor and authorised a repository commit. It permits
@@ -29,11 +15,11 @@ harness. It does not authorise provider login, external communications,
 deployment, live installation, destructive migration, Git push or release.
 
 This specification is grounded in
-[`docs/research/agentic-sdlc-harness-2026.md`](../research/agentic-sdlc-harness-2026.md).
+[`docs/research/agentic-sdlc-harness-2026.md`](../../research/agentic-sdlc-harness-2026.md).
 Research claims expire for decision purposes after 90 days or when a cited
 standard/provider interface materially changes, whichever occurs first.
 
-## 2. Problem
+## Problem
 
 The repository has a mature agentic software loop but its top-level claim is
 broader. Non-code delivery has no shared executable contract, design approval
@@ -45,7 +31,7 @@ trigger evaluation also need stronger machine evidence.
 A large all-in-one workflow would increase context cost and couple every domain
 to Git. The target is a small stable kernel plus profiles and existing skills.
 
-## 3. Objectives
+## Objectives
 
 - Make the lifecycle usable for software, research, analysis, documents and
   high-stakes domain work.
@@ -60,7 +46,7 @@ to Git. The target is a small stable kernel plus profiles and existing skills.
   dissent, never uncorroborated blockers.
 - Keep entrypoints compact and provider-neutral.
 
-## 4. Non-goals
+## Non-goals
 
 - Replacing domain skills with one generic prompt.
 - Mandating multiple agents for sequential or low-risk work.
@@ -71,7 +57,7 @@ to Git. The target is a small stable kernel plus profiles and existing skills.
 - Replacing project-specific legal, compliance or release authority.
 - Reimplementing the separately specified shared agent fabric.
 
-## 5. Lifecycle model
+## Lifecycle model
 
 ```text
 context
@@ -94,9 +80,9 @@ changes accepted intent, authority or a one-way-door design returns to the
 human design gate. Observation can open `diagnose`, incident response or a new
 delivery cycle. No status may jump a missing gate.
 
-## 6. Target architecture
+## Target architecture
 
-### 6.1 Delivery kernel
+### Delivery kernel
 
 The delivery kernel is a domain-neutral contract, validator and stable state
 machine. It orchestrates existing capabilities; it does not contain domain
@@ -118,9 +104,9 @@ pre-change held-out baseline scored 30/45 because every cross-domain delivery
 case lacked a lifecycle entrypoint; the `deliver` catalogue scored 45/45
 without displacing `implement`, `scope` or `release`. The public `deliver`
 entrypoint is therefore selected. Evidence:
-[`lifecycle-routing-baseline-2026-07-10.md`](../research/lifecycle-routing-baseline-2026-07-10.md).
+[`lifecycle-routing-baseline-2026-07-10.md`](../../research/lifecycle-routing-baseline-2026-07-10.md).
 
-### 6.2 Profiles
+### Profiles
 
 | Profile | Primary artifacts | Deterministic evidence | Judgement evidence | Release meaning |
 |---|---|---|---|---|
@@ -151,7 +137,7 @@ High-stakes work is an orthogonal safeguard, not a file type: it adds source
 authority, privacy, qualified-domain review and explicit human-action gates to
 any base profile.
 
-### 6.3 Skills remain composable
+### Skills remain composable
 
 `scope`, `prototype`, `tdd`, `diagnose`, `evaluate`, `code-review`, `release`,
 `session`, `work-map`, `orchestrate` and domain skills remain independently
@@ -159,7 +145,7 @@ triggerable. The kernel (or a future `deliver` entrypoint) calls only what the
 risk and profile require. A tiny answer does not create a run directory merely
 to satisfy ceremony.
 
-## 7. Neutral run receipt
+## Neutral run receipt
 
 The canonical receipt remains `.agent-run/<run-id>/RUN.json`, using the single
 public `delivery-run` schema v1.
@@ -230,7 +216,7 @@ Required invariants:
 - acceptance and release are separate;
 - a profile validator may add requirements but not remove kernel invariants.
 
-## 8. Design and risk gate
+## Design and risk gate
 
 Risk tiers remain `routine`, `substantial`, `crucial` and `terminal`.
 Substantial, crucial and terminal runs require an intent/design artifact.
@@ -246,9 +232,9 @@ The validator rejects:
 - an unresolved one-way-door decision marked as implementation detail; and
 - a risk downgrade without human evidence.
 
-## 9. Verification and review
+## Verification and review
 
-### 9.1 Verification plan
+### Verification plan
 
 Each profile declares:
 
@@ -263,7 +249,7 @@ Deterministic checks run first. Stochastic checks record model, prompt/rubric,
 dataset version, sample size, aggregation and raw-evidence location. A single
 model verdict cannot be labelled reproducible.
 
-### 9.2 Multi-lens review
+### Multi-lens review
 
 Review selects non-overlapping lenses from correctness, specification
 alignment, security, privacy, performance, reliability/concurrency, state/type
@@ -276,7 +262,7 @@ before synthesis. The reducer adjudicates against evidence and records
 disagreement; no majority vote can override a deterministic failure or human
 authority.
 
-## 10. Local skill evidence and shared exports
+## Local skill evidence and shared exports
 
 `skill-audit` defaults to static analysis. A direct human request authorises
 read-only, in-place analysis of the named local session histories. When the
@@ -302,7 +288,7 @@ exist. History predating a skill may inform broad harness patterns but cannot
 score that skill; those cells remain `N/A`. The balanced local-history fixture
 is prospective contract coverage, not a measured production selection rate.
 
-## 11. Measurable retrospective
+## Measurable retrospective
 
 Every substantial completed cycle may produce `RETROSPECT.json`. Crucial,
 escaped-defect and repeated-correction cycles require it. Human corrections are
@@ -320,7 +306,7 @@ checks for regressions/cost transfer. The validator forbids raw transcript
 payloads and dated diary destinations. `no-change` is valid when evidence
 supports it.
 
-## 12. Security evidence
+## Security evidence
 
 Software and agent-product profiles select deterministic checks based on the
 changed surface:
@@ -342,7 +328,7 @@ poisoning, insecure inter-agent communication, cascading failures and human
 trust exploitation. `not_applicable` requires a reason. Tool/model review
 cannot substitute for missing deterministic evidence.
 
-## 13. Observation and incidents
+## Observation and incidents
 
 Release defines an observation contract before promotion:
 
@@ -366,7 +352,7 @@ recipient confirmation, registry acceptance or decision follow-up. Observation
 may be `not_applicable` only with profile justification. Incidents link the
 release, evidence window, containment, diagnosis and resulting regression case.
 
-## 14. Installation, precedence and portability
+## Installation, precedence and portability
 
 Introduce a versioned installation manifest containing skill name, source
 digest, installed target, ownership and rename/supersession history. Installer
@@ -387,7 +373,7 @@ Provider-specific adapters advertise capabilities. Skills depend on capability
 contracts, not vendor names. Herdr and the shared agent fabric are optional
 transports; filesystem artifacts and receipts remain portable truth.
 
-## 15. Context and artifact lifecycle
+## Context and artifact lifecycle
 
 Each run owns an artifact manifest with class, owner, retention and expiry:
 
@@ -403,7 +389,7 @@ It may delete only manifest-owned scratch under explicit cleanup authority.
 Skills above the body budget move stable detail to targeted references; core
 rules remain early in the entrypoint.
 
-## 16. Evaluation strategy
+## Evaluation strategy
 
 Maintain three suites:
 
@@ -422,7 +408,7 @@ score. Production/session examples enter a shared or exported dataset only
 after disclosure review and explicit approval. Capability cases and regression
 cases are labelled separately.
 
-## 17. Implementation plan
+## Implementation plan
 
 | Phase | Status |
 |---|---|
@@ -470,7 +456,7 @@ cases are labelled separately.
 - Obtain independent native, Fable/Opus and optional-family review.
 - Repair, record remaining degradation and request final human acceptance.
 
-## 18. Stability and rollback
+## Stability and rollback
 
 - `implement` remains directly triggerable and uses the canonical software
   profile receipt.
@@ -481,7 +467,7 @@ cases are labelled separately.
 - If a profile cannot prove its gates, it falls back to the existing specialised
   skill and records `kernel_degraded`, never fabricates completion.
 
-## 19. Acceptance criteria
+## Acceptance criteria
 
 The refactor is complete when:
 
@@ -523,7 +509,7 @@ The refactor is complete when:
 | 11 | HREF-002 fresh native and Fable review artifacts after the final source freeze |
 | 12 | Pending explicit human acceptance; no release or push is authorised |
 
-## 20. Known risks and controls
+## Known risks and controls
 
 | Risk | Control |
 |---|---|
@@ -536,7 +522,7 @@ The refactor is complete when:
 | Concurrent agent-fabric work conflicts | Unique files in Phase 1; shared entrypoints deferred until fabric ownership closes. |
 | Research becomes stale | Dated evidence cut-off, 90-day decision expiry and retrospective refresh proposal. |
 
-## 21. Remaining human gates
+## Remaining human gates
 
 The held-out baseline justifies `deliver`; the instruction to implement this
 approved specification entirely selects that named entrypoint. Non-trivial
@@ -547,10 +533,10 @@ Sharing or exporting derived evidence remains a separate human decision.
 Final lifecycle acceptance remains pending. Runtime activation, live
 installation, provider login, push and release remain separate human decisions.
 
-## 22. Route and topology evaluation evidence
+## Route and topology evaluation evidence
 
 The mature route-evaluation findings from the
-[July 2026 continuity and routing snapshot](../research/evidence-snapshots/agent-continuity-routing-2026-07.md)
+[July 2026 continuity and routing snapshot](../../research/evidence-snapshots/agent-continuity-routing-2026-07.md)
 extend the neutral delivery evidence contract. They do not authorise a learned
 router, a global model leaderboard or automatic preference mutation.
 
@@ -643,7 +629,7 @@ routeEvaluationEvidenceV1:
 ```
 
 `registeredEvidenceRefV1` is not a new artifact-reference type. It is schema
-shorthand for the exact existing Spec 01 `EvidenceArtifactRegistration` tuple:
+shorthand for the exact existing the Agent Fabric contract `EvidenceArtifactRegistration` tuple:
 `{evidenceId, evidenceRevision, artifactRef:{path,digest}}`, equality-bound to
 the same current run/session and immutable registration revision. The generated
 schema expands that tuple directly.
@@ -698,8 +684,8 @@ adapter contract, route policy, discovery surface, dataset or expired record is
 not current route evidence. Capability and safety constraints remain hard gates
 regardless of an evaluation result.
 
-Every topology-bearing evaluation references the exact Spec 01
-`topologyWavePlanV1` row through the closed Spec 01
+Every topology-bearing evaluation references the exact the Agent Fabric contract
+`topologyWavePlanV1` row through the closed the Agent Fabric contract
 `topologyWavePlanRefV1`; the ref equality-binds session/run/task/wave/revision/
 digest to the current or historical plan row. That plan already owns
 dependency/decomposability, topology, contention, one accountable chair, stage
@@ -710,7 +696,7 @@ measure.
 
 Promotion is task-local. A new deployed route moves through bootstrap,
 shadow/advisory and canary evidence before `task-class-active`; expiry returns
-it to explicit stale/bootstrap handling. This amendment records the evidence
+it to explicit stale/bootstrap handling. This contract records the evidence
 and promotion state only. Candidate-pool construction, Pareto elimination,
 quality-floor values, trial volumes, expiry intervals and any learned selector
 remain future policy decisions.
