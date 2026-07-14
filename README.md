@@ -14,7 +14,9 @@ have the other model review anything substantial, then stop for you.
 </div>
 
 Status: a personal harness, used daily by its author. Interfaces change without
-notice.
+notice and support is best effort. Use [`CONTRIBUTING.md`](CONTRIBUTING.md) for
+change proposals and [`SECURITY.md`](SECURITY.md) for private vulnerability
+reports.
 
 ## What this is
 
@@ -191,8 +193,10 @@ two agents writing one source surface; acceptance and promotion stay human
 [`Architecture`](docs/ARCHITECTURE.md) ·
 [`Specifications`](docs/specs/README.md) ·
 [`Research`](docs/research/skill-portfolio-practices-2026.md) ·
+[`Contributing`](CONTRIBUTING.md) ·
 [`Maintenance`](MAINTAINING.md) ·
 [`Acknowledgements`](ACKNOWLEDGEMENTS.md) ·
 [`Third-party notices`](THIRD_PARTY_NOTICES.md) ·
+[`Code of Conduct`](CODE_OF_CONDUCT.md) ·
 [`Security`](SECURITY.md) ·
 [`MIT licence`](LICENSE)

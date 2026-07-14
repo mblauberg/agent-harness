@@ -1,54 +1,51 @@
 # Maintaining Provenant
 
-## Start with the contracts
+Read [`AGENTS.md`](AGENTS.md), [`HARNESS.md`](HARNESS.md) and
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before changing the harness.
+Inspect the live diff and preserve unrelated work. `HARNESS.md` owns lifecycle,
+risk, authority, orchestration and review policy; [`docs/worktrees.md`](docs/worktrees.md)
+owns branch and linked-worktree operation.
 
-Read `AGENTS.md`, `HARNESS.md` and `docs/ARCHITECTURE.md` before changing the
-harness. Inspect the live diff and preserve unrelated work. This repository is
-loaded by multiple agent platforms, so a convenient Claude-only or Codex-only
-change is a regression unless its scope is deliberately platform-specific.
-
-Do not create a branch or linked worktree without direct human authorisation.
-When authorised, use `scripts/worktree` and `docs/worktrees.md`; the shared path
-is a harness invariant, not an agent-platform preference.
+This repository is loaded by multiple agent platforms. A convenient
+Claude-only or Codex-only change is a regression unless the approved scope is
+platform-specific.
 
 ## Change a skill
 
 1. Confirm the capability belongs globally and is not better kept in a project.
 2. Use `skill-audit` for read-only assessment and `skill-authoring` for a new or
-   materially revised skill. `implement` owns an end-to-end delivery and its
+   materially revised skill. `implement` owns end-to-end delivery and
    verification.
-3. Write a consistent kebab-case capability name. Related writing skills use
+3. Use a consistent kebab-case capability name. Related writing skills use
    parallel names: `engineering-writing`, `academic-writing`, `legal-writing`.
-4. This harness's portable frontmatter profile contains only `name` and
-   `description`; provenance lives in a notice and provider UI metadata in a
-   validated sidecar. Metadata or tool lists may narrow invocation but never
-   grant authority.
+4. Keep portable frontmatter to `name` and `description`. Put provenance in a
+   notice and provider UI metadata in a validated sidecar. Metadata and tool
+   lists may narrow invocation but never grant authority.
 5. Put trigger terms and the nearest exclusion in the first 250 description
    characters. Keep the complete canonical catalogue at or below 8,000
-   characters, targeting 7,600 for wrapper/version headroom; per-entry brevity
-   cannot compensate for an omitted skill.
+   characters, targeting 7,600 for wrapper and version headroom.
 6. Keep `SKILL.md` roughly 500 words or less. Move depth into narrowly named
-   references loaded only when needed; put deterministic behaviour in scripts.
-7. Add canonical positive, negative and boundary fixtures with exact primary
-   and companion routes plus contract tests for machine-enforceable invariants.
+   references loaded only when needed and deterministic behaviour into scripts.
+7. Add positive, negative and boundary fixtures with exact primary and companion
+   routes, plus contract tests for machine-enforceable invariants.
 8. For material changes, freeze held-out cases and compare candidate,
    without-skill and previous-package arms on current primary families. Retain
-   every invalid, omitted, timed-out and failed attempt with model lineage.
+   invalid, omitted, timed-out and failed attempts with model lineage.
 9. Re-run the public-safety and full harness gates.
 
-Split a skill when its triggers, authority, artifacts or completion gates are
-meaningfully different. Merge skills when they compete for the same request and
-cannot explain a stable boundary. Condense duplicated model knowledge; retain
-only rules that change behaviour or prevent observed failures.
+Split a skill when its triggers, authority, artifacts or completion gates differ
+meaningfully. Merge skills when they compete for the same request and lack a
+stable boundary. Retain only rules that change behaviour or prevent observed
+failures.
 
-Choose the smallest correct container: always-loaded project rule, occasional
-skill, deterministic script/hook, external MCP/app capability, or stable
+Choose the smallest correct owner: an always-loaded project rule, occasional
+skill, deterministic script or hook, external MCP or app capability, or stable
 independently versioned plugin. Do not import popular packs wholesale. Extract
-only licensed, evidence-backed mechanisms into the nearest local owner; create a
-new skill only when trigger, authority, artifact and gate remain distinct.
+only licensed, evidence-backed mechanisms into the nearest owner; create a skill
+only when its trigger, authority, artifact and gate remain distinct.
 
-The writing parity set shares a tiered anti-AI base. Structural changes to one
-of `engineering-writing`, `academic-writing` or `legal-writing` must be checked
+The writing parity set shares a tiered anti-AI base. Structural changes to
+`engineering-writing`, `academic-writing` or `legal-writing` must be checked
 against the other two. `natural-writing` remains the general fallback.
 
 ## Promote and retire
@@ -58,41 +55,44 @@ projects. Generalise project-specific values into knobs and leave a thin local
 override. Project rules stay authoritative inside their workspace.
 
 Audit usage periodically. Retire zero-use skills that add no durable capability,
-but preserve required third-party notices and use repository history rather than
+but preserve required third-party notices and use repository history instead of
 live backup folders as the normal safety boundary.
 
 Record a public rename in `config/skill-renames.json`. Test the managed
-reconciliation path; do not rely on users deleting or replacing global links
-by hand. Preview with `scripts/manage_installation.py plan`, then reconcile
-with the rename registry. Never claim or overwrite an unmanaged target.
+reconciliation path; do not rely on users deleting or replacing global links by
+hand. Preview with `scripts/manage_installation.py plan`, then reconcile with the
+rename registry. Never claim or overwrite an unmanaged target.
 
 ## Change the delivery kernel
 
 Keep profile policy in `config/delivery-profiles.json`, surface-selected checks
 in `config/security-evidence.json` and machine invariants in the `deliver`
-validator. New domains should first compose an existing base profile plus a
-domain skill. Add a base profile only when its artifacts, deterministic gates,
+validator. A new domain should compose an existing base profile and a domain
+skill first. Add a base profile only when its artifacts, deterministic gates,
 judgement gates and release meaning are materially distinct.
 
 Every skill needs positive, negative and boundary trigger fixtures. Changes to
-routing descriptions also run the held-out portfolio/lifecycle
-dataset with repeated trials and record raw numerator/denominator, model and
-harness versions.
+routing descriptions also run the held-out portfolio and lifecycle dataset with
+repeated trials, recording raw numerator and denominator, model and harness
+versions.
 
 ## Public and third-party hygiene
 
-- No personal absolute paths, private project names, credentials, local plugin
-  caches, matter facts or private symlink targets.
-- Do not import material without a redistribution licence. Preserve upstream
-  licence, copyright, notice and modification requirements beside the component.
-- Prefer source links and small adaptations over vendoring large generated
-  bundles. Record why a third-party component is present.
-- Treat plugins as supply-chain packages: pin source/ref, inventory manifests,
-  scripts, hooks, binaries, MCP/app endpoints, network/data flows, permissions,
-  update/rollback and component licences before execution or installation.
+- Exclude personal absolute paths, private project names, credentials, local
+  plugin caches, matter facts and private symlink targets.
+- Import material only with a redistribution licence. Preserve upstream
+  licence, copyright, notice and modification requirements beside it.
+- Prefer source links and small adaptations to large generated bundles. Record
+  why each third-party component is present.
+- Treat plugins as supply-chain packages: before execution or installation,
+  pin the source and ref, then inventory manifests, scripts, hooks, binaries,
+  MCP or app endpoints, network and data flows, permissions, update and rollback,
+  and component licences.
 - Keep runtime examples synthetic and visibly placeholder-based.
 
-## Verify
+## Verify and release
+
+Run the checkout gates:
 
 ```sh
 scripts/check-harness
@@ -101,13 +101,14 @@ scripts/public-release-check
 git diff --check
 ```
 
-To audit every ref reachable in the local clone, run:
+Audit every ref reachable in the local clone with:
 
 ```sh
 scripts/public-release-check --history
 ```
 
-Before a public push, prove the exact commit range selected for publication:
+Before a public push, prove the exact non-empty commit range selected for
+publication. `origin/main` must be an ancestor of `HEAD`:
 
 ```sh
 scripts/public-release-check --publication-range \
@@ -115,30 +116,11 @@ scripts/public-release-check --publication-range \
   "$(git rev-parse --verify --end-of-options 'HEAD^{commit}')"
 ```
 
-The range must be non-empty and `origin/main` must be an ancestor of `HEAD`.
-This target-scoped proof deliberately ignores the checked-out tree, index and
-unrelated private refs. It applies the complete public-tree policy to the
-selected `HEAD`, then scans every selected commit's tree paths, content, full
-message and author email for forbidden paths, home paths and secret patterns.
-Both evidence modes bind Git to the repository discovered from this script's
-root under a closed child environment. They ignore replacement objects in any
-namespace and inherited Git directory, index, config, graft, shallow and object
-directory overrides; reject native graft or shallow state; and traverse stored
-commit parent headers with raw object reads instead of virtualized revision
-walks. Every consumed commit, annotated tag, tree and blob is rehashed from its
-canonical bytes using the repository's SHA-1 or SHA-256 storage format; paths
-and modes come from those same verified tree bytes. Evidence commands disable
-repository fsmonitor execution and optional index locking. Repository-native
-common directories, linked worktrees and object alternates remain supported.
-The default no-flag mode is unchanged and keeps checking the checkout/index.
-`--history` reads the native index through the hardened endpoint, applies the
-complete public-tree policy to verified raw `HEAD`, and adds every raw commit
-reachable from the bound local refs.
+The publication-range check applies the public-tree policy to the selected
+`HEAD` and scans the selected commits, their trees, messages and author email.
+It is target-scoped evidence: it deliberately ignores the checkout, index and
+unrelated private refs. The script owns the hardened raw-object verification
+details; default no-flag mode still checks the checkout and index.
 
 The first public release must use a fresh root commit. Never push private
 pre-publication refs merely because the current tree is clean.
-
-Review must be independent of authorship and proportionate to risk. A substantial
-`implement` run gets a fresh native reviewer and the other primary family; `crucial` work
-also attempts a non-blocking bonus family. Fix and re-run until the gate is
-clean, then ask the human for final acceptance or promotion authority.
