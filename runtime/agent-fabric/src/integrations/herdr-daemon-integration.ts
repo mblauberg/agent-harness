@@ -107,6 +107,9 @@ export class HerdrDaemonIntegration {
       providerActionAdmission: options.providerActionAdmission,
       ...(options.clock === undefined ? {} : { clock: options.clock }),
     });
+    if (this.#configuration.mode === "enabled") {
+      this.#recordControlIdentity("unavailable", "Herdr control is configured but not yet opened");
+    }
   }
 
   async executeAction(request: HerdrDaemonActionRequest): Promise<HerdrDaemonActionResult> {
@@ -543,6 +546,7 @@ export class HerdrDaemonIntegration {
         fabricJournal: this.#ports,
         fabricDirectSteer: this.#ports,
       });
+      this.#recordControlIdentity("available", "Herdr control available before the next presence observation");
       await this.#restoreControlBindings(projectSessionId, runtime);
       return runtime;
     })();
@@ -553,6 +557,49 @@ export class HerdrDaemonIntegration {
       this.#runtimes.delete(projectSessionId);
       throw error;
     }
+  }
+
+  #recordControlIdentity(
+    state: "available" | "unavailable",
+    detail: string,
+  ): void {
+    const existing = this.#database.prepare(`
+      SELECT discovered_contract_json FROM integration_availability
+       WHERE integration_id=?
+    `).get(HERDR_CONTROL_ADAPTER_ID);
+    let contract: Record<string, JsonValue> = {
+      schemaVersion: 1,
+      operationFamily: HERDR_CONTROL_ADAPTER_ID,
+      mode: "enabled",
+      detail,
+      presence: [],
+      degradedRunIds: [],
+      recoveryRunIds: [],
+      recoverySessionIds: [],
+    };
+    if (isRow(existing)) {
+      try {
+        const parsed: unknown = JSON.parse(text(existing, "discovered_contract_json"));
+        if (isJsonObjectValue(parsed) && parsed.schemaVersion === 1 && parsed.operationFamily === HERDR_CONTROL_ADAPTER_ID) {
+          contract = {
+            ...parsed,
+            mode: "enabled",
+            detail,
+          };
+        }
+      } catch {
+        // Replace malformed optional-integration discovery with the closed control identity.
+      }
+    }
+    this.#database.prepare(`
+      INSERT INTO integration_availability(
+        integration_id,state,discovered_contract_json,checked_at
+      ) VALUES (?, ?, ?, ?)
+      ON CONFLICT(integration_id) DO UPDATE SET
+        state=excluded.state,
+        discovered_contract_json=excluded.discovered_contract_json,
+        checked_at=excluded.checked_at
+    `).run(HERDR_CONTROL_ADAPTER_ID, state, canonicalJson(contract), this.#clock());
   }
 
   async #restoreControlBindings(

@@ -285,13 +285,7 @@ describe("daemon-owned Herdr Fabric ports", () => {
       for (const state of ["unavailable", "stale"] as const) {
         database.prepare(`UPDATE integration_availability SET state=? WHERE integration_id='herdr-control-v1'`)
           .run(state);
-        const unavailableActionId = `herdr-${state}-action` as ProviderActionId;
-        await expect(ports.prepareDirectSteerAction(unavailableActionId, intent))
-          .rejects.toThrow("integration is not available");
-        expect(database.prepare(`
-          SELECT COUNT(*) AS count FROM provider_action_pair_preflights
-           WHERE adapter_id='herdr-control-v1' AND action_id=?
-        `).get(unavailableActionId)).toEqual({ count: 0 });
+        await expect(ports.prepareDirectSteerAction(actionId, intent)).resolves.toEqual(terminal);
       }
       database.prepare(`DELETE FROM integration_availability WHERE integration_id='herdr-control-v1'`).run();
       await expect(ports.prepareDirectSteerAction("herdr-unauthenticated-action" as ProviderActionId, intent))

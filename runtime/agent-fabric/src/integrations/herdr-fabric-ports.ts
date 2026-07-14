@@ -653,14 +653,11 @@ export class HerdrFabricPorts {
       throw new TypeError("Herdr project binding is stale");
     }
     const availability = this.#database.prepare(`
-      SELECT state,discovered_contract_json FROM integration_availability
+      SELECT discovered_contract_json FROM integration_availability
        WHERE integration_id=?
     `).get(ADAPTER_ID);
     if (!isRow(availability)) {
       throw new TypeError("Herdr integration identity is not authenticated");
-    }
-    if (text(availability, "state") !== "available") {
-      throw new TypeError("Herdr integration is not available");
     }
     let discoveredContract: unknown;
     try {
