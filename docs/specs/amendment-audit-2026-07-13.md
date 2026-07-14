@@ -172,7 +172,7 @@ normative spec text and its executable fixtures only.
 ## Executable-fixture evidence (defects reproduced)
 
 Two deterministic stdlib-`sqlite3` harnesses under
-`.agent-run/CAPA-001/fixtures/` transcribe the cited DDL verbatim
+[`tests/spec_fixtures/`](../../tests/spec_fixtures/) transcribe the cited DDL verbatim
 (`PRAGMA foreign_keys=ON`) and reproduce each substantiated defect; both exit 0
 on `python3` 3.14.3:
 
@@ -207,6 +207,12 @@ built.
   constraint. **Evidence-carry columns through plan → effect → result remain
   (deeper part of lead 2).**
 
+**Complete in the current issue-17 draft (not yet committed):**
+- Lead 3 — the reservation carries a non-null decision-loss effect key without
+  referencing the not-yet-materialized after revision; its same-prepare batch
+  binds the exact after tuple to the linked effect, and the review binding
+  equality-copies that tuple and defers its apply FK.
+
 **Pending structural repair (needed before freeze; codex-certified):** these
 close only with multi-part DDL changes, not one-line additions, so they are
 deliberately not half-applied —
@@ -215,8 +221,6 @@ deliberately not half-applied —
 - Lead 2 (remaining) — evidence-carry columns (admission / transition-proof /
   mutation-plan / finalized-terminal-evidence / retirement-evidence) bound
   through plan → effect → result. (FK-mismatch part done above.)
-- Lead 3 — retarget the reservation FK to the same-prepare planned effect; bind
-  the materialized revision only post-apply.
 - Lead 4 — carry `transition_kind` into the apply; non-null sentinels so the
   fresh-arm composite FK cannot be null-skipped (do NOT add plan equality).
 - Lead 5 — kind↔owner CHECK + intent→effect identity FKs + declared
@@ -234,6 +238,10 @@ deliberately not half-applied —
 - MF01-1 (§32.21/§32.22 requirement IDs; new IDs start FR-077/NFR-034/AC-056);
   MF01-3 (`adapter_capability_snapshots.source` CHECK); MF01-4 (generic-route
   recovery owner cross-reference).
+- Newly found — `lifecycleMutationPlanV1`'s closed relation enum omits
+  `provider-action`, so an apply cannot name a provider-action mutation even
+  where the complete write set requires one. This first Lead-3 slice records
+  but does not repair that enum omission.
 
 **Freeze gate:** Specs 01 v0.36 / 04 v1.31 are NOT frozen. Freeze (version-note
 + status update) happens only after every substantiated P0–P2 above is repaired

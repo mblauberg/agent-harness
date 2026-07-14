@@ -6175,6 +6175,11 @@ lifecycle_receipt_batches(
   ordered_subject_set_digest,
   receipt_intent_count CHECK(receipt_intent_count IN (1,2)),
   review_adoption_reservation_id, review_adoption_reservation_digest,
+  review_decision_loss_effect_key NOT NULL,
+  review_decision_loss_effect_role, review_decision_loss_effect_digest,
+  review_decision_loss_after_id, review_decision_loss_after_revision,
+  review_decision_loss_after_semantic_digest,
+  review_decision_loss_after_source_ref_digest,
   fresh_handoff_id, fresh_handoff_digest,
   recovery_retirement_id, recovery_retirement_plan_digest, created_at,
   UNIQUE(project_session_id,run_id,agent_id,transition_replay_digest),
@@ -6191,6 +6196,20 @@ lifecycle_receipt_batches(
     transition_kind),
   UNIQUE(batch_id,planned_apply_id,transition_replay_digest,
     mutation_plan_digest,fresh_handoff_id,fresh_handoff_digest),
+  UNIQUE(batch_id,review_decision_loss_effect_role,
+    review_decision_loss_effect_digest),
+  UNIQUE(batch_id,review_decision_loss_effect_key),
+  UNIQUE(batch_id,review_decision_loss_effect_role,
+    review_decision_loss_effect_digest,project_session_id,run_id,agent_id,
+    review_decision_loss_after_id,review_decision_loss_after_revision,
+    review_decision_loss_after_semantic_digest,
+    review_decision_loss_after_source_ref_digest),
+  UNIQUE(batch_id,review_decision_loss_effect_key,
+    review_decision_loss_effect_role,review_decision_loss_effect_digest,
+    project_session_id,run_id,agent_id,review_decision_loss_after_id,
+    review_decision_loss_after_revision,
+    review_decision_loss_after_semantic_digest,
+    review_decision_loss_after_source_ref_digest),
   CHECK((review_adoption_reservation_id IS NULL)=
     (review_adoption_reservation_digest IS NULL)),
   CHECK((fresh_handoff_id IS NULL)=(fresh_handoff_digest IS NULL)),
@@ -6200,10 +6219,45 @@ lifecycle_receipt_batches(
     (recovery_retirement_id IS NOT NULL)),
   CHECK((receipt_intent_count=2)=
     (review_adoption_reservation_id IS NOT NULL)),
+  CHECK(
+    (review_adoption_reservation_id IS NULL AND
+      review_decision_loss_effect_key='none' AND
+      review_decision_loss_effect_role IS NULL AND
+      review_decision_loss_effect_digest IS NULL AND
+      review_decision_loss_after_id IS NULL AND
+      review_decision_loss_after_revision IS NULL AND
+      review_decision_loss_after_semantic_digest IS NULL AND
+      review_decision_loss_after_source_ref_digest IS NULL) OR
+    (review_adoption_reservation_id IS NOT NULL AND
+      review_decision_loss_effect_key='none' AND
+      review_decision_loss_effect_role IS NULL AND
+      review_decision_loss_effect_digest IS NULL AND
+      review_decision_loss_after_id IS NULL AND
+      review_decision_loss_after_revision IS NULL AND
+      review_decision_loss_after_semantic_digest IS NULL AND
+      review_decision_loss_after_source_ref_digest IS NULL) OR
+    (review_adoption_reservation_id IS NOT NULL AND
+      review_decision_loss_effect_key<>'none' AND
+      review_decision_loss_effect_role='linked' AND
+      review_decision_loss_effect_digest IS NOT NULL AND
+      review_decision_loss_effect_digest=review_decision_loss_effect_key AND
+      review_decision_loss_after_id IS NOT NULL AND
+      review_decision_loss_after_revision IS NOT NULL AND
+      review_decision_loss_after_semantic_digest IS NOT NULL AND
+      review_decision_loss_after_source_ref_digest IS NOT NULL)),
   FOREIGN KEY(review_adoption_reservation_id,
-      review_adoption_reservation_digest)
+      review_adoption_reservation_digest,review_decision_loss_effect_key)
     REFERENCES lifecycle_review_adoption_reservations(
-      reservation_id,reservation_digest),
+      reservation_id,reservation_digest,decision_loss_effect_key),
+  FOREIGN KEY(review_adoption_reservation_id,
+      review_adoption_reservation_digest,review_decision_loss_effect_key,
+      review_decision_loss_after_id,review_decision_loss_after_revision,
+      review_decision_loss_after_semantic_digest,
+      review_decision_loss_after_source_ref_digest)
+    REFERENCES lifecycle_review_adoption_reservations(
+      reservation_id,reservation_digest,decision_loss_effect_key,
+      decision_loss_after_id,decision_loss_after_revision,
+      decision_loss_after_semantic_digest,decision_loss_after_source_ref_digest),
   FOREIGN KEY(fresh_handoff_id,fresh_handoff_digest,planned_apply_id)
     REFERENCES lifecycle_fresh_recovery_handoffs(
       handoff_id,handoff_digest,planned_apply_id),
@@ -6211,7 +6265,17 @@ lifecycle_receipt_batches(
       planned_apply_id,project_session_id,run_id,agent_id,mutation_plan_digest)
     REFERENCES lifecycle_recovery_retirement_plans(
       retirement_id,retirement_plan_digest,planned_apply_id,
-      project_session_id,run_id,agent_id,mutation_plan_digest)
+      project_session_id,run_id,agent_id,mutation_plan_digest),
+  FOREIGN KEY(batch_id,review_decision_loss_effect_role,
+      review_decision_loss_effect_digest,project_session_id,run_id,agent_id,
+      review_decision_loss_after_id,review_decision_loss_after_revision,
+      review_decision_loss_after_semantic_digest,
+      review_decision_loss_after_source_ref_digest)
+    REFERENCES lifecycle_receipt_generation_loss_effects(
+      batch_id,role,effect_digest,project_session_id,run_id,agent_id,
+      generation_loss_id,final_revision,final_semantic_digest,
+      final_source_ref_digest)
+    DEFERRABLE INITIALLY DEFERRED
 )
 
 lifecycle_receipt_custody_effects(
@@ -6433,7 +6497,8 @@ lifecycle_review_authority_bindings(
   certification_cut_digest, certification_cut_key,
   decision_loss_after_id, decision_loss_after_revision,
   decision_loss_after_semantic_digest, decision_loss_after_source_ref_digest,
-  decision_loss_after_key,
+  decision_loss_after_key, decision_loss_effect_key NOT NULL,
+  decision_loss_effect_role, decision_loss_effect_digest,
   apply_id UNIQUE,
   UNIQUE(receipt_digest,run_id,agent_id,custody_id,custody_revision,
     review_decision_digest,certification_cut_digest),
@@ -6465,8 +6530,24 @@ lifecycle_review_authority_bindings(
     REFERENCES lifecycle_review_adoption_reservations(
       reservation_digest,decision_loss_after_id,decision_loss_after_revision,
       decision_loss_after_semantic_digest,decision_loss_after_source_ref_digest),
+  FOREIGN KEY(batch_id,decision_loss_effect_key)
+    REFERENCES lifecycle_receipt_batches(
+      batch_id,review_decision_loss_effect_key),
+  FOREIGN KEY(batch_id,decision_loss_effect_key,
+      decision_loss_effect_role,decision_loss_effect_digest,
+      project_session_id,run_id,agent_id,decision_loss_after_id,
+      decision_loss_after_revision,decision_loss_after_semantic_digest,
+      decision_loss_after_source_ref_digest)
+    REFERENCES lifecycle_receipt_batches(
+      batch_id,review_decision_loss_effect_key,
+      review_decision_loss_effect_role,review_decision_loss_effect_digest,
+      project_session_id,run_id,agent_id,review_decision_loss_after_id,
+      review_decision_loss_after_revision,
+      review_decision_loss_after_semantic_digest,
+      review_decision_loss_after_source_ref_digest),
   FOREIGN KEY(apply_id,batch_id)
-    REFERENCES lifecycle_transition_applies(apply_id,receipt_batch_id),
+    REFERENCES lifecycle_transition_applies(apply_id,receipt_batch_id)
+    DEFERRABLE INITIALLY DEFERRED,
   CHECK(certification_cut_key IS NOT NULL AND
     decision_loss_after_key IS NOT NULL),
   CHECK((certification_cut_digest IS NULL AND certification_cut_key='none') OR
@@ -6479,7 +6560,14 @@ lifecycle_review_authority_bindings(
     (decision_loss_after_key<>'none' AND decision_loss_after_id IS NOT NULL AND
       decision_loss_after_revision IS NOT NULL AND
       decision_loss_after_semantic_digest IS NOT NULL AND
-      decision_loss_after_source_ref_digest=decision_loss_after_key))
+      decision_loss_after_source_ref_digest=decision_loss_after_key)),
+  CHECK((decision_loss_effect_key='none' AND
+      decision_loss_effect_role IS NULL AND
+      decision_loss_effect_digest IS NULL) OR
+    (decision_loss_effect_key<>'none' AND
+      decision_loss_effect_role='linked' AND
+      decision_loss_effect_digest IS NOT NULL AND
+      decision_loss_effect_digest=decision_loss_effect_key))
 )
 
 lifecycle_receipt_batch_authorizations(
@@ -6635,10 +6723,15 @@ lifecycle_review_adoption_reservations(
   recovery_source_ref_digest,
   decision_loss_after_id, decision_loss_after_revision,
   decision_loss_after_semantic_digest, decision_loss_after_source_ref_digest,
-  decision_loss_after_key,
+  decision_loss_after_key, decision_loss_effect_key NOT NULL,
   recovery_source_decision_json, recovery_source_decision_digest,
   local_write_set_digest, reservation_json, created_at,
   UNIQUE(reservation_id,reservation_digest),
+  UNIQUE(reservation_id,reservation_digest,decision_loss_effect_key),
+  UNIQUE(reservation_id,reservation_digest,decision_loss_effect_key,
+    decision_loss_after_id,decision_loss_after_revision,
+    decision_loss_after_semantic_digest,
+    decision_loss_after_source_ref_digest),
   UNIQUE(reservation_digest,project_session_id,run_id,agent_id,custody_id,
     finalized_custody_revision,review_decision_digest,certification_cut_key,
     decision_loss_after_key),
@@ -6647,7 +6740,8 @@ lifecycle_review_adoption_reservations(
   UNIQUE(project_session_id,run_id,agent_id,custody_id,
     finalized_custody_revision),
   CHECK(certification_cut_key IS NOT NULL AND
-    decision_loss_after_key IS NOT NULL),
+    decision_loss_after_key IS NOT NULL AND
+    decision_loss_effect_key IS NOT NULL),
   FOREIGN KEY(project_session_id,run_id,agent_id,custody_id)
     REFERENCES lifecycle_rotation_custodies(
       project_session_id,run_id,agent_id,custody_id),
@@ -6664,6 +6758,7 @@ lifecycle_review_adoption_reservations(
       decision_loss_after_semantic_digest IS NULL AND
       decision_loss_after_source_ref_digest IS NULL AND
       decision_loss_after_key='none' AND
+      decision_loss_effect_key='none' AND
       recovery_source_decision_json IS NULL AND
       recovery_source_decision_digest IS NULL) OR
     (recovery_source_kind='custody' AND
@@ -6676,6 +6771,7 @@ lifecycle_review_adoption_reservations(
       decision_loss_after_semantic_digest IS NULL AND
       decision_loss_after_source_ref_digest IS NULL AND
       decision_loss_after_key='none' AND
+      decision_loss_effect_key='none' AND
       recovery_source_decision_json IS NOT NULL AND
       recovery_source_decision_digest IS NOT NULL) OR
     (recovery_source_kind='generation-loss' AND
@@ -6689,6 +6785,7 @@ lifecycle_review_adoption_reservations(
       decision_loss_after_semantic_digest IS NOT NULL AND
       decision_loss_after_source_ref_digest IS NOT NULL AND
       decision_loss_after_key=decision_loss_after_source_ref_digest AND
+      decision_loss_effect_key<>'none' AND
       recovery_source_decision_json IS NOT NULL AND
       recovery_source_decision_digest IS NOT NULL)),
   FOREIGN KEY(project_session_id,run_id,agent_id,recovery_from_custody_id,
@@ -6702,12 +6799,8 @@ lifecycle_review_adoption_reservations(
     REFERENCES lifecycle_generation_loss_revisions(
       project_session_id,run_id,agent_id,generation_loss_id,
       revision,source_ref_digest),
-  FOREIGN KEY(project_session_id,run_id,agent_id,decision_loss_after_id,
-      decision_loss_after_revision,decision_loss_after_semantic_digest,
-      decision_loss_after_source_ref_digest)
-    REFERENCES lifecycle_generation_loss_revisions(
-      project_session_id,run_id,agent_id,generation_loss_id,revision,
-      semantic_digest,source_ref_digest)
+  CHECK((decision_loss_effect_key='none')=
+    (decision_loss_after_id IS NULL))
 )
 
 lifecycle_fresh_rotation_preparations(
@@ -7376,7 +7469,12 @@ apply; point lookup is response-loss recovery, never completeness proof.
 
 The review reservation is immutable and has no batch back-pointer or mutable
 consumed state; its exact batch points one way to it and the apply proves
-consumption. It freezes decision/cut/high-water/predecessor at the adoption
+consumption. A generation-loss reservation names the planned linked effect key
+and after tuple without foreign-keying the not-yet-materialized revision. The
+same prepare batch equality-copies that tuple and binds it, deferred, to its
+exact linked effect; the apply-time review binding equality-copies the batch
+tuple and is deferred to the apply marker. It freezes
+decision/cut/high-water/predecessor at the adoption
 linearization point while permitting later provider terminals as post-cut.
 Review cut, successor binding and rebind receipt equality-copy the decision and
 ordinal-two external receipt; recovery never rereads later high-water or re-
