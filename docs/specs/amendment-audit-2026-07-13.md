@@ -308,12 +308,11 @@ fixtures described below.
   integrity-failed routes, while preserving the dedicated certifying,
   lifecycle and launch owners. This is an ownership cross-reference only; it
   adds no recovery runtime or framework.
-
-**Pending repair (needed before freeze; codex-certified):**
-- Newly found — `lifecycleMutationPlanV1`'s closed relation enum omits
-  `provider-action`, so an apply cannot name a provider-action mutation even
-  where the complete write set requires one. This first Lead-3 slice records
-  but does not repair that enum omission.
+- Newly found provider-action mutation-plan omission —
+  `lifecycleMutationPlanV1` now includes one update-only `provider-action`
+  member. Its key binds the exact daemon-global adapter/action pair from the
+  governing replay or fresh recovery handoff; insert, delete and crossed pairs
+  are invalid.
 
 **Freeze gate:** Specs 01 v0.36 / 04 v1.31 are NOT frozen. Freeze (version-note
 + status update) happens only after every substantiated P0–P2 above is repaired

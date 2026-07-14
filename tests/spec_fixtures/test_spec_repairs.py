@@ -2578,26 +2578,31 @@ class SpecRepairTests(unittest.TestCase):
             with self.subTest(requirement_id=requirement_id):
                 self.assertEqual(SPEC_01.count(f"**{requirement_id}:**"), 1)
 
-    def test_authority_profiles_are_closed_inert_and_never_downgrade(self) -> None:
-        spec_03 = (ROOT / "docs/specs/03-agent-fabric-activation.md").read_text()
-        section = SPEC_01[SPEC_01.index(
-            "## 33. Capability-compiled execution authority"
-        ) :]
-        flattened = " ".join(section.split())
+    def test_lifecycle_mutation_plan_binds_provider_action_update(self) -> None:
+        start = SPEC_01.index("`lifecycleMutationPlanV1`")
+        end = SPEC_01.index("An owner-transition receipt effect", start)
+        section = " ".join(SPEC_01[start:end].split())
+        enum_start = section.index("The closed relation enum is:")
+        enum_end = section.index("`writeSetDigest=", enum_start)
+        relation_enum = section[enum_start:enum_end]
+        self.assertEqual(relation_enum.count("`provider-action`"), 1)
         self.assertIn(
-            "initial closed enum is exactly `review-readonly | "
-            "workspace-write-offline`",
-            flattened,
+            "The `provider-action` member is update-only. Its `keyDigest` "
+            "binds the exact daemon-global `ProviderActionRefV1` pair "
+            "`{adapterId,actionId}`",
+            section,
         )
-        self.assertIn("There is no implicit fallback", flattened)
-        self.assertIn("`network.toolEgress:none`", flattened)
-        self.assertIn("`workspace-write-offline` is defined but inert", flattened)
-        self.assertIn("before provider I/O", flattened)
         self.assertIn(
-            "Activation recognises only `review-readonly` and the currently "
-            "inert `workspace-write-offline`",
-            " ".join(spec_03.split()),
+            "a normal `mutationPlan` equality-copies the replay's non-null "
+            "`providerActionRef`",
+            section,
         )
+        self.assertIn(
+            "a `freshApplyPlan` equality-copies its enclosing "
+            "`freshRecoveryHandoffV1.replacementActionRef`",
+            section,
+        )
+        self.assertIn("insert, delete or any different pair is invalid", section)
 
 
 if __name__ == "__main__":

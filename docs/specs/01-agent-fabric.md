@@ -1222,12 +1222,19 @@ only in immutable effect/apply rows after authority. The closed relation enum is
 `agent-state`, `provider-session`, `provider-lineage`, `principal-capability`,
 `agent-bridge`, `chair-bridge`, `turn-lease`, `write-lease`, `delivery`,
 `task-owner`, `result-obligation`, `membership`, `barrier`, `freeze-owner`,
+`provider-action`,
 `custody-revision`, `custody-head`, `generation-loss-revision`, `generation-loss-
 head`, `review-cut`, `review-binding`, `review-binding-pointer`, `recovery-
 issue`, `fresh-preparation`, `fresh-handoff`, `fresh-commit`, `recovery-
 retirement`, and `audit`. `writeSetDigest=LD("mutation-plan",
 {schemaVersion:1,writes})`; `mutationPlanDigest` equality-copies it, and
 `freshApplyPlanDigest` equality-copies it when this codec is the handoff plan.
+The `provider-action` member is update-only. Its `keyDigest` binds the exact
+daemon-global `ProviderActionRefV1` pair `{adapterId,actionId}`: a normal
+`mutationPlan` equality-copies the replay's non-null `providerActionRef`, while
+a `freshApplyPlan` equality-copies its enclosing
+`freshRecoveryHandoffV1.replacementActionRef`. The applicable pair must exist;
+insert, delete or any different pair is invalid.
 Every row
 changed by adoption, no-effect, supersession, quarantine or abandonment,
 including archival delivery/task/barrier effects and a linked generation loss,
