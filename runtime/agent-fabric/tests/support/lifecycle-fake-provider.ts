@@ -147,12 +147,38 @@ async function provisionRetainedAgent(params: Record<string, unknown>): Promise<
     ? params.providerSessionRef
     : `fake-session:${String(params.targetAgentId)}:g${String(providerSessionGeneration)}:replacement`;
   const activation = await retainedProtocol.call(FABRIC_OPERATIONS.getMailboxState, {});
-  const evidenceDigest = `sha256:${createHash("sha256").update(JSON.stringify({
-    actionId: params.actionId,
-    targetAgentId: params.targetAgentId,
+  const challenge = process.env.AGENT_FABRIC_ATTESTATION_CHALLENGE;
+  const challengeDigest = process.env.AGENT_FABRIC_ATTESTATION_CHALLENGE_DIGEST;
+  const custodyId = process.env.AGENT_FABRIC_LIFECYCLE_CUSTODY_ID;
+  const checkpointDigest = process.env.AGENT_FABRIC_LIFECYCLE_CHECKPOINT_DIGEST;
+  if (challenge !== undefined && (
+    !/^[0-9a-f]{64}$/u.test(challenge) ||
+    `sha256:${createHash("sha256").update(Buffer.from(challenge, "hex")).digest("hex")}` !== challengeDigest ||
+    typeof custodyId !== "string" || typeof checkpointDigest !== "string"
+  )) throw new Error("lifecycle launch attestation handoff is invalid");
+  if (challenge !== undefined && process.env.LIFECYCLE_FAKE_REFLECT_CHALLENGE_ERROR === "1") {
+    const canaryPath = process.env.LIFECYCLE_FAKE_CHALLENGE_CANARY;
+    if (canaryPath === undefined) throw new Error("lifecycle challenge canary path is required");
+    writeFileSync(canaryPath, `${challenge}\n`, { mode: 0o600 });
+    throw new Error(`provider reflected private lifecycle challenge ${challenge}`);
+  }
+  const unsignedAttestation = challenge === undefined ? undefined : {
+    schemaVersion: 1 as const,
+    kind: "provider-session-lifecycle-attestation" as const,
+    custodyId,
+    actionId: String(params.actionId),
+    checkpointDigest,
+    challengeDigest,
     providerSessionRef,
-    activation,
-  })).digest("hex")}`;
+    providerSessionGeneration,
+    bridgeGeneration: Number(params.bridgeGeneration),
+    providerTurnRef: `fake-turn:${String(params.actionId)}`,
+    providerInvocationRef: `fake-invocation:${String(params.actionId)}`,
+  };
+  const lifecycleAttestation = unsignedAttestation === undefined ? undefined : {
+    ...unsignedAttestation,
+    attestationDigest: `sha256:${createHash("sha256").update(JSON.stringify(unsignedAttestation)).digest("hex")}`,
+  };
   retainedBinding = {
     actionId: String(params.actionId),
     agentId: expectedPrincipal.agentId,
@@ -163,7 +189,7 @@ async function provisionRetainedAgent(params: Record<string, unknown>): Promise<
     providerSessionGeneration,
     bridgeGeneration: Number(params.bridgeGeneration),
   };
-  return {
+  const result: Record<string, unknown> = {
     schemaVersion: 1,
     adapterId,
     actionId: params.actionId,
@@ -172,8 +198,19 @@ async function provisionRetainedAgent(params: Record<string, unknown>): Promise<
     providerSessionGeneration,
     bridgeGeneration: params.bridgeGeneration,
     bridgeContractDigest: params.bridgeContractDigest,
-    activationEvidenceDigest: evidenceDigest,
+    activationEvidenceDigest: lifecycleAttestation?.attestationDigest ??
+      `sha256:${createHash("sha256").update(JSON.stringify({
+        actionId: params.actionId, targetAgentId: params.targetAgentId, providerSessionRef, activation,
+      })).digest("hex")}`,
+    ...(lifecycleAttestation === undefined ? {} : { lifecycleAttestation }),
   };
+  if (lifecycleAttestation !== undefined && process.env.LIFECYCLE_FAKE_ATTESTATION_MUTATION === "custody") {
+    result.lifecycleAttestation = { ...lifecycleAttestation, custodyId: `${custodyId}:crossed` };
+  }
+  if (lifecycleAttestation !== undefined && process.env.LIFECYCLE_FAKE_ATTESTATION_MUTATION === "unknown-provider-field") {
+    result.unexpected = "rejected";
+  }
+  return result;
 }
 
 async function runRetainedLifecycleCallback(payload: Record<string, unknown>): Promise<unknown> {

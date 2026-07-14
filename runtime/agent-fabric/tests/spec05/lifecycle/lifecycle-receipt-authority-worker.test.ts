@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,9 +58,40 @@ async function eventually(assertion: () => Promise<void> | void, timeoutMs = 8_0
   throw failure;
 }
 
+function expectUnverifiedCommittingAdvanceRejected(database: Database.Database, runId: string, agentId: string): void {
+  expect(() => database.prepare(`
+    INSERT INTO lifecycle_rotation_custody_revisions(
+      project_session_id,run_id,agent_id,custody_id,revision,prior_revision,
+      prior_journal_digest,state,disposition_code,proof_kind,
+      terminal_evidence_digest,semantic_json,semantic_digest,source_ref_digest,
+      origin_fresh_apply_id,origin_fresh_apply_digest,receipt_batch_id,
+      receipt_apply_id,receipt_apply_digest,journal_json,journal_digest,recorded_at
+    )
+    SELECT revision.project_session_id,revision.run_id,revision.agent_id,
+           revision.custody_id,revision.revision+1,revision.revision,
+           revision.journal_digest,'committing','none','none',
+           revision.terminal_evidence_digest,revision.semantic_json,
+           revision.semantic_digest,revision.source_ref_digest,
+           NULL,NULL,NULL,NULL,NULL,revision.journal_json,
+           revision.journal_digest,revision.recorded_at+1
+      FROM lifecycle_rotation_custody_heads head
+      JOIN lifecycle_rotation_custody_revisions revision
+        ON revision.run_id=head.run_id AND revision.agent_id=head.agent_id
+       AND revision.custody_id=head.custody_id
+       AND revision.revision=head.current_revision
+     WHERE head.run_id=? AND head.agent_id=?
+  `).run(runId, agentId)).toThrowError(/lifecycle-custody-revision-not-contiguous/u);
+}
+
 async function configuredFixture(
   corruption: LifecycleReceiptAuthorityCorruption = "none",
-  options: Readonly<{ wrongProviderGeneration?: boolean; spawnDelayMs?: number }> = {},
+  options: Readonly<{
+    wrongProviderGeneration?: boolean;
+    spawnDelayMs?: number;
+    attestationMutation?: "custody" | "unknown-provider-field";
+    reflectLifecycleChallengeError?: boolean;
+    fault?: (label: string) => void;
+  }> = {},
 ): Promise<ConfiguredFixture> {
   const fixture = await createLifecycleFixture();
   await fixture.fabric.close();
@@ -84,9 +115,19 @@ async function configuredFixture(
           ...(options.spawnDelayMs === undefined
             ? {}
             : { LIFECYCLE_FAKE_SPAWN_DELAY_MS: String(options.spawnDelayMs) }),
+          ...(options.attestationMutation === undefined
+            ? {}
+            : { LIFECYCLE_FAKE_ATTESTATION_MUTATION: options.attestationMutation }),
+          ...(options.reflectLifecycleChallengeError === true
+            ? {
+                LIFECYCLE_FAKE_REFLECT_CHALLENGE_ERROR: "1",
+                LIFECYCLE_FAKE_CHALLENGE_CANARY: join(fixture.directory, "lifecycle-challenge-canary.txt"),
+              }
+            : {}),
         },
       },
     },
+    ...(options.fault === undefined ? {} : { fault: options.fault }),
   });
   const server = createServer((socket) => {
     servePublicProtocolConnection(socket, {
@@ -272,6 +313,334 @@ describe("Spec 05 external lifecycle receipt authority worker", () => {
         .toEqual({ count: 0 });
       expect(database.prepare("SELECT count(*) AS count FROM lifecycle_transition_applies").get())
         .toEqual({ count: 0 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("restarts and converges an accepted source-vector CAS drift through authenticated postterminal supersession", async () => {
+    const context = await configuredFixture("none", { spawnDelayMs: 100 });
+    context.authority.readReceiptAbsentFromCall = 3;
+    context.authority.onReadReceiptOnce = () => {
+      const racing = new Database(context.fixture.databasePath);
+      try {
+        racing.prepare(`
+          UPDATE mailbox_state SET next_sequence=next_sequence+1
+           WHERE run_id=? AND recipient_id=?
+        `).run(context.fixture.runId, context.agentId);
+      } finally {
+        racing.close();
+      }
+    };
+
+    await requestRetainedRotation(context, "lifecycle:authority-worker:source-vector-drift");
+    await eventually(() => {
+      const database = new Database(context.fixture.databasePath, { readonly: true });
+      try {
+        const failure = database.prepare(`
+          SELECT payload_json FROM events
+           WHERE run_id=? AND type='lifecycle-continuation-failed'
+           ORDER BY created_at DESC LIMIT 1
+        `).get(context.fixture.runId) as { payload_json: string } | undefined;
+        expect(JSON.parse(failure?.payload_json ?? "{}")).toMatchObject({
+          message: expect.stringContaining("receipt remains pending"),
+        });
+      } finally {
+        database.close();
+      }
+    });
+
+    const database = new Database(context.fixture.databasePath);
+    try {
+      expect(database.prepare("SELECT count(*) AS count FROM lifecycle_authority_receipts").get()).toEqual({ count: 1 });
+      expect(database.prepare("SELECT count(*) AS count FROM lifecycle_transition_applies").get()).toEqual({ count: 0 });
+      expect(database.prepare("SELECT count(*) AS count FROM lifecycle_operations").get()).toEqual({ count: 0 });
+      expect(database.prepare(`
+        SELECT agent.lifecycle,bridge.provider_session_generation,bridge.bridge_generation,head.state,head.terminal
+          FROM agents agent JOIN agent_bridge_state bridge USING(run_id,agent_id)
+          JOIN lifecycle_rotation_custody_heads head USING(run_id,agent_id)
+         WHERE agent.run_id=? AND agent.agent_id=?
+      `).get(context.fixture.runId, context.agentId)).toEqual({
+        lifecycle: "suspended",
+        provider_session_generation: 1,
+        bridge_generation: 1,
+        state: "committing",
+        terminal: 0,
+      });
+      expectUnverifiedCommittingAdvanceRejected(database, context.fixture.runId, context.agentId);
+    } finally {
+      database.close();
+    }
+
+    await context.fabric.close();
+    context.authority.readReceiptAbsentFromCall = Number.POSITIVE_INFINITY;
+    const restarted = await openFabric({
+      databasePath: context.fixture.databasePath,
+      workspaceRoots: [context.fixture.directory],
+      clock: context.fixture.clock.now,
+      fabricSocketPath: join(context.fixture.directory, "authority-worker-restart.sock"),
+      lifecycleReceiptAuthority: context.authority,
+      adapters: {
+        "fake-lifecycle": {
+          command: [process.execPath, "--import", "tsx", fakeProvider],
+          environment: {
+            LIFECYCLE_FAKE_JOURNAL: context.fixture.providerJournalPath,
+          },
+        },
+      },
+    });
+    cleanup.push(async () => await restarted.close());
+    await expect(restarted.recoverStartupState()).resolves.toMatchObject({
+      actionsReconciled: 0,
+      actionsQuarantined: 0,
+    });
+    const restartedChair = restarted.connect(context.fixture.capabilities.chair);
+    await eventually(async () => {
+      const lifecycle = await restartedChair.getAgentLifecycle({ agentId: context.agentId });
+      expect(lifecycle).toMatchObject({
+        lifecycle: "ready",
+        providerSessionGeneration: 1,
+        bridgeGeneration: 1,
+        currentSource: { state: "finalized", disposition: "superseded" },
+      });
+    });
+    const converged = new Database(context.fixture.databasePath, { readonly: true });
+    try {
+      expect(converged.prepare("SELECT count(*) AS count FROM lifecycle_authority_receipts").get()).toEqual({ count: 2 });
+      expect(converged.prepare("SELECT count(*) AS count FROM lifecycle_transition_applies").get()).toEqual({ count: 1 });
+      expect(converged.prepare("SELECT count(*) AS count FROM lifecycle_operations").get()).toEqual({ count: 0 });
+      const terminalRevisions = converged.prepare(`
+        SELECT revision,state,semantic_digest,journal_digest
+          FROM lifecycle_rotation_custody_revisions
+         WHERE run_id=? AND agent_id=?
+         ORDER BY revision DESC LIMIT 3
+      `).all(context.fixture.runId, context.agentId).reverse() as Array<{
+        revision: number;
+        state: string;
+        semantic_digest: string;
+        journal_digest: string;
+      }>;
+      expect(terminalRevisions.map(({ revision, state }) => ({ revision, state }))).toEqual([
+        { revision: terminalRevisions[0]!.revision, state: "committing" },
+        { revision: terminalRevisions[0]!.revision + 1, state: "committing" },
+        { revision: terminalRevisions[0]!.revision + 2, state: "finalized" },
+      ]);
+      expect(new Set(terminalRevisions.map((revision) => revision.semantic_digest)).size).toBe(3);
+      expect(new Set(terminalRevisions.map((revision) => revision.journal_digest)).size).toBe(3);
+      const preparedApplies = converged.prepare(`
+        SELECT batch.planned_apply_id,effect.pre_revision,effect.final_revision,
+               json_extract(batch.transition_replay_json,'$.terminalDisposition') AS disposition,
+               CASE WHEN applied.apply_id IS NULL THEN 0 ELSE 1 END AS applied
+          FROM lifecycle_receipt_batches batch
+          JOIN lifecycle_receipt_custody_effects effect ON effect.batch_id=batch.batch_id
+          LEFT JOIN lifecycle_transition_applies applied ON applied.receipt_batch_id=batch.batch_id
+         WHERE batch.run_id=? AND batch.agent_id=?
+         ORDER BY effect.final_revision
+      `).all(context.fixture.runId, context.agentId) as Array<{
+        planned_apply_id: string;
+        pre_revision: number;
+        final_revision: number;
+        disposition: string;
+        applied: number;
+      }>;
+      expect(preparedApplies).toHaveLength(2);
+      expect(preparedApplies[0]).toMatchObject({
+        planned_apply_id: expect.stringMatching(/:apply$/u),
+        pre_revision: terminalRevisions[0]!.revision,
+        final_revision: terminalRevisions[1]!.revision,
+        disposition: "adopted",
+        applied: 0,
+      });
+      expect(preparedApplies[1]).toMatchObject({
+        planned_apply_id: expect.stringMatching(/:apply:postterminal-superseded$/u),
+        pre_revision: terminalRevisions[1]!.revision,
+        final_revision: terminalRevisions[2]!.revision,
+        disposition: "superseded",
+        applied: 1,
+      });
+      expect(converged.prepare(`
+        SELECT status,result_json FROM provider_actions
+         WHERE run_id=? AND action_id=?
+      `).get(context.fixture.runId, "lifecycle:authority-worker:source-vector-drift:spawn")).toMatchObject({
+        status: "terminal",
+        result_json: expect.stringContaining("lifecycleAttestation"),
+      });
+    } finally {
+      converged.close();
+    }
+  });
+
+  it("hydrates an authoritative stale adoption receipt after a pre-persist crash and supersedes without reappend", async () => {
+    let injected = false;
+    const context = await configuredFixture("none", {
+      spawnDelayMs: 100,
+      fault: (label) => {
+        if (label === "lifecycle-rotation:after-authoritative-adoption-receipt" && !injected) {
+          injected = true;
+          throw new Error(`fault:${label}`);
+        }
+      },
+    });
+    context.authority.onReadReceiptOnce = () => {
+      const racing = new Database(context.fixture.databasePath);
+      try {
+        racing.prepare(`
+          UPDATE mailbox_state SET next_sequence=next_sequence+1
+           WHERE run_id=? AND recipient_id=?
+        `).run(context.fixture.runId, context.agentId);
+      } finally {
+        racing.close();
+      }
+    };
+
+    await requestRetainedRotation(context, "lifecycle:authority-worker:pre-persist-crash");
+    await eventually(() => {
+      const database = new Database(context.fixture.databasePath, { readonly: true });
+      try {
+        const failure = database.prepare(`
+          SELECT payload_json FROM events
+           WHERE run_id=? AND type='lifecycle-continuation-failed'
+           ORDER BY created_at DESC LIMIT 1
+        `).get(context.fixture.runId) as { payload_json: string } | undefined;
+        expect(JSON.parse(failure?.payload_json ?? "{}")).toMatchObject({
+          message: "fault:lifecycle-rotation:after-authoritative-adoption-receipt",
+        });
+      } finally {
+        database.close();
+      }
+    });
+    expect(injected).toBe(true);
+    expect(context.authority.appendCalls).toBe(1);
+    const crashed = new Database(context.fixture.databasePath);
+    try {
+      const projectSession = crashed.prepare(`
+        SELECT project_session_id FROM runs WHERE run_id=?
+      `).get(context.fixture.runId) as { project_session_id: string };
+      expect(context.authority.scopeRecords(
+        projectSession.project_session_id,
+        context.fixture.runId,
+      )).toHaveLength(1);
+      expect(crashed.prepare("SELECT count(*) AS count FROM lifecycle_authority_receipts").get()).toEqual({ count: 0 });
+      expectUnverifiedCommittingAdvanceRejected(crashed, context.fixture.runId, context.agentId);
+      expect(crashed.prepare("SELECT count(*) AS count FROM lifecycle_transition_applies").get()).toEqual({ count: 0 });
+      expect(crashed.prepare(`
+        SELECT state,terminal FROM lifecycle_rotation_custody_heads
+         WHERE run_id=? AND agent_id=?
+      `).get(context.fixture.runId, context.agentId)).toEqual({ state: "committing", terminal: 0 });
+    } finally {
+      crashed.close();
+    }
+
+    await context.fabric.close();
+    const restarted = await openFabric({
+      databasePath: context.fixture.databasePath,
+      workspaceRoots: [context.fixture.directory],
+      clock: context.fixture.clock.now,
+      fabricSocketPath: join(context.fixture.directory, "authority-worker-pre-persist-restart.sock"),
+      lifecycleReceiptAuthority: context.authority,
+      adapters: {
+        "fake-lifecycle": {
+          command: [process.execPath, "--import", "tsx", fakeProvider],
+          environment: { LIFECYCLE_FAKE_JOURNAL: context.fixture.providerJournalPath },
+        },
+      },
+    });
+    cleanup.push(async () => await restarted.close());
+    await expect(restarted.recoverStartupState()).resolves.toMatchObject({
+      actionsReconciled: 0,
+      actionsQuarantined: 0,
+    });
+    const restartedChair = restarted.connect(context.fixture.capabilities.chair);
+    await expect(restartedChair.getAgentLifecycle({ agentId: context.agentId })).resolves.toMatchObject({
+      lifecycle: "ready",
+      providerSessionGeneration: 1,
+      bridgeGeneration: 1,
+      currentSource: { state: "finalized", disposition: "superseded" },
+    });
+    expect(context.authority.appendCalls).toBe(2);
+    const converged = new Database(context.fixture.databasePath, { readonly: true });
+    try {
+      expect(converged.prepare("SELECT count(*) AS count FROM lifecycle_authority_receipts").get()).toEqual({ count: 2 });
+      expect(converged.prepare("SELECT count(*) AS count FROM lifecycle_transition_applies").get()).toEqual({ count: 1 });
+      expect(converged.prepare(`
+        SELECT
+          SUM(CASE WHEN apply_id LIKE '%:apply' THEN 1 ELSE 0 END) AS original_applies,
+          SUM(CASE WHEN apply_id LIKE '%:apply:postterminal-superseded' THEN 1 ELSE 0 END) AS superseding_applies
+          FROM lifecycle_transition_applies
+      `).get()).toEqual({ original_applies: 0, superseding_applies: 1 });
+      expect(converged.prepare(`
+        SELECT COUNT(*) AS count
+          FROM lifecycle_authority_receipts receipt
+          JOIN lifecycle_receipt_batches batch ON batch.batch_id=receipt.batch_id
+         WHERE json_extract(batch.transition_replay_json,'$.terminalDisposition')='adopted'
+      `).get()).toEqual({ count: 1 });
+    } finally {
+      converged.close();
+    }
+  });
+
+  it.each(["custody", "unknown-provider-field"] as const)(
+    "rejects %s lifecycle launch attestation evidence before provider-terminal adoption",
+    async (attestationMutation) => {
+      const context = await configuredFixture("none", { attestationMutation });
+      await requestRetainedRotation(context, `lifecycle:authority-worker:attestation-${attestationMutation}`);
+      await eventually(() => {
+        const database = new Database(context.fixture.databasePath, { readonly: true });
+        try {
+          const failure = database.prepare(`
+            SELECT payload_json FROM events
+             WHERE run_id=? AND type='lifecycle-continuation-failed'
+             ORDER BY created_at DESC LIMIT 1
+          `).get(context.fixture.runId) as { payload_json: string } | undefined;
+          expect(JSON.parse(failure?.payload_json ?? "{}").message).toBeTypeOf("string");
+        } finally {
+          database.close();
+        }
+      });
+      const database = new Database(context.fixture.databasePath, { readonly: true });
+      try {
+        expect(database.prepare(`
+          SELECT count(*) AS count FROM lifecycle_rotation_custody_revisions
+           WHERE state='provider-terminal'
+        `).get()).toEqual({ count: 0 });
+        expect(database.prepare("SELECT count(*) AS count FROM lifecycle_transition_applies").get()).toEqual({ count: 0 });
+      } finally {
+        database.close();
+      }
+    },
+  );
+
+  it("redacts a provider-reflected lifecycle challenge from adapter journals and durable failure events", async () => {
+    const context = await configuredFixture("none", { reflectLifecycleChallengeError: true });
+    await requestRetainedRotation(context, "lifecycle:authority-worker:private-error");
+    await eventually(() => {
+      const database = new Database(context.fixture.databasePath, { readonly: true });
+      try {
+        const event = database.prepare(`
+          SELECT payload_json FROM events
+           WHERE run_id=? AND type='lifecycle-continuation-failed'
+           ORDER BY created_at DESC LIMIT 1
+        `).get(context.fixture.runId) as { payload_json: string } | undefined;
+        expect(JSON.parse(event?.payload_json ?? "{}")).toMatchObject({
+          message: "lifecycle replacement provider failed",
+        });
+      } finally {
+        database.close();
+      }
+    });
+    const challenge = (await readFile(
+      join(context.fixture.directory, "lifecycle-challenge-canary.txt"),
+      "utf8",
+    )).trim();
+    expect(challenge).toMatch(/^[0-9a-f]{64}$/u);
+    const providerJournal = await readFile(context.fixture.providerJournalPath, "utf8");
+    expect(providerJournal).not.toContain(challenge);
+    const database = new Database(context.fixture.databasePath, { readonly: true });
+    try {
+      const durableEvents = database.prepare(`
+        SELECT payload_json FROM events WHERE run_id=?
+      `).all(context.fixture.runId) as Array<{ payload_json: string }>;
+      expect(JSON.stringify(durableEvents)).not.toContain(challenge);
     } finally {
       database.close();
     }

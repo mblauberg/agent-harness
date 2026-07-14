@@ -3684,6 +3684,45 @@ BEGIN
           (p.state='accepted' AND NEW.state IN ('ambiguous','provider-terminal') AND NEW.disposition_code='none') OR
           (p.state='ambiguous' AND NEW.state='provider-terminal' AND NEW.disposition_code='none') OR
           (p.state='provider-terminal' AND NEW.state='committing' AND NEW.disposition_code='none') OR
+          (p.state='committing' AND NEW.state='committing' AND NEW.disposition_code='none'
+            AND NEW.terminal_evidence_digest=p.terminal_evidence_digest
+            AND EXISTS (
+              SELECT 1
+                FROM lifecycle_receipt_custody_effects effect
+                JOIN lifecycle_receipt_batches batch ON batch.batch_id=effect.batch_id
+                JOIN lifecycle_receipt_intents intent
+                  ON intent.batch_id=batch.batch_id AND intent.ordinal=1
+                 AND intent.kind='custody-terminal'
+                 AND intent.custody_effect_digest=effect.effect_digest
+                JOIN lifecycle_authority_receipts receipt
+                  ON receipt.intent_digest=intent.intent_digest
+                 AND receipt.batch_id=intent.batch_id
+                 AND receipt.ordinal=intent.ordinal
+                 AND receipt.project_session_id=intent.project_session_id
+                 AND receipt.run_id=intent.run_id AND receipt.agent_id=intent.agent_id
+                 AND receipt.kind=intent.kind
+                 AND receipt.subject_owner_kind=intent.subject_owner_kind
+                 AND receipt.subject_owner_id=intent.subject_owner_id
+                 AND receipt.subject_owner_revision=intent.subject_owner_revision
+                 AND receipt.subject_digest=intent.subject_digest
+               WHERE effect.project_session_id=NEW.project_session_id
+                 AND effect.run_id=NEW.run_id AND effect.agent_id=NEW.agent_id
+                 AND effect.custody_id=NEW.custody_id
+                 AND effect.pre_revision=p.revision
+                 AND effect.pre_journal_digest=p.journal_digest
+                 AND effect.final_revision=NEW.revision
+                 AND batch.planned_apply_id=NEW.custody_id || ':apply'
+                 AND batch.transition_kind='custody-terminal'
+                 AND batch.planned_apply_kind='terminal'
+                 AND json_extract(batch.transition_replay_json,
+                       '$.terminalDisposition')='adopted'
+                 AND receipt.verified_at IS NOT NULL
+                 AND NOT EXISTS (
+                   SELECT 1 FROM lifecycle_transition_applies applied
+                    WHERE applied.receipt_batch_id=batch.batch_id
+                       OR applied.apply_id=batch.planned_apply_id
+                 )
+            )) OR
           (NEW.state='finalized' AND NEW.disposition_code IN ('quarantined','abandoned')) OR
           (p.state IN ('awaiting-boundary','prepared') AND NEW.state='finalized' AND NEW.disposition_code IN ('no-effect','superseded')) OR
           (p.state='provider-terminal' AND NEW.state='finalized' AND NEW.disposition_code IN ('no-effect','superseded')) OR

@@ -196,6 +196,7 @@ import { resolveRunArtifactRoot } from "../artifacts/run-root.js";
 import {
   LifecycleRotationRepository,
   type LifecycleCustodyHead,
+  type PreparedChildCustodyTerminal,
 } from "../lifecycle/rotation-repository.js";
 import {
   GenerationLossRepository,
@@ -266,6 +267,12 @@ type StoredAuthority = {
   budget: Record<string, number>;
 };
 
+class LifecycleAdoptionSourceVectorDriftError extends Error {
+  constructor(readonly expectedDigest: string, readonly observedDigest: string) {
+    super("lifecycle accepted source vector changed before adoption apply");
+  }
+}
+
 
 function isRow(value: unknown): value is Row {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -330,6 +337,11 @@ function canonicalJson(value: unknown): string {
       .join(",")}}`;
   }
   throw new TypeError("value is not JSON-compatible");
+}
+
+function privateSafeErrorMessage(error: unknown, privateValues: readonly string[], fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return privateValues.some((value) => message.includes(value)) ? fallback : message;
 }
 
 function sha256(value: string): string {
@@ -7204,7 +7216,18 @@ export class Fabric {
     }
   }
 
-  #lifecycleRotationPreconditionDigest(runId: string, agentId: string, taskId: string): string {
+  #lifecycleRotationSourceVectorDigest(
+    runId: string,
+    agentId: string,
+    taskId: string,
+    checkpoint: LifecycleCheckpoint,
+    adoptionDeliveries: readonly Readonly<{
+      deliveryId: string;
+      claimGeneration: number;
+      requesterAgentId: string;
+      targetProviderSession: string;
+    }>[],
+  ): string {
     const task = rowOrNotFound(this.#database.prepare(`
       SELECT task_id,authority_id,state,owner_agent_id,revision,owner_lease_generation
         FROM tasks WHERE run_id=? AND task_id=?
@@ -7236,47 +7259,35 @@ export class Fabric {
         FROM tasks WHERE run_id=? AND owner_agent_id=?
        ORDER BY task_id
     `).all(runId, agentId);
-    const provider = rowOrNotFound(this.#database.prepare(`
-      SELECT agent.provider_session_ref,agent.authority_id,binding.adapter_id,binding.contract_version,
-             COALESCE(state.provider_session_generation,1) AS provider_session_generation,
-             state.context_revision,state.reconciled_checkpoint_sha256
-        FROM agents agent LEFT JOIN provider_state state
-          ON state.run_id=agent.run_id AND state.agent_id=agent.agent_id
-        LEFT JOIN agent_adapter_bindings binding
-          ON binding.run_id=agent.run_id AND binding.agent_id=agent.agent_id
-       WHERE agent.run_id=? AND agent.agent_id=?
-    `).get(runId, agentId), "lifecycle provider state");
-    const principals = this.#database.prepare(`
-      SELECT token_hash,principal_generation,expires_at,revoked_at
-        FROM capabilities WHERE run_id=? AND agent_id=?
-       ORDER BY principal_generation,token_hash
-    `).all(runId, agentId);
-    const writeLeases = this.#database.prepare(`
-      SELECT lease_id,kind,generation,status,expires_at,updated_at
-        FROM leases WHERE run_id=? AND holder_agent_id=?
-       ORDER BY lease_id
-    `).all(runId, agentId);
-    const providerTurns = this.#database.prepare(`
-      SELECT provider_session_generation,turn_lease_generation,action_id,status,created_at,updated_at
-        FROM provider_session_turn_leases WHERE run_id=? AND agent_id=?
-       ORDER BY turn_lease_generation
-    `).all(runId, agentId);
-    const bridge = this.#database.prepare(`
-      SELECT bridge_state,provider_session_ref,provider_session_generation,bridge_generation,revision
-        FROM agent_bridge_state WHERE run_id=? AND agent_id=?
-    `).get(runId, agentId) ?? null;
-    return sha256(canonicalJson({
+    const capturedDeliveries = adoptionDeliveries.map((captured) => {
+      const live = this.#database.prepare(`
+        SELECT result_delivery_id AS deliveryId,claim_generation AS claimGeneration,
+               requester_agent_id AS requesterAgentId,target_provider_session AS targetProviderSession,state
+          FROM result_deliveries WHERE result_delivery_id=? AND run_id=?
+      `).get(captured.deliveryId, runId);
+      return isRow(live) && ["claimed", "provider-accepted"].includes(String(live.state))
+        ? { deliveryId: live.deliveryId, claimGeneration: live.claimGeneration,
+            requesterAgentId: live.requesterAgentId, targetProviderSession: live.targetProviderSession,
+            eligibility: "captured" }
+        : null;
+    });
+    return sha256Digest(canonicalJson({
+      schemaVersion: 1,
       task,
       mailbox,
       deliveries,
       children,
       childTasks,
       ownedTasks,
-      provider,
-      principals,
-      writeLeases,
-      providerTurns,
-      bridge,
+      checkpoint: {
+        relativePath: checkpoint.relativePath,
+        sha256: checkpoint.sha256,
+        mailboxWatermark: checkpoint.mailboxWatermark,
+        acknowledgedAboveWatermark: [...checkpoint.acknowledgedAboveWatermark].sort(),
+        inFlightChildren: [...checkpoint.inFlightChildren].sort(),
+        openWork: [...checkpoint.openWork].sort(),
+      },
+      capturedDeliveries,
     }));
   }
 
@@ -7375,6 +7386,9 @@ export class Fabric {
     const targetPrincipalGeneration = targetGenerations.principalGeneration;
     const targetBridgeGeneration = targetGenerations.bridgeGeneration;
     const checkpointDigest = `sha256:${input.checkpoint.sha256}`;
+    const launchAttestationChallenge = randomBytes(32).toString("hex");
+    const launchAttestationChallengeDigest = `sha256:${createHash("sha256")
+      .update(Buffer.from(launchAttestationChallenge, "hex")).digest("hex")}`;
     const stagedCapability = `afc_${randomBytes(32).toString("base64url")}`;
     const stagedCapabilityHash = sha256(stagedCapability);
     const prompt = lifecycleHandoffPrompt({
@@ -7442,6 +7456,9 @@ export class Fabric {
       requesterAgentId: delivery.requesterAgentId,
       sourceState: delivery.state,
     }))));
+    const stableSourceVectorDigest = this.#lifecycleRotationSourceVectorDigest(
+      runId, agentId, input.taskId, input.checkpoint, capturedAdoptionDeliveries,
+    );
     const openWorkSetDigest = sha256Digest(canonicalJson([...input.checkpoint.openWork].sort()));
     const predecessorTurnSetDigest = sha256Digest(canonicalJson([{
       adapterId,
@@ -7537,6 +7554,11 @@ export class Fabric {
         }
       });
       quarantinedWriteSetDigest = sha256Digest(canonicalJson(capturedWriteLeases));
+      if (this.#lifecycleRotationSourceVectorDigest(
+        runId, agentId, input.taskId, input.checkpoint, capturedAdoptionDeliveries,
+      ) !== stableSourceVectorDigest) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle accepted source vector changed before custody capture");
+      }
       this.#lifecycleRotations.createInCurrentTransaction({
         projectSessionId: accepted.projectSessionId,
         runId,
@@ -7578,8 +7600,8 @@ export class Fabric {
         replacementAdapterId: adapterId,
         replacementContractDigest: stringField(source, "bridge_contract_digest"),
         stagedCapabilityHash,
-        launchAttestChallengeDigest: sha256(randomBytes(32).toString("hex")),
-        preconditionDigest: this.#lifecycleRotationPreconditionDigest(runId, agentId, input.taskId),
+        launchAttestChallengeDigest: launchAttestationChallengeDigest,
+        preconditionDigest: stableSourceVectorDigest,
         createdAt: this.#clock(),
       });
       const ownLease = this.#database.prepare(`
@@ -7650,6 +7672,8 @@ export class Fabric {
       capabilityExpiresAt: numberField(source, "expires_at"),
       providerPayload,
       checkpointSha256: input.checkpoint.sha256,
+      launchAttestationChallenge,
+      launchAttestationChallengeDigest,
       lifecycleInput: input,
     });
     return accepted;
@@ -7890,6 +7914,7 @@ export class Fabric {
   async #recoverLifecycleRotations(): Promise<void> {
     const pending = this.#database.prepare(`
       SELECT head.state,head.current_revision,custody.*,
+             head_revision.terminal_evidence_digest AS head_terminal_evidence_digest,
              action.status AS action_status,action.history_json,action.execution_count,
              action.effect_count,action.idempotency_proven,action.payload_json,action.result_json,
              agent.authority_id,capability.expires_at,checkpoint.checkpoint_json,
@@ -7904,6 +7929,11 @@ export class Fabric {
         JOIN lifecycle_rotation_custodies custody
           ON custody.run_id=head.run_id AND custody.agent_id=head.agent_id
          AND custody.custody_id=head.custody_id
+        JOIN lifecycle_rotation_custody_revisions head_revision
+          ON head_revision.project_session_id=head.project_session_id
+         AND head_revision.run_id=head.run_id AND head_revision.agent_id=head.agent_id
+         AND head_revision.custody_id=head.custody_id
+         AND head_revision.revision=head.current_revision
         LEFT JOIN provider_actions action
           ON action.run_id=custody.run_id
          AND action.adapter_id=custody.provider_action_adapter_id
@@ -7938,6 +7968,34 @@ export class Fabric {
         sourceProviderSessionRef: stringField(row, "source_provider_session_ref"),
         stagedCapabilityHash: stringField(row, "staged_capability_hash"),
       };
+      let recoveredCheckpoint: LifecycleCheckpoint | null = null;
+      try {
+        const candidate: unknown = JSON.parse(stringField(row, "checkpoint_json"));
+        if (isLifecycleCheckpoint(candidate)) recoveredCheckpoint = candidate;
+      } catch {
+        recoveredCheckpoint = null;
+      }
+      const recoveredAdoptionDeliveries = this.#database.prepare(`
+        SELECT ownership.delivery_id AS deliveryId,
+               ownership.delivery_generation AS claimGeneration,
+               ownership.recipient_agent_id AS requesterAgentId,
+               custody.source_provider_session_ref AS targetProviderSession
+          FROM lifecycle_custody_adoption_deliveries ownership
+          JOIN lifecycle_rotation_custodies custody
+            ON custody.run_id=ownership.run_id AND custody.agent_id=ownership.agent_id
+           AND custody.custody_id=ownership.custody_id
+         WHERE ownership.run_id=? AND ownership.agent_id=? AND ownership.custody_id=?
+           AND ownership.active_owner=1
+         ORDER BY ownership.ordinal
+      `).all(runId, agentId, minimalInput.custodyId).map((candidate) => {
+        const delivery = rowOrNotFound(candidate, "recoverable lifecycle adoption delivery");
+        return {
+          deliveryId: stringField(delivery, "deliveryId"),
+          claimGeneration: numberField(delivery, "claimGeneration"),
+          requesterAgentId: stringField(delivery, "requesterAgentId"),
+          targetProviderSession: stringField(delivery, "targetProviderSession"),
+        };
+      });
       let head = this.#lifecycleRotations.readHead(runId, agentId, minimalInput.custodyId);
       const finalizeQuarantine = async (reason: string, evidence: unknown): Promise<void> => {
         const proof = {
@@ -8025,13 +8083,26 @@ export class Fabric {
             `).get(agentId, runId);
         const sourceChanged = !isRow(observedSource) ||
           canonicalJson(observedSource) !== canonicalJson(expectedSource);
-        if (!checkpointChanged && !sourceChanged) return null;
+        const observedSourceVectorDigest = recoveredCheckpoint === null
+          ? null
+          : this.#lifecycleRotationSourceVectorDigest(
+              runId,
+              agentId,
+              stringField(row, "checkpoint_task_id"),
+              recoveredCheckpoint,
+              recoveredAdoptionDeliveries,
+            );
+        const sourceVectorChanged = observedSourceVectorDigest !== null &&
+          observedSourceVectorDigest !== stringField(row, "precondition_digest");
+        if (!checkpointChanged && !sourceChanged && !sourceVectorChanged) return null;
         return {
-          driftKind: checkpointChanged ? "checkpoint" : "source",
+          driftKind: checkpointChanged ? "checkpoint" : sourceChanged ? "source" : "accepted-source-vector",
           expectedCheckpointDigest,
           observedCheckpointDigest,
           expectedSource,
           observedSource: observedSource ?? null,
+          expectedSourceVectorDigest: stringField(row, "precondition_digest"),
+          observedSourceVectorDigest,
         };
       };
       const finalizeSuperseded = async (
@@ -8039,6 +8110,68 @@ export class Fabric {
         terminalObservation: unknown = null,
       ): Promise<void> => {
         const postterminal = head.state === "provider-terminal" || head.state === "committing";
+        const abandonedAdoption = postterminal
+          ? this.#lifecycleRotations.readPreparedChildCustodyTerminal(
+              runId,
+              agentId,
+              minimalInput.custodyId,
+              `${minimalInput.custodyId}:apply`,
+            )
+          : null;
+        let recoveredAdoptionReceipt: LifecycleReceiptRecord | null = null;
+        if (abandonedAdoption?.disposition === "adopted" && abandonedAdoption.preRevision === head.revision) {
+          const localReceipt = this.#database.prepare(`
+            SELECT receipt_digest FROM lifecycle_authority_receipts WHERE intent_digest=?
+          `).get(abandonedAdoption.intentDigest);
+          if (!isRow(localReceipt)) {
+            const authority = this.#lifecycleReceiptAuthority;
+            if (authority === undefined) {
+              throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle receipt authority recovery is unavailable");
+            }
+            const lookup = {
+              kind: "custody-terminal" as const,
+              projectSessionId: abandonedAdoption.projectSessionId,
+              runId: abandonedAdoption.runId,
+              agentId: abandonedAdoption.agentId,
+              ownerRefDigest: abandonedAdoption.ownerRefDigest as LifecycleDigest,
+              ownerRevision: abandonedAdoption.finalRevision,
+            };
+            try {
+              recoveredAdoptionReceipt = await authority.readReceipt(lookup);
+            } catch (error: unknown) {
+              throw new FabricError("CAPABILITY_UNAVAILABLE", "stale lifecycle adoption receipt read failed", { cause: error });
+            }
+            if (
+              recoveredAdoptionReceipt === null ||
+              canonicalJson(recoveredAdoptionReceipt.subject) !== abandonedAdoption.subjectJson ||
+              recoveredAdoptionReceipt.receipt.intentDigest !== abandonedAdoption.intentDigest ||
+              recoveredAdoptionReceipt.receipt.subjectDigest !== abandonedAdoption.subjectDigest ||
+              !await authority.verifyReceipt(abandonedAdoption.subject, recoveredAdoptionReceipt.receipt)
+            ) {
+              throw new FabricError(
+                "LIFECYCLE_PRECONDITION_FAILED",
+                "stale lifecycle adoption receipt authority evidence is absent or crossed",
+              );
+            }
+          }
+          head = this.#database.transaction(() => {
+            if (recoveredAdoptionReceipt !== null) {
+              this.#persistVerifiedLifecycleAuthorityReceiptInCurrentTransaction(
+                abandonedAdoption,
+                recoveredAdoptionReceipt,
+              );
+            }
+            return this.#lifecycleRotations.appendInCurrentTransaction({
+              runId,
+              agentId,
+              custodyId: minimalInput.custodyId,
+              expectedRevision: head.revision,
+              state: "committing",
+              terminalEvidenceDigest: abandonedAdoption.terminalEvidenceDigest,
+              recordedAt: this.#clock(),
+            });
+          }).immediate();
+        }
         const expectedSourceJournalDigest = sha256Digest(canonicalJson(drift.expectedSource));
         const observedSourceJournalDigest = sha256Digest(canonicalJson(drift.observedSource));
         const base = {
@@ -8061,7 +8194,9 @@ export class Fabric {
           kind: "predispatch-superseded",
           driftKind: drift.driftKind,
         };
-        const digest = sha256Digest(canonicalJson(proof));
+        const digest = postterminal
+          ? stringField(row, "head_terminal_evidence_digest")
+          : sha256Digest(canonicalJson(proof));
         await this.#ensureLifecycleReceiptScope(runId, agentId);
         await this.#finalizeLifecycleRotationAdopted(minimalInput, head, digest, null, {
           disposition: "superseded",
@@ -8146,6 +8281,11 @@ export class Fabric {
           const parsed = parseAgentProvisionProviderResult(rawResult, {
             adapterId, actionId, targetAgentId: agentId, bridgeGeneration: targetBridgeGeneration,
             bridgeContractDigest,
+            lifecycleAttestation: {
+              custodyId: minimalInput.custodyId,
+              checkpointDigest: stringField(row, "checkpoint_digest"),
+              challengeDigest: stringField(row, "launch_attest_challenge_digest"),
+            },
           });
           if (parsed.providerSessionGeneration !== numberField(row, "target_provider_generation")) {
             throw new Error("lifecycle provider result crossed its reserved generation");
@@ -8207,6 +8347,11 @@ export class Fabric {
         result = parseAgentProvisionProviderResult(rawResult, {
           adapterId, actionId, targetAgentId: agentId, bridgeGeneration: targetBridgeGeneration,
           bridgeContractDigest,
+          lifecycleAttestation: {
+            custodyId: minimalInput.custodyId,
+            checkpointDigest: stringField(row, "checkpoint_digest"),
+            challengeDigest: stringField(row, "launch_attest_challenge_digest"),
+          },
         });
         if (result.providerSessionGeneration !== numberField(row, "target_provider_generation")) {
           throw new Error("lifecycle provider result crossed its reserved generation");
@@ -8294,6 +8439,8 @@ export class Fabric {
     capabilityExpiresAt: number;
     providerPayload: Record<string, unknown>;
     checkpointSha256: string;
+    launchAttestationChallenge: string;
+    launchAttestationChallengeDigest: string;
     lifecycleInput: {
       action: "compact" | "rotate";
       agentId: string;
@@ -8316,7 +8463,11 @@ export class Fabric {
     void continuation.catch((error: unknown) => {
       this.#event(input.runId, "lifecycle-continuation-failed", input.agentId, {
         custodyId: input.custodyId,
-        message: error instanceof Error ? error.message : String(error),
+        message: privateSafeErrorMessage(
+          error,
+          [input.launchAttestationChallenge],
+          "lifecycle replacement provider failed",
+        ),
       });
     }).finally(() => {
       if (this.#ownedProviderActions.get(key) === continuation) this.#ownedProviderActions.delete(key);
@@ -8343,6 +8494,8 @@ export class Fabric {
     capabilityExpiresAt: number;
     providerPayload: Record<string, unknown>;
     checkpointSha256: string;
+    launchAttestationChallenge: string;
+    launchAttestationChallengeDigest: string;
     lifecycleInput: {
       action: "compact" | "rotate";
       agentId: string;
@@ -8412,6 +8565,11 @@ export class Fabric {
       bridgeGeneration: input.targetBridgeGeneration,
       bridgeContractDigest: input.bridgeContractDigest,
       payload: input.providerPayload,
+      lifecycleAttestation: {
+        custodyId: input.custodyId,
+        checkpointDigest: `sha256:${input.checkpointSha256}`,
+        challengeDigest: input.launchAttestationChallengeDigest,
+      },
     }, {
       capability: input.stagedCapability,
       socketPath: this.#fabricSocketPath as string,
@@ -8426,6 +8584,12 @@ export class Fabric {
         ),
         runId: input.runId,
         principalGeneration: input.targetPrincipalGeneration,
+      },
+      lifecycleAttestation: {
+        challenge: input.launchAttestationChallenge,
+        custodyId: input.custodyId,
+        checkpointDigest: `sha256:${input.checkpointSha256}`,
+        challengeDigest: input.launchAttestationChallengeDigest,
       },
     });
     if (result.providerSessionGeneration !== input.targetProviderGeneration) {
@@ -8536,7 +8700,9 @@ export class Fabric {
           ON head.project_session_id=scope.project_session_id AND head.run_id=scope.run_id
        WHERE scope.project_session_id=? AND scope.run_id=?
     `).get(head.projectSessionId, input.runId), "admitted lifecycle receipt scope");
-    const applyId = `${input.custodyId}:apply`;
+    const applyId = terminal.proofKind === "postterminal-adoption-cas-superseded"
+      ? `${input.custodyId}:apply:postterminal-superseded`
+      : `${input.custodyId}:apply`;
     const transitionProof = {
       ...terminal.transitionProof,
       actionRef: { adapterId: input.adapterId, actionId: input.actionId },
@@ -8547,7 +8713,8 @@ export class Fabric {
              target_bridge_generation,staged_capability_hash,
              source_adapter_id,source_custody_action_id,source_adapter_contract_digest,
              source_provider_session_ref,source_provider_generation,
-             source_principal_generation,source_bridge_generation,source_bridge_revision
+             source_principal_generation,source_bridge_generation,source_bridge_revision,
+             precondition_digest,launch_attest_challenge_digest,checkpoint_digest
         FROM lifecycle_rotation_custodies
        WHERE run_id=? AND agent_id=? AND custody_id=?
     `).get(input.runId, input.agentId, input.custodyId), "lifecycle custody owner");
@@ -8880,6 +9047,25 @@ export class Fabric {
       writeSetDigest: exactMutationPlan.writeSetDigest,
     };
     const revalidateMutationWrites = (): void => {
+      if (terminal.disposition === "adopted") {
+        const lifecycleInput = input.lifecycleInput as NonNullable<typeof input.lifecycleInput>;
+        const observedSourceVector = this.#lifecycleRotationSourceVectorDigest(
+          input.runId,
+          input.agentId,
+          lifecycleInput.taskId,
+          lifecycleInput.checkpoint,
+          custodyAdoptionDeliveries.map((delivery) => ({
+            deliveryId: stringField(delivery, "deliveryId"),
+            claimGeneration: numberField(delivery, "claimGeneration"),
+            requesterAgentId: stringField(delivery, "requesterAgentId"),
+            targetProviderSession: input.sourceProviderSessionRef,
+          })),
+        );
+        const expectedSourceVector = stringField(custodyOwner, "precondition_digest");
+        if (observedSourceVector !== expectedSourceVector) {
+          throw new LifecycleAdoptionSourceVectorDriftError(expectedSourceVector, observedSourceVector);
+        }
+      }
       const observed = new Map<string, Readonly<Record<string, unknown>> | null>();
       observed.set("agent-state", rowOrNotFound(this.#database.prepare(`
         SELECT lifecycle,provider_session_ref FROM agents WHERE run_id=? AND agent_id=?
@@ -8987,6 +9173,7 @@ export class Fabric {
       input.runId,
       input.agentId,
       input.custodyId,
+      applyId,
     ) ?? this.#database.transaction(() =>
       this.#lifecycleRotations.prepareChildCustodyTerminalInCurrentTransaction({
         runId: input.runId,
@@ -9161,8 +9348,9 @@ export class Fabric {
     ) {
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt is absent from its pinned checkpoint");
     }
-    this.#database.transaction(() => {
-      this.#lifecycleRotations.applyAuthorizedChildCustodyTerminalInCurrentTransaction({
+    try {
+      this.#database.transaction(() => {
+        this.#lifecycleRotations.applyAuthorizedChildCustodyTerminalInCurrentTransaction({
         prepared,
         expectedRevision: head.revision,
         expectedScopeHead: {
@@ -9460,8 +9648,112 @@ export class Fabric {
             adopted.providerSessionRef,
           );
         },
-      });
-    }).immediate();
+        });
+      }).immediate();
+    } catch (error: unknown) {
+      if (terminal.disposition !== "adopted" || !(error instanceof LifecycleAdoptionSourceVectorDriftError)) {
+        throw error;
+      }
+      const driftEvidence = {
+        schemaVersion: 1,
+        expectedSourceVectorDigest: error.expectedDigest,
+        observedSourceVectorDigest: error.observedDigest,
+      };
+      const terminalObservationDigest = sha256Digest(canonicalJson(result));
+      const proof = {
+        schemaVersion: 1,
+        kind: "postterminal-adoption-cas-superseded",
+        sourceState: head.state,
+        expectedSourceJournalDigest: error.expectedDigest,
+        observedSourceJournalDigest: error.observedDigest,
+        expectedCheckpointDigest: stringField(custodyOwner, "checkpoint_digest"),
+        observedCheckpointDigest: stringField(custodyOwner, "checkpoint_digest"),
+        terminalObservationDigest,
+        replacementCandidateDigest: terminalObservationDigest,
+        expectedMutationPreconditionDigest: error.expectedDigest,
+        failedCasEvidenceDigest: sha256Digest(canonicalJson(driftEvidence)),
+      };
+      this.#fault("lifecycle-rotation:after-authoritative-adoption-receipt");
+      this.#database.transaction(() => {
+        this.#persistVerifiedLifecycleAuthorityReceiptInCurrentTransaction(prepared, record);
+      }).immediate();
+      head = this.#database.transaction(() => this.#lifecycleRotations.appendInCurrentTransaction({
+        runId: input.runId,
+        agentId: input.agentId,
+        custodyId: input.custodyId,
+        expectedRevision: head.revision,
+        state: "committing",
+        terminalEvidenceDigest,
+        recordedAt: this.#clock(),
+      })).immediate();
+      await this.#finalizeLifecycleRotationAdopted(
+        input,
+        head,
+        terminalEvidenceDigest,
+        null,
+        {
+          disposition: "superseded",
+          proofKind: "postterminal-adoption-cas-superseded",
+          transitionProof: proof,
+        },
+      );
+    }
+  }
+
+  #persistVerifiedLifecycleAuthorityReceiptInCurrentTransaction(
+    prepared: PreparedChildCustodyTerminal,
+    record: LifecycleReceiptRecord,
+  ): void {
+    if (!this.#database.inTransaction) {
+      throw new Error("lifecycle authority receipt persistence requires a transaction");
+    }
+    const existing = this.#database.prepare(`
+      SELECT receipt_digest FROM lifecycle_authority_receipts WHERE intent_digest=?
+    `).get(prepared.intentDigest);
+    if (isRow(existing)) {
+      if (stringField(existing, "receipt_digest") !== record.receipt.receiptDigest) {
+        throw new Error("stale lifecycle adoption receipt changed before supersession");
+      }
+      return;
+    }
+    const receiptBody = {
+      schemaVersion: 1,
+      kind: "custody-terminal",
+      authorityId: record.receipt.authorityId,
+      authoritySequence: record.receipt.authoritySequence,
+      previousReceiptDigest: record.receipt.previousReceiptDigest,
+      intentDigest: prepared.intentDigest,
+      subjectDigest: prepared.subjectDigest,
+    };
+    this.#database.prepare(`
+      INSERT INTO lifecycle_authority_receipts(
+        intent_digest,batch_id,ordinal,project_session_id,run_id,agent_id,kind,
+        subject_owner_kind,subject_owner_id,subject_owner_revision,subject_digest,
+        authority_id,authority_sequence,previous_authority_sequence,previous_receipt_digest,
+        receipt_json,receipt_digest,attestation,verified_at
+      ) VALUES (?, ?,1,?,?,?,'custody-terminal','custody',?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      prepared.intentDigest,
+      prepared.batchId,
+      prepared.projectSessionId,
+      prepared.runId,
+      prepared.agentId,
+      prepared.custodyId,
+      prepared.finalRevision,
+      prepared.subjectDigest,
+      record.receipt.authorityId,
+      record.receipt.authoritySequence,
+      record.receipt.authoritySequence === 1 ? null : record.receipt.authoritySequence - 1,
+      record.receipt.previousReceiptDigest,
+      canonicalJson({
+        ...receiptBody,
+        receiptDigest: record.receipt.receiptDigest,
+        attestation: record.receipt.attestation,
+      }),
+      record.receipt.receiptDigest,
+      record.receipt.attestation,
+      this.#clock(),
+    );
   }
 
   #verifyCheckpoint(

@@ -325,7 +325,9 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
       ? "{}"
       : chairSession !== undefined && chairSession.bridgeGeneration === undefined
         ? `{"challengeResponse":"${(chairSession.bridge as ChairLaunchFabricBridge).challengeResponse}"}`
-        : "{}";
+        : chairSession !== undefined && (chairSession.bridge as AgentSessionFabricBridge).challengeResponse !== undefined
+          ? `{"challengeResponse":"${(chairSession.bridge as AgentSessionFabricBridge).challengeResponse}"}`
+          : "{}";
     const instruction = attestationToolName === undefined
       ? textInput(payload)
       : [{
@@ -590,6 +592,9 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   }
 
   async provisionAgent(input: AgentProvisionBoundaryInput): Promise<AgentProvisionProviderResult> {
+    const providerSessionGeneration = typeof input.payload.generation === "number" &&
+      Number.isSafeInteger(input.payload.generation) && input.payload.generation > 0
+      ? input.payload.generation : 1;
     const bridge = await this.#agentBridgeFactory({
       providerAdapterId: "codex-app-server",
       providerActionId: input.actionId,
@@ -599,6 +604,14 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
       bridgeContractDigest: input.bridgeContractDigest,
       capability: input.environment.AGENT_FABRIC_CAPABILITY,
       socketPath: input.environment.AGENT_FABRIC_SOCKET_PATH,
+      ...(input.environment.AGENT_FABRIC_ATTESTATION_CHALLENGE === undefined ? {} : {
+        lifecycleAttestation: {
+          challenge: input.environment.AGENT_FABRIC_ATTESTATION_CHALLENGE,
+          challengeDigest: input.environment.AGENT_FABRIC_ATTESTATION_CHALLENGE_DIGEST as string,
+          custodyId: input.environment.AGENT_FABRIC_LIFECYCLE_CUSTODY_ID as string,
+          checkpointDigest: input.environment.AGENT_FABRIC_LIFECYCLE_CHECKPOINT_DIGEST as string,
+        },
+      }),
     });
     let connection: CodexConnection | undefined;
     try {
@@ -635,11 +648,11 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
           });
       const thread = threadFromResponse(response, input.operation === "spawn" ? "thread/start" : "thread/resume");
       const resumeReference = String(thread.id);
-      bridge.bindProviderSession(resumeReference, 1);
+      bridge.bindProviderSession(resumeReference, providerSessionGeneration);
       session = {
         bridge,
         providerSessionRef: resumeReference,
-        providerSessionGeneration: 1,
+        providerSessionGeneration,
         bridgeGeneration: input.bridgeGeneration,
         nativeInvocationKeys: new Set(),
       };

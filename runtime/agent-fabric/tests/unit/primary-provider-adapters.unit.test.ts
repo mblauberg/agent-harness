@@ -37,6 +37,7 @@ import * as providerTypes from "../../src/adapters/providers/types.ts";
 import {
   chairLaunchAttestationDigest,
   chairLaunchChallengeDigest,
+  ProviderAdapterError,
 } from "../../src/adapters/providers/types.ts";
 
 const ATTESTATION_CHALLENGE = "ab".repeat(32);
@@ -2455,6 +2456,222 @@ describe("primary provider retained child bridges", () => {
     }
     expect(transport.call).not.toHaveBeenCalled();
   });
+
+  it("requires the one-use provider-session challenge before emitting lifecycle replacement evidence", async () => {
+    const expectedPrincipal = {
+      agentId: "child",
+      projectSessionId: "session-1",
+      runId: "run-1",
+      principalGeneration: 2,
+    } as const;
+    const transport = providerSessionProtocolTransport(
+      vi.fn(),
+      vi.fn(async () => undefined),
+      { kind: "agent", ...expectedPrincipal } as ProviderSessionProtocolTransport["principal"],
+    );
+    const binding = {
+      custodyId: "lifecycle-custody-1",
+      checkpointDigest: `sha256:${"c".repeat(64)}`,
+      challengeDigest: ATTESTATION_CHALLENGE_DIGEST,
+    };
+    const bridge = Reflect.construct(
+      AgentSessionFabricBridge as unknown as new (...args: never[]) => AgentSessionFabricBridge,
+      [{
+        providerAdapterId: "codex-app-server",
+        providerActionId: "lifecycle-action-1",
+        targetAgentId: expectedPrincipal.agentId,
+        expectedPrincipal,
+        bridgeGeneration: 2,
+        bridgeContractDigest: `sha256:${"b".repeat(64)}`,
+        capability: `afc_${"1".repeat(43)}`,
+        socketPath: "/private/fabric.sock",
+        lifecycleAttestation: { ...binding, challenge: ATTESTATION_CHALLENGE },
+      }, transport],
+    );
+    bridge.bindProviderSession("provider-session-2", 2);
+    expect(() => bridge.result()).toThrow(expect.objectContaining({ code: "AGENT_BRIDGE_UNPROVEN" }));
+    const ordinaryTool = (bridge.descriptors as readonly { name: string; operation: string }[])
+      .find((descriptor) => descriptor.operation === FABRIC_OPERATIONS.getMailboxState);
+    expect(ordinaryTool).toBeDefined();
+    await expect(bridge.invokeTool(ordinaryTool!.name, {}, {
+      providerSessionRef: "provider-session-2",
+      providerSessionGeneration: 2,
+      providerTurnRef: "turn-0",
+      providerInvocationRef: "call-0",
+    })).rejects.toMatchObject({ code: "AGENT_BRIDGE_UNPROVEN" });
+    expect(() => bridge.result()).toThrow(expect.objectContaining({ code: "AGENT_BRIDGE_UNPROVEN" }));
+    await expect(bridge.invokeTool(bridge.activationToolName, { challengeResponse: "00".repeat(32) }, {
+      providerSessionRef: "provider-session-2",
+      providerSessionGeneration: 2,
+      providerTurnRef: "turn-1",
+      providerInvocationRef: "call-1",
+    })).rejects.toMatchObject({ code: "AGENT_BRIDGE_UNPROVEN" });
+    await bridge.invokeTool(bridge.activationToolName, { challengeResponse: ATTESTATION_CHALLENGE }, {
+      providerSessionRef: "provider-session-2",
+      providerSessionGeneration: 2,
+      providerTurnRef: "turn-1",
+      providerInvocationRef: "call-2",
+    });
+    const result = bridge.result();
+    expect(providerTypes.parseAgentProvisionProviderResult(result, {
+      adapterId: "codex-app-server",
+      actionId: "lifecycle-action-1",
+      targetAgentId: expectedPrincipal.agentId,
+      bridgeGeneration: 2,
+      bridgeContractDigest: `sha256:${"b".repeat(64)}`,
+      lifecycleAttestation: binding,
+    })).toEqual(result);
+    await expect(bridge.invokeTool(bridge.activationToolName, { challengeResponse: ATTESTATION_CHALLENGE }, {
+      providerSessionRef: "provider-session-2",
+      providerSessionGeneration: 2,
+      providerTurnRef: "turn-1",
+      providerInvocationRef: "call-3",
+    })).rejects.toMatchObject({ code: "AGENT_BRIDGE_UNPROVEN" });
+  });
+
+  it.each(["claude", "codex"] as const)(
+    "rejects a %s lifecycle provider result that reflects the raw private challenge as a provider reference",
+    async (provider) => {
+      const actionJournal = await journal();
+      const expectedPrincipal = {
+        agentId: `${provider}-lifecycle-child`,
+        projectSessionId: "session-1",
+        runId: "run-1",
+        principalGeneration: 2,
+      } as const;
+      const adapterId = provider === "claude" ? "claude-agent-sdk" : "codex-app-server";
+      const actionId = `${provider}-reflected-lifecycle-challenge`;
+      const challenge = ATTESTATION_CHALLENGE;
+      const binding = {
+        custodyId: `${provider}-custody`,
+        checkpointDigest: `sha256:${"c".repeat(64)}`,
+        challengeDigest: ATTESTATION_CHALLENGE_DIGEST,
+      };
+      const unsigned = {
+        schemaVersion: 1 as const,
+        kind: "provider-session-lifecycle-attestation" as const,
+        custodyId: binding.custodyId,
+        actionId,
+        checkpointDigest: binding.checkpointDigest,
+        challengeDigest: binding.challengeDigest,
+        providerSessionRef: challenge,
+        providerSessionGeneration: 2,
+        bridgeGeneration: 2,
+        providerTurnRef: "turn-reflected",
+        providerInvocationRef: "call-reflected",
+      };
+      const boundary = provider === "claude" ? claudeBoundary() : codexBoundary();
+      Reflect.set(boundary, "provisionAgent", vi.fn(async () => ({
+        schemaVersion: 1,
+        adapterId,
+        actionId,
+        targetAgentId: expectedPrincipal.agentId,
+        providerSessionRef: challenge,
+        providerSessionGeneration: 2,
+        bridgeGeneration: 2,
+        bridgeContractDigest: `sha256:${"b".repeat(64)}`,
+        activationEvidenceDigest: providerTypes.agentLifecycleAttestationDigest(unsigned),
+        lifecycleAttestation: {
+          ...unsigned,
+          attestationDigest: providerTypes.agentLifecycleAttestationDigest(unsigned),
+        },
+      })));
+      const handoff = {
+        capability: `afc_${"1".repeat(43)}`,
+        socketPath: `/private/${provider}-lifecycle.sock`,
+        expectedPrincipal,
+        lifecycleAttestation: { ...binding, challenge },
+      };
+      const adapter = provider === "claude"
+        ? createClaudeAgentSdkAdapter({ boundary: boundary as ClaudeAgentSdkBoundary, journal: actionJournal,
+            agentBridgeHandoff: handoff })
+        : createCodexAppServerAdapter({ boundary: boundary as CodexAppServerBoundary, journal: actionJournal,
+            agentBridgeHandoff: handoff });
+      await expect(adapter.request("provision_agent", {
+        schemaVersion: 1,
+        runId: expectedPrincipal.runId,
+        operation: "spawn",
+        actionId,
+        targetAgentId: expectedPrincipal.agentId,
+        authorityId: `${provider}-authority`,
+        bridgeGeneration: 2,
+        bridgeContractDigest: `sha256:${"b".repeat(64)}`,
+        payload: { generation: 2 },
+      })).rejects.toMatchObject({ code: "PROVIDER_RESPONSE_INVALID" });
+      actionJournal.close();
+    },
+  );
+
+  it.each(["claude", "codex"] as const)(
+    "sanitises a %s lifecycle provider error that reflects the private challenge",
+    async (provider) => {
+      const directory = await mkdtemp(join(tmpdir(), `agent-fabric-${provider}-lifecycle-error-`));
+      temporaryDirectories.push(directory);
+      const journalPath = join(directory, "actions.sqlite3");
+      const actionJournal = new SqliteAdapterActionJournal(journalPath);
+      const expectedPrincipal = {
+        agentId: `${provider}-error-child`,
+        projectSessionId: "session-1",
+        runId: "run-1",
+        principalGeneration: 2,
+      } as const;
+      const boundary = provider === "claude" ? claudeBoundary() : codexBoundary();
+      Reflect.set(boundary, "provisionAgent", vi.fn(async () => {
+        const reflected = new ProviderAdapterError(
+          "PROVIDER_TURN_FAILED",
+          `provider reflected ${ATTESTATION_CHALLENGE}`,
+          { structured: { challenge: ATTESTATION_CHALLENGE } },
+          { cause: new Error(`nested ${ATTESTATION_CHALLENGE}`) },
+        );
+        reflected.stack = `provider stack ${ATTESTATION_CHALLENGE}`;
+        throw reflected;
+      }));
+      const handoff = {
+        capability: `afc_${"1".repeat(43)}`,
+        socketPath: `/private/${provider}-lifecycle-error.sock`,
+        expectedPrincipal,
+        lifecycleAttestation: {
+          custodyId: `${provider}-error-custody`,
+          checkpointDigest: `sha256:${"c".repeat(64)}`,
+          challengeDigest: ATTESTATION_CHALLENGE_DIGEST,
+          challenge: ATTESTATION_CHALLENGE,
+        },
+      };
+      const adapter = provider === "claude"
+        ? createClaudeAgentSdkAdapter({
+            boundary: boundary as ClaudeAgentSdkBoundary,
+            journal: actionJournal,
+            agentBridgeHandoff: handoff,
+          })
+        : createCodexAppServerAdapter({
+            boundary: boundary as CodexAppServerBoundary,
+            journal: actionJournal,
+            agentBridgeHandoff: handoff,
+          });
+      const actionId = `${provider}-private-error`;
+      const error = await adapter.request("provision_agent", {
+        schemaVersion: 1,
+        runId: expectedPrincipal.runId,
+        operation: "spawn",
+        actionId,
+        targetAgentId: expectedPrincipal.agentId,
+        authorityId: `${provider}-authority`,
+        bridgeGeneration: 2,
+        bridgeContractDigest: `sha256:${"b".repeat(64)}`,
+        payload: { generation: 2 },
+      }).catch((cause: unknown) => cause);
+      expect(error).toMatchObject({
+        code: "PROVIDER_RESPONSE_INVALID",
+        message: "agent provision provider error contained private handoff material",
+      });
+      expect(Reflect.get(error as object, "cause")).toBeUndefined();
+      expect(Reflect.get(error as object, "details")).toBeUndefined();
+      expect(String(Reflect.get(error as object, "stack"))).not.toContain(ATTESTATION_CHALLENGE);
+      expect(JSON.stringify(actionJournal.get(actionId))).not.toContain(ATTESTATION_CHALLENGE);
+      await expectJournalFilesNotToContain(journalPath, ATTESTATION_CHALLENGE);
+      actionJournal.close();
+    },
+  );
 
   it("provisions and reuses the exact Claude SDK child MCP bridge", async () => {
     const childPrincipal = {

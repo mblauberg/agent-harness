@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "epoch": "agent-fabric-pre-release-v1",
   "baselineFile": "0001-current-baseline.sql",
-  "baselineSha256": "2cba3ab885c4216c3e868925df80990748ac590ab804599facea7de9e645177c",
-  "catalogSha256": "7031cfe159575334a34b1fe98c8d03e712fcb41f0f5fbf08f7af150558d80a13",
+  "baselineSha256": "e11ba6d8dd7d1f4e10574b6d05696830144c711fadb56d56aa5ff01ba1573af3",
+  "catalogSha256": "8d2e98b29be83af2d2a09bf21f692b6f94908bb01c26aeb0d636a74d35e6afc1",
   "objectCount": 742
 }

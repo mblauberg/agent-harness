@@ -671,6 +671,7 @@ export class LifecycleRotationRepository {
     runId: string,
     agentId: string,
     custodyId: string,
+    applyId: string,
   ): PreparedChildCustodyTerminal | null {
     const stored = this.#database.prepare(`
       SELECT batch.project_session_id,batch.planned_apply_id,batch.batch_id,
@@ -694,7 +695,8 @@ export class LifecycleRotationRepository {
         LEFT JOIN lifecycle_receipt_intents review_intent
           ON review_intent.batch_id=batch.batch_id AND review_intent.ordinal=2
        WHERE effect.run_id=? AND effect.agent_id=? AND effect.custody_id=?
-    `).get(runId, agentId, custodyId);
+         AND batch.planned_apply_id=?
+    `).get(runId, agentId, custodyId, applyId);
     if (stored === undefined) return null;
     const value = row(stored, "prepared child custody terminal");
     const parsedSubject: unknown = JSON.parse(text(value, "subject_json"));

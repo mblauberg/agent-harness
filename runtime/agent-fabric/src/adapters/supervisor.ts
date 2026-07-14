@@ -59,6 +59,7 @@ export type AdapterAgentProvisionRequest = {
   bridgeContractDigest: string;
   payload: Record<string, unknown>;
   providerSessionRef?: string;
+  lifecycleAttestation?: Readonly<{ custodyId: string; checkpointDigest: string; challengeDigest: string }>;
 };
 
 export type RetainedChildBridge = Readonly<{
@@ -474,7 +475,12 @@ export class AdapterSupervisor {
       typeof handoff.socketPath !== "string" || !isAbsolute(handoff.socketPath) ||
       !validExpectedPrincipal(handoff.expectedPrincipal) ||
       handoff.expectedPrincipal.agentId !== request.targetAgentId ||
-      handoff.expectedPrincipal.runId !== request.runId
+      handoff.expectedPrincipal.runId !== request.runId ||
+      ((handoff.lifecycleAttestation === undefined) !== (request.lifecycleAttestation === undefined)) ||
+      (handoff.lifecycleAttestation !== undefined && request.lifecycleAttestation !== undefined &&
+        (handoff.lifecycleAttestation.custodyId !== request.lifecycleAttestation.custodyId ||
+         handoff.lifecycleAttestation.checkpointDigest !== request.lifecycleAttestation.checkpointDigest ||
+         handoff.lifecycleAttestation.challengeDigest !== request.lifecycleAttestation.challengeDigest))
     ) {
       throw new ProviderAdapterError("PRIVATE_HANDOFF_UNAVAILABLE", "agent bridge private handoff is invalid");
     }
@@ -495,6 +501,12 @@ export class AdapterSupervisor {
         AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID: handoff.expectedPrincipal.projectSessionId,
         AGENT_FABRIC_EXPECTED_RUN_ID: handoff.expectedPrincipal.runId,
         AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION: String(handoff.expectedPrincipal.principalGeneration),
+        ...(handoff.lifecycleAttestation === undefined ? {} : {
+          AGENT_FABRIC_ATTESTATION_CHALLENGE: handoff.lifecycleAttestation.challenge,
+          AGENT_FABRIC_ATTESTATION_CHALLENGE_DIGEST: handoff.lifecycleAttestation.challengeDigest,
+          AGENT_FABRIC_LIFECYCLE_CUSTODY_ID: handoff.lifecycleAttestation.custodyId,
+          AGENT_FABRIC_LIFECYCLE_CHECKPOINT_DIGEST: handoff.lifecycleAttestation.checkpointDigest,
+        }),
       },
     });
     try {
@@ -518,6 +530,9 @@ export class AdapterSupervisor {
           targetAgentId: request.targetAgentId,
           bridgeGeneration: request.bridgeGeneration,
           bridgeContractDigest: request.bridgeContractDigest,
+          ...(request.lifecycleAttestation === undefined ? {} : {
+            lifecycleAttestation: request.lifecycleAttestation,
+          }),
         },
       );
       await transport.request("capabilities", {}, { timeoutMs: this.#controlTimeoutMs });

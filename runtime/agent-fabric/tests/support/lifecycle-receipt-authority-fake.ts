@@ -189,6 +189,8 @@ export class TestLifecycleReceiptAuthority implements LifecycleIntegrityReceiptA
   appendSuccessThenThrowOnce = false;
   appendUnrelatedAfterNextReceipt = false;
   readReceiptAlwaysAbsent = false;
+  readReceiptAbsentFromCall = Number.POSITIVE_INFINITY;
+  readReceiptCalls = 0;
   onReadReceiptOnce: (() => void) | undefined;
   admitCalls = 0;
   appendCalls = 0;
@@ -242,10 +244,11 @@ export class TestLifecycleReceiptAuthority implements LifecycleIntegrityReceiptA
   }
 
   async readReceipt(lookup: LifecycleReceiptLookup): Promise<LifecycleReceiptRecord | null> {
+    this.readReceiptCalls += 1;
     const hook = this.onReadReceiptOnce;
     this.onReadReceiptOnce = undefined;
     hook?.();
-    if (this.readReceiptAlwaysAbsent) return null;
+    if (this.readReceiptAlwaysAbsent || this.readReceiptCalls >= this.readReceiptAbsentFromCall) return null;
     return this.#receiptsByLookup.get(receiptLookupKey(lookup)) ?? null;
   }
 

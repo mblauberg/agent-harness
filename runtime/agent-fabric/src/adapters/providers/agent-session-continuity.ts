@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { createConnection } from "node:net";
 
 import {
@@ -13,7 +13,12 @@ import {
   type ProtocolFeature,
 } from "@local/agent-fabric-protocol";
 
-import { ProviderAdapterError, type AgentProvisionProviderResult } from "./types.js";
+import {
+  agentLifecycleAttestationDigest,
+  ProviderAdapterError,
+  type AgentLifecycleAttestationBinding,
+  type AgentProvisionProviderResult,
+} from "./types.js";
 import {
   ProviderSessionFabricSurface,
   type ProviderSessionProtocolTransport,
@@ -34,6 +39,7 @@ export type AgentSessionFabricBridgeInput = {
   bridgeContractDigest: string;
   capability: string;
   socketPath: string;
+  lifecycleAttestation?: AgentLifecycleAttestationBinding & { challenge: string };
 };
 
 export type AgentSessionProviderInvocation = {
@@ -93,6 +99,7 @@ export class AgentSessionFabricBridge {
   readonly #surface: ProviderSessionFabricSurface;
   #session: { ref: string; generation: number } | undefined;
   #activation: { turnRef: string; invocationRef: string; operation: FabricOperation } | undefined;
+  readonly #lifecycleAttestation: (AgentLifecycleAttestationBinding & { challenge: Buffer }) | undefined;
   #closed = false;
 
   private constructor(input: AgentSessionFabricBridgeInput, transport: ProviderSessionProtocolTransport) {
@@ -118,9 +125,28 @@ export class AgentSessionFabricBridge {
       bridgeContractDigest: input.bridgeContractDigest,
     };
     this.#transport = transport;
-    this.#surface = new ProviderSessionFabricSurface(transport);
+    if (input.lifecycleAttestation !== undefined) {
+      const observedChallengeDigest = `sha256:${createHash("sha256")
+        .update(Buffer.from(input.lifecycleAttestation.challenge, "hex")).digest("hex")}`;
+      if (!/^[0-9a-f]{64}$/u.test(input.lifecycleAttestation.challenge) ||
+        observedChallengeDigest !== input.lifecycleAttestation.challengeDigest ||
+        !/^sha256:[0-9a-f]{64}$/u.test(input.lifecycleAttestation.checkpointDigest) ||
+        !bounded(input.lifecycleAttestation.custodyId)) {
+        throw new ProviderAdapterError("AGENT_BRIDGE_UNPROVEN", "agent lifecycle challenge is invalid");
+      }
+      this.#lifecycleAttestation = {
+        ...input.lifecycleAttestation,
+        challenge: Buffer.from(input.lifecycleAttestation.challenge, "hex"),
+      };
+    }
+    this.#surface = new ProviderSessionFabricSurface(transport, this.#lifecycleAttestation === undefined ? [] : [{
+      operation: FABRIC_OPERATIONS.launchAttest,
+      invoke: async (value, context) => await this.#attest(value, context),
+    }]);
     this.descriptors = this.#surface.descriptors;
-    const descriptor = this.descriptors.find(({ operation }) => operation === FABRIC_OPERATIONS.getMailboxState);
+    const descriptor = this.descriptors.find(({ operation }) => operation === (
+      this.#lifecycleAttestation === undefined ? FABRIC_OPERATIONS.getMailboxState : FABRIC_OPERATIONS.launchAttest
+    ));
     if (descriptor === undefined) {
       throw new ProviderAdapterError("CAPABILITY_UNAVAILABLE", "child grant lacks the mailbox activation tool");
     }
@@ -138,6 +164,10 @@ export class AgentSessionFabricBridge {
   }
 
   get closed(): boolean { return this.#closed || this.#transport.closed === true; }
+
+  get challengeResponse(): string | undefined {
+    return this.#lifecycleAttestation?.challenge.toString("hex");
+  }
 
   bindProviderSession(providerSessionRef: string, providerSessionGeneration: number): void {
     if (!bounded(providerSessionRef) || !Number.isSafeInteger(providerSessionGeneration) || providerSessionGeneration < 1) {
@@ -162,6 +192,10 @@ export class AgentSessionFabricBridge {
     }
     const descriptor = this.#surface.descriptor(name);
     if (descriptor === undefined) throw new ProviderAdapterError("CAPABILITY_UNAVAILABLE", "unknown child Fabric tool");
+    if (this.#lifecycleAttestation !== undefined && this.#activation === undefined &&
+      descriptor.operation !== FABRIC_OPERATIONS.launchAttest) {
+      throw new ProviderAdapterError("AGENT_BRIDGE_UNPROVEN", "agent Fabric tools are unavailable before lifecycle attestation");
+    }
     const result = await this.#surface.invoke(name, args, invocation);
     if (this.#activation === undefined) {
       this.#activation = {
@@ -173,11 +207,41 @@ export class AgentSessionFabricBridge {
     return result;
   }
 
+  async #attest(value: unknown, context: unknown): Promise<unknown> {
+    const binding = this.#lifecycleAttestation;
+    if (binding === undefined || this.#activation !== undefined || this.#session === undefined ||
+      typeof value !== "object" || value === null || Array.isArray(value) ||
+      typeof context !== "object" || context === null || Array.isArray(context)) {
+      throw new ProviderAdapterError("AGENT_BRIDGE_UNPROVEN", "agent lifecycle attestation is not attributable");
+    }
+    const request = value as Record<string, unknown>;
+    const invocation = context as Record<string, unknown>;
+    if (Object.keys(request).length !== 1 || typeof request.challengeResponse !== "string" ||
+      invocation.providerSessionRef !== this.#session.ref ||
+      invocation.providerSessionGeneration !== this.#session.generation ||
+      typeof invocation.providerTurnRef !== "string" || !bounded(invocation.providerTurnRef) ||
+      typeof invocation.providerInvocationRef !== "string" || !bounded(invocation.providerInvocationRef)) {
+      throw new ProviderAdapterError("AGENT_BRIDGE_UNPROVEN", "agent lifecycle attestation fields crossed");
+    }
+    const response = Buffer.from(request.challengeResponse, "hex");
+    const matches = response.byteLength === binding.challenge.byteLength && timingSafeEqual(response, binding.challenge);
+    response.fill(0);
+    if (!matches) throw new ProviderAdapterError("AGENT_BRIDGE_UNPROVEN", "agent lifecycle challenge did not match");
+    binding.challenge.fill(0);
+    this.#activation = {
+      turnRef: invocation.providerTurnRef,
+      invocationRef: invocation.providerInvocationRef,
+      operation: FABRIC_OPERATIONS.launchAttest,
+    };
+    return { attested: true, challengeDigest: binding.challengeDigest };
+  }
+
   result(): AgentProvisionProviderResult {
-    if (this.closed || this.#session === undefined || this.#activation === undefined) {
+    if (this.closed || this.#session === undefined || this.#activation === undefined ||
+      (this.#lifecycleAttestation !== undefined && this.#activation.operation !== FABRIC_OPERATIONS.launchAttest)) {
       throw new ProviderAdapterError("AGENT_BRIDGE_UNPROVEN", "provider session made no attributable Fabric call");
     }
-    const evidenceDigest = `sha256:${createHash("sha256").update(JSON.stringify({
+    const ordinaryEvidenceDigest = `sha256:${createHash("sha256").update(JSON.stringify({
       schemaVersion: 1,
       adapterId: this.#binding.providerAdapterId,
       actionId: this.#binding.providerActionId,
@@ -190,6 +254,23 @@ export class AgentSessionFabricBridge {
       providerInvocationRef: this.#activation.invocationRef,
       operation: this.#activation.operation,
     })).digest("hex")}`;
+    const lifecycleAttestation = this.#lifecycleAttestation === undefined ? undefined : {
+      schemaVersion: 1 as const,
+      kind: "provider-session-lifecycle-attestation" as const,
+      custodyId: this.#lifecycleAttestation.custodyId,
+      actionId: this.#binding.providerActionId,
+      checkpointDigest: this.#lifecycleAttestation.checkpointDigest,
+      challengeDigest: this.#lifecycleAttestation.challengeDigest,
+      providerSessionRef: this.#session.ref,
+      providerSessionGeneration: this.#session.generation,
+      bridgeGeneration: this.#binding.bridgeGeneration,
+      providerTurnRef: this.#activation.turnRef,
+      providerInvocationRef: this.#activation.invocationRef,
+    };
+    const attested = lifecycleAttestation === undefined ? undefined : {
+      ...lifecycleAttestation,
+      attestationDigest: agentLifecycleAttestationDigest(lifecycleAttestation),
+    };
     return {
       schemaVersion: 1,
       adapterId: this.#binding.providerAdapterId,
@@ -199,7 +280,8 @@ export class AgentSessionFabricBridge {
       providerSessionGeneration: this.#session.generation,
       bridgeGeneration: this.#binding.bridgeGeneration,
       bridgeContractDigest: this.#binding.bridgeContractDigest,
-      activationEvidenceDigest: evidenceDigest,
+      activationEvidenceDigest: attested?.attestationDigest ?? ordinaryEvidenceDigest,
+      ...(attested === undefined ? {} : { lifecycleAttestation: attested }),
     };
   }
 
