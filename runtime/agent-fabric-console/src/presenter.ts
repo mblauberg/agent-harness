@@ -1831,6 +1831,68 @@ function guidedWorkflowActions(): readonly PresentedAction[] {
   ];
 }
 
+type PresentedRows = Readonly<{
+  masterRows: readonly PresentedRow[];
+  topAttention: PresentedRow | null;
+}>;
+
+type PresentedRowsCache = Readonly<{
+  dataset: FabricConsoleDataset;
+  activeRows: readonly ConsoleRow[];
+  selected: ConsoleControllerState["selectionByView"][FabricView];
+  value: PresentedRows;
+}>;
+
+const presentedRowsByController = new WeakMap<
+  ConsoleControllerState,
+  PresentedRowsCache
+>();
+
+function presentRows(
+  dataset: FabricConsoleDataset,
+  controller: ConsoleControllerState,
+  activeRows: readonly ConsoleRow[],
+  selected: ConsoleControllerState["selectionByView"][FabricView],
+): PresentedRows {
+  const cached = presentedRowsByController.get(controller);
+  if (
+    cached?.dataset === dataset &&
+    cached.activeRows === activeRows &&
+    cached.selected === selected
+  ) {
+    return cached.value;
+  }
+  const canMutate = dataset.canMutate && dataset.connection.state === "live";
+  const firstAttention = dataset.pages.attention.rows[0];
+  const value = {
+    masterRows: activeRows.map((candidate) =>
+      presentRow(
+        candidate,
+        candidate.stableId === selected?.stableId,
+        canMutate,
+        dataset,
+      )
+    ),
+    topAttention:
+      firstAttention === undefined
+        ? null
+        : presentRow(
+            firstAttention,
+            controller.selectionByView.attention?.stableId ===
+              firstAttention.stableId,
+            canMutate,
+            dataset,
+          ),
+  } satisfies PresentedRows;
+  presentedRowsByController.set(controller, {
+    dataset,
+    activeRows,
+    selected,
+    value,
+  });
+  return value;
+}
+
 export function presentFabricConsole(
   dataset: FabricConsoleDataset,
   controller: ConsoleControllerState,
@@ -1843,6 +1905,7 @@ export function presentFabricConsole(
     selected === null
       ? null
       : activeRows.find((candidate) => candidate.stableId === selected.stableId) ?? null;
+  const presentedRows = presentRows(dataset, controller, activeRows, selected);
   const review = controller.review;
   const workflowReview = review === null ? ui.workflowReview : null;
   const actions = review === null && workflowReview === null && ui.guidedWorkflow !== null
@@ -1887,24 +1950,8 @@ export function presentFabricConsole(
       key: String(index + 1),
     })),
     activeView: controller.activeView,
-    masterRows: activeRows.map((candidate) =>
-      presentRow(
-        candidate,
-        candidate.stableId === selected?.stableId,
-        dataset.canMutate && dataset.connection.state === "live",
-        dataset,
-      ),
-    ),
-    topAttention:
-      dataset.pages.attention.rows[0] === undefined
-        ? null
-        : presentRow(
-            dataset.pages.attention.rows[0],
-            controller.selectionByView.attention?.stableId ===
-              dataset.pages.attention.rows[0].stableId,
-            dataset.canMutate && dataset.connection.state === "live",
-            dataset,
-          ),
+    masterRows: presentedRows.masterRows,
+    topAttention: presentedRows.topAttention,
     detail,
     actions,
     review:
