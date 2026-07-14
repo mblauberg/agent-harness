@@ -9,7 +9,7 @@ The manifest intentionally excludes its own hash.
 | `docs/provenant-simplification/00_START_HERE.md` | `cd5bdb89e8123d04c8ea9393e28b591a4ae97572d627c4af7a65712aff9e2f8a` |
 | `docs/provenant-simplification/01_IMPLEMENTATION_CHARTER.md` | `8144289e9ffeee88a513b2f7b197e9bf093c0857fbc107f2f083d1c34fc681a2` |
 | `docs/provenant-simplification/02_TARGET_ARCHITECTURE.md` | `11d4d9fcca34f579d20d2a717b1c8c3ca9bbd7d2331a834f4941cd313b2652ce` |
-| `docs/provenant-simplification/03_MINIMAL_CONTRACTS.md` | `f785e398da43d2798a016f7743903403f54ce2f320bef65a1265914cc6f9fc29` |
+| `docs/provenant-simplification/03_MINIMAL_CONTRACTS.md` | `768473649b0f16529321b0102c97bc73f88fa48ad1ad9283e220aefbc7897c01` |
 | `docs/provenant-simplification/04_PROGRESSIVE_GOVERNANCE.md` | `6f8d0acb298821e57fd992831ed6e047187e887d8fc1688fd1c70df7b79c7852` |
 | `docs/provenant-simplification/05_ROUTING_AND_MODEL_POLICY.md` | `5d9e51191099acd242e434eddba9b2012381a88e5d8170cb20e09ed0767cbf8b` |
 | `docs/provenant-simplification/06_LOOP_AND_REVIEW_POLICY.md` | `960cf1fe556c49155109414626fa30d81a2dcca8e0912bd5c950ebfb21a9ab54` |

@@ -26,7 +26,7 @@ Every contract in this file that is persisted on its own carries a `retention_cl
 - `durable-knowledge` — current specs, ADRs, runbooks, promoted research;
 - `sensitive` — credentials, raw private input, secret-bearing debug.
 
-**These five strings are the machine identifiers** — the exact values admitted by the schemas in `schemas/` and written into persisted state. ADR-0007 names the classes in prose; the prose names map 1:1 onto the machine identifiers, and only the fifth differs:
+**These five strings are the machine identifiers** — the exact values admitted by the schemas in `schemas/` and written into persisted state. ADR-0007 names the classes in prose; the prose names map 1:1 onto the machine identifiers, and only the fourth differs:
 
 | ADR-0007 prose name | machine identifier |
 |---|---|

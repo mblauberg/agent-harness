@@ -5,7 +5,8 @@ session. Each ADR is the canonical owner of its decision. The scoping evidence,
 challenge history, decision riders and rejected-alternatives rationale are
 preserved in the simplification pack's decision register
 (`docs/provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/15_DECISION_REGISTER.md`),
-which supersedes the original review-pack register.
+which supersedes the original review-pack register. ADRs 0009–0010 were ratified
+later, on 2026-07-15.
 
 | ADR | Title | Status |
 |---|---|---|
@@ -15,5 +16,7 @@ which supersedes the original review-pack register.
 | [0004](0004-per-domain-truth-owners.md) | Per-domain truth owners, no god manifest | Accepted |
 | [0005](0005-lifecycle-kernel-extends-delivery.md) | Lifecycle kernel extends the delivery kernel | Accepted |
 | [0006](0006-backlog-schema-first-store-pluggable.md) | Backlog: schema-first, store-pluggable; queue controller deferred | Accepted |
-| [0007](0007-retention-classes-then-governed-deletion.md) | Retention classes now, governed deletion later | Accepted |
+| [0007](0007-retention-classes-then-governed-deletion.md) | Retention classes now, governed deletion later | Accepted (amended 2026-07-15) |
 | [0008](0008-review-pressure-risk-and-oracle-adjusted.md) | Risk/oracle-adjusted certifying review | Accepted (spec amendment pending) |
+| [0009](0009-spec-families-unnumbered-durable-modules.md) | Specification families are unnumbered durable topic modules | Accepted |
+| [0010](0010-lifecycle-receipt-authority-distinct-trust-boundary.md) | Lifecycle receipt authority is a trust boundary distinct from provider authority compilation | Accepted |
