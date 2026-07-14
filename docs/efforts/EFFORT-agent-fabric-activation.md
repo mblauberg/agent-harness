@@ -5,7 +5,7 @@ Status: awaiting final human acceptance
 
 ## Destination
 
-Deliver [Spec 03](../specs/03-agent-fabric-activation.md): safely activate all model adapters, add a read-only Herdr observer and implement explicit coordinated seat rotation.
+Deliver the [activation contract](../specs/agent-fabric/activation.md): safely activate all model adapters, add a read-only Herdr observer and implement explicit coordinated seat rotation.
 
 ## Route
 
@@ -22,7 +22,7 @@ Deliver [Spec 03](../specs/03-agent-fabric-activation.md): safely activate all m
 
 ## Invariants
 
-- Follow [Spec 03](../specs/03-agent-fabric-activation.md) and [HARNESS.md](../../HARNESS.md).
+- Follow the [activation contract](../specs/agent-fabric/activation.md) and [HARNESS.md](../../HARNESS.md).
 - One serial release operator; partition source writers.
 - No adapter joins `activeAdapters` before its negative boundary and compatibility gates pass.
 - Preserve coordination-only rollback and never expose capability files. The explicit local observer may render terminal-safe 160-character message previews.

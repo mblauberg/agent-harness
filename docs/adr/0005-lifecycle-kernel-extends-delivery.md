@@ -24,6 +24,5 @@ Skills reference the kernel instead of restating gates.
 ## Consequences
 
 - `HARNESS.md` stays a short constitution.
-- Spec amendment-history cleanup (F-023: amendments are ~72% of Spec 01 and
-  ~93% of Spec 04) proceeds via the separately mandated spec-family split
+- Amendment-history cleanup proceeds via the separately mandated standalone-spec split
   (1,000-line cap, `docs/handoffs/HANDOFF-2026-07-13-project-fabric-console.md`).

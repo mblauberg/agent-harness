@@ -1,5 +1,5 @@
 #!/bin/sh
-# Launch the agent-fabric stdio MCP proxy (spec 01-agent-fabric section 14).
+# Launch the agent-fabric stdio MCP proxy defined by the public protocol contract.
 # Requires AGENT_FABRIC_SOCKET_PATH and exactly one capability source:
 # AGENT_FABRIC_SEAT plus AGENT_FABRIC_STATE_DIRECTORY (global project-aware
 # registration), AGENT_FABRIC_CAPABILITY_FILE, or AGENT_FABRIC_CAPABILITY.

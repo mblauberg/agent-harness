@@ -3,7 +3,7 @@
 
 The schema transcribes only the copied arm, effect-membership, completion-fence,
 and apply-last witnesses exercised below. The complete normative DDL remains in
-Spec 04; this fixture is deliberately isolated from the Lead-3/v2 oracle.
+the hardening specifications; this fixture is deliberately isolated from the Lead-3/v2 oracle.
 """
 
 from __future__ import annotations

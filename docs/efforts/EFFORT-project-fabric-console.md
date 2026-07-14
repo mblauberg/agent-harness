@@ -1,13 +1,13 @@
 # EFFORT: project fabric console
 
-Updated: 14 July 2026
+Updated: 15 July 2026
 Status: active
 
 ## Destination
 
-Deliver [Spec 05 v1.14](../specs/05-project-fabric-console.md) from its
-`c2fc623` v1.0 approval baseline: a project-scoped terminal Console over the
-shared Fabric, including the owned Spec 01/03/04 authority extensions, adaptive
+Deliver the [current Console contract](../specs/console/scope-and-projections.md) from its
+`c2fc623` approval baseline: a project-scoped terminal Console over the
+shared Fabric, including the owned Fabric and activation authority extensions, adaptive
 one-chair sessions, typed operator actions, reliable result delivery, lifecycle
 skills and full verification. D-021 makes the consolidated PR review the only
 human gate; push beyond that branch, merge and release remain prohibited.
@@ -15,9 +15,9 @@ human gate; push beyond that branch, merge and release remain prohibited.
 ## Route
 
 - [>] Leg 1: canonical delivery run, anchored amendment audit, versioned
-  evaluation plan and D-023 council-accepted Specs 01 v0.37, 03 v1.3, 04 v1.32
-  and 05 v1.14 freeze candidates; family split and final integration review
-  remain before runtime implementation
+  evaluation plan and D-023 council-accepted Fabric, activation and hardening
+  contracts plus the Console draft; the standalone-spec cutover and generic
+  spec gate are complete before runtime implementation
 - [>] Leg 2: one current public protocol and one current database baseline are
   consolidated on local `main` as preserved WIP; compact schema generation and
   invariant reconciliation remain open
@@ -44,8 +44,9 @@ human gate; push beyond that branch, merge and release remain prohibited.
 
 ## Invariants for every leg
 
-- Follow [HARNESS.md](../../HARNESS.md), Spec 01 v0.37, Spec 03 v1.3, Spec 04
-  v1.32, Spec 05 v1.14 and traced direct-human clarifications. D-023 accepts the
+- Follow [HARNESS.md](../../HARNESS.md), the current Fabric, activation,
+  hardening and Console contracts, and traced direct-human
+  clarifications. D-023 accepts the
   write-profile authority design; remaining material additions require exact
   authority trace and council resolution under D-021 before the consolidated
   PR.
@@ -57,7 +58,7 @@ human gate; push beyond that branch, merge and release remain prohibited.
 ## Trail
 
 - 11 July 2026 Codex: created AFAB-004, amended the protocol/daemon owners before code, resolved all amendment review findings, froze the usability evaluation and isolated work from a concurrent skill-portfolio writer. Protocol TDD began; harness 421/421 and runtime 363/363 are green after a clean-worktree portability repair.
-- 11 July 2026 Codex: compared current TypeScript, Rust, Go and C++ TUI stacks and open-source operator interfaces. Selected a small Node cell-grid terminal layer because it preserves one typed protocol/toolchain, with a mandatory responsive-render/PTY spike and automatic Rust/Ratatui fallback. Spec 05 v1.1 records 80x24 as the default/reference acceptance viewport and requires dynamic reflow with terminal resizing.
+- 11 July 2026 Codex: compared current TypeScript, Rust, Go and C++ TUI stacks and open-source operator interfaces. Selected a small Node cell-grid terminal layer because it preserves one typed protocol/toolchain, with a mandatory responsive-render/PTY spike and automatic Rust/Ratatui fallback. The Console contract records 80x24 as the default/reference acceptance viewport and requires dynamic reflow with terminal resizing.
 - 11 July 2026 Codex: compared 18 current open-source agent harnesses. Retained Fabric's one-chair, one-transaction-owner architecture; adopted gap-free durable projection catch-up and immutable Git-object binding as non-normative implementation hardening, while parking browser, external-ledger and merge-automation scope.
 - 12 July 2026 Codex: completed the Console multi-session correction. The project client remains attached, exactly one attachable session auto-selects, multiple sessions require a stable run/session choice, `s` returns to the project selector, `--session` supports explicit/headless selection, and responsive/evidence state remains preserved across resize. Current Console clients require exact run/session projection instead of adding another legacy shim.
 - 12 July 2026 Codex: consolidated Fabric onto one manifest-pinned database

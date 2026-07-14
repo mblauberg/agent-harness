@@ -1,17 +1,16 @@
 # EFFORT: capability-compiled execution authority
 
-Updated: 14 July 2026
-Status: active. D-023 council-accepted the capability-authority design in Specs
-01 v0.37, 03 v1.3, 04 v1.32 and 05 v1.14. That design remains inert: the
-structural family split is integrated and dual-primary certified under D-024;
-runtime implementation, exact Step-3 containment execution, W017 semantic
-consolidation, Lane C/D and Rust CI reconciliation remain pending. Lane B
-evidence is retained, but D-021 routes every programme change through the
-single `comprehensive-review` PR.
+Updated: 15 July 2026
+Status: active. D-023 council-accepted the current capability-authority design
+in the Agent Fabric, activation and hardening contracts. The corresponding
+Console projection remains a draft under acceptance. The design remains inert: runtime
+implementation, exact Step-3 containment execution, Lane D and Rust CI
+reconciliation remain pending. The authority cutover continues in
+[issue #21](https://github.com/mblauberg/provenant/issues/21).
 
-F-023 is only partially resolved. The default family loader preserves exact
-frozen authority; its filtered topical candidate is non-binding. W017 owns the
-remaining net-current consolidation and equivalence proof.
+The document-structure work is resolved by ADR 0009's standalone semantic
+specifications. Git owns history and integrity; the generic spec gate checks
+only size, ownership IDs, local links and semantic filenames.
 
 ## Destination
 
@@ -26,34 +25,30 @@ and the [Step-1 work package and Step-3 containment
 checklist](../provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/25_AUTHORITY_V2_AND_CONTAINMENT.md)
 (both human-approved). Risk tier: crucial.
 
-Parallelisation constraint: one chair, disjoint write scopes per lane. Lane C
-must not land `AuthorityEnvelopeV2` against an unfrozen spec contract (Lane A
-freeze first). Each leg runs as its own fresh-session `/implement` (or
+Parallelisation constraint: one chair, disjoint write scopes per lane. The
+authority cutover follows issue #21 against the current standalone
+specifications. Each leg runs as its own fresh-session `/implement` (or
 spec-edit) leg, digest-bound to the ADRs and this map.
 
 ## Route
 
-- [ ] Lane A — spec authority: fresh anchored amendment audit; repair the nine
-  P1 leads from
-  [HANDOFF-2026-07-13-project-fabric-console.md](../handoffs/HANDOFF-2026-07-13-project-fabric-console.md);
-  freeze Specs 01 v0.37, 03 v1.3, 04 v1.32 and 05 v1.14; spec-family split
-  (≤1,000-line modules, `check_spec_families.py` gate); and integrate the
+- [x] Lane A — spec authority: repair and freeze the current Agent Fabric,
+  activation and hardening contracts, preserve the Console draft acceptance
+  boundary, complete the [standalone specification cutover](../adr/0009-standalone-semantic-specifications.md)
+  and integrate the
   **council-accepted** write-profile amendment. The amendment adds no runtime
   write authority: certifying stays read-only and the generic profile stays
   inert until its exact Step-3 provider tuple passes.
-  - [x] Anchored amendment audit with a durable receipt
-    ([`docs/specs/amendment-audit-2026-07-13.md`](../specs/amendment-audit-2026-07-13.md));
-    8/9 leads substantiated (lead 4 chair-adjudicated, its plan-equality
-    sub-clause refuted), 10 missed defects found, 11 reproduced by fixtures
+  - [x] Review findings, adjudication and repairs are preserved by Git history
+    and [issue #17](https://github.com/mblauberg/provenant/issues/17)
   - [x] Complete repairs landed: MF04-1 (P0), MF04-2, lead 9, lead 2 FK-mismatch
-  - [x] Structural repairs and D-023 authority semantics frozen in the v0.37/
-    v1.3/v1.32/v1.14 candidates; no runtime implementation claimed
-  - [x] Structural spec-family split and deterministic family gates under D-024
-    (exact frozen binding authority; filtered topical stream is non-binding)
-  - [ ] W017 — consolidate the focused residual superseded/mixed clauses into
-    net-current modules with a hash-bound supersession map and net-effective-
-    equivalence proof; F-023 remains open until this passes crucial review
-  - [x] D-024 structural integration and dual-primary certification
+  - [x] Structural repairs and D-023 authority semantics frozen in the current
+    contracts; the Console remains a draft and no runtime
+    implementation is claimed
+  - [x] Standalone semantic specifications and a small deterministic ADR-0009
+    gate, with one normative owner per ID and no monolith aliases or manifests
+  - [x] Net-current semantic fold; superseded amendment diaries remain in Git
+    history rather than live specification structure
 - [x] Lane B — foundations/build: root npm workspace + single lockfile
   (F-011; fixes `@local/agent-fabric-protocol` resolution and the red CI
   legs); compact protocol schema generation under the 5 MiB release gate;
@@ -64,17 +59,15 @@ spec-edit) leg, digest-bound to the ADRs and this map.
   - [x] Compact deterministic protocol schema below the unchanged 5 MiB gate
   - [x] Root-lock CI caching, protocol resolution and duplicate push/PR repair
   - [x] Human-run `gh api` required-checks ruleset proposal
-- [ ] Lane C — Step 1 authority contract: characterisation goldens of the
+- [ ] Lane C — [issue #21](https://github.com/mblauberg/provenant/issues/21): characterisation goldens of the
   current read-only projection (may start immediately; no behaviour change);
   then `AuthorityEnvelopeV2` in protocol, delivery→Fabric mapper, direct V2
-  cutover of all callers/tests/stored state (no dual parser), after Lane A
-  freezes; re-run the seam diff after Lane B lands
+  cutover of all callers/tests/stored state (no dual parser); re-run the seam
+  diff against current `main`
   - [x] Characterisation goldens of the current read-only projection (done
     2026-07-13, commit `6748ceb`)
-  - [ ] Atomic `AuthorityEnvelopeV2` direct cutover — BLOCKED; resume from
-    [HANDOFF-2026-07-13-capability-profiles-v2.md](../handoffs/HANDOFF-2026-07-13-capability-profiles-v2.md)
-    only after Lane A's family/integration gates and the handoff's runtime gate
-    pass
+  - [ ] Atomic `AuthorityEnvelopeV2` direct cutover: track implementation and
+    acceptance in issue #21
 - [ ] Lane D — runtime reconciliation: repair the failing Fabric test families
   via TDD after Lane B integration. Reproduction on the Lane B rebase over
   `main@24ceb83` passed 149 Fabric files/1,054 tests and failed 30 files/162
