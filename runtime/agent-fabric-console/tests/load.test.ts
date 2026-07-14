@@ -259,6 +259,70 @@ describe("Console bounded load gates", () => {
     expect(secondProjectionCount()).toBe(1);
   });
 
+  it("projects invariant rows once across repeated selection changes", () => {
+    const { dataset, controller: initialController, rows } = largeFixture(10_000);
+    const projectionSentinel = rows[5_000];
+    expect(projectionSentinel).toBeDefined();
+    if (projectionSentinel === undefined) return;
+    const sentinelProjectionCount = countRowProjections(projectionSentinel);
+    const ui = createFabricUiState({
+      focusId: "row:attention:attention:000000",
+      scrollOffsetByView: { attention: 0 },
+      draft: "selection-preserved",
+    });
+    const before = structuredClone(ui);
+    let controller = initialController;
+    let frame = renderFabricConsoleFrame(
+      dataset,
+      controller,
+      ui,
+      { columns: 80, rows: 24 },
+    );
+    expect(frame.presentation.masterRows[0]?.selected).toBe(true);
+    expect(frame.presentation.topAttention?.selected).toBe(true);
+
+    for (let index = 1; index <= 50; index += 1) {
+      const selected = rows[index];
+      expect(selected).toBeDefined();
+      if (selected === undefined) return;
+      controller = {
+        ...controller,
+        selectionByView: {
+          ...controller.selectionByView,
+          attention: {
+            stableId: selected.stableId,
+            revision: selected.revision,
+          },
+        },
+      };
+      frame = renderFabricConsoleFrame(
+        dataset,
+        controller,
+        ui,
+        { columns: 80, rows: 24 },
+      );
+
+      expect(frame.presentation.masterRows[index]).toMatchObject({
+        stableId: selected.stableId,
+        selected: true,
+      });
+      expect(frame.presentation.masterRows[index - 1]?.selected).toBe(false);
+      expect(frame.presentation.detail?.stableId).toBe(selected.stableId);
+      expect(frame.presentation.topAttention?.selected).toBe(false);
+    }
+
+    expect(frame.presentation.masterRows.filter(({ selected }) => selected))
+      .toHaveLength(1);
+    expect(sentinelProjectionCount()).toBe(1);
+    expect(frame.columns * frame.rows.length).toBeLessThanOrEqual(
+      MAX_FRAME_CELLS,
+    );
+    expect(frame.rows.every((row) => cellWidth(row) === frame.columns)).toBe(
+      true,
+    );
+    expect(ui).toStrictEqual(before);
+  });
+
   it("rejects frames beyond the shared cell budget without allocation", () => {
     const { dataset, controller } = largeFixture(1);
     const frame = renderFabricConsoleFrame(
