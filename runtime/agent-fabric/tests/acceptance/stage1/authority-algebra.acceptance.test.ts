@@ -11,6 +11,54 @@ import { createCurrentSessionRun } from "../../support/current-session-testkit.t
 import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 
 describe("Stage 1 authority algebra", () => {
+  it.each(["sourcePaths", "artifactPaths"] as const)(
+    "rejects syntactically valid stored %s outside workspaceRoots",
+    async (field) => {
+      const workspaceRoot = await mkdtemp(join(tmpdir(), "fabric-authority-semantic-tamper-"));
+      const databasePath = join(workspaceRoot, "fabric.sqlite3");
+      await mkdir(join(workspaceRoot, "project", "src"), { recursive: true });
+      const authority = {
+        ...TEST_AUTHORITY_V2_FIELDS,
+        workspaceRoots: ["project"],
+        sourcePaths: ["project/src"],
+        artifactPaths: ["project/artifacts"],
+        actions: [FABRIC_OPERATIONS.acquireWriteLease],
+        disclosure: { level: "scoped", scopes: ["local"] } as const,
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        budget: { turns: 1 },
+      };
+      let fabric = await openFabric({ databasePath, workspaceRoots: [workspaceRoot] });
+      try {
+        const run = await createCurrentSessionRun({
+          databasePath,
+          workspaceRoot,
+          runId: `semantic-tamper-${field}`,
+          chair: { agentId: "chair", authority },
+        });
+        await fabric.close();
+
+        const database = new Database(databasePath);
+        const row = database.prepare("SELECT authority_json FROM authorities WHERE authority_id = ?")
+          .get(run.chairAuthorityId) as { authority_json: string };
+        const stored = JSON.parse(row.authority_json) as Record<string, unknown>;
+        stored[field] = ["outside"];
+        database.prepare("UPDATE authorities SET authority_json = ? WHERE authority_id = ?")
+          .run(JSON.stringify(stored), run.chairAuthorityId);
+        database.close();
+
+        fabric = await openFabric({ databasePath, workspaceRoots: [workspaceRoot] });
+        await expect(fabric.connect(run.chairCapability).acquireWriteLease({
+          scope: ["project/src"],
+          ttlMs: 1_000,
+          commandId: `semantic-tamper-${field}:lease`,
+        })).rejects.toThrow(/stored authority is invalid/u);
+      } finally {
+        await fabric.close().catch(() => undefined);
+        await rm(workspaceRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("preserves a canonical delegated path when its filesystem target changes before restart", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "fabric-authority-restart-"));
     const databasePath = join(workspaceRoot, "fabric.sqlite3");

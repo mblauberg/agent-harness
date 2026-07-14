@@ -118,6 +118,48 @@ def test_delivery_authority_v2_is_closed_and_rejects_unknown_operations():
         )
 
 
+@pytest.mark.parametrize(
+    "budget",
+    [
+        {"turns": -1},
+        {"turns": 2**53},
+        {
+            **{f"input_tokens:provider-{index}": 1 for index in range(123)},
+            **{unit: 1 for unit in ("turns", "provider_calls", "concurrent_turns", "descendants", "message_bytes", "artifact_bytes")},
+        },
+    ],
+)
+def test_delivery_authority_budget_matches_canonical_bounds(budget):
+    module = load(AUTHORITY_MAPPER_PATH, "authority_mapping_budget_bounds")
+    delivery = json.loads((AUTHORITY_FIXTURE_ROOT / "delivery-authority.json").read_text())
+    delivery["budget"] = budget
+    valid_operations = {*delivery["allowed_fabric_operations"], *delivery["denied_fabric_operations"]}
+
+    with pytest.raises(module.AuthorityMappingError, match="budget"):
+        module.map_delivery_authority(
+            delivery,
+            valid_operations=valid_operations,
+            valid_cost_pattern=COST_PATTERN,
+        )
+
+
+def test_delivery_authority_budget_accepts_canonical_128_key_boundary():
+    module = load(AUTHORITY_MAPPER_PATH, "authority_mapping_budget_boundary")
+    delivery = json.loads((AUTHORITY_FIXTURE_ROOT / "delivery-authority.json").read_text())
+    delivery["budget"] = {
+        **{f"input_tokens:provider-{index}": 1 for index in range(122)},
+        **{unit: 1 for unit in ("turns", "provider_calls", "concurrent_turns", "descendants", "message_bytes", "artifact_bytes")},
+    }
+    valid_operations = {*delivery["allowed_fabric_operations"], *delivery["denied_fabric_operations"]}
+
+    mapped = module.map_delivery_authority(
+        delivery,
+        valid_operations=valid_operations,
+        valid_cost_pattern=COST_PATTERN,
+    )
+    assert len(mapped["budget"]) == 128
+
+
 def test_complete_delivery_delegation_inherits_approval_and_must_narrow_every_dimension():
     module = load(AUTHORITY_MAPPER_PATH, "authority_mapping_delegation")
     delivery = json.loads((AUTHORITY_FIXTURE_ROOT / "delivery-authority.json").read_text())

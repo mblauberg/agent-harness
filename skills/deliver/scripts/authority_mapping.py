@@ -28,6 +28,8 @@ _GENERIC_BUDGET_UNITS = {
     "artifact_bytes",
     "wall_clock_milliseconds",
 }
+_MAX_SAFE_INTEGER = 2**53 - 1
+_MAX_BUDGET_UNITS = 128
 
 _SCOPE_FIELDS = {
     "schema_version",
@@ -127,6 +129,7 @@ def _timestamp(value: Any, field: str) -> str:
 
 def _budget(value: Any, field: str, valid_cost_pattern: Pattern[str]) -> dict[str, int]:
     budget = _object(value, field)
+    _fail(len(budget) > _MAX_BUDGET_UNITS, f"{field} must contain at most {_MAX_BUDGET_UNITS} units")
     result: dict[str, int] = {}
     for key, amount in budget.items():
         _fail(
@@ -138,7 +141,13 @@ def _budget(value: Any, field: str, valid_cost_pattern: Pattern[str]) -> dict[st
             ),
             f"{field} contains an invalid budget unit",
         )
-        _fail(isinstance(amount, bool) or not isinstance(amount, int), f"{field}.{key} must be an integer")
+        _fail(
+            isinstance(amount, bool)
+            or not isinstance(amount, int)
+            or amount < 0
+            or amount > _MAX_SAFE_INTEGER,
+            f"{field}.{key} must be a non-negative safe integer",
+        )
         result[key] = amount
     return dict(sorted(result.items()))
 

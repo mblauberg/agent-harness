@@ -88,6 +88,16 @@ describe("AuthorityEnvelopeV2", () => {
     }
   });
 
+  it.each([
+    { sourcePaths: ["outside"], artifactPaths: ["project/artifacts"] },
+    { sourcePaths: ["project/src"], artifactPaths: ["outside"] },
+  ])("rejects syntactically valid paths outside workspace roots: %#", (paths) => {
+    expect(() => AUTHORITY_ENVELOPE_V2_CODEC.parse(authority({
+      workspaceRoots: ["project"],
+      ...paths,
+    }), "authority")).toThrow(/sourcePaths|artifactPaths|workspaceRoots/u);
+  });
+
   it("accepts a child only when every authority dimension narrows", () => {
     const parent = authority({
       workspaceRoots: ["."],

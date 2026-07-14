@@ -56,8 +56,8 @@ const launchPacket = {
     schemaVersion: 2,
     approval: { approvedBy: "human-maintainer", evidenceId: "authority-approval", evidenceDigest: digest },
     workspaceRoots: ["project"],
-    sourcePaths: ["runtime/agent-fabric"],
-    artifactPaths: [".agent-run/AFAB-005"],
+    sourcePaths: ["project/runtime/agent-fabric"],
+    artifactPaths: ["project/.agent-run/AFAB-005"],
     actions: [FABRIC_OPERATIONS.createTask],
     deniedPaths: [],
     deniedActions: [],
@@ -210,7 +210,11 @@ describe("launch packet v1", () => {
   it.each(["workspaceRoots", "sourcePaths", "artifactPaths", "deniedPaths"] as const)(
     "permits the exact project root in chairAuthority.%s only",
     (field) => {
-      const authority = { ...launchPacket.chairAuthority, [field]: ["."] };
+      const authority = {
+        ...launchPacket.chairAuthority,
+        ...(field === "sourcePaths" || field === "artifactPaths" ? { workspaceRoots: ["."] } : {}),
+        [field]: ["."],
+      };
       expect(parseLaunchPacketV1({ ...launchPacket, chairAuthority: authority }).chairAuthority[field])
         .toStrictEqual(["."]);
       for (const unsafe of ["../outside", "/absolute"]) {

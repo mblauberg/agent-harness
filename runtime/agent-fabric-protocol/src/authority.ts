@@ -152,9 +152,19 @@ const baseCodec = objectCodec({
   },
 });
 
+function validateAuthorityEnvelopeV2(value: AuthorityEnvelopeV2, path: string): AuthorityEnvelopeV2 {
+  if (!allowedPathsContained(value.sourcePaths, value.workspaceRoots)) {
+    throw new TypeError(`${path}.sourcePaths must be contained by ${path}.workspaceRoots`);
+  }
+  if (!allowedPathsContained(value.artifactPaths, value.workspaceRoots)) {
+    throw new TypeError(`${path}.artifactPaths must be contained by ${path}.workspaceRoots`);
+  }
+  return value;
+}
+
 export const AUTHORITY_ENVELOPE_V2_CODEC = parserBacked(
   baseCodec,
-  (value) => value as unknown as AuthorityEnvelopeV2,
+  (value, path) => validateAuthorityEnvelopeV2(value as unknown as AuthorityEnvelopeV2, path),
   baseCodec.example as unknown as AuthorityEnvelopeV2,
 );
 
