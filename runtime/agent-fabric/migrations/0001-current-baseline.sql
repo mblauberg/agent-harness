@@ -847,27 +847,27 @@ CREATE TABLE lifecycle_operations (
 );
 
 CREATE TABLE agent_lifecycle_identity_high_water (
-  run_id TEXT,
-  agent_id TEXT,
-  provider_generation INTEGER,
-  principal_generation INTEGER,
-  revision INTEGER,
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  provider_generation INTEGER NOT NULL CHECK(provider_generation BETWEEN 1 AND 9007199254740991),
+  principal_generation INTEGER NOT NULL CHECK(principal_generation BETWEEN 1 AND 9007199254740991),
+  revision INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 9007199254740991),
   PRIMARY KEY(run_id, agent_id)
 ) STRICT;
 CREATE TABLE agent_lifecycle_bridge_high_water (
-  run_id TEXT,
-  agent_id TEXT,
-  bridge_owner_kind TEXT,
-  bridge_generation INTEGER,
-  revision INTEGER,
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  bridge_owner_kind TEXT NOT NULL CHECK(bridge_owner_kind IN ('chair','child')),
+  bridge_generation INTEGER NOT NULL CHECK(bridge_generation BETWEEN 1 AND 9007199254740991),
+  revision INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 9007199254740991),
   PRIMARY KEY(run_id, agent_id, bridge_owner_kind)
 ) STRICT;
 CREATE TABLE agent_lifecycle_context_high_water (
-  run_id TEXT,
-  agent_id TEXT,
-  provider_generation INTEGER,
-  context_revision INTEGER,
-  revision INTEGER,
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  provider_generation INTEGER NOT NULL CHECK(provider_generation BETWEEN 1 AND 9007199254740991),
+  context_revision INTEGER NOT NULL CHECK(context_revision BETWEEN 0 AND 9007199254740991),
+  revision INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 9007199254740991),
   PRIMARY KEY(run_id, agent_id, provider_generation)
 ) STRICT;
 CREATE TABLE provider_context_observation_audit (
@@ -3127,15 +3127,15 @@ CREATE UNIQUE INDEX one_nonterminal_generation_loss_per_agent
   ON lifecycle_generation_loss_heads(run_id,agent_id)
   WHERE terminal=0;
 CREATE TABLE lifecycle_custody_adoption_deliveries (
-  run_id TEXT,
-  agent_id TEXT,
-  custody_id TEXT,
-  ordinal INTEGER,
-  delivery_id TEXT,
-  delivery_generation INTEGER,
-  recipient_agent_id TEXT,
-  source_state TEXT,
-  active_owner INTEGER,
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  custody_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal>=1),
+  delivery_id TEXT NOT NULL,
+  delivery_generation INTEGER NOT NULL CHECK(delivery_generation>=1),
+  recipient_agent_id TEXT NOT NULL,
+  source_state TEXT NOT NULL CHECK(source_state IN ('claimed','provider-accepted')),
+  active_owner INTEGER NOT NULL CHECK(active_owner IN (0,1)),
   PRIMARY KEY(run_id, agent_id, custody_id, ordinal),
   UNIQUE(run_id, agent_id, custody_id, delivery_id, delivery_generation),
   FOREIGN KEY(run_id, agent_id, custody_id)
@@ -3145,6 +3145,68 @@ CREATE UNIQUE INDEX one_nonfinal_custody_per_delivery_generation
   ON lifecycle_custody_adoption_deliveries(run_id, delivery_id,
     delivery_generation)
   WHERE active_owner = 1;
+CREATE TRIGGER lifecycle_custody_adoption_delivery_owner_update_guard
+BEFORE UPDATE ON lifecycle_custody_adoption_deliveries
+WHEN NOT (
+  OLD.active_owner=1 AND NEW.active_owner=0
+  AND NEW.run_id=OLD.run_id AND NEW.agent_id=OLD.agent_id
+  AND NEW.custody_id=OLD.custody_id AND NEW.ordinal=OLD.ordinal
+  AND NEW.delivery_id=OLD.delivery_id
+  AND NEW.delivery_generation=OLD.delivery_generation
+  AND NEW.recipient_agent_id=OLD.recipient_agent_id
+  AND NEW.source_state=OLD.source_state
+  AND EXISTS (
+    SELECT 1 FROM lifecycle_rotation_custody_heads head
+     WHERE head.run_id=OLD.run_id AND head.agent_id=OLD.agent_id
+       AND head.custody_id=OLD.custody_id AND head.terminal=1
+       AND head.disposition_code IN ('adopted','no-effect','superseded')
+  )
+)
+BEGIN SELECT RAISE(ABORT,'INVARIANT_lifecycle_custody_adoption_delivery_owner'); END;
+CREATE TRIGGER lifecycle_custody_adoption_delivery_owner_delete_guard
+BEFORE DELETE ON lifecycle_custody_adoption_deliveries
+BEGIN SELECT RAISE(ABORT,'INVARIANT_lifecycle_custody_adoption_delivery_owner'); END;
+CREATE TABLE lifecycle_custody_write_leases (
+  run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  custody_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal>=1),
+  lease_id TEXT NOT NULL,
+  lease_generation INTEGER NOT NULL CHECK(lease_generation>=1),
+  source_status TEXT NOT NULL CHECK(source_status='active'),
+  active_owner INTEGER NOT NULL CHECK(active_owner IN (0,1)),
+  PRIMARY KEY(run_id,agent_id,custody_id,ordinal),
+  UNIQUE(run_id,agent_id,custody_id,lease_id,lease_generation),
+  FOREIGN KEY(run_id,agent_id,custody_id)
+    REFERENCES lifecycle_rotation_custodies(run_id,agent_id,custody_id)
+) STRICT;
+CREATE UNIQUE INDEX one_lifecycle_custody_per_write_lease_generation
+  ON lifecycle_custody_write_leases(run_id,lease_id,lease_generation)
+  WHERE active_owner=1;
+CREATE TRIGGER lifecycle_custody_write_lease_owner_update_guard
+BEFORE UPDATE ON lifecycle_custody_write_leases
+WHEN NOT (
+  OLD.active_owner=1 AND NEW.active_owner=0
+  AND NEW.run_id=OLD.run_id AND NEW.agent_id=OLD.agent_id
+  AND NEW.custody_id=OLD.custody_id AND NEW.ordinal=OLD.ordinal
+  AND NEW.lease_id=OLD.lease_id AND NEW.lease_generation=OLD.lease_generation
+  AND NEW.source_status=OLD.source_status
+  AND EXISTS (
+    SELECT 1
+      FROM lifecycle_rotation_custody_heads head
+      JOIN leases lease
+        ON lease.run_id=OLD.run_id AND lease.lease_id=OLD.lease_id
+       AND lease.generation=OLD.lease_generation
+     WHERE head.run_id=OLD.run_id AND head.agent_id=OLD.agent_id
+       AND head.custody_id=OLD.custody_id AND head.terminal=1
+       AND head.disposition_code IN ('no-effect','superseded')
+       AND lease.status='active'
+  )
+)
+BEGIN SELECT RAISE(ABORT,'INVARIANT_lifecycle_custody_write_lease_owner'); END;
+CREATE TRIGGER lifecycle_custody_write_lease_owner_delete_guard
+BEFORE DELETE ON lifecycle_custody_write_leases
+BEGIN SELECT RAISE(ABORT,'INVARIANT_lifecycle_custody_write_lease_owner'); END;
 CREATE TABLE agent_lifecycle_recovery_capability_issues (
   issue_id TEXT,
   capability_hash TEXT,
@@ -3750,6 +3812,10 @@ END;
 CREATE TRIGGER agent_lifecycle_identity_high_water_insert
 BEFORE INSERT ON agent_lifecycle_identity_high_water
 WHEN NEW.revision IS NULL OR NEW.revision<>1
+  OR NEW.provider_generation IS NULL
+  OR NEW.provider_generation NOT BETWEEN 1 AND 9007199254740991
+  OR NEW.principal_generation IS NULL
+  OR NEW.principal_generation NOT BETWEEN 1 AND 9007199254740991
 BEGIN
   SELECT RAISE(ABORT,'INVARIANT_agent_lifecycle_identity_high_water_cas');
 END;
@@ -3758,6 +3824,9 @@ BEFORE UPDATE ON agent_lifecycle_identity_high_water
 WHEN NEW.run_id IS NOT OLD.run_id OR NEW.agent_id IS NOT OLD.agent_id
   OR NEW.revision IS NULL OR NEW.revision<>OLD.revision+1
   OR NEW.provider_generation IS NULL OR NEW.principal_generation IS NULL
+  OR NEW.revision NOT BETWEEN 1 AND 9007199254740991
+  OR NEW.provider_generation NOT BETWEEN 1 AND 9007199254740991
+  OR NEW.principal_generation NOT BETWEEN 1 AND 9007199254740991
   OR NEW.provider_generation<OLD.provider_generation
   OR NEW.principal_generation NOT IN (OLD.principal_generation,OLD.principal_generation+1)
   OR (NEW.provider_generation=OLD.provider_generation AND
@@ -3774,6 +3843,8 @@ END;
 CREATE TRIGGER agent_lifecycle_bridge_high_water_insert
 BEFORE INSERT ON agent_lifecycle_bridge_high_water
 WHEN NEW.revision IS NULL OR NEW.revision<>1
+  OR NEW.bridge_generation IS NULL
+  OR NEW.bridge_generation NOT BETWEEN 1 AND 9007199254740991
 BEGIN
   SELECT RAISE(ABORT,'INVARIANT_agent_lifecycle_bridge_high_water_cas');
 END;
@@ -3783,6 +3854,8 @@ WHEN NEW.run_id IS NOT OLD.run_id OR NEW.agent_id IS NOT OLD.agent_id
   OR NEW.bridge_owner_kind IS NOT OLD.bridge_owner_kind
   OR NEW.revision IS NULL OR NEW.revision<>OLD.revision+1
   OR NEW.bridge_generation IS NULL OR NEW.bridge_generation<>OLD.bridge_generation+1
+  OR NEW.revision NOT BETWEEN 1 AND 9007199254740991
+  OR NEW.bridge_generation NOT BETWEEN 1 AND 9007199254740991
 BEGIN
   SELECT RAISE(ABORT,'INVARIANT_agent_lifecycle_bridge_high_water_cas');
 END;
@@ -3795,6 +3868,10 @@ END;
 CREATE TRIGGER agent_lifecycle_context_high_water_insert
 BEFORE INSERT ON agent_lifecycle_context_high_water
 WHEN NEW.revision IS NULL OR NEW.revision<>1
+  OR NEW.provider_generation IS NULL
+  OR NEW.provider_generation NOT BETWEEN 1 AND 9007199254740991
+  OR NEW.context_revision IS NULL
+  OR NEW.context_revision NOT BETWEEN 0 AND 9007199254740991
 BEGIN
   SELECT RAISE(ABORT,'INVARIANT_agent_lifecycle_context_high_water_cas');
 END;
@@ -3804,6 +3881,9 @@ WHEN NEW.run_id IS NOT OLD.run_id OR NEW.agent_id IS NOT OLD.agent_id
   OR NEW.provider_generation IS NOT OLD.provider_generation
   OR NEW.revision IS NULL OR NEW.revision<>OLD.revision+1
   OR NEW.context_revision IS NULL OR NEW.context_revision<=OLD.context_revision
+  OR NEW.revision NOT BETWEEN 1 AND 9007199254740991
+  OR NEW.provider_generation NOT BETWEEN 1 AND 9007199254740991
+  OR NEW.context_revision NOT BETWEEN 0 AND 9007199254740991
 BEGIN
   SELECT RAISE(ABORT,'INVARIANT_agent_lifecycle_context_high_water_cas');
 END;
@@ -5163,6 +5243,21 @@ CREATE TABLE result_deliveries (
     REFERENCES provider_actions(run_id, adapter_id, action_id),
   CHECK ((provider_adapter_id IS NULL) = (provider_action_id IS NULL))
 );
+CREATE TRIGGER result_delivery_lifecycle_receipt_owner_guard
+BEFORE UPDATE ON result_deliveries
+WHEN EXISTS (
+  SELECT 1
+    FROM lifecycle_custody_adoption_deliveries ownership
+    JOIN lifecycle_rotation_custody_heads head
+      ON head.run_id=ownership.run_id AND head.agent_id=ownership.agent_id
+     AND head.custody_id=ownership.custody_id
+    JOIN lifecycle_receipt_custody_effects effect
+      ON effect.run_id=ownership.run_id AND effect.agent_id=ownership.agent_id
+     AND effect.custody_id=ownership.custody_id
+   WHERE ownership.delivery_id=OLD.result_delivery_id
+     AND ownership.active_owner=1 AND head.terminal=0
+)
+BEGIN SELECT RAISE(ABORT,'INVARIANT_result_delivery_lifecycle_receipt_owner'); END;
 
 CREATE TABLE result_delivery_attempts (
   result_delivery_id TEXT NOT NULL REFERENCES result_deliveries(result_delivery_id),
@@ -5835,6 +5930,66 @@ CREATE TRIGGER agent_bridge_live_delete_forbidden
 BEFORE DELETE ON agent_bridge_state
 WHEN OLD.bridge_state<>'none'
 BEGIN SELECT RAISE(ABORT,'INVARIANT_agent_bridge_active_retirement_proof'); END;
+
+CREATE TRIGGER agent_bridge_lifecycle_rotation_identity_guard
+BEFORE UPDATE OF adapter_id,action_id,provider_session_ref,provider_session_generation,
+  bridge_generation,capability_hash,activation_evidence_digest,revision ON agent_bridge_state
+WHEN OLD.bridge_state='active' AND NEW.bridge_state='active'
+  AND EXISTS (
+    SELECT 1
+      FROM lifecycle_rotation_custodies custody
+      JOIN lifecycle_rotation_custody_heads head
+        ON head.run_id=custody.run_id AND head.agent_id=custody.agent_id
+       AND head.custody_id=custody.custody_id
+     WHERE custody.bridge_owner_kind='child'
+       AND ((head.state='committing' AND head.terminal=0)
+         OR (head.state='finalized' AND head.disposition_code='adopted' AND head.terminal=1))
+       AND custody.run_id=OLD.run_id AND custody.agent_id=OLD.agent_id
+       AND custody.source_adapter_id=OLD.adapter_id
+       AND custody.source_custody_action_id=OLD.action_id
+       AND custody.source_provider_session_ref=OLD.provider_session_ref
+       AND custody.source_provider_generation=OLD.provider_session_generation
+       AND custody.source_bridge_generation=OLD.bridge_generation
+       AND custody.source_capability_hash=OLD.capability_hash
+       AND custody.source_bridge_revision=OLD.revision
+  )
+  AND NOT EXISTS (
+    SELECT 1
+      FROM lifecycle_rotation_custodies custody
+      JOIN lifecycle_rotation_custody_heads head
+        ON head.run_id=custody.run_id AND head.agent_id=custody.agent_id
+       AND head.custody_id=custody.custody_id
+      JOIN provider_actions action
+        ON action.run_id=custody.run_id
+       AND action.adapter_id=custody.replacement_adapter_id
+       AND action.action_id=custody.provider_action_id
+     WHERE custody.bridge_owner_kind='child'
+       AND ((head.state='committing' AND head.terminal=0)
+         OR (head.state='finalized' AND head.disposition_code='adopted' AND head.terminal=1))
+       AND custody.run_id=OLD.run_id AND custody.agent_id=OLD.agent_id
+       AND custody.source_adapter_id=OLD.adapter_id
+       AND custody.source_custody_action_id=OLD.action_id
+       AND custody.source_provider_session_ref=OLD.provider_session_ref
+       AND custody.source_provider_generation=OLD.provider_session_generation
+       AND custody.source_bridge_generation=OLD.bridge_generation
+       AND custody.source_capability_hash=OLD.capability_hash
+       AND custody.source_bridge_revision=OLD.revision
+       AND NEW.adapter_id=custody.replacement_adapter_id
+       AND NEW.action_id=custody.provider_action_id
+       AND action.status='terminal' AND action.idempotency_proven=1
+       AND action.execution_count=1 AND action.effect_count=1
+       AND action.provider_session_generation=custody.target_provider_generation
+       AND json_valid(action.result_json)=1
+       AND NEW.provider_session_ref=json_extract(action.result_json,'$.providerSessionRef')
+       AND json_extract(action.result_json,'$.providerSessionGeneration')=custody.target_provider_generation
+       AND json_extract(action.result_json,'$.bridgeGeneration')=custody.target_bridge_generation
+       AND NEW.provider_session_generation=custody.target_provider_generation
+       AND NEW.bridge_generation=custody.target_bridge_generation
+       AND NEW.capability_hash=custody.staged_capability_hash
+       AND NEW.activation_evidence_digest=json_extract(action.result_json,'$.activationEvidenceDigest')
+       AND NEW.revision=OLD.revision+1
+  )
+BEGIN SELECT RAISE(ABORT,'INVARIANT_agent_bridge_lifecycle_rotation_target'); END;
 
 CREATE TRIGGER agents_values_insert BEFORE INSERT ON agents BEGIN
   SELECT CASE WHEN NEW.lifecycle NOT IN ('ready','completion-ready','suspended','context-unreconciled','archived')
@@ -7008,6 +7163,50 @@ CREATE TRIGGER leases_values_update BEFORE UPDATE OF kind,status,generation,hold
   SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM agents a WHERE a.agent_id=NEW.holder_agent_id AND a.run_id=NEW.run_id)
     THEN RAISE(ABORT, 'INVARIANT_leases_holder_same_run') END;
 END;
+
+CREATE TRIGGER write_lease_lifecycle_custody_owner_update_guard
+BEFORE UPDATE ON leases
+WHEN EXISTS (
+  SELECT 1
+    FROM lifecycle_custody_write_leases ownership
+    JOIN lifecycle_rotation_custody_heads head
+      ON head.run_id=ownership.run_id AND head.agent_id=ownership.agent_id
+     AND head.custody_id=ownership.custody_id
+   WHERE ownership.lease_id=OLD.lease_id
+     AND ownership.lease_generation=OLD.generation
+     AND ownership.active_owner=1
+)
+AND NOT (
+  OLD.status='quarantined' AND NEW.status='active'
+  AND NEW.lease_id=OLD.lease_id AND NEW.run_id=OLD.run_id
+  AND NEW.kind=OLD.kind AND NEW.holder_agent_id=OLD.holder_agent_id
+  AND NEW.generation=OLD.generation AND NEW.expires_at=OLD.expires_at
+  AND EXISTS (
+    SELECT 1
+      FROM lifecycle_custody_write_leases ownership
+      JOIN lifecycle_rotation_custody_heads head
+        ON head.run_id=ownership.run_id AND head.agent_id=ownership.agent_id
+       AND head.custody_id=ownership.custody_id
+     WHERE ownership.lease_id=OLD.lease_id
+       AND ownership.lease_generation=OLD.generation
+       AND ownership.active_owner=1 AND head.terminal=1
+       AND head.disposition_code IN ('no-effect','superseded')
+  )
+)
+BEGIN SELECT RAISE(ABORT,'INVARIANT_write_lease_lifecycle_custody_owner'); END;
+CREATE TRIGGER write_lease_lifecycle_custody_owner_delete_guard
+BEFORE DELETE ON leases
+WHEN EXISTS (
+  SELECT 1
+    FROM lifecycle_custody_write_leases ownership
+    JOIN lifecycle_rotation_custody_heads head
+      ON head.run_id=ownership.run_id AND head.agent_id=ownership.agent_id
+     AND head.custody_id=ownership.custody_id
+   WHERE ownership.lease_id=OLD.lease_id
+     AND ownership.lease_generation=OLD.generation
+     AND ownership.active_owner=1
+)
+BEGIN SELECT RAISE(ABORT,'INVARIANT_write_lease_lifecycle_custody_owner'); END;
 
 CREATE TRIGGER membership_same_run_insert BEFORE INSERT ON project_session_memberships
 WHEN NOT EXISTS (SELECT 1 FROM runs r WHERE r.project_session_id=NEW.project_session_id AND r.run_id=NEW.coordination_run_id)

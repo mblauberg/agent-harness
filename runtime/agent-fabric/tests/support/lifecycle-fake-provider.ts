@@ -136,9 +136,13 @@ async function provisionRetainedAgent(params: Record<string, unknown>): Promise<
   ) throw new Error("private child principal binding changed");
   const payload = isRecord(params.payload) ? params.payload : {};
   const requestedGeneration = payload.targetProviderGeneration ?? payload.generation;
-  const providerSessionGeneration = typeof requestedGeneration === "number" && Number.isSafeInteger(requestedGeneration)
+  const reservedProviderSessionGeneration = typeof requestedGeneration === "number" && Number.isSafeInteger(requestedGeneration)
     ? requestedGeneration
     : params.operation === "attach" ? 1 : 2;
+  const providerSessionGeneration = process.env.LIFECYCLE_FAKE_WRONG_PROVIDER_GENERATION === "1" &&
+    params.operation === "spawn"
+    ? reservedProviderSessionGeneration + 1
+    : reservedProviderSessionGeneration;
   const providerSessionRef = typeof params.providerSessionRef === "string"
     ? params.providerSessionRef
     : `fake-session:${String(params.targetAgentId)}:g${String(providerSessionGeneration)}:replacement`;

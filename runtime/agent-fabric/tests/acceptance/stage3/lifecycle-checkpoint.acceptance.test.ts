@@ -608,7 +608,7 @@ describe("FR-013 Stage 3 checkpointed lifecycle requests", () => {
     });
   });
 
-  it("supersedes a terminal replacement when the source bridge loses its adoption CAS", async () => {
+  it("fences source bridge drift while a terminal replacement awaits adopted apply", async () => {
     const fixture = await createLifecycleFixture({ retainedAgents: true });
     cleanup.push(async () => {
       await fixture.fabric.close();
@@ -618,7 +618,7 @@ describe("FR-013 Stage 3 checkpointed lifecycle requests", () => {
       agentId: "leader",
       inFlightChildren: ["child"],
       openWork: ["leader-task"],
-      nextAction: "retain the predecessor after source CAS drift",
+      nextAction: "retain the exact source until adopted apply",
     });
     const request = {
       action: "rotate" as const,
@@ -636,22 +636,22 @@ describe("FR-013 Stage 3 checkpointed lifecycle requests", () => {
       effect_count: 1,
     }));
     const drifted = new Database(fixture.databasePath);
-    drifted.prepare(`
+    expect(() => drifted.prepare(`
       UPDATE agent_bridge_state SET revision=revision+1
        WHERE run_id=? AND agent_id='leader' AND bridge_state='active'
-    `).run(fixture.runId);
+    `).run(fixture.runId)).toThrow("INVARIANT_agent_bridge_lifecycle_rotation_target");
     drifted.close();
 
     const restarted = await restartWithReceiptAuthority(fixture);
     await expect(restarted.fabric.recoverStartupState()).resolves.toMatchObject({ actionsReconciled: 0 });
     await expect(restarted.chair.getAgentLifecycle({ agentId: "leader" })).resolves.toMatchObject({
       lifecycle: "ready",
-      providerSessionGeneration: 1,
-      currentSource: { state: "finalized", disposition: "superseded" },
+      providerSessionGeneration: 2,
+      currentSource: { state: "finalized", disposition: "adopted" },
     });
     expect(rotationHead(fixture, request.commandId)).toMatchObject({
       state: "finalized",
-      disposition_code: "superseded",
+      disposition_code: "adopted",
       terminal: 1,
       action_status: "terminal",
       execution_count: 1,

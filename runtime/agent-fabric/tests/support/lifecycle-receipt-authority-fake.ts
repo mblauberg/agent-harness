@@ -188,6 +188,8 @@ export class TestLifecycleReceiptAuthority implements LifecycleIntegrityReceiptA
   corruption: LifecycleReceiptAuthorityCorruption = "none";
   appendSuccessThenThrowOnce = false;
   appendUnrelatedAfterNextReceipt = false;
+  readReceiptAlwaysAbsent = false;
+  onReadReceiptOnce: (() => void) | undefined;
   admitCalls = 0;
   appendCalls = 0;
   appendThrowCount = 0;
@@ -240,6 +242,10 @@ export class TestLifecycleReceiptAuthority implements LifecycleIntegrityReceiptA
   }
 
   async readReceipt(lookup: LifecycleReceiptLookup): Promise<LifecycleReceiptRecord | null> {
+    const hook = this.onReadReceiptOnce;
+    this.onReadReceiptOnce = undefined;
+    hook?.();
+    if (this.readReceiptAlwaysAbsent) return null;
     return this.#receiptsByLookup.get(receiptLookupKey(lookup)) ?? null;
   }
 

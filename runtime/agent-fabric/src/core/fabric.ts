@@ -7355,9 +7355,25 @@ export class Fabric {
     const sourceProviderGeneration = numberField(source, "provider_session_generation");
     const sourcePrincipalGeneration = numberField(source, "principal_generation");
     const sourceBridgeGeneration = numberField(source, "bridge_generation");
-    const targetProviderGeneration = sourceProviderGeneration + 1;
-    const targetPrincipalGeneration = sourcePrincipalGeneration + 1;
-    const targetBridgeGeneration = sourceBridgeGeneration + 1;
+    const bridgeOwnerKind = stringField(source, "bridge_owner_kind") as "chair" | "child";
+    if (bridgeOwnerKind === "chair") {
+      throw new FabricError(
+        "CAPABILITY_UNAVAILABLE",
+        "true-chair lifecycle rotation requires the disabled ordinal-two review authority path",
+      );
+    }
+    const generationReservation = {
+      runId,
+      agentId,
+      bridgeOwnerKind,
+      sourceProviderGeneration,
+      sourcePrincipalGeneration,
+      sourceBridgeGeneration,
+    };
+    const targetGenerations = this.#lifecycleRotations.nextGenerations(generationReservation);
+    const targetProviderGeneration = targetGenerations.providerGeneration;
+    const targetPrincipalGeneration = targetGenerations.principalGeneration;
+    const targetBridgeGeneration = targetGenerations.bridgeGeneration;
     const checkpointDigest = `sha256:${input.checkpoint.sha256}`;
     const stagedCapability = `afc_${randomBytes(32).toString("base64url")}`;
     const stagedCapabilityHash = sha256(stagedCapability);
@@ -7399,6 +7415,33 @@ export class Fabric {
       if (replay?.kind === "accepted-suspended") return replay;
       throw new FabricError("DEDUPE_CONFLICT", "admitted lifecycle rotation lacks its command receipt");
     }
+    let capturedWriteLeases: Array<Readonly<{ leaseId: string; generation: number }>> = [];
+    const capturedAdoptionDeliveries = this.#database.prepare(`
+      SELECT result_delivery_id AS deliveryId,claim_generation AS claimGeneration,
+             requester_agent_id AS requesterAgentId,target_provider_session AS targetProviderSession,
+             state,revision
+        FROM result_deliveries
+       WHERE run_id=? AND requester_agent_id=? AND target_provider_session=?
+         AND state IN ('claimed','provider-accepted')
+       ORDER BY result_delivery_id
+    `).all(runId, agentId, stringField(source, "provider_session_ref")).map((candidate) => {
+      const delivery = rowOrNotFound(candidate, "lifecycle adoption delivery");
+      return {
+        deliveryId: stringField(delivery, "deliveryId"),
+        claimGeneration: numberField(delivery, "claimGeneration"),
+        requesterAgentId: stringField(delivery, "requesterAgentId"),
+        targetProviderSession: stringField(delivery, "targetProviderSession"),
+        state: stringField(delivery, "state") as "claimed" | "provider-accepted",
+        revision: numberField(delivery, "revision"),
+      };
+    });
+    let quarantinedWriteSetDigest = sha256Digest(canonicalJson(capturedWriteLeases));
+    const adoptionDeliverySetDigest = sha256Digest(canonicalJson(capturedAdoptionDeliveries.map((delivery) => ({
+      deliveryId: delivery.deliveryId,
+      claimGeneration: delivery.claimGeneration,
+      requesterAgentId: delivery.requesterAgentId,
+      sourceState: delivery.state,
+    }))));
     const openWorkSetDigest = sha256Digest(canonicalJson([...input.checkpoint.openWork].sort()));
     const predecessorTurnSetDigest = sha256Digest(canonicalJson([{
       adapterId,
@@ -7439,6 +7482,10 @@ export class Fabric {
       acceptedReceiptDigest: sha256Digest(canonicalJson(acceptedBase)),
     }, "lifecycleAcceptance");
     this.#database.transaction(() => {
+      const reserved = this.#lifecycleRotations.reserveNextGenerationsInCurrentTransaction(generationReservation);
+      if (canonicalJson(reserved) !== canonicalJson(targetGenerations)) {
+        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle generation reservation changed");
+      }
       const payloadJson = canonicalJson(providerPayload);
       this.#providerActionAdmission.admitUnroutedInCurrentTransaction(ticket, {
         runId,
@@ -7469,6 +7516,27 @@ export class Fabric {
       if (suspended.changes !== 1) {
         throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle source changed before suspension");
       }
+      capturedWriteLeases = this.#database.prepare(`
+        SELECT lease_id AS leaseId,generation
+          FROM leases
+         WHERE run_id=? AND holder_agent_id=? AND kind='write' AND status='active'
+         ORDER BY lease_id
+      `).all(runId, agentId).map((candidate) => {
+        const lease = rowOrNotFound(candidate, "lifecycle active write lease");
+        return { leaseId: stringField(lease, "leaseId"), generation: numberField(lease, "generation") };
+      });
+      const quarantineLease = this.#database.prepare(`
+        UPDATE leases SET status='quarantined',updated_at=?
+         WHERE lease_id=? AND run_id=? AND holder_agent_id=? AND kind='write'
+           AND generation=? AND status='active'
+      `);
+      capturedWriteLeases.forEach((lease) => {
+        const changed = quarantineLease.run(this.#clock(), lease.leaseId, runId, agentId, lease.generation);
+        if (changed.changes !== 1) {
+          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle write lease changed before quarantine");
+        }
+      });
+      quarantinedWriteSetDigest = sha256Digest(canonicalJson(capturedWriteLeases));
       this.#lifecycleRotations.createInCurrentTransaction({
         projectSessionId: accepted.projectSessionId,
         runId,
@@ -7477,13 +7545,13 @@ export class Fabric {
         commandId: input.commandId,
         admissionDigest: accepted.acceptedReceiptDigest,
         actionRef: accepted.actionRef,
-        bridgeOwnerKind: stringField(source, "bridge_owner_kind") as "chair" | "child",
+        bridgeOwnerKind,
         callerTurnLeaseId: stringField(source, "caller_action_id"),
         callerTurnGeneration: numberField(source, "turn_lease_generation"),
         predecessorTurnSetDigest,
-        quarantinedWriteSetDigest: sha256(canonicalJson([])),
+        quarantinedWriteSetDigest,
         deliveryCutWatermark: accepted.deliveryCutWatermark,
-        adoptionDeliverySetDigest: sha256(canonicalJson([])),
+        adoptionDeliverySetDigest,
         checkpointRef: input.checkpoint.relativePath,
         checkpointDigest,
         taskRevision: input.taskRevision,
@@ -7513,6 +7581,51 @@ export class Fabric {
         launchAttestChallengeDigest: sha256(randomBytes(32).toString("hex")),
         preconditionDigest: this.#lifecycleRotationPreconditionDigest(runId, agentId, input.taskId),
         createdAt: this.#clock(),
+      });
+      const ownLease = this.#database.prepare(`
+        INSERT INTO lifecycle_custody_write_leases(
+          run_id,agent_id,custody_id,ordinal,lease_id,lease_generation,source_status,active_owner
+        ) VALUES (?,?,?,?,?,?,'active',1)
+      `);
+      capturedWriteLeases.forEach((lease, index) => {
+        ownLease.run(runId, agentId, custodyId, index + 1, lease.leaseId, lease.generation);
+      });
+      const ownDelivery = this.#database.prepare(`
+        INSERT INTO lifecycle_custody_adoption_deliveries(
+          run_id,agent_id,custody_id,ordinal,delivery_id,delivery_generation,
+          recipient_agent_id,source_state,active_owner
+        ) VALUES (?,?,?,?,?,?,?,?,1)
+      `);
+      const capturedDeliveryStillExact = this.#database.prepare(`
+        SELECT 1 FROM result_deliveries
+         WHERE result_delivery_id=? AND run_id=? AND requester_agent_id=?
+           AND state=? AND claim_generation=? AND target_provider_session=? AND revision=?
+      `);
+      capturedAdoptionDeliveries.forEach((delivery, index) => {
+        if (capturedDeliveryStillExact.get(
+          delivery.deliveryId,
+          runId,
+          delivery.requesterAgentId,
+          delivery.state,
+          delivery.claimGeneration,
+          delivery.targetProviderSession,
+          delivery.revision,
+        ) === undefined) {
+          throw new FabricError(
+            "LIFECYCLE_PRECONDITION_FAILED",
+            "lifecycle adoption delivery changed before custody capture",
+          );
+        }
+        ownDelivery.run(
+          runId,
+          agentId,
+          custodyId,
+          index + 1,
+          delivery.deliveryId,
+          delivery.claimGeneration,
+          delivery.requesterAgentId,
+          delivery.state,
+        );
       });
       this.#commandJournal.write(runId, agentId, input.commandId, input, accepted);
     }).immediate();
@@ -7813,6 +7926,7 @@ export class Fabric {
       const agentId = stringField(row, "agent_id");
       const bridgeContractDigest = stringField(row, "replacement_contract_digest");
       const targetBridgeGeneration = numberField(row, "target_bridge_generation");
+      const bridgeOwnerKind = stringField(row, "bridge_owner_kind") as "chair" | "child";
       const minimalInput = {
         runId,
         agentId,
@@ -7849,10 +7963,6 @@ export class Fabric {
           : null;
         const checkpointChanged = typeof row.checkpoint_json !== "string" &&
           observedCheckpointDigest !== null && observedCheckpointDigest !== expectedCheckpointDigest;
-        const sourceOwned = this.#database.prepare(`
-          SELECT 1 FROM provider_agent_custody
-           WHERE run_id=? AND adapter_id=? AND action_id=?
-        `).get(runId, stringField(row, "source_adapter_id"), stringField(row, "source_custody_action_id"));
         const expectedSource = {
           projectSessionGeneration: numberField(row, "source_project_session_generation"),
           runGeneration: numberField(row, "source_run_generation"),
@@ -7867,30 +7977,54 @@ export class Fabric {
           capabilityHash: stringField(row, "source_capability_hash"),
           bridgeContractDigest: stringField(row, "source_adapter_contract_digest"),
         };
-        const observedSource = this.#database.prepare(`
-          SELECT session.generation AS projectSessionGeneration,
-                 run.revision AS runGeneration,
-                 COALESCE(run.chair_generation,1) AS chairLeaseGeneration,
-                 bridge.adapter_id AS adapterId,bridge.action_id AS actionId,
-                 bridge.provider_session_ref AS providerSessionRef,
-                 bridge.provider_session_generation AS providerGeneration,
-                 capability.principal_generation AS principalGeneration,
-                 bridge.bridge_generation AS bridgeGeneration,
-                 bridge.revision AS bridgeRevision,bridge.capability_hash AS capabilityHash,
-                 source.bridge_contract_digest AS bridgeContractDigest
-            FROM runs run
-            JOIN project_sessions session ON session.project_session_id=run.project_session_id
-            JOIN agent_bridge_state bridge
-              ON bridge.run_id=run.run_id AND bridge.agent_id=? AND bridge.bridge_state='active'
-            JOIN provider_agent_custody source
-              ON source.run_id=bridge.run_id AND source.adapter_id=bridge.adapter_id
-             AND source.action_id=bridge.action_id
-            JOIN capabilities capability
-              ON capability.token_hash=bridge.capability_hash AND capability.revoked_at IS NULL
-           WHERE run.run_id=?
-        `).get(agentId, runId);
-        const sourceChanged = sourceOwned !== undefined &&
-          (!isRow(observedSource) || canonicalJson(observedSource) !== canonicalJson(expectedSource));
+        const observedSource = bridgeOwnerKind === "chair"
+          ? this.#database.prepare(`
+              SELECT session.generation AS projectSessionGeneration,
+                     run.revision AS runGeneration,
+                     COALESCE(run.chair_generation,1) AS chairLeaseGeneration,
+                     bridge.provider_adapter_id AS adapterId,
+                     bridge.provider_action_id AS actionId,
+                     bridge.provider_session_ref AS providerSessionRef,
+                     bridge.provider_session_generation AS providerGeneration,
+                     bridge.principal_generation AS principalGeneration,
+                     bridge.bridge_generation AS bridgeGeneration,
+                     bridge.revision AS bridgeRevision,
+                     bridge.capability_hash AS capabilityHash,
+                     bridge.provider_contract_digest AS bridgeContractDigest
+                FROM runs run
+                JOIN project_sessions session ON session.project_session_id=run.project_session_id
+                JOIN launched_chair_bridge_state bridge
+                  ON bridge.project_session_id=run.project_session_id
+                 AND bridge.coordination_run_id=run.run_id
+                 AND bridge.chair_agent_id=? AND bridge.state='active'
+                JOIN capabilities capability
+                  ON capability.token_hash=bridge.capability_hash AND capability.revoked_at IS NULL
+               WHERE run.run_id=? AND run.chair_agent_id=bridge.chair_agent_id
+            `).get(agentId, runId)
+          : this.#database.prepare(`
+              SELECT session.generation AS projectSessionGeneration,
+                     run.revision AS runGeneration,
+                     COALESCE(run.chair_generation,1) AS chairLeaseGeneration,
+                     bridge.adapter_id AS adapterId,bridge.action_id AS actionId,
+                     bridge.provider_session_ref AS providerSessionRef,
+                     bridge.provider_session_generation AS providerGeneration,
+                     capability.principal_generation AS principalGeneration,
+                     bridge.bridge_generation AS bridgeGeneration,
+                     bridge.revision AS bridgeRevision,bridge.capability_hash AS capabilityHash,
+                     source.bridge_contract_digest AS bridgeContractDigest
+                FROM runs run
+                JOIN project_sessions session ON session.project_session_id=run.project_session_id
+                JOIN agent_bridge_state bridge
+                  ON bridge.run_id=run.run_id AND bridge.agent_id=? AND bridge.bridge_state='active'
+                JOIN provider_agent_custody source
+                  ON source.run_id=bridge.run_id AND source.adapter_id=bridge.adapter_id
+                 AND source.action_id=bridge.action_id
+                JOIN capabilities capability
+                  ON capability.token_hash=bridge.capability_hash AND capability.revoked_at IS NULL
+               WHERE run.run_id=? AND run.chair_agent_id<>bridge.agent_id
+            `).get(agentId, runId);
+        const sourceChanged = !isRow(observedSource) ||
+          canonicalJson(observedSource) !== canonicalJson(expectedSource);
         if (!checkpointChanged && !sourceChanged) return null;
         return {
           driftKind: checkpointChanged ? "checkpoint" : "source",
@@ -8009,10 +8143,13 @@ export class Fabric {
         }
         rawResult = lookup.result;
         try {
-          parseAgentProvisionProviderResult(rawResult, {
+          const parsed = parseAgentProvisionProviderResult(rawResult, {
             adapterId, actionId, targetAgentId: agentId, bridgeGeneration: targetBridgeGeneration,
             bridgeContractDigest,
           });
+          if (parsed.providerSessionGeneration !== numberField(row, "target_provider_generation")) {
+            throw new Error("lifecycle provider result crossed its reserved generation");
+          }
         } catch {
           await finalizeQuarantine("provider-action-terminal-evidence-crossed", lookup);
           continue;
@@ -8071,6 +8208,9 @@ export class Fabric {
           adapterId, actionId, targetAgentId: agentId, bridgeGeneration: targetBridgeGeneration,
           bridgeContractDigest,
         });
+        if (result.providerSessionGeneration !== numberField(row, "target_provider_generation")) {
+          throw new Error("lifecycle provider result crossed its reserved generation");
+        }
       } catch {
         await finalizeQuarantine("stored-provider-terminal-evidence-crossed", rawResult);
         continue;
@@ -8288,6 +8428,31 @@ export class Fabric {
         principalGeneration: input.targetPrincipalGeneration,
       },
     });
+    if (result.providerSessionGeneration !== input.targetProviderGeneration) {
+      const proof = {
+        schemaVersion: 1,
+        kind: "integrity-quarantine",
+        sourceState: head.state,
+        reason: "provider-result-reserved-generation-crossed",
+        providerActionRef: { runId: input.runId, adapterId: input.adapterId, actionId: input.actionId },
+        evidenceDigest: sha256Digest(canonicalJson({
+          expectedProviderSessionGeneration: input.targetProviderGeneration,
+          observedProviderSessionGeneration: result.providerSessionGeneration,
+        })),
+      };
+      await this.#finalizeLifecycleRotationAdopted(
+        input,
+        head,
+        sha256Digest(canonicalJson(proof)),
+        null,
+        {
+          disposition: "quarantined",
+          proofKind: "integrity-quarantine",
+          transitionProof: proof,
+        },
+      );
+      return;
+    }
     const terminalEvidenceDigest = sha256Digest(canonicalJson(result));
     this.#database.transaction(() => {
       const terminalized = this.#database.prepare(`
@@ -8378,7 +8543,8 @@ export class Fabric {
       terminalEvidenceDigest,
     };
     const custodyOwner = rowOrNotFound(this.#database.prepare(`
-      SELECT bridge_owner_kind,target_principal_generation,
+      SELECT bridge_owner_kind,target_provider_generation,target_principal_generation,
+             target_bridge_generation,staged_capability_hash,
              source_adapter_id,source_custody_action_id,source_adapter_contract_digest,
              source_provider_session_ref,source_provider_generation,
              source_principal_generation,source_bridge_generation,source_bridge_revision
@@ -8386,65 +8552,419 @@ export class Fabric {
        WHERE run_id=? AND agent_id=? AND custody_id=?
     `).get(input.runId, input.agentId, input.custodyId), "lifecycle custody owner");
     const bridgeOwnerKind = stringField(custodyOwner, "bridge_owner_kind") as "chair" | "child";
+    const targetProviderGeneration = numberField(custodyOwner, "target_provider_generation");
     const targetPrincipalGeneration = numberField(custodyOwner, "target_principal_generation");
+    const targetBridgeGeneration = numberField(custodyOwner, "target_bridge_generation");
+    const custodyWriteLeases = this.#database.prepare(`
+      SELECT ownership.lease_id AS leaseId,ownership.lease_generation AS leaseGeneration,
+             lease.status,lease.generation
+        FROM lifecycle_custody_write_leases ownership
+        JOIN leases lease ON lease.lease_id=ownership.lease_id AND lease.run_id=ownership.run_id
+       WHERE ownership.run_id=? AND ownership.agent_id=? AND ownership.custody_id=?
+         AND ownership.active_owner=1
+       ORDER BY ownership.ordinal
+    `).all(input.runId, input.agentId, input.custodyId).map((candidate) =>
+      rowOrNotFound(candidate, "lifecycle custody write lease"));
+    const custodyAdoptionDeliveries = this.#database.prepare(`
+      SELECT ownership.delivery_id AS deliveryId,
+             ownership.delivery_generation AS claimGeneration,
+             ownership.recipient_agent_id AS requesterAgentId,
+             ownership.source_state AS sourceState,
+             delivery.claim_generation AS liveClaimGeneration,
+             delivery.target_provider_session AS targetProviderSession,
+             delivery.state,delivery.revision
+        FROM lifecycle_custody_adoption_deliveries ownership
+        JOIN result_deliveries delivery
+          ON delivery.result_delivery_id=ownership.delivery_id AND delivery.run_id=ownership.run_id
+       WHERE ownership.run_id=? AND ownership.agent_id=? AND ownership.custody_id=?
+         AND ownership.active_owner=1
+       ORDER BY ownership.ordinal
+    `).all(input.runId, input.agentId, input.custodyId).map((candidate) =>
+      rowOrNotFound(candidate, "lifecycle custody adoption delivery"));
+    if (terminal.disposition === "adopted") {
+      for (const delivery of custodyAdoptionDeliveries) {
+        if (
+          !["claimed", "provider-accepted"].includes(stringField(delivery, "state")) ||
+          numberField(delivery, "liveClaimGeneration") !== numberField(delivery, "claimGeneration") ||
+          stringField(delivery, "requesterAgentId") !== input.agentId ||
+          stringField(delivery, "targetProviderSession") !== input.sourceProviderSessionRef
+        ) {
+          throw new FabricError(
+            "LIFECYCLE_PRECONDITION_FAILED",
+            "captured lifecycle adoption delivery left its eligible source state",
+          );
+        }
+      }
+    }
     const mutationWrite = (
       relation: string,
       key: string,
       operation: "insert" | "update" | "delete",
+      before: Readonly<Record<string, unknown>> | null,
+      after: Readonly<Record<string, unknown>> | null,
     ) => {
-      const after = operation === "delete" ? null : { schemaVersion: 1, relation, key, operation };
+      if ((operation === "insert") !== (before === null) || (operation === "delete") !== (after === null)) {
+        throw new Error("lifecycle mutation plan row state is crossed");
+      }
       return {
         relation,
-        keyDigest: sha256Digest(`${relation}:${key}`),
+        keyDigest: lifecycleDigest("mutation-key", { schemaVersion: 1, relation, key }),
         operation,
-        expectedSemanticDigest: operation === "insert" ? null : sha256Digest(`before:${relation}:${key}`),
+        expectedSemanticDigest: before === null ? null : lifecycleDigest("mutation-before", before),
         afterSemanticJcs: after === null ? null : canonicalJson(after),
         afterSemanticDigest: after === null ? null : lifecycleDigest("mutation-after", after),
       };
     };
-    const mutationWrites = [
-      mutationWrite("agent-state", `${input.runId}:${input.agentId}`, "update"),
-      mutationWrite("provider-session", `${input.runId}:${input.agentId}`, "update"),
-      mutationWrite(bridgeOwnerKind === "chair" ? "chair-bridge" : "agent-bridge", `${input.runId}:${input.agentId}`, "update"),
-      mutationWrite("principal-capability", input.sourceCapabilityHash, "update"),
-      mutationWrite("freeze-owner", `${input.runId}:${input.agentId}`, "delete"),
-      mutationWrite("custody-revision", `${input.runId}:${input.agentId}:${input.custodyId}`, "insert"),
-      mutationWrite("custody-head", `${input.runId}:${input.agentId}:${input.custodyId}`, "update"),
-      ...(terminal.disposition === "adopted" && bridgeOwnerKind === "chair" ? [
-        mutationWrite("review-cut", `${input.runId}:${input.custodyId}`, "insert"),
-        mutationWrite("review-binding", `${input.runId}:${input.custodyId}`, "insert"),
-        mutationWrite("review-binding-pointer", `${input.runId}:${input.custodyId}`, "update"),
-      ] : []),
-      mutationWrite("audit", `${input.runId}:${input.custodyId}`, "insert"),
-    ].sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
+    const agentBefore = rowOrNotFound(this.#database.prepare(`
+      SELECT lifecycle,provider_session_ref FROM agents WHERE run_id=? AND agent_id=?
+    `).get(input.runId, input.agentId), "lifecycle mutation agent source");
+    const actionBefore = rowOrNotFound(this.#database.prepare(`
+      SELECT status,execution_count,effect_count,idempotency_proven
+        FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?
+    `).get(input.runId, input.adapterId, input.actionId), "lifecycle mutation provider action source");
+    const freezeReason = `lifecycle-rotation:${sha256(input.custodyId).slice(0, 32)}`;
+    const freezeBeforeValue = this.#database.prepare(`
+      SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=? AND reason=?
+    `).get(input.runId, input.agentId, freezeReason);
+    const freezeBefore = isRow(freezeBeforeValue) ? freezeBeforeValue : null;
+    const mutationWrites: Array<ReturnType<typeof mutationWrite>> = [];
+    const localWrites: Array<Readonly<{
+      relation: string;
+      key: string;
+      operation: "insert" | "update" | "delete";
+    }>> = [];
+    const auxiliaryLocalWrites: Array<Readonly<{
+      relation: string;
+      key: string;
+      operation: "insert" | "update" | "delete";
+    }>> = [];
+    if (terminal.disposition === "adopted") {
+      const adopted = result as AgentProvisionProviderResult;
+      const lifecycleInput = input.lifecycleInput as NonNullable<typeof input.lifecycleInput>;
+      const bridgeBefore = bridgeOwnerKind === "chair"
+        ? rowOrNotFound(this.#database.prepare(`
+            SELECT provider_adapter_id AS adapterId,provider_action_id AS actionId,
+                   provider_session_ref AS providerSessionRef,
+                   provider_session_generation AS providerGeneration,
+                   principal_generation AS principalGeneration,
+                   bridge_generation AS bridgeGeneration,capability_hash AS capabilityHash,
+                   activation_evidence_digest AS activationEvidenceDigest,revision
+              FROM launched_chair_bridge_state
+             WHERE project_session_id=(SELECT project_session_id FROM runs WHERE run_id=?)
+               AND coordination_run_id=? AND chair_agent_id=? AND state='active'
+          `).get(input.runId, input.runId, input.agentId), "lifecycle chair bridge source")
+        : rowOrNotFound(this.#database.prepare(`
+            SELECT adapter_id AS adapterId,action_id AS actionId,
+                   provider_session_ref AS providerSessionRef,
+                   provider_session_generation AS providerGeneration,
+                   bridge_generation AS bridgeGeneration,capability_hash AS capabilityHash,
+                   activation_evidence_digest AS activationEvidenceDigest,revision
+              FROM agent_bridge_state
+             WHERE run_id=? AND agent_id=? AND bridge_state='active'
+          `).get(input.runId, input.agentId), "lifecycle child bridge source");
+      const bridgeAfter = {
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+        providerSessionRef: adopted.providerSessionRef,
+        providerGeneration: targetProviderGeneration,
+        ...(bridgeOwnerKind === "chair" ? { principalGeneration: targetPrincipalGeneration } : {}),
+        bridgeGeneration: targetBridgeGeneration,
+        capabilityHash: input.stagedCapabilityHash,
+        activationEvidenceDigest: adopted.activationEvidenceDigest,
+        revision: numberField(bridgeBefore, "revision") + 1,
+      };
+      mutationWrites.push(mutationWrite(
+        bridgeOwnerKind === "chair" ? "chair-bridge" : "agent-bridge",
+        `${input.runId}:${input.agentId}`,
+        "update",
+        bridgeBefore,
+        bridgeAfter,
+      ));
+      localWrites.push({
+        relation: bridgeOwnerKind === "chair" ? "chair-bridge" : "agent-bridge",
+        key: `${input.runId}:${input.agentId}`,
+        operation: "update",
+      });
+      const capabilityBefore = rowOrNotFound(this.#database.prepare(`
+        SELECT principal_generation AS principalGeneration,
+               CASE WHEN revoked_at IS NULL THEN 0 ELSE 1 END AS revoked
+          FROM capabilities WHERE token_hash=?
+      `).get(input.sourceCapabilityHash), "lifecycle source capability");
+      mutationWrites.push(mutationWrite(
+        "principal-capability",
+        input.sourceCapabilityHash,
+        "update",
+        capabilityBefore,
+        { principalGeneration: numberField(capabilityBefore, "principalGeneration"), revoked: 1 },
+      ));
+      localWrites.push({ relation: "principal-capability", key: input.sourceCapabilityHash, operation: "update" });
+      mutationWrites.push(mutationWrite(
+        "agent-state",
+        `${input.runId}:${input.agentId}`,
+        "update",
+        agentBefore,
+        { lifecycle: "ready", provider_session_ref: adopted.providerSessionRef },
+      ));
+      localWrites.push({ relation: "agent-state", key: `${input.runId}:${input.agentId}`, operation: "update" });
+      const providerBeforeValue = this.#database.prepare(`
+        SELECT provider_session_generation AS providerGeneration,context_revision AS contextRevision,
+               reconciled_checkpoint_sha256 AS checkpointSha256
+          FROM provider_state WHERE run_id=? AND agent_id=?
+      `).get(input.runId, input.agentId);
+      const providerBefore = isRow(providerBeforeValue) ? providerBeforeValue : null;
+      mutationWrites.push(mutationWrite(
+        "provider-session",
+        `${input.runId}:${input.agentId}`,
+        providerBefore === null ? "insert" : "update",
+        providerBefore,
+        { providerGeneration: targetProviderGeneration, contextRevision: 0, checkpointSha256: input.checkpointSha256 },
+      ));
+      localWrites.push({
+        relation: "provider-session",
+        key: `${input.runId}:${input.agentId}`,
+        operation: providerBefore === null ? "insert" : "update",
+      });
+      mutationWrites.push(mutationWrite(
+        "audit",
+        `${input.runId}:${lifecycleInput.commandId}`,
+        "insert",
+        null,
+        {
+          agentId: input.agentId,
+          action: lifecycleInput.action,
+          taskId: lifecycleInput.taskId,
+          taskRevision: lifecycleInput.taskRevision,
+          checkpointSha256: input.checkpointSha256,
+          priorResumeReference: input.sourceProviderSessionRef,
+          replacementResumeReference: adopted.providerSessionRef,
+        },
+      ));
+      localWrites.push({
+        relation: "audit",
+        key: `${input.runId}:${lifecycleInput.commandId}`,
+        operation: "insert",
+      });
+    } else {
+      const stagedCapabilityValue = this.#database.prepare(`
+        SELECT principal_generation AS principalGeneration,
+               CASE WHEN revoked_at IS NULL THEN 0 ELSE 1 END AS revoked
+          FROM capabilities WHERE token_hash=? AND revoked_at IS NULL
+      `).get(input.stagedCapabilityHash);
+      if (isRow(stagedCapabilityValue)) {
+        mutationWrites.push(mutationWrite(
+          "principal-capability",
+          input.stagedCapabilityHash,
+          "update",
+          stagedCapabilityValue,
+          { principalGeneration: numberField(stagedCapabilityValue, "principalGeneration"), revoked: 1 },
+        ));
+        localWrites.push({
+          relation: "principal-capability",
+          key: input.stagedCapabilityHash,
+          operation: "update",
+        });
+      }
+      const terminalAction = terminal.disposition === "quarantined"
+        ? { status: "quarantined", execution_count: actionBefore.execution_count,
+            effect_count: actionBefore.effect_count, idempotency_proven: 0 }
+        : { status: "terminal", execution_count: terminal.disposition === "no-effect" ? 0 : actionBefore.execution_count,
+            effect_count: terminal.disposition === "no-effect" ? 0 : actionBefore.effect_count, idempotency_proven: 1 };
+      if (terminal.disposition !== "superseded" || actionBefore.status === "prepared") {
+        mutationWrites.push(mutationWrite(
+          "provider-action",
+          `${input.runId}:${input.adapterId}:${input.actionId}`,
+          "update",
+          actionBefore,
+          terminalAction,
+        ));
+        localWrites.push({
+          relation: "provider-action",
+          key: `${input.runId}:${input.adapterId}:${input.actionId}`,
+          operation: "update",
+        });
+      }
+      if (terminal.disposition !== "quarantined") {
+        mutationWrites.push(mutationWrite(
+          "agent-state",
+          `${input.runId}:${input.agentId}`,
+          "update",
+          agentBefore,
+          { lifecycle: "ready", provider_session_ref: agentBefore.provider_session_ref },
+        ));
+        localWrites.push({ relation: "agent-state", key: `${input.runId}:${input.agentId}`, operation: "update" });
+      }
+    }
+    if (terminal.disposition !== "quarantined" && freezeBefore !== null) {
+      mutationWrites.push(mutationWrite(
+        "freeze-owner",
+        `${input.runId}:${input.agentId}`,
+        "delete",
+        freezeBefore,
+        null,
+      ));
+      localWrites.push({ relation: "freeze-owner", key: `${input.runId}:${input.agentId}`, operation: "delete" });
+    }
+    if (terminal.disposition === "adopted") {
+      const adopted = result as AgentProvisionProviderResult;
+      for (const delivery of custodyAdoptionDeliveries) {
+        const key = stringField(delivery, "deliveryId");
+        const before = {
+          state: stringField(delivery, "state"),
+          claimGeneration: numberField(delivery, "claimGeneration"),
+          targetProviderSession: stringField(delivery, "targetProviderSession"),
+          revision: numberField(delivery, "revision"),
+        };
+        mutationWrites.push(mutationWrite("delivery", key, "update", before, {
+          ...before,
+          targetProviderSession: adopted.providerSessionRef,
+          revision: before.revision + 1,
+        }));
+        localWrites.push({ relation: "delivery", key, operation: "update" });
+        auxiliaryLocalWrites.push({
+          relation: "lifecycle_custody_adoption_deliveries",
+          key: `${input.runId}:${input.agentId}:${input.custodyId}:${key}:${before.claimGeneration}`,
+          operation: "update",
+        });
+      }
+    } else if (terminal.disposition === "no-effect" || terminal.disposition === "superseded") {
+      for (const lease of custodyWriteLeases) {
+        const key = stringField(lease, "leaseId");
+        const before = {
+          status: stringField(lease, "status"),
+          generation: numberField(lease, "generation"),
+        };
+        mutationWrites.push(mutationWrite("write-lease", key, "update", before, {
+          status: "active",
+          generation: before.generation,
+        }));
+        localWrites.push({ relation: "write-lease", key, operation: "update" });
+        auxiliaryLocalWrites.push({
+          relation: "lifecycle_custody_write_leases",
+          key: `${input.runId}:${input.agentId}:${input.custodyId}:${key}:${before.generation}`,
+          operation: "update",
+        });
+      }
+      for (const delivery of custodyAdoptionDeliveries) {
+        auxiliaryLocalWrites.push({
+          relation: "lifecycle_custody_adoption_deliveries",
+          key: `${input.runId}:${input.agentId}:${input.custodyId}:${stringField(delivery, "deliveryId")}:${numberField(delivery, "claimGeneration")}`,
+          operation: "update",
+        });
+      }
+    }
+    mutationWrites.sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
     const exactMutationPlan = {
       schemaVersion: 1 as const,
       writes: mutationWrites,
       writeSetDigest: lifecycleDigest("mutation-plan", { schemaVersion: 1, writes: mutationWrites }),
     };
-    const lifecycleAdoptionEvidenceDigest = terminal.disposition === "adopted" && result !== null
-      ? lifecycleDigest("lifecycle-adoption-evidence", {
-          schemaVersion: 1,
-          runId: input.runId,
-          agentId: input.agentId,
-          custodyId: input.custodyId,
-          bridgeOwnerKind,
-          sourceActionId: input.sourceActionId,
-          targetActionId: input.actionId,
-          targetProviderSessionRef: result.providerSessionRef,
-          targetProviderGeneration: result.providerSessionGeneration,
-          targetBridgeGeneration: result.bridgeGeneration,
-          activationEvidenceDigest: result.activationEvidenceDigest,
-        })
-      : null;
-    const mutationPlan = terminal.disposition === "adopted" ? {
+    const mutationPlan = {
       schemaVersion: 1,
       writes: mutationWrites,
       writeSetDigest: exactMutationPlan.writeSetDigest,
-    } : {
-      schemaVersion: 1,
-      writes: mutationWrites,
-      writeSetDigest: exactMutationPlan.writeSetDigest,
+    };
+    const revalidateMutationWrites = (): void => {
+      const observed = new Map<string, Readonly<Record<string, unknown>> | null>();
+      observed.set("agent-state", rowOrNotFound(this.#database.prepare(`
+        SELECT lifecycle,provider_session_ref FROM agents WHERE run_id=? AND agent_id=?
+      `).get(input.runId, input.agentId), "lifecycle mutation agent revalidation"));
+      observed.set("provider-action", rowOrNotFound(this.#database.prepare(`
+        SELECT status,execution_count,effect_count,idempotency_proven
+          FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?
+      `).get(input.runId, input.adapterId, input.actionId), "lifecycle mutation action revalidation"));
+      const currentFreeze = this.#database.prepare(`
+        SELECT reason FROM delivery_freezes WHERE run_id=? AND agent_id=? AND reason=?
+      `).get(input.runId, input.agentId, freezeReason);
+      observed.set("freeze-owner", isRow(currentFreeze) ? currentFreeze : null);
+      const capabilityHash = terminal.disposition === "adopted"
+        ? input.sourceCapabilityHash
+        : input.stagedCapabilityHash;
+      const currentCapability = this.#database.prepare(`
+        SELECT principal_generation AS principalGeneration,
+               CASE WHEN revoked_at IS NULL THEN 0 ELSE 1 END AS revoked
+          FROM capabilities WHERE token_hash=?
+      `).get(capabilityHash);
+      observed.set("principal-capability", isRow(currentCapability) ? currentCapability : null);
+      if (terminal.disposition === "adopted") {
+        const currentBridge = bridgeOwnerKind === "chair"
+          ? this.#database.prepare(`
+              SELECT provider_adapter_id AS adapterId,provider_action_id AS actionId,
+                     provider_session_ref AS providerSessionRef,
+                     provider_session_generation AS providerGeneration,
+                     principal_generation AS principalGeneration,
+                     bridge_generation AS bridgeGeneration,capability_hash AS capabilityHash,
+                     activation_evidence_digest AS activationEvidenceDigest,revision
+                FROM launched_chair_bridge_state
+               WHERE project_session_id=(SELECT project_session_id FROM runs WHERE run_id=?)
+                 AND coordination_run_id=? AND chair_agent_id=? AND state='active'
+            `).get(input.runId, input.runId, input.agentId)
+          : this.#database.prepare(`
+              SELECT adapter_id AS adapterId,action_id AS actionId,
+                     provider_session_ref AS providerSessionRef,
+                     provider_session_generation AS providerGeneration,
+                     bridge_generation AS bridgeGeneration,capability_hash AS capabilityHash,
+                     activation_evidence_digest AS activationEvidenceDigest,revision
+                FROM agent_bridge_state
+               WHERE run_id=? AND agent_id=? AND bridge_state='active'
+            `).get(input.runId, input.agentId);
+        observed.set(bridgeOwnerKind === "chair" ? "chair-bridge" : "agent-bridge",
+          isRow(currentBridge) ? currentBridge : null);
+        const currentProvider = this.#database.prepare(`
+          SELECT provider_session_generation AS providerGeneration,context_revision AS contextRevision,
+                 reconciled_checkpoint_sha256 AS checkpointSha256
+            FROM provider_state WHERE run_id=? AND agent_id=?
+        `).get(input.runId, input.agentId);
+        observed.set("provider-session", isRow(currentProvider) ? currentProvider : null);
+        const lifecycleInput = input.lifecycleInput as NonNullable<typeof input.lifecycleInput>;
+        const currentAudit = this.#database.prepare(`
+          SELECT operation_id FROM lifecycle_operations
+           WHERE run_id=? AND agent_id=? AND action=? AND task_id=? AND task_revision=?
+             AND checkpoint_sha256=? AND prior_resume_reference=?
+        `).get(
+          input.runId,
+          input.agentId,
+          lifecycleInput.action,
+          lifecycleInput.taskId,
+          lifecycleInput.taskRevision,
+          input.checkpointSha256,
+          input.sourceProviderSessionRef,
+        );
+        observed.set("audit", isRow(currentAudit) ? currentAudit : null);
+      }
+      for (const write of mutationWrites) {
+        let current = observed.get(write.relation) ?? null;
+        if (write.relation === "delivery") {
+          const delivery = custodyAdoptionDeliveries.find((candidate) =>
+            lifecycleDigest("mutation-key", {
+              schemaVersion: 1,
+              relation: "delivery",
+              key: stringField(candidate, "deliveryId"),
+            }) === write.keyDigest);
+          const live = delivery === undefined ? undefined : this.#database.prepare(`
+            SELECT state,claim_generation AS claimGeneration,
+                   target_provider_session AS targetProviderSession,revision
+              FROM result_deliveries WHERE result_delivery_id=? AND run_id=?
+          `).get(stringField(delivery, "deliveryId"), input.runId);
+          current = isRow(live) ? live : null;
+        } else if (write.relation === "write-lease") {
+          const lease = custodyWriteLeases.find((candidate) =>
+            lifecycleDigest("mutation-key", {
+              schemaVersion: 1,
+              relation: "write-lease",
+              key: stringField(candidate, "leaseId"),
+            }) === write.keyDigest);
+          const live = lease === undefined ? undefined : this.#database.prepare(`
+            SELECT status,generation FROM leases WHERE lease_id=? AND run_id=?
+          `).get(stringField(lease, "leaseId"), input.runId);
+          current = isRow(live) ? live : null;
+        } else if (!observed.has(write.relation)) {
+          throw new Error(`lifecycle mutation revalidation lacks ${write.relation}`);
+        }
+        const currentDigest = current === null ? null : lifecycleDigest("mutation-before", current);
+        if (currentDigest !== write.expectedSemanticDigest) {
+          throw new Error(`lifecycle ${write.relation} changed after terminal preparation`);
+        }
+      }
     };
     const recordedAt = this.#clock();
     const prepared = this.#lifecycleRotations.readPreparedChildCustodyTerminal(
@@ -8461,15 +8981,6 @@ export class Fabric {
         transitionProof,
         mutationPlan,
         recordedAt,
-        ...(bridgeOwnerKind === "chair" && terminal.disposition === "adopted"
-          ? {
-              review: {
-                commandId: input.lifecycleInput!.commandId,
-                lifecycleAdoptionEvidenceDigest: lifecycleAdoptionEvidenceDigest!,
-                recordedAt,
-              },
-            }
-          : {}),
         terminal: {
           disposition: terminal.disposition,
           proofKind: terminal.proofKind,
@@ -8477,7 +8988,14 @@ export class Fabric {
         },
       })
     ).immediate();
-    if (prepared.applyId !== applyId || prepared.preRevision !== head.revision) {
+    if (
+      prepared.applyId !== applyId ||
+      prepared.preRevision !== head.revision ||
+      prepared.disposition !== terminal.disposition ||
+      prepared.proofKind !== terminal.proofKind ||
+      prepared.terminalEvidenceDigest !== terminalEvidenceDigest ||
+      canonicalJson(prepared.mutationPlan) !== canonicalJson(mutationPlan)
+    ) {
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "prepared lifecycle terminal apply changed");
     }
     const lookup = {
@@ -8509,8 +9027,10 @@ export class Fabric {
         throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle receipt authority reconciliation failed", { cause: error });
       }
     }
+    if (record === null) {
+      throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle authority receipt remains pending");
+    }
     if (
-      record === null ||
       canonicalJson(record.subject) !== prepared.subjectJson ||
       record.receipt.intentDigest !== prepared.intentDigest ||
       record.receipt.subjectDigest !== prepared.subjectDigest ||
@@ -8546,8 +9066,10 @@ export class Fabric {
           throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle review receipt authority reconciliation failed", { cause: error });
         }
       }
+      if (reviewRecord === null) {
+        throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle review authority receipt remains pending");
+      }
       if (
-        reviewRecord === null ||
         canonicalJson(reviewRecord.subject) !== review.subjectJson ||
         reviewRecord.receipt.intentDigest !== review.intentDigest ||
         reviewRecord.receipt.subjectDigest !== review.subjectDigest ||
@@ -8623,23 +9145,6 @@ export class Fabric {
     ) {
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt is absent from its pinned checkpoint");
     }
-    const localWriteIdentities = [
-      `agent:${input.runId}:${input.agentId}`,
-      `provider-action:${input.runId}:${input.adapterId}:${input.actionId}`,
-      `delivery-freeze:${input.runId}:${input.agentId}`,
-      `capability:${input.stagedCapabilityHash}`,
-      ...(terminal.disposition === "adopted" && input.lifecycleInput !== undefined ? [
-        `${bridgeOwnerKind === "chair" ? "chair-bridge" : "agent-bridge"}:${input.runId}:${input.agentId}`,
-        `capability:${input.sourceCapabilityHash}`,
-        `provider-state:${input.runId}:${input.agentId}`,
-        `lifecycle-operation:${input.runId}:${input.lifecycleInput.commandId}`,
-        ...(bridgeOwnerKind === "chair" ? [
-          `review-cut:${input.runId}:${input.custodyId}`,
-          `review-binding:${input.runId}:${input.custodyId}`,
-          `review-binding-pointer:${input.runId}:${input.custodyId}`,
-        ] : []),
-      ] : []),
-    ];
     this.#database.transaction(() => {
       this.#lifecycleRotations.applyAuthorizedChildCustodyTerminalInCurrentTransaction({
         prepared,
@@ -8677,10 +9182,44 @@ export class Fabric {
         },
         authorizedAt: this.#clock(),
         appliedAt: this.#clock(),
-        localWriteIdentities,
+        localWrites,
+        auxiliaryLocalWrites,
+        revalidateAdoptionWrites: revalidateMutationWrites,
         performAdoptionWrites: () => {
           if (terminal.disposition !== "adopted") {
             const now = this.#clock();
+            if (terminal.disposition === "no-effect" || terminal.disposition === "superseded") {
+              for (const lease of custodyWriteLeases) {
+                const leaseId = stringField(lease, "leaseId");
+                const generation = numberField(lease, "leaseGeneration");
+                const restored = this.#database.prepare(`
+                  UPDATE leases SET status='active',updated_at=?
+                   WHERE lease_id=? AND run_id=? AND holder_agent_id=? AND kind='write'
+                     AND generation=? AND status='quarantined'
+                `).run(now, leaseId, input.runId, input.agentId, generation);
+                if (restored.changes !== 1) throw new Error("lifecycle custody write lease changed before restore");
+                const released = this.#database.prepare(`
+                  UPDATE lifecycle_custody_write_leases SET active_owner=0
+                   WHERE run_id=? AND agent_id=? AND custody_id=? AND lease_id=?
+                     AND lease_generation=? AND active_owner=1
+                `).run(input.runId, input.agentId, input.custodyId, leaseId, generation);
+                if (released.changes !== 1) throw new Error("lifecycle custody write lease ownership changed");
+              }
+              for (const delivery of custodyAdoptionDeliveries) {
+                const released = this.#database.prepare(`
+                  UPDATE lifecycle_custody_adoption_deliveries SET active_owner=0
+                   WHERE run_id=? AND agent_id=? AND custody_id=? AND delivery_id=?
+                     AND delivery_generation=? AND active_owner=1
+                `).run(
+                  input.runId,
+                  input.agentId,
+                  input.custodyId,
+                  stringField(delivery, "deliveryId"),
+                  numberField(delivery, "claimGeneration"),
+                );
+                if (released.changes !== 1) throw new Error("lifecycle adoption delivery ownership changed");
+              }
+            }
             this.#database.prepare(`
               UPDATE capabilities SET revoked_at=?
                WHERE token_hash=? AND revoked_at IS NULL
@@ -8765,6 +9304,34 @@ export class Fabric {
           }
           const adopted = result as AgentProvisionProviderResult;
           const lifecycleInput = input.lifecycleInput as NonNullable<typeof input.lifecycleInput>;
+          for (const delivery of custodyAdoptionDeliveries) {
+            const deliveryId = stringField(delivery, "deliveryId");
+            const claimGeneration = numberField(delivery, "claimGeneration");
+            const revision = numberField(delivery, "revision");
+            const transferred = this.#database.prepare(`
+              UPDATE result_deliveries
+                 SET target_provider_session=?,revision=revision+1,updated_at=?
+               WHERE result_delivery_id=? AND run_id=? AND requester_agent_id=?
+                 AND state=? AND claim_generation=? AND target_provider_session=? AND revision=?
+            `).run(
+              adopted.providerSessionRef,
+              this.#clock(),
+              deliveryId,
+              input.runId,
+              stringField(delivery, "requesterAgentId"),
+              stringField(delivery, "state"),
+              claimGeneration,
+              input.sourceProviderSessionRef,
+              revision,
+            );
+            if (transferred.changes !== 1) throw new Error("lifecycle adoption delivery changed before transfer");
+            const released = this.#database.prepare(`
+              UPDATE lifecycle_custody_adoption_deliveries SET active_owner=0
+               WHERE run_id=? AND agent_id=? AND custody_id=? AND delivery_id=?
+                 AND delivery_generation=? AND active_owner=1
+            `).run(input.runId, input.agentId, input.custodyId, deliveryId, claimGeneration);
+            if (released.changes !== 1) throw new Error("lifecycle adoption delivery ownership changed");
+          }
           const bridge = bridgeOwnerKind === "chair"
             ? this.#database.prepare(`
                 UPDATE launched_chair_bridge_state

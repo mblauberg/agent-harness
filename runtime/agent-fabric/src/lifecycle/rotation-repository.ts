@@ -22,7 +22,7 @@ export type LifecycleCustodyDisposition =
   | "abandoned";
 
 const MUTATION_PLAN_RELATIONS = new Set([
-  "agent-state", "provider-session", "provider-lineage", "principal-capability",
+  "agent-state", "provider-session", "provider-lineage", "provider-action", "principal-capability",
   "agent-bridge", "chair-bridge", "turn-lease", "write-lease", "delivery",
   "task-owner", "result-obligation", "membership", "barrier", "freeze-owner",
   "custody-revision", "custody-head", "generation-loss-revision", "generation-loss-head",
@@ -57,6 +57,12 @@ export type LifecycleCustodyHead = Readonly<{
   sourceRefDigest: string;
   journalDigest: string;
   terminal: boolean;
+}>;
+
+export type ReservedLifecycleGenerations = Readonly<{
+  providerGeneration: number;
+  principalGeneration: number;
+  bridgeGeneration: number;
 }>;
 
 export type CreateLifecycleCustodyInput = Readonly<{
@@ -225,7 +231,17 @@ export type ExternallyVerifiedChildCustodyAuthorization = Readonly<{
   }>;
   authorizedAt: number;
   appliedAt: number;
-  localWriteIdentities: readonly string[];
+  localWrites: readonly Readonly<{
+    relation: string;
+    key: string;
+    operation: "insert" | "update" | "delete";
+  }>[];
+  auxiliaryLocalWrites?: readonly Readonly<{
+    relation: string;
+    key: string;
+    operation: "insert" | "update" | "delete";
+  }>[];
+  revalidateAdoptionWrites: () => void;
   performAdoptionWrites: () => void;
 }>;
 
@@ -343,6 +359,143 @@ export class LifecycleRotationRepository {
 
   constructor(database: Database.Database) {
     this.#database = database;
+  }
+
+  nextGenerations(input: Readonly<{
+    runId: string;
+    agentId: string;
+    bridgeOwnerKind: "chair" | "child";
+    sourceProviderGeneration: number;
+    sourcePrincipalGeneration: number;
+    sourceBridgeGeneration: number;
+  }>): ReservedLifecycleGenerations {
+    for (const [label, value] of [
+      ["provider", input.sourceProviderGeneration],
+      ["principal", input.sourcePrincipalGeneration],
+      ["bridge", input.sourceBridgeGeneration],
+    ] as const) {
+      if (!Number.isSafeInteger(value) || value < 1) {
+        throw new Error(`source ${label} generation must be a positive safe integer`);
+      }
+    }
+    const identityValue = this.#database.prepare(`
+      SELECT provider_generation,principal_generation,revision
+        FROM agent_lifecycle_identity_high_water
+       WHERE run_id=? AND agent_id=?
+    `).get(input.runId, input.agentId);
+    const bridgeValue = this.#database.prepare(`
+      SELECT bridge_generation,revision
+        FROM agent_lifecycle_bridge_high_water
+       WHERE run_id=? AND agent_id=? AND bridge_owner_kind=?
+    `).get(input.runId, input.agentId, input.bridgeOwnerKind);
+    const identity = isRow(identityValue) ? identityValue : null;
+    const bridge = isRow(bridgeValue) ? bridgeValue : null;
+    const providerHighWater = identity === null
+      ? input.sourceProviderGeneration
+      : integer(identity, "provider_generation");
+    const principalHighWater = identity === null
+      ? input.sourcePrincipalGeneration
+      : integer(identity, "principal_generation");
+    const bridgeHighWater = bridge === null
+      ? input.sourceBridgeGeneration
+      : integer(bridge, "bridge_generation");
+    if (principalHighWater < input.sourcePrincipalGeneration || bridgeHighWater < input.sourceBridgeGeneration) {
+      throw new Error("lifecycle generation high-water is behind its authoritative source");
+    }
+    const next = (label: string, value: number): number => {
+      if (value >= Number.MAX_SAFE_INTEGER) throw new Error(`${label} generation is exhausted`);
+      return value + 1;
+    };
+    const reserved = {
+      providerGeneration: next("provider", Math.max(providerHighWater, input.sourceProviderGeneration)),
+      principalGeneration: next("principal", principalHighWater),
+      bridgeGeneration: next("bridge", bridgeHighWater),
+    };
+    return reserved;
+  }
+
+  reserveNextGenerationsInCurrentTransaction(input: Readonly<{
+    runId: string;
+    agentId: string;
+    bridgeOwnerKind: "chair" | "child";
+    sourceProviderGeneration: number;
+    sourcePrincipalGeneration: number;
+    sourceBridgeGeneration: number;
+  }>): ReservedLifecycleGenerations {
+    if (!this.#database.inTransaction) throw new Error("lifecycle generation reservation requires a transaction");
+    const reserved = this.nextGenerations(input);
+    const identityValue = this.#database.prepare(`
+      SELECT provider_generation,principal_generation,revision
+        FROM agent_lifecycle_identity_high_water
+       WHERE run_id=? AND agent_id=?
+    `).get(input.runId, input.agentId);
+    const bridgeValue = this.#database.prepare(`
+      SELECT bridge_generation,revision
+        FROM agent_lifecycle_bridge_high_water
+       WHERE run_id=? AND agent_id=? AND bridge_owner_kind=?
+    `).get(input.runId, input.agentId, input.bridgeOwnerKind);
+    const identity = isRow(identityValue) ? identityValue : null;
+    const bridge = isRow(bridgeValue) ? bridgeValue : null;
+    const providerHighWater = identity === null
+      ? input.sourceProviderGeneration
+      : integer(identity, "provider_generation");
+    const principalHighWater = identity === null
+      ? input.sourcePrincipalGeneration
+      : integer(identity, "principal_generation");
+    const bridgeHighWater = bridge === null
+      ? input.sourceBridgeGeneration
+      : integer(bridge, "bridge_generation");
+    if (identity === null) {
+      this.#database.prepare(`
+        INSERT INTO agent_lifecycle_identity_high_water(
+          run_id,agent_id,provider_generation,principal_generation,revision
+        ) VALUES (?,?,?,?,1)
+      `).run(input.runId, input.agentId, reserved.providerGeneration, reserved.principalGeneration);
+    } else {
+      const changed = this.#database.prepare(`
+        UPDATE agent_lifecycle_identity_high_water
+           SET provider_generation=?,principal_generation=?,revision=revision+1
+         WHERE run_id=? AND agent_id=? AND provider_generation=?
+           AND principal_generation=? AND revision=?
+      `).run(
+        reserved.providerGeneration,
+        reserved.principalGeneration,
+        input.runId,
+        input.agentId,
+        providerHighWater,
+        principalHighWater,
+        integer(identity, "revision"),
+      );
+      if (changed.changes !== 1) throw new Error("lifecycle identity generation reservation compare-and-set failed");
+    }
+    if (bridge === null) {
+      this.#database.prepare(`
+        INSERT INTO agent_lifecycle_bridge_high_water(
+          run_id,agent_id,bridge_owner_kind,bridge_generation,revision
+        ) VALUES (?,?,?,?,1)
+      `).run(input.runId, input.agentId, input.bridgeOwnerKind, reserved.bridgeGeneration);
+    } else {
+      const changed = this.#database.prepare(`
+        UPDATE agent_lifecycle_bridge_high_water
+           SET bridge_generation=?,revision=revision+1
+         WHERE run_id=? AND agent_id=? AND bridge_owner_kind=?
+           AND bridge_generation=? AND revision=?
+      `).run(
+        reserved.bridgeGeneration,
+        input.runId,
+        input.agentId,
+        input.bridgeOwnerKind,
+        bridgeHighWater,
+        integer(bridge, "revision"),
+      );
+      if (changed.changes !== 1) throw new Error("lifecycle bridge generation reservation compare-and-set failed");
+    }
+    this.#database.prepare(`
+      INSERT INTO agent_lifecycle_context_high_water(
+        run_id,agent_id,provider_generation,context_revision,revision
+      ) VALUES (?,?,?,0,1)
+    `).run(input.runId, input.agentId, reserved.providerGeneration);
+    return reserved;
   }
 
   createInCurrentTransaction(input: CreateLifecycleCustodyInput): LifecycleCustodyHead {
@@ -892,8 +1045,8 @@ export class LifecycleRotationRepository {
     `).get(head.revision, input.runId, input.agentId, input.custodyId), "lifecycle committing custody");
     const ownerKind = text(source, "bridge_owner_kind");
     if (ownerKind !== "chair" && ownerKind !== "child") throw new Error("lifecycle custody owner kind is invalid");
-    if (ownerKind === "chair" && terminal.disposition === "adopted" && input.review === undefined) {
-      throw new Error("true-chair adoption requires a review adoption reservation");
+    if (ownerKind === "chair" && terminal.disposition === "adopted") {
+      throw new Error("true-chair lifecycle adoption requires ordinal-two review authority");
     }
     const normalizedMutationPlan = mutationPlan(input.mutationPlan);
     const terminalEvidenceDigest = terminal.terminalEvidenceDigest ?? text(source, "terminal_evidence_digest");
@@ -920,17 +1073,19 @@ export class LifecycleRotationRepository {
     };
     const transitionProofDigest = lifecycleDigest("transition-proof", input.transitionProof);
     const mutationPlanDigest = normalizedMutationPlan.writeSetDigest;
-    const reviewPlan = ownerKind === "chair" && terminal.disposition === "adopted"
+    const reviewAdoptionEnabled = (): boolean => false;
+    const reviewPlan = reviewAdoptionEnabled() && ownerKind === "chair" &&
+      terminal.disposition === "adopted" && input.review !== undefined
       ? this.#prepareReviewReservationInCurrentTransaction({
           runId: input.runId,
           agentId: input.agentId,
           custodyId: input.custodyId,
           applyId: input.applyId,
-          commandId: input.review!.commandId,
+          commandId: input.review.commandId,
           head,
           finalRevision,
           finalSourceRefDigest,
-          lifecycleAdoptionEvidenceDigest: input.review!.lifecycleAdoptionEvidenceDigest,
+          lifecycleAdoptionEvidenceDigest: input.review.lifecycleAdoptionEvidenceDigest,
           recordedAt: input.recordedAt,
           source,
           mutationPlan: normalizedMutationPlan,
@@ -1004,7 +1159,7 @@ export class LifecycleRotationRepository {
       agentId: input.agentId,
       ownerRef: afterRef,
       custodyTerminalSubjectDigest: subjectDigest,
-      lifecycleAdoptionEvidenceDigest: input.review!.lifecycleAdoptionEvidenceDigest,
+      lifecycleAdoptionEvidenceDigest: input.review?.lifecycleAdoptionEvidenceDigest,
       reviewReservationDigest: reviewPlan.reservationDigest,
       reviewDecision: reviewPlan.decision,
       reviewDecisionDigest: reviewPlan.decisionDigest,
@@ -1340,8 +1495,32 @@ export class LifecycleRotationRepository {
       prepared.agentId, prepared.finalRevision, prepared.finalSemanticDigest,
       prepared.finalSourceRefDigest,
     ), "prepared lifecycle terminal batch");
-    if (text(plan, "mutation_plan_digest") !== prepared.mutationPlan.writeSetDigest) {
+    const revalidatedMutationPlan = mutationPlan(
+      prepared.mutationPlan as unknown as Readonly<Record<string, unknown>>,
+    );
+    if (text(plan, "mutation_plan_digest") !== revalidatedMutationPlan.writeSetDigest) {
       throw new Error("prepared lifecycle mutation plan changed");
+    }
+    const actualBusinessWrites = [...input.localWrites]
+      .map((write) => ({
+        relation: write.relation,
+        keyDigest: lifecycleDigest("mutation-key", {
+          schemaVersion: 1,
+          relation: write.relation,
+          key: write.key,
+        }),
+        operation: write.operation,
+      }))
+      .sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
+    const plannedBusinessWrites = revalidatedMutationPlan.writes
+      .map((write) => ({
+        relation: write.relation,
+        keyDigest: write.keyDigest,
+        operation: write.operation,
+      }))
+      .sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
+    if (canonicalJson(actualBusinessWrites) !== canonicalJson(plannedBusinessWrites)) {
+      throw new Error("lifecycle actual write identities crossed the prepared mutation plan");
     }
     const effectRows = this.#database.prepare(`
       SELECT effect_digest,ordinal,role FROM lifecycle_receipt_custody_effects WHERE batch_id=?
@@ -1563,9 +1742,47 @@ export class LifecycleRotationRepository {
       receiptSetDigest, input.scopeCheckpoint.checkpointDigest, input.authorizedAt,
       authorizationDigest,
     );
-    const localWriteSetDigest = lifecycleDigest("mutation-plan", {
+    input.revalidateAdoptionWrites();
+    const systemWrites: Array<Readonly<{
+      relation: string;
+      key: string;
+      operation: "insert" | "update" | "delete";
+    }>> = [
+      { relation: "lifecycle_authority_receipts", key: `${prepared.batchId}:1`, operation: "insert" },
+      ...(prepared.review === null ? [] : [{
+        relation: "lifecycle_authority_receipts",
+        key: `${prepared.batchId}:2`,
+        operation: "insert" as const,
+      }]),
+      {
+        relation: "lifecycle_receipt_scope_checkpoints",
+        key: `${prepared.projectSessionId}:${prepared.runId}:${input.scopeCheckpoint.checkpointDigest}`,
+        operation: "insert",
+      },
+      {
+        relation: "lifecycle_receipt_scope_heads",
+        key: `${prepared.projectSessionId}:${prepared.runId}`,
+        operation: "update",
+      },
+      { relation: "lifecycle_receipt_batch_completions", key: prepared.batchId, operation: "insert" },
+      { relation: "lifecycle_receipt_batch_authorizations", key: prepared.batchId, operation: "insert" },
+      {
+        relation: "lifecycle_rotation_custody_revisions",
+        key: `${prepared.runId}:${prepared.agentId}:${prepared.custodyId}:${prepared.finalRevision}`,
+        operation: "insert",
+      },
+      {
+        relation: "lifecycle_rotation_custody_heads",
+        key: `${prepared.runId}:${prepared.agentId}:${prepared.custodyId}`,
+        operation: "update",
+      },
+      { relation: "lifecycle_transition_applies", key: prepared.applyId, operation: "insert" },
+    ];
+    const localWrites = [...input.localWrites, ...(input.auxiliaryLocalWrites ?? []), ...systemWrites]
+      .sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
+    const localWriteSetDigest = lifecycleDigest("local-write-set", {
       schemaVersion: 1,
-      writes: prepared.mutationPlan.writes,
+      writes: localWrites,
     });
     const applyBody = {
       schemaVersion: 1,
@@ -1649,10 +1866,10 @@ export class LifecycleRotationRepository {
       head.revision, head.journalDigest,
     );
     if (headChanged.changes !== 1) throw new Error("lifecycle custody head compare-and-set failed");
+    input.performAdoptionWrites();
     if (prepared.review !== null && reviewReceipt !== null) {
       this.#writeReviewPostStateInCurrentTransaction(prepared, reviewReceipt, input.appliedAt);
     }
-    input.performAdoptionWrites();
     this.#database.prepare(`
       INSERT INTO lifecycle_transition_applies(
         apply_id,apply_kind,batch_transition_kind,receipt_batch_id,
