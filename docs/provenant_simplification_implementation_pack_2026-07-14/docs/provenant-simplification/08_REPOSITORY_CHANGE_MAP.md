@@ -197,18 +197,59 @@ Binding today. It pins the four certifying slots (native, other-primary, cursor-
 
 ### Review-policy migration
 
-Review policy is enforced on more surfaces than this map previously listed. Treat the change as one atomic, effective-dated migration carrying a single amendment identifier across every surface. No surface is amended, relaxed or deleted alone:
+Review policy is enforced far more widely than a config change suggests. The four slots (`native`, `other-primary`, `cursor-grok`, `agy-gemini`) and the blanket substantial+ other-primary rule are live in normative spec text, root instructions, protocol wire codecs and their generated closed schemas, runtime completion-domain logic, SQLite slot and ordinal constraints, the delivery kernel validator, and the Spec 05 acceptance selector/requirements catalogue.
 
-- `HARNESS.md` coverage table (lines 78-90);
-- `docs/specs/05-project-fabric-console.md` four-slot mandate;
-- `config/review-profiles/spec05-four-slot-v1.json`;
+Treat the change as one atomic, effective-dated migration carrying a single amendment identifier across every surface below. No surface is amended, relaxed or deleted alone.
+
+**Root instructions and product prose**
+
+- `HARNESS.md` coverage table (lines 78-90) — the risk-to-review-pressure ladder;
+- `README.md` (line 76) — states that substantial+ cannot reach acceptance with the other-primary leg missing;
+- `skills/implement/SKILL.md` (line 42) — restates native plus other-primary as load-bearing, bonus families as opportunistic.
+
+**Normative specifications**
+
+- `docs/specs/01-agent-fabric.md` §32.19.3 (lines 7057-7138) — the owned closed four-slot profile, per-slot adapter class/family/model mapping, enforced read-only requirement per certifying slot, and the reviewer-family relation table;
+- `docs/specs/04-agent-fabric-operational-hardening.md` (lines 3339-3348, 5623-5627) — the baseline requiring exactly the four slots with the exact Spec 01 mapping, and the completion read that demands one resolved four-slot profile and exactly four slot heads;
+- `docs/specs/05-project-fabric-console.md` (lines 39, 546-547, 669, 1052) — the four-slot mandate, slot names and target snapshot.
+
+**Protocol and wire (codecs, generated closed schemas, regression tests)**
+
+- `runtime/agent-fabric-protocol/src/provider-review.ts` — `REVIEW_SLOTS` and the slot enumeration (lines 26-27); the closed complete-completion shape pinning `minItems`/`maxItems` 4, per-index slot constants and per-index `reviewerFamilyRelation` (lines 1188-1210); the completion predicate requiring four CLEAN certifying slots in exact order with no blockers and no unavailable slots (lines 1232-1242); the wire-order guard that rejects any slot list that is neither empty nor exactly four in profile order (lines 1266-1279);
+- `runtime/agent-fabric-protocol/src/provider-action.ts` (line 31) and `runtime/agent-fabric-protocol/src/route-lineage.ts` (line 464) — the same slot enumeration on the action and route-lineage codecs;
+- `runtime/agent-fabric-protocol/src/review-profile.ts` — profile projection;
+- `runtime/agent-fabric-protocol/src/schema.ts` — the `spec05-four-slot-v1` schema registration (line 178) and the `x-fourSlotProfileMatrix` correlated-codec keyword (line 597);
+- generated closed schemas: `runtime/agent-fabric-protocol/schemas/spec05-four-slot-v1.schema.json` (lines 245-253, the four-slot `minItems`/`maxItems` and resolved profile digest) and `runtime/agent-fabric-protocol/schemas/review-completion.v1.schema.json` (lines 285-287, 385-387, 1150, 1631). The generated tree must be regenerated inside the migration and stay clean;
+- protocol regression tests: `runtime/agent-fabric-protocol/tests/spec05-four-slot-profile.test.ts` (lines 5-11, which asserts a three-slot profile throws), `spec05-provider-review.test.ts`, `spec05-review-correlation-repair.test.ts`, `spec05-review-rereview-repair.test.ts`, `spec05-review-wire-repair.test.ts`.
+
+**Runtime completion and persistence**
+
+- `runtime/agent-fabric/src/review/canonical/domains.ts` (lines 249-255) — the canonical completion-domain check that a completion profile carries exactly four slots;
+- `runtime/agent-fabric/schemas/review-profile.v1.schema.json` and `runtime/agent-fabric/src/review/profile/index.ts` — runtime profile enforcement;
+- `runtime/agent-fabric/migrations/0001-current-baseline.sql` — SQLite slot and ordinal constraints in `review_finding_capacity_reservations` (lines 5565-5571), `review_certifying_slot_availability_revisions` (lines 5837-5843) and `review_profile_slots` (lines 5908-5913, slot `CHECK` plus `ordinal BETWEEN 0 AND 3`). Persisted rows outlive the code change: the migration must state what happens to existing four-slot rows, not only to new writes;
+- `runtime/agent-fabric/tests/spec05/review-algorithms/` — `profile.test.ts`, `digest-domains.test.ts`, `schemas-config.test.ts` and siblings.
+
+**Delivery kernel (config, validator, fixtures)**
+
+- `config/review-profiles/spec05-four-slot-v1.json` — the checked-in closed profile;
 - `config/delivery-profiles.json` evidence minima and gates;
 - `config/risk-policy.json` risk floors;
 - `skills/deliver/scripts/validate_delivery.py` — the `_validate_reviews` gate (native plus distinct other-primary, distinct evidence ids, minimum lens count, non-primary bonus family) and the acceptance-transition evidence check;
-- runtime profile enforcement: `runtime/agent-fabric/schemas/review-profile.v1.schema.json`, `runtime/agent-fabric/src/review/profile/index.ts`, `runtime/agent-fabric-protocol/src/review-profile.ts`;
-- regression fixtures: `tests/test_delivery_contract.py`, `tests/test_delivery_profile_scenarios.py`, `runtime/agent-fabric/tests/spec05/review-algorithms/`.
+- `skills/deliver/scripts/reference_runs.py` (line 195) and `scripts/validate_delivery_scenarios.py` (line 202) — reference and scenario runs that bake the `other-primary` role into the golden shapes;
+- regression fixtures: `tests/test_delivery_contract.py`, `tests/test_delivery_profile_scenarios.py`, `tests/test_model_route.py` (line 46), `skills/orchestrate/evals/test_cf_dispatch.py` (lines 105, 137).
 
-The migration passes as a unit — spec, constitution, config, validator logic and fixtures green in one change — or it does not pass. Until it does, the present gate remains binding: blanket other-primary review for substantial+, and the four-slot profile for Spec 05 deliveries (ADR 0008). The risk/oracle-adjusted planner described in `06_LOOP_AND_REVIEW_POLICY.md` is a proposal, not an entitlement, until this migration lands.
+**Spec 05 acceptance catalogue**
+
+- `config/spec05-evidence-selector-registry.v1.json` (line 40) — the `spec05-post-review-acceptance-four-family-final-review-v1` selector, proof domain `current-four-family-clean-review`, owned by the review-completion gate;
+- `config/spec05-delivery-requirements.v1.json` (lines 468-477) — SPEC05-AC-033, which binds that selector as a `complete-nonempty-current-set` post-review-acceptance requirement with `requiredStatus: approved`.
+
+Acceptance is catalogued, not only enforced: changing the gate without changing SPEC05-AC-033 and its selector leaves the acceptance requirement demanding a four-family clean review that the new policy no longer produces.
+
+The migration passes as a unit — spec, constitution, protocol codecs and regenerated schemas, completion logic, database constraints, validator logic, fixtures and the acceptance catalogue all green in one change — or it does not pass. A partial landing is not a partial improvement: it leaves incompatible enforcement behind, in which the wire, the database and the acceptance catalogue still require what the policy has abandoned.
+
+Before the migration is authored, sweep the tree again for slot literals and gate restatements; this list is the surfaces known at pack time, not a guarantee of completeness, and any newly found surface joins the same single amendment.
+
+Until the migration lands, the present gate remains binding: blanket other-primary review for substantial+, and the four-slot profile for Spec 05 deliveries (ADR 0008). The risk/oracle-adjusted planner described in `06_LOOP_AND_REVIEW_POLICY.md` is a proposal, not an entitlement, until this migration lands.
 
 ### `config/delivery-profiles.json`
 
@@ -252,8 +293,20 @@ Do not pre-install a composition root, generic dispatcher, universal UnitOfWork 
 
 ### Extraction order
 
-1. Admission and authority first: provider payload admission, action identity and capability/authority compilation. This is the slice under change pressure and the one later slices depend on.
+1. **First: the pure authority compiler.** This is exactly ADR 0002 step 2 — a pure admission extraction, behaviour unchanged. Its subject is `Fabric.#admitProviderPayload` (`runtime/agent-fabric/src/core/fabric.ts`, defined at line 6537) together with its enumerated callers and the pure helpers it sits between. It compiles a caller-supplied provider payload against the stored authority: load the authority row, reject an expired authority, require provider disclosure, reject any payload that overrides a trusted control (`allowedTools`, `permissions`, `sandbox`, `readOnlyRoot` and the rest of the forbidden-control set), resolve and containment-check `cwd` against `sourcePaths`/`deniedPaths`, and return the compiled read-only capability projection (`readOnlyRoot`, `allowedTools: ["Read", "Glob", "Grep"]`, `approvalPolicy: "never"`, `sandbox: "read-only"`). That is the whole slice. It moves to `authority/authority-compiler` (`02_TARGET_ARCHITECTURE.md`), which the target architecture keeps separate from `providers/provider-action-service`.
+
+   The callers, and the call order to preserve exactly:
+
+   - `spawnAgent` (line 3124): `#admitProviderPayload` (line 3144), then `#assertAdapterModel` (line 3145);
+   - `attachAgent` (line 3163): `#admitProviderPayload` with an empty payload (line 3184);
+   - `#dispatchProviderAction` (line 4843), three sites: the target-agent branch admits against the target's authority (line 4962); the actor branch runs `#assertEphemeralProviderAuthority` (line 4986) before admitting against the actor or ephemeral authority (line 4990); the ephemeral re-admission path re-asserts then re-admits (lines 5114-5115). `#assertAdapterModel` (line 4993) runs after admission, on the admitted payload — not before it.
+
+   Supporting pure code moves with it: `parseAuthority` (line 490), `#assertAdapterModel` (line 6482), `#assertEphemeralProviderAuthority` (line 6610). Behaviour is unchanged and pinned by characterisation goldens of today's read-only projection (ADR 0002 step 1). Admission ordering is load-bearing: admit before model assertion, ephemeral authority assertion before admission.
+
 2. Then only those residual responsibilities whose characterisation tests and callers are known. Nothing moves until its current callers in `fabric.ts` are enumerated and characterisation and recovery tests pin its behaviour. Import-boundary tests (F-033) precede extraction. Each move deletes the old path; no parallel second implementation.
+
+   The **provider-action tranche** is the next structural one, not the first. It completes `provider-session-coordinator` into `providers/provider-action-service` and carries the coordinator's structural residuals below — concurrency queues, in-flight action ownership, reconciliation and the merged dispatch shape. These are provider-session and action-lifecycle responsibilities; folding them into the authority slice would merge two target modules the architecture deliberately keeps apart. Per ADR 0002 the merged `ProviderActionDispatchInputV1` contract shape lands only after the write pilot and the second provider (step 4).
+
 3. Responsibilities with no live seam and no known caller set — workspace ownership and leases, lifecycle transition projection, verification and evidence, projections — stay behind the facade in `fabric.ts` until change pressure produces a seam. Opening an empty module for them is the scaffolding-first move ADR 0003 rejects.
 
 The sections below are a residual-responsibility map, not a module inventory: what each live seam owns today, and what must still move to it.
@@ -262,12 +315,14 @@ The sections below are a residual-responsibility map, not a module inventory: wh
 
 Owns today: registration preflight; provider action identity and dedupe; session target resolution; turn admission against the concurrency ceiling; steer binding; turn settlement; lifecycle-intent preparation, terminalisation, finalisation and recovery enumeration; model-routing and cross-family review evidence recording.
 
-Residual still in `fabric.ts`, to move here first as the admission and authority slice:
+Residual still in `fabric.ts`, to move here in the **provider-action tranche** (extraction step 2, not the first slice — these are provider-session and action-lifecycle responsibilities, not the pure authority compiler):
 
 - in-flight provider action ownership (`#ownedProviderActions`, `#lifecycleProviderActions`, `#activeProviderOperations`);
 - the deferred-action queue, pump and backpressure timer (`#deferredProviderActions`, `#pumpDeferredProviderActions`), which today enforce the concurrency ceiling in a second place;
 - provider action reconciliation with its replay and ownership branches (`reconcileProviderAction`, `#reconcileProviderAction`);
-- the merged `ProviderActionDispatchInputV1` contract shape once the write-pilot steps land (ADR 0003).
+- the merged `ProviderActionDispatchInputV1` contract shape once the write-pilot steps land (ADR 0002 step 4; ADR 0003).
+
+`#dispatchProviderAction` is a caller of both slices. The authority compiler leaves it as a call into `authority/authority-compiler`; the coordinator residuals above move out of it later. Do not conflate the two moves.
 
 ### `runtime/agent-fabric/src/application/command-journal.ts`
 

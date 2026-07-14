@@ -42,15 +42,33 @@ authority contract: goldens landed at `6748ceb`; the atomic V2 cutover is
 BLOCKED), Lane D (runtime reconciliation), Rust CI reconciliation, and Steps 2–4
 (compiler extraction, write pilot, second provider), record:
 
-- **status** — adopted into a named package here, or explicitly superseded;
-- **owner** — one owner, as for any package;
+- **status** — one of `complete`, `carried`, `red`, `not-started` or `superseded`;
+- **owner** — one named owner, as for any package;
 - **gate** — the acceptance or resume gate it must still pass;
-- **evidence** — the existing artefact that carries its current state (commit,
-  receipt, handoff or effort-map checkpoint).
+- **evidence** — the existing artefact that carries its current state, bound to a
+  digest (commit, receipt, handoff or effort-map checkpoint).
 
-Lane B is already promoted through PR #7; record it as complete rather than
-re-adopting it. Supersession must state what replaces the lane's obligation, not
-merely that it stopped.
+Where a lane's status, owner, gate or evidence is genuinely not established, record
+`unknown — must be established in WP0`. Blank and `—` are not allowed values.
+Supersession must state what replaces the lane's obligation, not merely that it
+stopped.
+
+#### Historical completion is not current-head reverification
+
+The two are separate records and neither substitutes for the other:
+
+- **historical completion** — the lane's gate passed at a stated digest, and that
+  digest is reachable from the current head. The lane is recorded `complete` and is
+  **not** re-adopted into a package.
+- **current-head reverification** — the same gate re-run on the current head. It is
+  a WP0 baseline obligation, tracked separately. Its absence never downgrades a
+  historical completion to unverified, and it is never recorded as a residual of the
+  completed lane.
+
+Lane B is already promoted: the merge commit `90a10f7` ("Merge pull request #7") is
+an ancestor of the current head `42da7ee`. Record it `complete`, and carry its
+current-head reverification as a WP0 baseline item — not as a re-adoption of the
+lane and not as an outstanding PR-review merge.
 
 ### Open human gate — D-021 charter carry-over
 
@@ -72,8 +90,11 @@ programme.
 - current-head status is explicit;
 - unrelated red tests are understood;
 - no later package relies on stale review assumptions;
-- every active lane is adopted or explicitly superseded, each with a named owner,
-  gate and evidence;
+- every lane is adopted into a named package, recorded `complete`, or explicitly
+  superseded — each carrying a status, one named owner, a gate and digest-bound
+  evidence, with no blank and no `—`;
+- historical completions and outstanding current-head reverifications are recorded
+  separately, and no completed lane is re-adopted;
 - the D-021 carry-over question stands recorded as an open human gate.
 
 ## WP1 — ratify the thin-kernel design
@@ -133,8 +154,12 @@ the kernel enforces them at persistence, with the refusal or default behaviour
 stated below made executable and tested.
 
 - **Retention class (ADR-0007).** Every persisted contract carries a
-  `retention_class` validated against exactly five classes: `ephemeral`,
-  `operational`, `evidence`, `durable knowledge`, `sensitive`. An absent,
+  `retention_class` validated against exactly five machine identifiers:
+  `ephemeral`, `operational`, `evidence`, `durable-knowledge`, `sensitive`.
+  (ADR-0007 names the fourth class in prose as "durable knowledge"; the
+  hyphenated form is its canonical machine identifier — a space is inadmissible
+  in a JSON enum or persisted value. The ADR-0007 amendment records the
+  mapping.) An absent,
   unrecognised or ambiguous class **refuses the write**. There is no permissive
   default and no inferred class: the class is chosen at authoring time so that
   later governed deletion needs no archaeology. Archive-only behaviour remains;
@@ -227,25 +252,46 @@ Prove the product path.
 - allocate worktree and lease;
 - start provider-native chair/worker;
 - implement and verify;
-- derive and consume the minimum deterministic ReviewPlan (below);
+- derive and consume the deterministic ReviewPlan (below);
 - produce effect proposal;
 - apply human-approved PR creation through typed executor;
 - project status through CLI.
 
-### Minimum deterministic ReviewPlan
+### Deterministic ReviewPlan derivation
 
-WP4 owns the smallest ReviewPlan derivation the vertical trace needs, so the
-trace does not depend on WP5. It is a pure function of the WorkItem's risk tier
-and declared verification strategy, with no calibration input and no measured
-yield: it emits the required deterministic checks, whether fresh-context review is
-required, the review input boundary and the repair ceiling
-(`03_MINIMAL_CONTRACTS.md §9`). Same input, same plan. The chair may add review;
-it cannot remove required review.
+WP4 owns the ReviewPlan derivation the vertical trace consumes, so the trace does
+not depend on WP5. It emits **every** field the ReviewPlan contract requires
+(`03_MINIMAL_CONTRACTS.md §9`) — required deterministic checks, fresh-context
+review required, other-primary required, specialist required, human acceptance
+required, review input boundary, repair ceiling, re-review requirement and
+`retention_class`. No required field is deferred to a later package.
+
+It is a pure function of the WorkItem's declared risk tier, its declared
+verification strategy and whether the delivery touches a Spec 05 surface. It takes
+no calibration input and no measured review yield. Same input, same plan.
+
+It resolves those fields under the **binding present policy**, not the target
+table (`06_LOOP_AND_REVIEW_POLICY.md §6`):
+
+- the `HARNESS.md` coverage table (lines 78-90) is the authority for coverage.
+  `routine` resolves to chair plus objective/native checks; `substantial`,
+  `crucial` and `terminal` resolve to fresh-context native review **plus the other
+  primary**. `other-primary required?` is therefore true for substantial and above.
+  Bonus families at `crucial` and `terminal` are attempted and recorded, and never
+  block on absence, quota or API failure;
+- a Spec 05 delivery additionally resolves the mandated four-slot certifying
+  profile (`spec05-four-slot-v1`);
+- the future-state minimum-pattern table is inert here. It must not be used to
+  lower any field of the plan.
+
+The chair may add review. It cannot remove required review.
 
 ### Non-goal
 
-Calibration, review-yield measurement, risk-shape classification and the
-other-primary/second-provider requirement are WP5's; WP4 does not attempt them.
+Calibration, review-yield measurement, deriving the risk shape from signals rather
+than from the declared tier, and the second provider's own write profile are WP5's;
+WP4 does not attempt them. WP4 defers no **required** ReviewPlan field: WP5 may
+change how a field is computed, but no required field first appears there.
 
 ### Exit
 
@@ -268,20 +314,26 @@ Complete provider neutrality and remove blanket review cost.
 ### Work
 
 - independently prove the second provider's offline write profile;
-- extend — not re-implement — WP4's minimum deterministic ReviewPlan derivation:
-  keep its pure core and its outputs, and add calibration, risk-shape
-  classification and the second-provider/other-primary requirement on top;
+- extend — not re-implement — WP4's deterministic ReviewPlan derivation: keep its
+  pure core and its full output shape, and add calibration, review-yield
+  measurement, and derivation of the risk shape from signals (blast radius,
+  novelty, oracle strength, dependency cone) in place of the declared tier;
+- change *when* a required field binds — including the other-primary requirement,
+  which WP4 already emits — only through the single atomic review-policy migration
+  (`06_LOOP_AND_REVIEW_POLICY.md §6`, `08_REPOSITORY_CHANGE_MAP.md §4`). WP5
+  introduces no new required ReviewPlan field and relaxes no coverage outside that
+  migration;
 - implement LoopPolicy and no-progress detection;
-- distinguish routine, substantial, crucial and terminal shapes;
-- measure review yield;
 - preserve stronger review for authority, security and weak-oracle work.
 
 ### Exit
 
 - both primaries can lead and write under the same neutral contract;
 - review is proportional and explainable;
-- one ReviewPlan derivation exists, WP5's being a superset of WP4's minimum, not
-  a parallel implementation;
+- one ReviewPlan derivation exists, WP5's extending WP4's, not a parallel
+  implementation;
+- no required ReviewPlan field first appeared in WP5, and no coverage change landed
+  outside the atomic policy migration;
 - loops stop predictably.
 
 ## WP6 — Skill and documentation simplification

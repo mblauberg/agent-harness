@@ -18,7 +18,7 @@ The structures below are conceptual subcontracts of that one kernel. Existing ca
 
 ### 1.3 Class-tag persisted state
 
-Every persisted contract in this file carries a `retention_class`, validated against the five ADR-0007 classes:
+Every contract in this file that is persisted on its own carries a `retention_class`, validated against the five ADR-0007 classes:
 
 - `ephemeral` — scratch, temporary renders, disposable worktrees;
 - `operational` — detailed events, intermediate checkpoints, provider debug output;
@@ -26,7 +26,21 @@ Every persisted contract in this file carries a `retention_class`, validated aga
 - `durable-knowledge` — current specs, ADRs, runbooks, promoted research;
 - `sensitive` — credentials, raw private input, secret-bearing debug.
 
-The value is validated on admission; an absent or unknown class is refused, not defaulted. Each contract below states its default class; a record that carries secret-bearing content is reclassified `sensitive`.
+**These five strings are the machine identifiers** — the exact values admitted by the schemas in `schemas/` and written into persisted state. ADR-0007 names the classes in prose; the prose names map 1:1 onto the machine identifiers, and only the fifth differs:
+
+| ADR-0007 prose name | machine identifier |
+|---|---|
+| ephemeral | `ephemeral` |
+| operational | `operational` |
+| evidence | `evidence` |
+| durable knowledge | `durable-knowledge` |
+| sensitive | `sensitive` |
+
+A space is not admissible in a JSON enum or a persisted field value, so `durable knowledge` is a prose name only and `durable-knowledge` is its sole machine identifier. The ADR-0007 amendment records this mapping; no other spelling is accepted in this pack, in any schema or in any example.
+
+The value is validated on admission; an absent or unknown class is refused, not defaulted. Each independently persisted contract below states its default class; a record that carries secret-bearing content is reclassified `sensitive`.
+
+A structure that is only ever embedded in another contract — the loop policy (§8), embedded in a run or node, is the single case — carries no class of its own and inherits its container's class. Every other contract in this file (§2, §3, §4, §5, §6, §7, §9, §10, §11, §12, §13) is independently persisted and states an explicit default class.
 
 Class-tagging is the whole of the near-term obligation (ADR-0007). Governed deletion machinery — preview, protected paths, legal hold, deletion receipts, refuse-unknown-files — ships after the ADR-0002 tranche; archive-only behaviour holds until then.
 
@@ -73,24 +87,26 @@ authority:                        # delivery-side projection of AuthorityEnvelop
   network:
     tool_egress: none
   expires_at: 2026-07-15T00:00:00Z
+  budget:                         # required V2 member; maps to Fabric V2 `budget`
+    maximum_turns: 40
+    maximum_wall_time_minutes: 90
+    maximum_repair_cycles: 2
 
 checks:
   - npm test
   - npm run typecheck
 
-budget:                           # binds to the V2 `budget` map
-  maximum_turns: 40
-  maximum_wall_time_minutes: 90
-  maximum_repair_cycles: 2
-
 effect_ceiling:
   - propose-pull-request
+
+retention_class: evidence         # persisted run envelope (§1.3)
 ```
 
 `authority` is not a contract of its own. It is the delivery-side projection of `AuthorityEnvelopeV2` (ADR-0002; `25_AUTHORITY_V2_AND_CONTAINMENT.md §1`), field-for-field per that document's mapping table (§2). Two properties are load-bearing and may not be thinned:
 
 - **Approval and evidence binding.** `approved_by`, `evidence` and `evidence_digest` map to V2 `approval.approvedBy`, `approval.evidenceId` and `approval.evidenceDigest`. The digest is of the artefact linked by the delivery authority's passing `authority-approval` evidence, so the grant is independently bindable rather than a copy of a mutable evidence ID. A child authority keeps the parent's approval binding exactly.
 - **Closed dimension set.** V2 closes over `secrets`, `deployment`, `irreversibleActions` and `network` in addition to path, operation, disclosure, expiry and budget scope. No dimension receives an implicit permissive default and there is no unrestricted-network variant; `network` governs model-invoked tool and subprocess egress, not the provider control plane. An enabling variant requires its non-empty set (`references`, `targets`, `actionIds`, `allowedHosts`). An omitted dimension is a refusal, not an allowance.
+- **Budget is inside the envelope.** `budget` is a required member of `AuthorityEnvelopeV2` (`25_AUTHORITY_V2_AND_CONTAINMENT.md §1`) and the delivery `budget` map maps directly to Fabric V2 `budget` (that document's §2 mapping table). It is therefore a member of the authority projection, never a sibling of it: budget is an authority dimension, and a budget held outside the envelope would be a parallel authority shape (§1.2). A contained child reduces every budget unit and can never raise one. No contract in this file carries a second, envelope-external budget.
 
 The kernel produces effective authority. The model never supplies trusted provider controls directly.
 
@@ -139,7 +155,7 @@ An Initiative is not a standing mandate. Any material scope change invalidates r
 
 ## 5. WorkItem
 
-The WorkItem is the normal unit of implementation, authority, budget, evidence and PR lineage.
+The WorkItem is the normal unit of implementation, authority, evidence and PR lineage. Its budget is an authority dimension, carried inside the bound envelope (§2), not a WorkItem field of its own.
 
 Required semantics:
 
@@ -153,11 +169,10 @@ acceptance criteria
 verification strategy
 dependency list
 risk tier
-requested capability profile
-expected source scope
-prohibited scope
-budget
-expiry
+authority                  # the AuthorityEnvelopeV2 projection of §2, carrying
+                           #   the requested capability profile, the expected
+                           #   source scope, the prohibited scope, the budget
+                           #   map and the expiry
 governing decision digests
 spec_digest                # canonical governing spec
 approval_digest            # canonical human approval
@@ -167,11 +182,13 @@ status
 retention_class            # default durable-knowledge
 ```
 
+Capability profile, source scope, prohibited scope, budget and expiry are members of `authority`, so the WorkItem restates none of them. A WorkItem-level `budget`, `expiry` or path-scope field would be a narrower parallel authority shape and is prohibited (§1.2); read them from the envelope.
+
 ADR-0006 makes the WorkItem the canonical backlog-item contract, so the approval/spec digests and the authority-envelope identity are canonical fields, not derivations: the store (repo markdown or GitHub Issues) is pluggable, and a pluggable store may not be the only place the approval or the governing envelope can be found. `authority_envelope_digest` names the exact bound envelope (§1.2); the envelope's own `approval.evidenceDigest` remains its internal binding and is not a substitute for the WorkItem's `approval_digest`.
 
 Readiness is deterministic. Missing material fields route back to scope.
 
-A validated draft-2020-12 seed for this contract — with enums for `state`, `risk.tier` (`routine|substantial|crucial|terminal`), `review.class`, and the `conflict_keys`/`pr_strategy` fields used by `09_WORK_PACKAGES_AND_SEQUENCE.md` PR topology — is provided at `schemas/work-item.schema.json` (example `schemas/examples/work-item.example.json`) for WP2/WP4. That seed predates this section: WP2 must add `spec_digest`, `approval_digest`, `authority_envelope_digest` and the validated `retention_class` enum to it, and must refuse a work item that omits them.
+A validated draft-2020-12 seed for this contract is provided at `schemas/work-item.schema.json` (example `schemas/examples/work-item.example.json`) for WP2/WP4. It is current with this section: it already requires `spec_digest`, `approval_digest`, `authority_envelope_digest`, `authority_schema_version`, the validated `retention_class` enum and the envelope-internal `budget` map, and it already carries the enums for `state`, `risk.tier` (`routine|substantial|crucial|terminal`) and `review.class` plus the `conflict_keys`/`pr_strategy` fields used by `09_WORK_PACKAGES_AND_SEQUENCE.md` PR topology. WP2 adopts the seed and enforces it: a work item that omits any required field is refused, not defaulted.
 
 ## 6. Optional work graph
 
@@ -185,17 +202,19 @@ semantic type
 objective
 dependencies
 owner role
-read scope
-write scope
-authority profile
-budget
 expected artefact
 verification oracle
 completion condition
 maximum attempts
+authority                  # contained child AuthorityEnvelopeV2 projection (§2),
+                           #   carrying the node's read scope, write scope,
+                           #   capability profile, budget and expiry
+retention_class            # default operational
 ```
 
-A node's authority is a contained child of the run's `AuthorityEnvelopeV2` (§1.2), never a fresh grant.
+A node's authority is a contained child of the run's `AuthorityEnvelopeV2` (§1.2), never a fresh grant. As with the WorkItem (§5), the node's read/write scope, profile and budget are members of that child envelope, not separate node fields.
+
+A work graph is persisted, not scratch: it exists precisely because the work is multi-owner, cross-session or recovery-bearing (`02_TARGET_ARCHITECTURE.md §4-5`), so its nodes outlive the provider session and must be class-tagged. The default is `operational` — a node is an intermediate coordination checkpoint. A node whose artefact is itself a receipt, approval or test result is `evidence`; a node carrying secret-bearing content is `sensitive`.
 
 Registered semantic node types should remain small:
 
@@ -259,6 +278,8 @@ checkpoint requirement
 ```
 
 Defaults should be conservative and risk-adjusted.
+
+The loop policy is the one structure here that is never persisted on its own: it is embedded in the run (§2) or the node (§6) and inherits that container's `retention_class` (§1.3). Its cost, turn and wall-time ceilings are read from the container's authority budget, which the loop may not exceed.
 
 ## 9. ReviewPlan
 

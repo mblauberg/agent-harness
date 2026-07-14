@@ -22,7 +22,6 @@
     "authority_envelope_digest",
     "spec_digest",
     "approval_digest",
-    "budget",
     "evidence",
     "review",
     "effects",
@@ -82,7 +81,8 @@
         "deployment",
         "irreversible_actions",
         "network",
-        "expires_at"
+        "expires_at",
+        "budget"
       ],
       "properties": {
         "schema_version": {
@@ -213,6 +213,29 @@
         "expires_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "budget": {
+          "description": "Required V2 envelope member. Maps directly to Fabric V2 budget (25_AUTHORITY_V2_AND_CONTAINMENT.md sections 1-2). Budget is an authority dimension: it lives inside the envelope, never beside it. A contained child reduces every budget unit and can never raise one.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          },
+          "properties": {
+            "maximum_turns": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maximum_wall_time_minutes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maximum_repair_cycles": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       },
       "allOf": [
@@ -452,29 +475,6 @@
     "approval_digest": {
       "description": "Canonical human approval digest (ADR-0006). The envelope's own approval.evidenceDigest is its internal binding and is not a substitute for this field.",
       "$ref": "#/$defs/sha256_digest"
-    },
-    "budget": {
-      "description": "Binds to the V2 budget map (03_MINIMAL_CONTRACTS.md section 2). Every unit is reduced, never raised, by a contained child authority.",
-      "type": "object",
-      "minProperties": 1,
-      "additionalProperties": {
-        "type": "number",
-        "minimum": 0
-      },
-      "properties": {
-        "maximum_turns": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "maximum_wall_time_minutes": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "maximum_repair_cycles": {
-          "type": "integer",
-          "minimum": 0
-        }
-      }
     },
     "evidence": {
       "type": "object",

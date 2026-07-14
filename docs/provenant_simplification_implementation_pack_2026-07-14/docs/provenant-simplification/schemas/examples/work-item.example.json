@@ -86,17 +86,17 @@
     "network": {
       "tool_egress": "none"
     },
-    "expires_at": "2026-07-27T00:00:00Z"
+    "expires_at": "2026-07-27T00:00:00Z",
+    "budget": {
+      "maximum_turns": 40,
+      "maximum_wall_time_minutes": 90,
+      "maximum_repair_cycles": 2
+    }
   },
   "authority_schema_version": 2,
   "authority_envelope_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
   "spec_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
   "approval_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
-  "budget": {
-    "maximum_turns": 40,
-    "maximum_wall_time_minutes": 90,
-    "maximum_repair_cycles": 2
-  },
   "evidence": {
     "deterministic": [
       "schema tests",
