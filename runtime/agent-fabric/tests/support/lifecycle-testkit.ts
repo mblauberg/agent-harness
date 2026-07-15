@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
+import { existsSync, watch } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { PROTOCOL_FEATURES, PROTOCOL_LIMITS } from "@local/agent-fabric-protocol";
@@ -69,6 +70,10 @@ export type LifecycleFixture = {
   runDirectory: string;
   databasePath: string;
   providerJournalPath: string;
+  providerSpawnBarrier?: {
+    waitUntilEntered: () => Promise<void>;
+    release: () => Promise<void>;
+  };
   secondaryProviderJournalPath?: string;
   providerSessionMarker: string;
   clock: ManualClock;
@@ -98,6 +103,7 @@ function adapterOptions(fixture: {
   providerStatus?: "healthy" | "unmanaged" | "missing-evidence";
   capabilitiesDelayMs?: number;
   spawnDelayMs?: number;
+  spawnBarrierPaths?: { entered: string; release: string };
   mandatoryUsageUnits?: boolean;
   maximumConcurrentProviderTurns?: number;
   payloadMaxTurns?: boolean;
@@ -129,6 +135,12 @@ function adapterOptions(fixture: {
           ...(fixture.spawnDelayMs === undefined
             ? {}
             : { LIFECYCLE_FAKE_SPAWN_DELAY_MS: String(fixture.spawnDelayMs) }),
+          ...(fixture.spawnBarrierPaths === undefined
+            ? {}
+            : {
+                LIFECYCLE_FAKE_SPAWN_BARRIER_ENTERED: fixture.spawnBarrierPaths.entered,
+                LIFECYCLE_FAKE_SPAWN_BARRIER_RELEASE: fixture.spawnBarrierPaths.release,
+              }),
           LIFECYCLE_FAKE_MANDATORY_USAGE: fixture.mandatoryUsageUnits === true ? "1" : "0",
           LIFECYCLE_FAKE_PAYLOAD_MAX_TURNS: fixture.payloadMaxTurns === true ? "1" : "0",
           LIFECYCLE_FAKE_SPAWN_RESULT_LOST: fixture.spawnResultLost === true ? "1" : "0",
@@ -162,6 +174,7 @@ export async function createLifecycleFixture(
   options: {
     capabilitiesDelayMs?: number;
     spawnDelayMs?: number;
+    spawnBarrier?: boolean;
     mandatoryUsageUnits?: boolean;
     maximumConcurrentProviderTurns?: number;
     payloadMaxTurns?: boolean;
@@ -179,6 +192,12 @@ export async function createLifecycleFixture(
   const providerJournalPath = join(directory, "fake-provider-journal.json");
   const secondaryProviderJournalPath = join(directory, "fake-provider-secondary-journal.json");
   const providerSessionMarker = join(directory, "provider-native-session.json");
+  const providerSpawnBarrier = options.spawnBarrier === true
+    ? {
+        entered: join(directory, "fake-provider-spawn-barrier-entered"),
+        release: join(directory, "fake-provider-spawn-barrier-release"),
+      }
+    : undefined;
   const clock = new ManualClock();
   await mkdir(join(directory, "src", "leader", "child"), { recursive: true });
   await mkdir(runDirectory, { recursive: true });
@@ -200,6 +219,7 @@ export async function createLifecycleFixture(
     directory,
     clock,
     providerJournalPath,
+    ...(providerSpawnBarrier === undefined ? {} : { spawnBarrierPaths: providerSpawnBarrier }),
     ...(options.secondaryAdapter === true ? { secondaryProviderJournalPath } : {}),
     ...options,
   }));
@@ -297,6 +317,14 @@ export async function createLifecycleFixture(
     runDirectory,
     databasePath,
     providerJournalPath,
+    ...(providerSpawnBarrier === undefined
+      ? {}
+      : {
+          providerSpawnBarrier: {
+            waitUntilEntered: async () => await waitUntilFileExists(providerSpawnBarrier.entered),
+            release: async () => await writeFile(providerSpawnBarrier.release, "released\n"),
+          },
+        }),
     ...(options.secondaryAdapter === true ? { secondaryProviderJournalPath } : {}),
     providerSessionMarker,
     clock,
@@ -315,6 +343,30 @@ export async function createLifecycleFixture(
     leaderTask,
     childTask,
   };
+}
+
+async function waitUntilFileExists(path: string): Promise<void> {
+  if (existsSync(path)) return;
+  await new Promise<void>((resolvePromise, reject) => {
+    const watcher = watch(dirname(path));
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      watcher.close();
+      resolvePromise();
+    };
+    watcher.on("change", () => {
+      if (existsSync(path)) finish();
+    });
+    watcher.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      watcher.close();
+      reject(error);
+    });
+    if (existsSync(path)) finish();
+  });
 }
 
 function mcpFailure(outcome: Awaited<ReturnType<typeof callTool>>): Error & { code?: string } {

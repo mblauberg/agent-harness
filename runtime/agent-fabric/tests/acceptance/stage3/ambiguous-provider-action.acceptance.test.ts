@@ -1688,9 +1688,10 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
   it("queues answer-bearing work within the shared provider-turn ceiling", async () => {
     const fixture = await createLifecycleFixture({
       maximumConcurrentProviderTurns: 1,
-      spawnDelayMs: 250,
+      spawnBarrier: true,
     });
     cleanup.push(async () => {
+      await fixture.providerSpawnBarrier?.release();
       await fixture.fabric.close();
       await rm(fixture.directory, { recursive: true, force: true });
     });
@@ -1721,6 +1722,9 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
 
     await expect(dispatch("one")).resolves.toMatchObject({ status: "prepared", executionCount: 0 });
     await expect(dispatch("two")).resolves.toMatchObject({ status: "prepared", executionCount: 0 });
+    const spawnBarrier = fixture.providerSpawnBarrier;
+    if (spawnBarrier === undefined) throw new Error("provider spawn barrier is required");
+    await spawnBarrier.waitUntilEntered();
     const database = new Database(fixture.databasePath, { readonly: true });
     try {
       expect(database.prepare(`
@@ -1734,6 +1738,12 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     } finally {
       database.close();
     }
+    const blockedJournal = JSON.parse(await readFile(fixture.providerJournalPath, "utf8")) as {
+      actions: Record<string, { executionCount: number; effectCount: number }>;
+    };
+    expect(Object.keys(blockedJournal.actions)).toEqual(["provider-review-queue:one"]);
+    expect(blockedJournal.actions["provider-review-queue:one"])
+      .toMatchObject({ executionCount: 1, effectCount: 1 });
     await expect(fixture.leader.updateTask({
       taskId: fixture.leaderTask.taskId,
       expectedRevision: fixture.leaderTask.revision,
@@ -1741,10 +1751,11 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-queue:complete-early",
     })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
 
+    await spawnBarrier.release();
     await expect(waitForProviderAction(fixture.chair, "provider-review-queue:one"))
-      .resolves.toMatchObject({ status: "terminal", executionCount: 1 });
+      .resolves.toMatchObject({ status: "terminal", executionCount: 1, effectCount: 1 });
     await expect(waitForProviderAction(fixture.chair, "provider-review-queue:two"))
-      .resolves.toMatchObject({ status: "terminal", executionCount: 1 });
+      .resolves.toMatchObject({ status: "terminal", executionCount: 1, effectCount: 1 });
   });
 
   it("keeps ambiguous answer-bearing work inside the shared provider-turn ceiling", async () => {
