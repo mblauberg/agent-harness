@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
+import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 
 import {
@@ -12,7 +13,11 @@ const journalPath = process.env.AGENT_BRIDGE_FAKE_JOURNAL;
 if (journalPath === undefined) throw new Error("AGENT_BRIDGE_FAKE_JOURNAL is required");
 const requiredJournalPath: string = journalPath;
 const bridgeSupported = process.env.AGENT_BRIDGE_FAKE_NO_BRIDGE !== "1";
-const exitAfterProvisionMs = Number(process.env.AGENT_BRIDGE_FAKE_EXIT_AFTER_PROVISION_MS ?? "0");
+const lossRequestPath = process.env.AGENT_BRIDGE_FAKE_LOSS_REQUEST;
+const lossObservedPath = process.env.AGENT_BRIDGE_FAKE_LOSS_OBSERVED;
+if ((lossRequestPath === undefined) !== (lossObservedPath === undefined)) {
+  throw new Error("agent bridge fake loss signal requires request and observed paths");
+}
 
 type Action = {
   actionId: string;
@@ -72,6 +77,8 @@ const bridgeContract = {
 };
 
 let retainedProtocol: Awaited<ReturnType<typeof NdjsonRpcTransport.connect>> | undefined;
+let retainedBridgeLive = true;
+let lossRequested = false;
 let retainedBinding: Readonly<{
   actionId: string;
   agentId: string;
@@ -82,6 +89,18 @@ let retainedBinding: Readonly<{
   providerSessionGeneration: number;
   bridgeGeneration: number;
 }> | undefined;
+
+function requestBridgeLoss(): void {
+  if (lossRequestPath === undefined || !existsSync(lossRequestPath) || lossRequested) return;
+  rmSync(lossRequestPath, { force: true });
+  lossRequested = true;
+  retainedBridgeLive = false;
+}
+
+const lossWatcher = lossRequestPath === undefined
+  ? undefined
+  : watch(dirname(lossRequestPath), requestBridgeLoss);
+requestBridgeLoss();
 
 async function provision(params: Record<string, unknown>): Promise<Record<string, unknown>> {
   const capability = process.env.AGENT_FABRIC_CAPABILITY;
@@ -191,12 +210,6 @@ input.on("line", (line) => {
         };
         save(journal);
         respond(request.id, result);
-        if (
-          Number.isFinite(exitAfterProvisionMs) && exitAfterProvisionMs > 0 &&
-          process.env.AGENT_FABRIC_HANDOFF_KIND === "agent"
-        ) {
-          setTimeout(() => process.exit(91), exitAfterProvisionMs);
-        }
       } catch (error: unknown) {
         fail(request.id, "PROVISION_FAILED", error instanceof Error ? error.message : String(error));
       }
@@ -210,7 +223,7 @@ input.on("line", (line) => {
     }
     if (request.method === "retained_bridge_health") {
       const binding = retainedBinding;
-      const live = binding !== undefined && retainedProtocol !== undefined &&
+      const live = retainedBridgeLive && binding !== undefined && retainedProtocol !== undefined &&
         request.params.kind === "child" && request.params.actionId === binding.actionId &&
         request.params.agentId === binding.agentId && request.params.projectSessionId === binding.projectSessionId &&
         request.params.runId === binding.runId && request.params.principalGeneration === binding.principalGeneration &&
@@ -236,5 +249,9 @@ input.on("line", (line) => {
 });
 
 input.on("close", () => {
+  lossWatcher?.close();
+  if (lossRequested && lossObservedPath !== undefined) {
+    writeFileSync(lossObservedPath, "child-bridge-loss-observed\n", { mode: 0o600 });
+  }
   void retainedProtocol?.close();
 });
