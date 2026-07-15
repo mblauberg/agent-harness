@@ -84,6 +84,31 @@ function routeRequest() {
 }
 
 describe("Spec 05 provider action operation wire", () => {
+  it("accepts exact provider controls on an ordinary spawn without review routing", () => {
+    const input = {
+      adapterId: "codex-app-server",
+      actionId: "spawn_01",
+      operation: "spawn",
+      taskId: "task_spawn_01",
+      authorityId: "authority_spawn_01",
+      certifyingReview: null,
+      payload: {
+        taskId: "task_spawn_01",
+        model: "gpt-5.6-luna",
+        modelFamily: "openai",
+        effort: "xhigh",
+        prompt: "Implement the bounded task.",
+      },
+      commandId: "command_spawn_01",
+    } as const;
+
+    expect(parseOperationInput(FABRIC_OPERATIONS.dispatchProviderAction, input)).toStrictEqual(input);
+    expect(() => parseOperationInput(FABRIC_OPERATIONS.dispatchProviderAction, {
+      ...input,
+      routeRequest: routeRequest(),
+    })).toThrow(/routeRequest|unknown field|allowed variant/);
+  });
+
   it("admits only task/route-bound certifying review spawns", () => {
     const input = {
       adapterId: "cursor-agent",

@@ -75,6 +75,22 @@ Receipts separate adapter, endpoint, model family, requested/effective effort,
 capability source and substitution. Detailed roster and failover policy live in
 `skills/orchestrate/references/routing-and-tiers.md`.
 
+Provider controls stay explicit and small:
+
+| Control | Rule |
+|---|---|
+| model | Put the exact `model` and `modelFamily` in each admitted spawn or turn; a retained role/model change starts fresh through rotate. |
+| effort | Put the supported `effort` in each admitted spawn or turn; do not infer it from the model name. |
+| compact | Checkpoint, then continue the same retained task with bounded context. |
+| rotate/clear | Checkpoint, then start fresh for a new task, independent review, stale/confused/unreconciled context, or role/model change. Fabric rotate is the clear equivalent; never clear silently. |
+
+Claude reviewers and one-task workers start fresh and release. A retained Claude
+pair checkpoints and compacts at every stage or work-unit boundary, no later
+than four answer-bearing provider turns, and before an idle pause expected to
+exceed five minutes. Codex follows stage boundaries; native auto-compaction is
+a fallback. These are manual operating rules, not Fabric-enforced timers or
+turn counters.
+
 Coverage is proportional:
 
 | Risk | Minimum review pressure |

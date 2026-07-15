@@ -90,16 +90,6 @@ describe("current pre-release protocol contract", () => {
       operation: "spawn",
       taskId: "task_review_01",
       authorityId: "authority_review_01",
-      routeRequest: {
-        schemaVersion: 1,
-        adapterAlias: "agy",
-        modelAlias: "gemini",
-        explicitModel: "gemini-3.1-pro",
-        role: "reviewer",
-        leadFamily: "openai",
-        requireDistinct: true,
-        providerEffort: null,
-      },
       certifyingReview: null,
       payload: {
         taskId: "task_review_01",
