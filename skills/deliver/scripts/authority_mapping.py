@@ -17,7 +17,7 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _HOST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$")
 _RFC3339 = re.compile(
-    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|([+-])(\d{2}):(\d{2}))$"
+    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:Z|([+-])(\d{2}):(\d{2}))$"
 )
 _PROVIDER_TOKEN_BUDGET = re.compile(
     r"^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
@@ -131,13 +131,19 @@ def _timestamp_value(value: str) -> datetime:
     return datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
 
 
+def _timestamp_order(value: str) -> tuple[datetime, str]:
+    match = _RFC3339.fullmatch(value)
+    assert match is not None
+    return _timestamp_value(value).replace(microsecond=0), (match.group(7) or "").ljust(9, "0")
+
+
 def _timestamp(value: Any, field: str) -> str:
     match = _RFC3339.fullmatch(value) if isinstance(value, str) else None
     _fail(match is None, f"{field} must be a strict RFC3339 timestamp")
     assert match is not None
     year, month, day, hour, minute, second = (int(part) for part in match.groups()[:6])
-    offset_hour = int(match.group(8)) if match.group(8) is not None else 0
-    offset_minute = int(match.group(9)) if match.group(9) is not None else 0
+    offset_hour = int(match.group(9)) if match.group(9) is not None else 0
+    offset_minute = int(match.group(10)) if match.group(10) is not None else 0
     _fail(
         year < 1 or hour > 23 or minute > 59 or second > 59
         or offset_hour > 23 or offset_minute > 59,
@@ -387,7 +393,7 @@ def authority_contained(child: dict[str, Any], parent: dict[str, Any]) -> bool:
         and _union_contained(child["deployment"], parent["deployment"], "allowed", "targets")
         and _union_contained(child["irreversibleActions"], parent["irreversibleActions"], "allowed", "actionIds")
         and network_ok
-        and _timestamp_value(child["expiresAt"]) <= _timestamp_value(parent["expiresAt"])
+        and _timestamp_order(child["expiresAt"]) <= _timestamp_order(parent["expiresAt"])
         and set(child["budget"]) <= set(parent["budget"])
         and all(child["budget"][key] <= parent["budget"][key] for key in child["budget"])
     )

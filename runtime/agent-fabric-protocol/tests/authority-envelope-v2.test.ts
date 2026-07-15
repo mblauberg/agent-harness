@@ -49,6 +49,7 @@ describe("AuthorityEnvelopeV2", () => {
     const vectors = JSON.parse(await readFile(path, "utf8")) as {
       accepted: string[];
       rejected: string[];
+      ordering: Array<{ child: string; parent: string; contained: boolean }>;
     };
 
     for (const timestamp of vectors.accepted) {
@@ -56,6 +57,12 @@ describe("AuthorityEnvelopeV2", () => {
     }
     for (const timestamp of vectors.rejected) {
       expect(() => parseTimestamp(timestamp, "timestamp")).toThrow(/RFC3339/u);
+    }
+    for (const vector of vectors.ordering) {
+      expect(authorityEnvelopeV2Contained(
+        authority({ expiresAt: vector.child }),
+        authority({ expiresAt: vector.parent }),
+      ), JSON.stringify(vector)).toBe(vector.contained);
     }
   });
 

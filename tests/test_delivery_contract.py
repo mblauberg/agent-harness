@@ -108,6 +108,12 @@ def test_delivery_authority_timestamp_validation_matches_protocol_vectors():
                 valid_cost_pattern=COST_PATTERN,
             )
 
+    authority = json.loads((AUTHORITY_FIXTURE_ROOT / "fabric-authority.json").read_text())
+    for vector in vectors["ordering"]:
+        child = {**authority, "expiresAt": vector["child"]}
+        parent = {**authority, "expiresAt": vector["parent"]}
+        assert module.authority_contained(child, parent) is vector["contained"]
+
 
 def test_delivery_authority_v2_is_closed_and_rejects_unknown_operations():
     module = load(AUTHORITY_MAPPER_PATH, "authority_mapping_closed")

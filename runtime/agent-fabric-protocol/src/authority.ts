@@ -231,6 +231,25 @@ function networkContained(child: AuthorityEnvelopeV2["network"], parent: Authori
   return child.toolEgress === "none" || subset(child.allowedHosts, parent.allowedHosts);
 }
 
+function timestampNanoseconds(value: string): bigint | null {
+  const zoneStart = value.endsWith("Z") ? value.length - 1 : value.length - 6;
+  const fractionStart = value.indexOf(".", 19);
+  const base = fractionStart === -1
+    ? value
+    : `${value.slice(0, fractionStart)}${value.slice(zoneStart)}`;
+  const milliseconds = Date.parse(base);
+  if (!Number.isFinite(milliseconds)) return null;
+  const fraction = fractionStart === -1 ? "" : value.slice(fractionStart + 1, zoneStart);
+  const nanoseconds = BigInt((fraction + "000000000").slice(0, 9));
+  return BigInt(milliseconds) * 1_000_000n + nanoseconds;
+}
+
+function expiryContained(child: string, parent: string): boolean {
+  const childNanoseconds = timestampNanoseconds(child);
+  const parentNanoseconds = timestampNanoseconds(parent);
+  return childNanoseconds !== null && parentNanoseconds !== null && childNanoseconds <= parentNanoseconds;
+}
+
 export function authorityEnvelopeV2Contained(child: AuthorityEnvelopeV2, parent: AuthorityEnvelopeV2): boolean {
   const childBudget = Object.keys(child.budget).sort();
   return child.schemaVersion === 2
@@ -250,6 +269,6 @@ export function authorityEnvelopeV2Contained(child: AuthorityEnvelopeV2, parent:
     && deploymentContained(child.deployment, parent.deployment)
     && irreversibleContained(child.irreversibleActions, parent.irreversibleActions)
     && networkContained(child.network, parent.network)
-    && Date.parse(child.expiresAt) <= Date.parse(parent.expiresAt)
+    && expiryContained(child.expiresAt, parent.expiresAt)
     && childBudget.every((key) => Object.hasOwn(parent.budget, key) && child.budget[key]! <= parent.budget[key]!);
 }
