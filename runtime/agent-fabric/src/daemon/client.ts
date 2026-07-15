@@ -389,9 +389,15 @@ function childEnvironment(
     if (value !== undefined) environment[key] = value;
   }
   const cutoverRaceFixture = process.env.AGENT_FABRIC_TEST_CUTOVER_RACE_FIXTURE_PATH;
-  if (process.env.NODE_ENV === "test" && cutoverRaceFixture !== undefined) {
+  const idleStopAttemptSocket = process.env.AGENT_FABRIC_TEST_IDLE_STOP_ATTEMPT_SOCKET_PATH;
+  if (process.env.NODE_ENV === "test" && (cutoverRaceFixture !== undefined || idleStopAttemptSocket !== undefined)) {
     environment.NODE_ENV = "test";
-    environment.AGENT_FABRIC_TEST_CUTOVER_RACE_FIXTURE_PATH = cutoverRaceFixture;
+    if (cutoverRaceFixture !== undefined) {
+      environment.AGENT_FABRIC_TEST_CUTOVER_RACE_FIXTURE_PATH = cutoverRaceFixture;
+    }
+    if (idleStopAttemptSocket !== undefined) {
+      environment.AGENT_FABRIC_TEST_IDLE_STOP_ATTEMPT_SOCKET_PATH = idleStopAttemptSocket;
+    }
   }
   return environment;
 }

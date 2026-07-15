@@ -1,7 +1,8 @@
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { createConnection } from "node:net";
+import { createConnection, createServer, type Server } from "node:net";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -26,9 +27,13 @@ import { runWorkspaceTrust } from "../../../src/cli/workspace-trust.ts";
 
 const roots: string[] = [];
 const daemons: FabricDaemonHandle[] = [];
+const servers: Server[] = [];
 
 afterEach(async () => {
   await Promise.allSettled(daemons.splice(0).reverse().map(async (daemon) => daemon.stop()));
+  await Promise.allSettled(servers.splice(0).map(async (server) => await new Promise<void>((resolvePromise, reject) => {
+    server.close((error) => error === undefined ? resolvePromise() : reject(error));
+  })));
   await Promise.allSettled(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -728,7 +733,39 @@ describe("public local operator Console session", () => {
   });
 
   it("lets an explicit operator daemon-stop drain its own dispatch custody and exit", async () => {
-    const { paths, projectA, projectB, daemon } = await fixture();
+    const barrierRoot = await mkdtemp(join(tmpdir(), "fabric-idle-stop-attempt-"));
+    roots.push(barrierRoot);
+    const barrierPath = join(barrierRoot, "attempt.sock");
+    const barrier = createServer();
+    servers.push(barrier);
+    const idleStopAttempted = new Promise<void>((resolvePromise, reject) => {
+      barrier.once("connection", (socket) => {
+        const lines = createInterface({ input: socket, crlfDelay: Infinity });
+        lines.once("line", (frame) => {
+          lines.close();
+          if (frame !== "idle-stop-attempt:operator-detach") {
+            reject(new Error(`unexpected idle-stop attempt frame: ${JSON.stringify(frame)}`));
+            return;
+          }
+          resolvePromise();
+        });
+        socket.once("error", reject);
+      });
+      barrier.once("error", reject);
+    });
+    await new Promise<void>((resolvePromise, reject) => {
+      barrier.once("error", reject);
+      barrier.listen(barrierPath, () => {
+        barrier.off("error", reject);
+        resolvePromise();
+      });
+    });
+    const previousBarrierPath = process.env.AGENT_FABRIC_TEST_IDLE_STOP_ATTEMPT_SOCKET_PATH;
+    process.env.AGENT_FABRIC_TEST_IDLE_STOP_ATTEMPT_SOCKET_PATH = barrierPath;
+    const { paths, projectA, projectB, daemon } = await fixture().finally(() => {
+      if (previousBarrierPath === undefined) delete process.env.AGENT_FABRIC_TEST_IDLE_STOP_ATTEMPT_SOCKET_PATH;
+      else process.env.AGENT_FABRIC_TEST_IDLE_STOP_ATTEMPT_SOCKET_PATH = previousBarrierPath;
+    });
     const session = await openLocalOperatorConsoleSession({
       projectRoot: projectA,
       surface: "standalone",
@@ -771,6 +808,10 @@ describe("public local operator Console session", () => {
     await session.refreshProjectSessions();
     await session.selectProjectSession("session_console_daemon_stop_01" as never);
     await session.detach({ reason: "operator" });
+    await expect(Promise.race([
+      idleStopAttempted.then(() => "idle-stop-attempt" as const),
+      daemon.waitForExit().then(() => "daemon-exit" as const),
+    ])).resolves.toBe("idle-stop-attempt");
 
     const readEpoch = async () => {
       const { default: Database } = await import("better-sqlite3");
@@ -850,11 +891,7 @@ describe("public local operator Console session", () => {
       confirmation: { kind: "explicit", confirmationId: "confirm_console_daemon_stop_01" },
     });
 
-    const exited = await Promise.race([
-      daemon.waitForExit().then(() => true),
-      new Promise<false>((resolve) => setTimeout(() => resolve(false), 2_000)),
-    ]);
-    expect(exited).toBe(true);
+    await daemon.waitForExit();
     const { default: Database } = await import("better-sqlite3");
     const database = new Database(paths.databasePath, { readonly: true, fileMustExist: true });
     try {

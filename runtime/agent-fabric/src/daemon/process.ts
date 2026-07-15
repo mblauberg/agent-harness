@@ -8,7 +8,7 @@ import {
   rmdirSync,
   rmSync,
 } from "node:fs";
-import { createServer, type Socket } from "node:net";
+import { createConnection, createServer, type Socket } from "node:net";
 
 import {
   FABRIC_OPERATIONS,
@@ -704,13 +704,33 @@ const attemptIdleStopWithServingRecovery = async (input: {
   }
 };
 
+const idleStopAttemptSocketPath = process.env.NODE_ENV === "test"
+  ? process.env.AGENT_FABRIC_TEST_IDLE_STOP_ATTEMPT_SOCKET_PATH
+  : undefined;
+const holdTestOperatorDetachAttempt = async (): Promise<void> => {
+  if (idleStopAttemptSocketPath === undefined) return;
+  await new Promise<void>((resolvePromise, reject) => {
+    const socket = createConnection(idleStopAttemptSocketPath);
+    socket.once("connect", () => {
+      socket.write("idle-stop-attempt:operator-detach\n", (error) => {
+        if (error !== undefined) reject(error);
+      });
+    });
+    socket.once("end", resolvePromise);
+    socket.once("error", reject);
+  });
+};
+
 const idleScheduler = new IdleShutdownScheduler({
   graceMs: 250,
   sweepMs: 30_000,
-  attempt: async ({ actionId }) => await attemptIdleStopWithServingRecovery({
-    actionId: `${actionId}:${String(daemonInstanceGeneration)}`,
-    signal: null,
-  }),
+  attempt: async ({ actionId, reason }) => {
+    if (reason === "operator-detach") await holdTestOperatorDetachAttempt();
+    return await attemptIdleStopWithServingRecovery({
+      actionId: `${actionId}:${String(daemonInstanceGeneration)}`,
+      signal: null,
+    });
+  },
   onStopped: async () => {
     shuttingDown = true;
     await finishProcess({ signal: null, state: "stopped", exitCode: 0 });
