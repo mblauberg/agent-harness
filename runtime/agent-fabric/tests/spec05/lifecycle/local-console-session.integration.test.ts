@@ -124,6 +124,26 @@ describe("secret-absence scan", () => {
     expect(readPaths).toEqual(expect.arrayContaining([disappearing, stable]));
   });
 
+  it("continues after the first enumerated read disappears and rejects a later credential", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-secret-scan-"));
+    roots.push(root);
+    await Promise.all([
+      writeFile(join(root, "first"), "enumerated"),
+      writeFile(join(root, "second"), "enumerated"),
+    ]);
+    const secret = "credential-token-after-enoent";
+    let reads = 0;
+
+    await expect(expectSecretsAbsent([root], [secret], async () => {
+      reads += 1;
+      if (reads === 1) {
+        throw Object.assign(new Error("injected disappearing file"), { code: "ENOENT" });
+      }
+      return Buffer.from(secret);
+    })).rejects.toThrow();
+    expect(reads).toBe(2);
+  });
+
   it.each(["credential-token-a", "credential-token-b"])(
     "still fails when %s persists in a stable file",
     async (persistedSecret) => {
