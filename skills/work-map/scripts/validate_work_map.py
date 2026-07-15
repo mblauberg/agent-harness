@@ -22,7 +22,13 @@ ROUTE_NARRATION_RE = re.compile(
     r"owner|owns|pending|remaining|waiting)\b|\bdepends\s*:",
     re.IGNORECASE,
 )
-HANDOFF_RE = re.compile(r"\bhandoff\b", re.IGNORECASE)
+HANDOFF_RE = re.compile(r"\bhandoffs?\b", re.IGNORECASE)
+LABEL_SMUGGLE_RE = re.compile(
+    r"(?:[—–-]\s*[^\]]*\b(?:done|in progress|blocked|complete(?:d)?|integrated|"
+    r"pending|waiting|owner)\b)|\bowner\s+\S+|\b\d{4}-\d{2}-\d{2}\b",
+    re.IGNORECASE,
+)
+LINK_LABEL_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
 HEADING_MATCHERS = {
     "destination": lambda line: line == "## Destination",
     "route": lambda line: line == "## Route" or line.startswith("## Route ("),
@@ -103,8 +109,13 @@ def validate(path: Path) -> list[str]:
             errors.append(f"route section permits only link rows: {row}")
         if ROUTE_NARRATION_RE.search(prose):
             errors.append(f"route rows must link, not narrate live state: {row}")
-        if HANDOFF_RE.search(prose):
+        if HANDOFF_RE.search(row):
             errors.append(f"temporary handoffs stay outside route maps: {row}")
+        for label in LINK_LABEL_RE.findall(row):
+            if LABEL_SMUGGLE_RE.search(label):
+                errors.append(
+                    f"route link labels must not smuggle live state: {row}"
+                )
 
     invariant_rows = [
         line.strip()

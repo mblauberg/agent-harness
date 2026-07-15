@@ -1,6 +1,6 @@
 # Architecture decision records
 
-Decisions ratified on 2026-07-13. Each ADR is the canonical owner
+Decisions ratified by the user on 2026-07-13. Each ADR is the canonical owner
 of its decision; supporting scoping evidence, challenge history and rejected
 alternatives remain available in Git history without forming a live
 cross-reference dependency. ADRs 0009–0010 were ratified later, on 2026-07-15;

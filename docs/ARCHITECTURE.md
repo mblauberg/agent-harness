@@ -349,7 +349,8 @@ location and lifecycle are defined in [worktrees.md](worktrees.md).
 ## Context and durable memory
 
 Project knowledge must remain visible to every family. Durable facts therefore
-live in specifications, ADRs ([adr/](adr/)), runbooks and context digests.
+live in project-owned state files, specifications, ADRs ([adr/](adr/)),
+runbooks and context digests.
 Private harness memory is limited to cross-project user preferences. For this
 repository, GitHub issues own the current owner, dependencies and user gates;
 Project Status owns workflow state. Project-local effort maps link that work

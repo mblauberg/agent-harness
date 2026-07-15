@@ -137,6 +137,33 @@ def test_route_rejects_delivery_state_suffixes_outside_the_link(tmp_path):
     )
 
 
+def test_route_rejects_handoff_link_targets(tmp_path):
+    path = tmp_path / "EFFORT-example.md"
+    path.write_text(
+        map_text(
+            "- [Session baton](../handoffs/HANDOFF-2026-07-16-example.md)"
+        )
+    )
+
+    assert "temporary handoffs stay outside route maps" in "\n".join(
+        load_module().validate(path)
+    )
+
+
+def test_route_rejects_live_state_smuggled_in_link_labels(tmp_path):
+    path = tmp_path / "EFFORT-example.md"
+    path.write_text(
+        map_text(
+            "- [Issue #1 — DONE, integrated 2026-07-15, owner Alice]"
+            "(https://github.com/example/project/issues/1)"
+        )
+    )
+
+    assert "route link labels must not smuggle live state" in "\n".join(
+        load_module().validate(path)
+    )
+
+
 def test_route_rejects_prose_around_an_otherwise_valid_link(tmp_path):
     path = tmp_path / "EFFORT-example.md"
     path.write_text(
