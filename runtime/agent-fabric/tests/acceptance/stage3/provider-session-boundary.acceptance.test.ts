@@ -8,6 +8,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../../src/index.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 import { createLifecycleFixture, reopenLifecycleFabric } from "../../support/lifecycle-testkit.ts";
 
@@ -24,6 +25,7 @@ const turnAdapter = fileURLToPath(
 function authority(root: string) {
   void root;
   return {
+    ...TEST_AUTHORITY_V2_FIELDS,
     workspaceRoots: ["."],
     sourcePaths: ["src"],
     artifactPaths: [".agent-run"],

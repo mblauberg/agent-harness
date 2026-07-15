@@ -1,6 +1,6 @@
-import type { AuthorityInput, DisclosurePolicy } from "./baseline-contracts.js";
+import type { AuthorityInput } from "./baseline-contracts.js";
+import { AUTHORITY_ENVELOPE_V2_CODEC, parseAuthorityEnvelopeV2 } from "./authority.js";
 import {
-  arrayOf,
   defineCodec,
   enumeration,
   integer,
@@ -16,7 +16,6 @@ import {
   unionOf,
   type Codec,
 } from "./codec.js";
-import { isActiveFabricOperation, OPERATION_REGISTRY, type FabricOperation } from "./operations.js";
 import {
   parseArtifactRef,
   parseCanonicalRelativePath,
@@ -186,57 +185,13 @@ export type LaunchProviderActionJournalRefV1 =
     });
 
 const RESOURCE_UNIT_PATTERN = "^(?:provider_calls|concurrent_turns|descendants|message_bytes|artifact_bytes|wall_clock_milliseconds|cost:[A-Z]{3}|(?:input_tokens|output_tokens):[a-z0-9][a-z0-9._-]{0,63})$";
-const activeAgentOperations = Object.values(OPERATION_REGISTRY)
-  .filter((entry) => entry.principals.includes("agent"))
-  .map((entry) => entry.operation);
-const firstAgentOperation = activeAgentOperations[0];
-if (firstAgentOperation === undefined) throw new Error("launch authority requires at least one active agent operation");
-
-const agentAuthorityOperationCodec = defineCodec<string>({
-  type: "string",
-  enum: activeAgentOperations,
-}, firstAgentOperation, (value, path) => parseAgentOperation(value, path));
-const chairAuthorityPathCodec = defineCodec<string>({
-  oneOf: [{ const: "." }, relativePath.schema],
-}, ".", parseChairAuthorityPath);
-const disclosureCodec = objectCodec({ level: literal("allowed") });
-const scopedDisclosureCodec = objectCodec({
-  level: literal("scoped"),
-  scopes: arrayOf(defineCodec({
-    type: "string",
-    enum: ["local", "approved-provider", "external"],
-  }, "local", parseDisclosureTarget), { minimum: 1, maximum: 3, unique: true }),
-});
-const forbiddenDisclosureCodec = objectCodec({ level: literal("forbidden") });
-const resourceAmountsCodec = recordOf(integer(), {
-  maximum: 128,
-  keyPattern: RESOURCE_UNIT_PATTERN,
-  exampleKey: "concurrent_turns",
-});
 const nonEmptyResourceAmountsCodec = recordOf(integer(), {
   minimum: 1,
   maximum: 128,
   keyPattern: RESOURCE_UNIT_PATTERN,
   exampleKey: "concurrent_turns",
 });
-const chairAuthorityCodec = objectCodec({
-  workspaceRoots: arrayOf(chairAuthorityPathCodec, { minimum: 1, maximum: 64, unique: true }),
-  sourcePaths: arrayOf(chairAuthorityPathCodec, { maximum: 256, unique: true }),
-  artifactPaths: arrayOf(chairAuthorityPathCodec, { maximum: 256, unique: true }),
-  actions: arrayOf(agentAuthorityOperationCodec, { maximum: 256, unique: true }),
-  disclosure: defineCodec({
-    oneOf: [
-      disclosureCodec.schema,
-      scopedDisclosureCodec.schema,
-      forbiddenDisclosureCodec.schema,
-    ],
-  }, { level: "forbidden" }, parseDisclosure),
-  expiresAt: timestamp,
-  budget: resourceAmountsCodec,
-}, {
-  deniedPaths: arrayOf(chairAuthorityPathCodec, { maximum: 256, unique: true }),
-  deniedActions: arrayOf(agentAuthorityOperationCodec, { maximum: 256, unique: true }),
-});
+const chairAuthorityCodec = AUTHORITY_ENVELOPE_V2_CODEC;
 const artifactRefCodec = objectCodec({ path: relativePath, digest: sha256 });
 const launchPacketBaseCodec = objectCodec({
   schemaVersion: literal(1),
@@ -494,7 +449,7 @@ export function parseLaunchPacketV1(value: unknown, path = "launchPacketV1"): La
     topologyMode: parseTopologyMode(record.topologyMode, `${path}.topologyMode`),
     budgetRef: parseIdentifier<"BudgetRef">(record.budgetRef, `${path}.budgetRef`),
     resourcePlanRef: parseArtifactRef(record.resourcePlanRef, `${path}.resourcePlanRef`),
-    chairAuthority: parseChairAuthority(record.chairAuthority, `${path}.chairAuthority`),
+    chairAuthority: parseAuthorityEnvelopeV2(record.chairAuthority, `${path}.chairAuthority`),
     provider: {
       adapterId: parseIdentifier<"AdapterId">(provider.adapterId, `${path}.provider.adapterId`),
       actionId: parseIdentifier<"ProviderActionId">(provider.actionId, `${path}.provider.actionId`),
@@ -902,94 +857,6 @@ function parseTopologyMode(value: unknown, path: string): "coordinated" | "indep
   throw new TypeError(`${path} must be coordinated or independent`);
 }
 
-function parseAgentOperation(value: unknown, path: string): FabricOperation {
-  if (typeof value !== "string" || !isActiveFabricOperation(value) || !OPERATION_REGISTRY[value].principals.includes("agent")) {
-    throw new TypeError(`${path} must be an active agent protocol operation`);
-  }
-  return value;
-}
-
-function parseDisclosureTarget(value: unknown, path: string): "local" | "approved-provider" | "external" {
-  if (value === "local" || value === "approved-provider" || value === "external") return value;
-  throw new TypeError(`${path} must be local, approved-provider or external`);
-}
-
-function parseDisclosure(value: unknown, path: string): DisclosurePolicy {
-  const record = strictRecord(value, path, ["level", "scopes"]);
-  if (record.level === "allowed" || record.level === "forbidden") {
-    if (record.scopes !== undefined) throw new TypeError(`${path}.scopes is forbidden for ${record.level}`);
-    return { level: record.level };
-  }
-  if (record.level === "scoped") {
-    return { level: "scoped", scopes: parseUniqueArray(record.scopes, `${path}.scopes`, 1, 3, parseDisclosureTarget) };
-  }
-  throw new TypeError(`${path}.level is invalid`);
-}
-
-function parseChairAuthority(value: unknown, path: string): AuthorityInput {
-  const record = strictRecord(value, path, [
-    "workspaceRoots",
-    "sourcePaths",
-    "artifactPaths",
-    "actions",
-    "deniedPaths",
-    "deniedActions",
-    "disclosure",
-    "expiresAt",
-    "budget",
-  ]);
-  const authority: AuthorityInput = {
-    workspaceRoots: parseUniqueArray(record.workspaceRoots, `${path}.workspaceRoots`, 1, 64, parseChairAuthorityPath),
-    sourcePaths: parseUniqueArray(record.sourcePaths, `${path}.sourcePaths`, 0, 256, parseChairAuthorityPath),
-    artifactPaths: parseUniqueArray(record.artifactPaths, `${path}.artifactPaths`, 0, 256, parseChairAuthorityPath),
-    actions: parseUniqueArray(record.actions, `${path}.actions`, 0, 256, parseAgentOperation),
-    disclosure: parseDisclosure(record.disclosure, `${path}.disclosure`),
-    expiresAt: parseTimestamp(record.expiresAt, `${path}.expiresAt`),
-    budget: parseAuthorityBudget(record.budget, `${path}.budget`),
-  };
-  return {
-    ...authority,
-    ...(record.deniedPaths === undefined
-      ? {}
-      : { deniedPaths: parseUniqueArray(record.deniedPaths, `${path}.deniedPaths`, 0, 256, parseChairAuthorityPath) }),
-    ...(record.deniedActions === undefined
-      ? {}
-      : { deniedActions: parseUniqueArray(record.deniedActions, `${path}.deniedActions`, 0, 256, parseAgentOperation) }),
-  };
-}
-
-function parseChairAuthorityPath(value: unknown, path: string): string {
-  return value === "." ? "." : parseCanonicalRelativePath(value, path);
-}
-
-function parseAuthorityBudget(value: unknown, path: string): Readonly<Record<string, number>> {
-  const fields = typeof value === "object" && value !== null && !Array.isArray(value) ? Object.keys(value) : [];
-  const record = strictRecord(value, path, fields);
-  if (fields.length > 128) throw new TypeError(`${path} must contain at most 128 dimensions`);
-  const amounts: Record<string, number> = {};
-  for (const [unit, amount] of Object.entries(record)) {
-    if (!isResourceUnitKey(unit)) throw new TypeError(`${path}.${unit} is not a qualified resource unit`);
-    amounts[unit] = safeInteger(amount, `${path}.${unit}`);
-  }
-  return amounts;
-}
-
-function parseUniqueArray<T>(
-  value: unknown,
-  path: string,
-  minimum: number,
-  maximum: number,
-  parse: (entry: unknown, path: string) => T,
-): readonly T[] {
-  if (!Array.isArray(value) || value.length < minimum || value.length > maximum) {
-    throw new TypeError(`${path} must contain ${String(minimum)}-${String(maximum)} items`);
-  }
-  const parsed = value.map((entry, index) => parse(entry, `${path}[${String(index)}]`));
-  if (new Set(parsed.map((entry) => JSON.stringify(entry))).size !== parsed.length) {
-    throw new TypeError(`${path} must contain unique items`);
-  }
-  return parsed;
-}
 
 function parseJsonObject(value: unknown, path: string): Readonly<Record<string, JsonValue>> {
   const parsed = parseJsonValue(value, path);

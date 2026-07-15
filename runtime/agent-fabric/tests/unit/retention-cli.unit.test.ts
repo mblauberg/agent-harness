@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { archiveRun, retentionReport } from "../../src/cli/retention.ts";
 import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../src/index.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../support/authority-v2-testkit.ts";
 import { createCurrentSessionRun } from "../support/current-session-testkit.ts";
 
 const cleanup: string[] = [];
@@ -29,6 +30,7 @@ async function fixture(runId = "run-terminal"): Promise<{ root: string; database
       chair: {
         agentId: "chair",
         authority: {
+          ...TEST_AUTHORITY_V2_FIELDS,
           workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: [".agent-run"],
           actions: [...AUTHORITY_ACTION_VOCABULARY], disclosure: { level: "scoped", scopes: ["local"] } as const,
           expiresAt: "2099-01-01T00:00:00.000Z", budget: { turns: 10 },

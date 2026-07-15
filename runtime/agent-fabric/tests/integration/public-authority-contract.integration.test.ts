@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { AUTHORITY_ACTION_VOCABULARY, connectFabricDaemon, startFabricDaemon } from "../../src/index.ts";
 import type { AuthorityInput } from "../../src/index.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../support/authority-v2-testkit.ts";
 import { callTool, spawnMcpProxy } from "../support/mcp-testkit.ts";
 import { requireRecord, teamCreateInput } from "../support/stage5-team-testkit.ts";
 import { createCurrentSessionRun } from "../support/current-session-testkit.ts";
@@ -46,6 +47,7 @@ describe("public authority contract", () => {
     let chairProxy: Awaited<ReturnType<typeof spawnMcpProxy>> | undefined;
     try {
       const rootAuthority: AuthorityInput = {
+        ...TEST_AUTHORITY_V2_FIELDS,
         workspaceRoots: ["."],
         sourcePaths: ["src"],
         artifactPaths: [".agent-run"],
@@ -62,12 +64,16 @@ describe("public authority contract", () => {
         runId: "run-public-authority",
         chair: { agentId: "chair", authority: rootAuthority },
       });
-      expect(storedAuthority(databasePath, run.chairAuthorityId)).toMatchObject({
-        deniedPaths: ["src/public-contract/private"],
-        deniedActions: ["fabric.v1.task.update"],
+      const expectedRootAuthority: AuthorityInput = {
+        ...rootAuthority,
+        actions: [...rootAuthority.actions].sort(),
+        deniedPaths: [...rootAuthority.deniedPaths].sort(),
+        deniedActions: [...rootAuthority.deniedActions].sort(),
+        prohibitedActions: [...rootAuthority.prohibitedActions].sort(),
         disclosure: { level: "scoped", scopes: ["approved-provider", "local"] } as const,
-        budget: { turns: 100, "cost:USD": 100, "input_tokens:google": 1_000, descendants: 20 },
-      });
+        budget: Object.fromEntries(Object.entries(rootAuthority.budget).sort(([left], [right]) => left.localeCompare(right))),
+      };
+      expect(storedAuthority(databasePath, run.chairAuthorityId)).toEqual(expectedRootAuthority);
 
       const second = await createCurrentSessionRun({
         databasePath,
@@ -78,7 +84,10 @@ describe("public authority contract", () => {
           authority: { ...rootAuthority, deniedPaths: [], deniedActions: [], disclosure: { level: "scoped", scopes: ["local"] } as const },
         },
       });
-      expect(storedAuthority(databasePath, second.chairAuthorityId)).toMatchObject({
+      expect(storedAuthority(databasePath, second.chairAuthorityId)).toEqual({
+        ...expectedRootAuthority,
+        deniedPaths: [],
+        deniedActions: [],
         disclosure: { level: "scoped", scopes: ["local"] } as const,
       });
 
@@ -112,6 +121,7 @@ describe("public authority contract", () => {
         leader: {
           ...leader,
           authority: {
+            ...rootAuthority,
             workspaceRoots: ["."],
             sourcePaths: ["src/public-contract"],
             artifactPaths: [".agent-run/public-contract"],
@@ -128,9 +138,11 @@ describe("public authority contract", () => {
       expect(created.isError, created.text).toBe(false);
       const createdLeader = requireRecord(created.structured.leader, "created leader");
       if (typeof createdLeader.authorityId !== "string") throw new TypeError("created leader authority is missing");
-      expect(storedAuthority(databasePath, createdLeader.authorityId)).toMatchObject({
-        deniedPaths: ["src/public-contract/private"],
-        deniedActions: ["fabric.v1.task.update"],
+      expect(storedAuthority(databasePath, createdLeader.authorityId)).toEqual({
+        ...expectedRootAuthority,
+        sourcePaths: ["src/public-contract"],
+        artifactPaths: [".agent-run/public-contract"],
+        actions: [...(leaderAuthority.actions as string[])].sort(),
         disclosure: { level: "scoped", scopes: ["approved-provider"] } as const,
         budget: { turns: 40, "cost:USD": 40, "input_tokens:google": 400, descendants: 6 },
       });

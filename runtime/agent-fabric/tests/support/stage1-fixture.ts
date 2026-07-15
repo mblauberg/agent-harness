@@ -6,9 +6,11 @@ import { openFabric } from "../../src/index.ts";
 import { AUTHORITY_ACTION_VOCABULARY } from "../../src/domain/operations.ts";
 
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "./authority-v2-testkit.ts";
 import { ManualClock } from "./manual-clock.ts";
 
 export const ROOT_AUTHORITY = {
+  ...TEST_AUTHORITY_V2_FIELDS,
   workspaceRoots: ["."],
   sourcePaths: ["src"],
   artifactPaths: [".agent-run"],

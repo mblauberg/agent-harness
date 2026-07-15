@@ -13,7 +13,7 @@ export const AGENT_AUTHORITY_OPERATIONS: readonly FabricOperation[] = Object.fre
   ...operationsForPrincipal("agent"),
 ].filter(isDaemonGrantableOperation));
 
-export const AUTHORITY_ACTION_VOCABULARY: readonly string[] = Object.freeze([
+export const AUTHORITY_ACTION_VOCABULARY: readonly FabricOperation[] = Object.freeze([
   ...AGENT_AUTHORITY_OPERATIONS,
 ]);
 

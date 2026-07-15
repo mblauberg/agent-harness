@@ -3,7 +3,11 @@ import type { CurrentMcpSeatBindingInput } from "../core/contracts.js";
 import type { AuthorityInput, MessageInput, RecoveryEvidence } from "../domain/types.js";
 import { isBudgetUnitKey } from "../domain/unit-keys.js";
 import { FABRIC_PROTOCOL_LIMITS, type FabricProtocolLimits } from "../transport/bounded-ndjson.js";
-import { OPERATOR_ACTIONS, type OperatorAction } from "@local/agent-fabric-protocol";
+import {
+  OPERATOR_ACTIONS,
+  parseAuthorityEnvelopeV2,
+  type OperatorAction,
+} from "@local/agent-fabric-protocol";
 
 export const FABRIC_PROTOCOL_VERSION = 1 as const;
 export const FABRIC_DAEMON_VERSION = "0.1.0";
@@ -215,25 +219,6 @@ function stringArray(value: unknown, field: string): string[] {
   return value;
 }
 
-const disclosureTargets = new Set(["local", "approved-provider", "external"]);
-
-function disclosurePolicy(value: unknown): AuthorityInput["disclosure"] {
-  if (!isRecord(value) || typeof value.level !== "string") {
-    throw new TypeError("disclosure must be a policy object");
-  }
-  if ((value.level === "allowed" || value.level === "forbidden") && Object.keys(value).length === 1) {
-    return { level: value.level };
-  }
-  if (value.level === "scoped" && Object.keys(value).length === 2 && "scopes" in value) {
-    const scopes = stringArray(value.scopes, "disclosure.scopes");
-    if (scopes.some((scope) => !disclosureTargets.has(scope))) {
-      throw new TypeError("disclosure.scopes contains an unknown scope");
-    }
-    return { level: "scoped", scopes: scopes as Array<"local" | "approved-provider" | "external"> };
-  }
-  throw new TypeError("disclosure policy is invalid");
-}
-
 function budgetRecord(
   value: unknown,
   field: string,
@@ -269,43 +254,7 @@ function budgetRecord(
 }
 
 function authority(value: unknown): AuthorityInput {
-  if (!isRecord(value)) {
-    throw new TypeError("authority must be an object");
-  }
-  const allowedFields = new Set([
-    "workspaceRoots",
-    "sourcePaths",
-    "artifactPaths",
-    "actions",
-    "deniedPaths",
-    "deniedActions",
-    "disclosure",
-    "expiresAt",
-    "budget",
-  ]);
-  const unknownFields = Object.keys(value).filter((field) => !allowedFields.has(field));
-  if (unknownFields.length > 0) {
-    throw new TypeError(`authority contains unknown fields: ${unknownFields.sort().join(", ")}`);
-  }
-  const budgetValue = requiredRecord(value, "budget");
-  const budget: Record<string, number> = {};
-  for (const [unit, amount] of Object.entries(budgetValue)) {
-    if (!isBudgetUnitKey(unit) || typeof amount !== "number" || !Number.isInteger(amount) || amount < 0) {
-      throw new TypeError(`budget.${unit} must be a qualified non-negative integer`);
-    }
-    budget[unit] = amount;
-  }
-  return {
-    workspaceRoots: stringArray(value.workspaceRoots, "workspaceRoots"),
-    sourcePaths: stringArray(value.sourcePaths, "sourcePaths"),
-    artifactPaths: stringArray(value.artifactPaths, "artifactPaths"),
-    actions: stringArray(value.actions, "actions"),
-    ...(value.deniedPaths === undefined ? {} : { deniedPaths: stringArray(value.deniedPaths, "deniedPaths") }),
-    ...(value.deniedActions === undefined ? {} : { deniedActions: stringArray(value.deniedActions, "deniedActions") }),
-    disclosure: disclosurePolicy(value.disclosure),
-    expiresAt: requiredString(value, "expiresAt"),
-    budget,
-  };
+  return parseAuthorityEnvelopeV2(value, "authority");
 }
 
 function message(value: Record<string, unknown>): MessageInput {

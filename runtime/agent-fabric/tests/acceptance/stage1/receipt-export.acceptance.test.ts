@@ -8,6 +8,7 @@ import Database from "better-sqlite3";
 
 import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../../src/index.ts";
 import { assertFabricReceiptSchema } from "../../../src/exports/schema.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 import { ManualClock } from "../../support/manual-clock.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
@@ -30,6 +31,7 @@ describe("Stage 1 fabric receipt export", () => {
       workspaceRoot: root,
       runId: "run-upgrade", projectRunDirectory: runDirectory,
       chair: { agentId: "chair", authority: {
+        ...TEST_AUTHORITY_V2_FIELDS,
         workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: [".agent-run"],
         actions: [...AUTHORITY_ACTION_VOCABULARY], disclosure: { level: "scoped", scopes: ["local"] } as const,
         expiresAt: "2099-01-01T00:00:00.000Z", budget: {},
@@ -75,6 +77,7 @@ describe("Stage 1 fabric receipt export", () => {
       chair: {
         agentId: "chair",
         authority: {
+          ...TEST_AUTHORITY_V2_FIELDS,
           workspaceRoots: ["."],
           sourcePaths: ["."],
           artifactPaths: [".agent-run/run-receipt"],
@@ -141,6 +144,7 @@ describe("Stage 1 fabric receipt export", () => {
       await rm(root, { recursive: true, force: true });
     });
     const authority = {
+      ...TEST_AUTHORITY_V2_FIELDS,
       workspaceRoots: ["."], sourcePaths: ["."], artifactPaths: [".agent-run/run-receipt-state"],
       actions: [...AUTHORITY_ACTION_VOCABULARY], disclosure: { level: "scoped", scopes: ["local"] } as const,
       expiresAt: "2099-01-01T00:00:00.000Z", budget: { turns: 20, "cost:USD": 10 },

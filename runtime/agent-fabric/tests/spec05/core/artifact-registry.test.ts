@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../../src/index.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const roots: string[] = [];
@@ -23,6 +24,7 @@ const sha256 = (value: string): `sha256:${string}` =>
 async function registryFixture(options: Readonly<{
   rootEqual?: boolean;
   artifactPaths?: readonly string[];
+  deniedPaths?: readonly string[];
 }> = {}) {
   const root = await mkdtemp(join(tmpdir(), "artifact-registry-"));
   roots.push(root);
@@ -39,9 +41,11 @@ async function registryFixture(options: Readonly<{
     chair: {
       agentId: "chair",
       authority: {
+        ...TEST_AUTHORITY_V2_FIELDS,
         workspaceRoots: ["."],
         sourcePaths: ["."],
         artifactPaths: [...(options.artifactPaths ?? [options.rootEqual === true ? "." : ".agent-run/run-registry"])],
+        deniedPaths: [...(options.deniedPaths ?? TEST_AUTHORITY_V2_FIELDS.deniedPaths)],
         actions: [...AUTHORITY_ACTION_VOCABULARY],
         disclosure: { level: "scoped", scopes: ["local"] } as const,
         expiresAt: "2099-01-01T00:00:00.000Z",
@@ -66,6 +70,90 @@ async function registryFixture(options: Readonly<{
 }
 
 describe("canonical artifact registry", () => {
+  it("rejects publishArtifact through a symlinked ancestor before registration", async () => {
+    const f = await registryFixture();
+    const outside = await mkdtemp(join(tmpdir(), "artifact-registry-publish-outside-"));
+    roots.push(outside);
+    await symlink(outside, join(f.runDirectory, "linked"));
+
+    await expect(f.client.publishArtifact({
+      relativePath: "linked/blocked.md",
+      sha256: "a".repeat(64),
+      commandId: "command_symlink_publish",
+    })).rejects.toMatchObject({
+      code: "ARTIFACT_PATH_FORBIDDEN",
+      message: "artifact source resolves through a symlinked path",
+    });
+  });
+
+  it.each(["publishArtifact", "publishEvidence"] as const)(
+    "rejects an empty artifact scope through %s",
+    async (publication) => {
+      const f = await registryFixture({ artifactPaths: [] });
+      await writeFile(join(f.runDirectory, "empty-scope.md"), "blocked\n");
+
+      if (publication === "publishArtifact") {
+        await expect(f.client.publishArtifact({
+          relativePath: "empty-scope.md",
+          sha256: createHash("sha256").update("blocked\n").digest("hex"),
+          commandId: "command_empty_scope",
+        })).rejects.toMatchObject({
+          code: "CAPABILITY_FORBIDDEN",
+          message: "artifact source is outside the agent path authority",
+        });
+      } else {
+        await expect(f.client.publishEvidence({
+          commandId: "command_empty_scope" as never,
+          projectSessionId: f.identity.project_session_id as never,
+          coordinationRunId: "run-registry" as never,
+          requestedSourceKind: "run-file",
+          evidenceKind: "artifact",
+          relativePath: "empty-scope.md" as never,
+          sourceDigest: sha256("blocked\n") as never,
+        })).rejects.toMatchObject({
+          code: "CAPABILITY_FORBIDDEN",
+          message: "artifact source is outside the agent path authority",
+        });
+      }
+    },
+  );
+
+  it.each(["publishArtifact", "publishEvidence"] as const)(
+    "rejects a denied artifact subtree through %s",
+    async (publication) => {
+      const f = await registryFixture({
+        artifactPaths: [".agent-run/run-registry/allowed"],
+        deniedPaths: [".agent-run/run-registry/allowed/denied"],
+      });
+      await mkdir(join(f.runDirectory, "allowed", "denied"), { recursive: true });
+      await writeFile(join(f.runDirectory, "allowed", "denied", "blocked.md"), "blocked\n");
+
+      if (publication === "publishArtifact") {
+        await expect(f.client.publishArtifact({
+          relativePath: "allowed/denied/blocked.md",
+          sha256: createHash("sha256").update("blocked\n").digest("hex"),
+          commandId: "command_denied_subtree",
+        })).rejects.toMatchObject({
+          code: "CAPABILITY_FORBIDDEN",
+          message: "artifact source is inside a denied path",
+        });
+      } else {
+        await expect(f.client.publishEvidence({
+          commandId: "command_denied_subtree" as never,
+          projectSessionId: f.identity.project_session_id as never,
+          coordinationRunId: "run-registry" as never,
+          requestedSourceKind: "run-file",
+          evidenceKind: "artifact",
+          relativePath: "allowed/denied/blocked.md" as never,
+          sourceDigest: sha256("blocked\n") as never,
+        })).rejects.toMatchObject({
+          code: "CAPABILITY_FORBIDDEN",
+          message: "artifact source is inside a denied path",
+        });
+      }
+    },
+  );
+
   it("replays an exact registration and conflicts on changed provenance or kind", async () => {
     const f = await registryFixture();
     const content = "review evidence\n";
@@ -218,6 +306,9 @@ describe("canonical artifact registry", () => {
       evidenceKind: "artifact",
       relativePath: "linked/escaped.md" as never,
       sourceDigest: sha256("escaped\n") as never,
-    })).rejects.toMatchObject({ code: "ARTIFACT_PATH_FORBIDDEN" });
+    })).rejects.toMatchObject({
+      code: "ARTIFACT_PATH_FORBIDDEN",
+      message: "artifact source resolves through a symlinked path",
+    });
   });
 });

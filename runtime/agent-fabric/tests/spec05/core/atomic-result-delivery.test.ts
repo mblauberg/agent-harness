@@ -1,3 +1,7 @@
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import type Database from "better-sqlite3";
 import type {
   ResultDeliveryClaimRequest,
@@ -21,8 +25,10 @@ import {
 import { admitProviderActionFixture } from "../../support/provider-action-fixture.ts";
 
 const databases: Database.Database[] = [];
+const roots: string[] = [];
 afterEach(() => {
   for (const database of databases.splice(0)) database.close();
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 function open(): Database.Database {
@@ -103,6 +109,26 @@ const integrationContext: AuthenticatedIntegrationContext = {
 };
 
 describe("atomic request, result, and callback delivery", () => {
+  it("rejects a task-result artifact through a symlinked ancestor before registration", () => {
+    const database = open();
+    const root = mkdtempSync(join(tmpdir(), "result-artifact-authority-"));
+    const outside = mkdtempSync(join(tmpdir(), "result-artifact-outside-"));
+    roots.push(root, outside);
+    const canonicalRoot = realpathSync(root);
+    const runDirectory = join(canonicalRoot, ".agent-run", "run_01");
+    mkdirSync(runDirectory, { recursive: true });
+    symlinkSync(outside, join(runDirectory, "artifacts"));
+    database.prepare("UPDATE projects SET canonical_root=? WHERE project_id='project_01'").run(canonicalRoot);
+    database.prepare("UPDATE runs SET workspace_root=? WHERE run_id='run_01'").run(canonicalRoot);
+    const store = new AtomicDeliveryStore({ database, clock: () => 1_000 });
+    store.request(chairContext, request());
+
+    expect(() => store.completeWithReply(workerContext, completion())).toThrowError(
+      "artifact source resolves through a symlinked path",
+    );
+    expect(database.prepare("SELECT COUNT(*) AS count FROM artifacts").get()).toEqual({ count: 0 });
+  });
+
   it.each([
     "results:request:after-task",
     "results:request:after-message",
