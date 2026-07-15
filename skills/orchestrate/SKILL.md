@@ -71,6 +71,8 @@ best-effort routes only scout.
 
 ## References
 
+Herdr depth stays here; never install a peer skill.
+
 Load only relevant file from [references/](references/):
 `trigger-boundary.md`, `routing-and-tiers.md`, `codex-subagents.md`,
 `dynamic-workflows.md`, `paired-primary.md`, `herdr-panes.md`,
