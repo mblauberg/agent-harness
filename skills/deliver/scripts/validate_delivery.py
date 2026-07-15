@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 from datetime import datetime
 from functools import lru_cache
 import hashlib
@@ -18,9 +17,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[3]
-PROFILES_PATH = ROOT / "config" / "delivery-profiles.json"
-AUTHORITY_MAPPING_PATH = Path(__file__).with_name("authority_mapping.py")
-AUTHORITY_SCHEMA_PATH = ROOT / "runtime" / "agent-fabric-protocol" / "schemas" / "authority-envelope.v2.schema.json"
+POLICY_VALIDATION_PATH = Path(__file__).with_name("delivery_policy_validation.py")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 SAFE_CLASSES = {"canonical", "evidence", "handoff", "scratch", "external"}
@@ -53,15 +50,6 @@ AGENTIC_RISKS = {
 EVALUATION_BINDING_FIELDS = {
     "status", "anchored_at", "evidence_id", "evaluation_artifact_id",
     "evaluation_id", "evaluation_digest", "plan_digest",
-}
-FABRIC_RELATIONSHIP_FIELDS = {
-    "mode", "delivery_run_id", "project_session_id", "coordination_run_id",
-    "workstream_id", "lead_agent_id",
-}
-PROFILE_FIELDS = {
-    "artifact_types", "required_evidence", "required_measures", "stochastic_policy",
-    "security_surface_policy", "boundary_checks", "evidence_policy",
-    "release_semantics", "observation_examples",
 }
 
 
@@ -116,110 +104,14 @@ def _inside(path: str, scope: str) -> bool:
 
 
 @lru_cache(maxsize=1)
-def _authority_mapping_module():
-    spec = importlib.util.spec_from_file_location("delivery_authority_mapping", AUTHORITY_MAPPING_PATH)
-    fail(spec is None or spec.loader is None, "authority mapper is unavailable")
+def _policy_validation_module():
+    spec = importlib.util.spec_from_file_location(
+        "delivery_policy_validation", POLICY_VALIDATION_PATH,
+    )
+    fail(spec is None or spec.loader is None, "delivery policy validator is unavailable")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-@lru_cache(maxsize=1)
-def _fabric_operations() -> frozenset[str]:
-    try:
-        schema = json.loads(AUTHORITY_SCHEMA_PATH.read_text())
-        operations = schema["properties"]["actions"]["items"]["enum"]
-    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
-        raise Invalid("canonical Fabric authority schema is unavailable") from exc
-    fail(
-        not isinstance(operations, list)
-        or not operations
-        or any(not isinstance(operation, str) for operation in operations),
-        "canonical Fabric operation registry is invalid",
-    )
-    return frozenset(operations)
-
-
-@lru_cache(maxsize=1)
-def _fabric_cost_pattern() -> re.Pattern[str]:
-    try:
-        schema = json.loads(AUTHORITY_SCHEMA_PATH.read_text())
-        alternatives = schema["properties"]["budget"]["propertyNames"]["oneOf"]
-        pattern = next(
-            item["pattern"] for item in alternatives
-            if isinstance(item, dict) and isinstance(item.get("pattern"), str) and item["pattern"].startswith("^cost:")
-        )
-        return re.compile(pattern)
-    except (OSError, KeyError, TypeError, StopIteration, re.error, json.JSONDecodeError) as exc:
-        raise Invalid("canonical Fabric cost-unit registry is unavailable") from exc
-
-
-def _validate_profile(name: str, profile: Any) -> None:
-    fail(not isinstance(profile, dict) or set(profile) != PROFILE_FIELDS, f"profile {name} contract is incomplete")
-    artifact_types = profile["artifact_types"]
-    fail(
-        not isinstance(artifact_types, list)
-        or not artifact_types
-        or any(not isinstance(value, str) or not value for value in artifact_types)
-        or len(set(artifact_types)) != len(artifact_types),
-        f"profile {name} artifact_types must be a unique non-empty string list",
-    )
-    stochastic_policy = profile["stochastic_policy"]
-    fail(not isinstance(stochastic_policy, dict), f"profile {name} stochastic_policy must be an object")
-    classified_types = stochastic_policy.get("required_for_artifact_types")
-    if classified_types is not None:
-        fail(
-            not isinstance(classified_types, list)
-            or not classified_types
-            or any(not isinstance(value, str) or not value for value in classified_types)
-            or len(set(classified_types)) != len(classified_types)
-            or not set(classified_types) <= set(artifact_types),
-            f"profile {name} required_for_artifact_types must be a unique non-empty subset of artifact_types",
-        )
-    fail(not set(profile["boundary_checks"]) <= set(profile["required_evidence"]["deterministic"]), f"profile {name} boundary checks are not deterministic gates")
-
-
-def _load_profiles(root: Path) -> dict[str, Any]:
-    try:
-        data = json.loads((root / "config" / "delivery-profiles.json").read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise Invalid(f"profile registry is unreadable: {exc}") from exc
-    fail(data.get("schema_version") != 1 or not isinstance(data.get("profiles"), dict), "profile registry is invalid")
-    for name, profile in data["profiles"].items():
-        _validate_profile(name, profile)
-    return data
-
-
-def _validate_fabric_relationships(run: dict[str, Any]) -> None:
-    if "fabric_relationships" not in run:  # Existing delivery-v1 receipts remain valid.
-        return
-    value = run["fabric_relationships"]
-    relationships = _mapping(value, "fabric_relationships")
-    fail(
-        set(relationships) != FABRIC_RELATIONSHIP_FIELDS,
-        "fabric_relationships fields are invalid",
-    )
-    mode = relationships.get("mode")
-    fail(mode not in {"coordinated", "independent"}, "fabric_relationships.mode is invalid")
-    delivery_run_id = _identifier(
-        relationships.get("delivery_run_id"), "fabric_relationships.delivery_run_id",
-    )
-    fail(delivery_run_id != run["run_id"], "fabric_relationships.delivery_run_id must match run_id")
-    relation_fields = (
-        "project_session_id", "coordination_run_id", "workstream_id", "lead_agent_id",
-    )
-    if mode == "independent":
-        fail(
-            any(relationships.get(field) != "not_applicable" for field in relation_fields),
-            "independent relationships must be explicit not_applicable values",
-        )
-        return
-    for field in relation_fields:
-        identifier = _identifier(relationships.get(field), f"fabric_relationships.{field}")
-        fail(
-            identifier == "not_applicable",
-            "coordinated relationships require concrete project-session, coordination-run, workstream and lead identifiers",
-        )
 
 
 def _retrospect_validator():
@@ -255,97 +147,6 @@ def _load_bound_json(raw: bytes, field: str) -> dict[str, Any]:
         raise Invalid(f"{field} is not readable JSON: {exc}") from exc
     fail(not isinstance(value, dict), f"{field} root must be an object")
     return value
-
-
-def _apply_project_policy(
-    registry: dict[str, Any], run: dict[str, Any], *, project_policy_path: Path | None, workspace_root: Path | None,
-) -> dict[str, Any]:
-    declared = run.get("project_policy")
-    if project_policy_path is None:
-        fail(declared is not None, "declared project_policy requires --project-policy")
-        return registry
-    fail(not isinstance(declared, dict) or set(declared) != {"path", "digest"}, "project_policy receipt binding is invalid")
-    clean = _safe_path(declared.get("path"), "project_policy.path")
-    _digest(declared.get("digest"), "project_policy.digest")
-    fail(workspace_root is None, "project_policy requires workspace_root")
-    expected_path = (workspace_root / clean).resolve()
-    fail(expected_path != project_policy_path.resolve(), "project_policy path does not match the receipt")
-    try:
-        raw = project_policy_path.read_bytes()
-        overlay = json.loads(raw)
-    except (OSError, json.JSONDecodeError) as exc:
-        raise Invalid(f"project policy is unreadable: {exc}") from exc
-    actual = "sha256:" + hashlib.sha256(raw).hexdigest()
-    fail(actual != declared["digest"], "project_policy digest does not match")
-    fail(not isinstance(overlay, dict) or set(overlay) != {"schema_version", "profiles"} or overlay.get("schema_version") != 1 or not isinstance(overlay.get("profiles"), dict), "project policy schema is invalid")
-    strengthened = copy.deepcopy(registry)
-    profile_keys = PROFILE_FIELDS
-    for profile_name, additions in overlay["profiles"].items():
-        if profile_name not in strengthened["profiles"]:
-            fail(not isinstance(additions, dict) or set(additions) != profile_keys, f"new project profile {profile_name} must declare the complete profile contract")
-            fail(not additions.get("artifact_types") or not additions.get("release_semantics") or not additions.get("observation_examples"), f"new project profile {profile_name} is incomplete")
-            fail(
-                any(artifact_type not in strengthened["artifact_type_surfaces"] for artifact_type in additions["artifact_types"]),
-                f"new project profile {profile_name} uses an unclassified artifact type",
-            )
-            for group, kinds in (("required_evidence", {"deterministic", "judgement"}), ("required_measures", {"outcome", "trajectory"})):
-                fail(not isinstance(additions.get(group), dict) or set(additions[group]) != kinds or any(not isinstance(values, list) or not values for values in additions[group].values()), f"new project profile {profile_name} {group} is incomplete")
-            strengthened["profiles"][profile_name] = copy.deepcopy(additions)
-            continue
-        fail(not isinstance(additions, dict) or not set(additions) <= {"required_evidence", "required_measures"}, f"project profile {profile_name} contains a non-additive field")
-        for group in ("required_evidence", "required_measures"):
-            for kind, values in additions.get(group, {}).items():
-                fail(kind not in strengthened["profiles"][profile_name][group], f"project profile {profile_name} has invalid {group} kind")
-                fail(not isinstance(values, list) or any(not isinstance(value, str) or not value for value in values), f"project profile {profile_name} {group}.{kind} is invalid")
-                strengthened["profiles"][profile_name][group][kind] = sorted(set(strengthened["profiles"][profile_name][group][kind]) | set(values))
-    for profile_name, profile in strengthened["profiles"].items():
-        _validate_profile(profile_name, profile)
-    return strengthened
-
-
-def _validate_risk(run: dict[str, Any], root: Path) -> None:
-    try:
-        policy = json.loads((root / "config" / "risk-policy.json").read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise Invalid(f"risk policy is unreadable: {exc}") from exc
-    factors = policy.get("factors")
-    order = policy.get("tier_order")
-    fail(not isinstance(factors, dict) or order != list(RISKS), "risk policy is invalid")
-    assessment = _mapping(run.get("risk_assessment"), "risk_assessment")
-    fail(set(assessment) != set(factors), "risk_assessment must cover every policy factor")
-    minimum_index = 0
-    for factor, values in factors.items():
-        value = assessment.get(factor)
-        fail(value not in values, f"risk_assessment.{factor} is invalid")
-        minimum_index = max(minimum_index, RISKS.index(values[value]))
-    declared_index = RISKS.index(run["risk_tier"])
-    override = _mapping(run.get("risk_override"), "risk_override")
-    fail(override.get("status") not in {"not-required", "approved"}, "risk_override.status is invalid")
-    if declared_index < minimum_index:
-        fail(
-            override.get("status") != "approved" or not override.get("approved_by") or not override.get("evidence") or not override.get("reason"),
-            f"risk downgrade below derived {RISKS[minimum_index]} requires human evidence",
-        )
-
-
-def _validate_authority(authority: dict[str, Any], run: dict[str, Any]) -> None:
-    mapper = _authority_mapping_module()
-    try:
-        mapper.map_delivery_authority(
-            authority,
-            valid_operations=_fabric_operations(),
-            valid_cost_pattern=_fabric_cost_pattern(),
-        )
-        mapper.map_delivery_delegations(
-            authority,
-            valid_operations=_fabric_operations(),
-            valid_cost_pattern=_fabric_cost_pattern(),
-        )
-    except mapper.AuthorityMappingError as exc:
-        raise Invalid(str(exc)) from exc
-    expiry = _utc(authority.get("expires_at"), "authority.expires_at")
-    history_times = [_utc(item.get("at"), "state_history.at") for item in run.get("state_history", []) if isinstance(item, dict)]
-    fail(bool(history_times) and expiry <= max(history_times), "authority must cover the current run checkpoint")
 
 
 def _validate_artifacts(
@@ -1016,10 +817,14 @@ def validate(
     fail(root.resolve() != ROOT.resolve(), "global policy root cannot be replaced by a project registry")
     fail(run.get("schema_version") != 1 or run.get("contract") != "delivery-run", "delivery receipt must use contract delivery-run schema_version 1")
     fail(not run.get("run_id"), "run_id is required")
-    _validate_fabric_relationships(run)
-    registry = _apply_project_policy(
-        _load_profiles(ROOT), run, project_policy_path=project_policy_path,
+    policy_validation = _policy_validation_module()
+    policy_validation.validate_fabric_relationships(run, invalid_type=Invalid)
+    registry = policy_validation.apply_project_policy(
+        policy_validation.load_profiles(ROOT, invalid_type=Invalid),
+        run,
+        project_policy_path=project_policy_path,
         workspace_root=workspace_root or receipt_dir,
+        invalid_type=Invalid,
     )
     profile = registry["profiles"].get(run.get("profile"))
     fail(profile is None, "unknown delivery profile")
@@ -1028,9 +833,13 @@ def validate(
     repairs = run.get("repair_cycles")
     fail(isinstance(repairs, bool) or not isinstance(repairs, int) or not 0 <= repairs <= 2, "repair_cycles must be between 0 and 2")
     fail(not isinstance(run.get("escaped_defect"), bool), "escaped_defect must be boolean")
-    _validate_risk(run, ROOT)
+    policy_validation.validate_risk(
+        run, ROOT, risks=RISKS, invalid_type=Invalid,
+    )
     authority = _mapping(run.get("authority"), "authority")
-    _validate_authority(authority, run)
+    policy_validation.validate_authority(
+        authority, run, ROOT, invalid_type=Invalid,
+    )
     allowed_artifact_paths = [_safe_path(item, "authority.allowed_artifact_paths") for item in authority["allowed_artifact_paths"]]
     artifacts = _validate_artifacts(
         _list(run.get("artifacts"), "artifacts"),
