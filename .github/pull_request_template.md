@@ -2,6 +2,14 @@
 
 Describe the outcome and link the approved spec, issue or decision record.
 
+## Revision under review
+
+- Exact base branch and commit:
+- Exact head branch and commit:
+
+A later commit invalidates exact-head checks and independent review. Rerun both
+against the new head.
+
 ## Risk and authority
 
 - Risk tier:
@@ -42,8 +50,10 @@ List exact commands, results and any unavailable or intentionally skipped gate.
 
 ## Independent review
 
-- Reviewer and model family:
+- Reviewer role:
+- Model family:
 - Independence from authorship/implementation context:
+- Exact head reviewed:
 - Unresolved P0-P2 findings:
 
 ## Acceptance

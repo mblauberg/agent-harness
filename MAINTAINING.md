@@ -4,7 +4,9 @@ Read [`AGENTS.md`](AGENTS.md), [`HARNESS.md`](HARNESS.md) and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before changing the harness.
 Inspect the live diff and preserve unrelated work. `HARNESS.md` owns lifecycle,
 risk, authority, orchestration and review policy; [`docs/worktrees.md`](docs/worktrees.md)
-owns branch and linked-worktree operation.
+owns branch and linked-worktree operation. Use the
+[GitHub work-item workflow](docs/runbooks/github-workflow.md) for issue intake,
+Project status, pull-request linking and human gates.
 
 This repository is loaded by multiple agent platforms. A convenient
 Claude-only or Codex-only change is a regression unless the approved scope is

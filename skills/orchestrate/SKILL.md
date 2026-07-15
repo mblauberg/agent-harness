@@ -7,15 +7,18 @@ description: "Use when bounded fan-out, multi-agent research, cross-family revie
 
 ## Overview
 
-One chair adapts topology: decompose -> waves -> reduce -> gate.
+Decompose -> waves -> reduce -> gate.
 
 ## Rules
 
 - **Use parallel fan-out only after the decomposition/value gate passes.**
   Bounded is insufficient.
-- Preflight dependencies and shared errors.
+- Preflight dependencies/shared errors.
 - **No concurrent shared-state writes.** Partition authorised writers into
   repository `.worktrees/<task-agent>`; otherwise use a serial applier.
+- Parallel lanes stop ready-to-merge. The chair merges serially, refreshes the
+  next branch from current main, then reruns checks and reviews after commit/tree
+  changes.
 - **Keep topology exact.** One run has one chair. Leaders settle recursive
   obligations. Chair handoff is a generation-bound operator action; independent
   work uses separate sessions.
@@ -41,18 +44,17 @@ Before parallel dispatch, require:
 - expected information gain greater than coordination, shared-state and
   tool-density cost.
 
-If this parallel gate fails, keep serial ownership with the chair or one
-specialist. Shared errors and tightly coupled work stay serial. Choose the
-smallest topology that passes; every topology has one chair.
+If the gate fails, keep serial ownership with the chair or one specialist.
+Shared errors/tightly coupled work stay serial. Choose the smallest passing
+topology; each has one chair.
 
 ## Adaptive Loop
 
-1. Preflight authority/isolation/disclosure/receipts; keep the plan skeletal.
+1. Preflight authority/isolation/disclosure/receipts.
 2. Use **native same-session subagents** first. **Use same-family CLI only for
    auth/preflight smoke tests**, never as the primary worker substrate.
 3. Dispatch parallel read/partitioned-write and serial shared-state waves.
-   Adjust leaders/teams only on evidence; paired-primary keeps one chair and
-   stage owner.
+   Adapt leaders on evidence; paired-primary retains one chair/stage owner.
 4. Reduce to a claim/conflict map; verify the live tree before repair.
 5. Add only informative waves: narrow, repair, verify, **cross-family broad
    review**, or **Document update wave**.
@@ -71,9 +73,9 @@ best-effort routes only scout.
 
 ## References
 
-Herdr depth stays here; never install a peer skill.
+No peer Herdr skill.
 
-Load only relevant file from [references/](references/):
+Load relevant [references](references/) only:
 `trigger-boundary.md`, `routing-and-tiers.md`, `codex-subagents.md`,
 `dynamic-workflows.md`, `paired-primary.md`, `herdr-panes.md`,
 `layering-and-context.md`, `retrieval-and-tool-routing.md`, `verification.md`,
@@ -84,6 +86,6 @@ Load only relevant file from [references/](references/):
 
 ## Adapter-absent path
 
-Without optional Console, Herdr or GitHub, canonical project artifacts emit the
-skill-owned [portable kind](portable-workflow.v1.json). This grants neither
-Fabric authority nor a second live task owner.
+Without Console, Herdr or GitHub, emit the skill-owned
+[portable kind](portable-workflow.v1.json) from canonical project artifacts. It
+grants neither Fabric authority nor a second task owner.

@@ -7,6 +7,10 @@ schema_version: 1
 doctrine_invariants:
   - "Cross-family follows the HARNESS risk ladder"
   - "No concurrent shared-state writes"
+  - "Parallel lanes stop ready-to-merge"
+  - "The chair merges serially"
+  - "refreshes the next branch from current main"
+  - "reruns checks and reviews after commit/tree changes"
   - "Workers write full output to files"
   - "Objective checks outrank opinions"
   - "You own the final call"
