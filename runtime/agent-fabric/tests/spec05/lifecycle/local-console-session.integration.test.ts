@@ -278,8 +278,6 @@ describe("public local operator Console session", () => {
         digest: `sha256:${"b".repeat(64)}` as never,
       },
     });
-    await project.close();
-
     const seed = await import("better-sqlite3").then(({ default: Database }) =>
       new Database(paths.databasePath, { fileMustExist: true }),
     );
@@ -318,65 +316,75 @@ describe("public local operator Console session", () => {
       }),
     ]);
 
-    expect(first.projectSessionId).toBe("session_console_existing_01");
-    expect(replay.projectSessionId).toBe(first.projectSessionId);
-    expect(first.credential.capabilityId).not.toBe(replay.credential.capabilityId);
-    expect(first.client.console?.readOnly).toBe(false);
-    expect(first.client.operations[FABRIC_OPERATIONS.operatorActionPreview]).toBeTypeOf("function");
-    expect(first.client.intakes?.submit).toBeTypeOf("function");
-    expect(first.client.intakes?.revise).toBeTypeOf("function");
-    expect(first.client.gates?.resolve).toBeTypeOf("function");
-    expect(first.client.projectSessions?.transition).toBeTypeOf("function");
-    expect(first.client.projectSessions?.close).toBeTypeOf("function");
-    expect(first.client.console?.launchAvailable).toBe(true);
-    const selectedSessionId = first.projectSessionId;
-    if (selectedSessionId === undefined) throw new Error("expected selected session");
-    const currentSnapshot = await first.client.projection?.snapshot({
-      credential: first.credential,
-      projectId: first.projectId,
-      projectSessionId: selectedSessionId,
-    });
-    expect(currentSnapshot?.attention).toMatchObject({
-      value: [{
-        itemId: "attention_console_optional_01",
-        nativeNotification: expect.any(Object),
-      }],
-    });
-
-    const optionalTransport = await NdjsonRpcTransport.connect(
-      createConnection(paths.socketPath),
-      {
-        protocolVersion: 1,
-        client: { name: "current-console-without-notifications", version: "0.1.0" },
-        authentication: {
-          scheme: "capability",
-          credential: first.credential.token,
-          clientNonce: "optional_client_current_daemon_nonce_01",
-        },
-        expectedPrincipalKind: "operator",
-        requiredFeatures: ["operator-control.v1", "operator-projection.v1"],
-        optionalFeatures: CURRENT_CONSOLE_OPTIONAL_FEATURES,
-      },
-    );
     try {
-      const optionalClient = createOperatorClient(optionalTransport);
-      const optionalSnapshot = await optionalClient.projection?.snapshot({
+      expect(first.projectSessionId).toBe("session_console_existing_01");
+      expect(replay.projectSessionId).toBe(first.projectSessionId);
+      expect(first.credential.capabilityId).not.toBe(replay.credential.capabilityId);
+      expect(first.client.console?.readOnly).toBe(false);
+      expect(first.client.operations[FABRIC_OPERATIONS.operatorActionPreview]).toBeTypeOf("function");
+      expect(first.client.intakes?.submit).toBeTypeOf("function");
+      expect(first.client.intakes?.revise).toBeTypeOf("function");
+      expect(first.client.gates?.resolve).toBeTypeOf("function");
+      expect(first.client.projectSessions?.transition).toBeTypeOf("function");
+      expect(first.client.projectSessions?.close).toBeTypeOf("function");
+      expect(first.client.console?.launchAvailable).toBe(true);
+      const selectedSessionId = first.projectSessionId;
+      if (selectedSessionId === undefined) throw new Error("expected selected session");
+      const currentSnapshot = await first.client.projection?.snapshot({
         credential: first.credential,
         projectId: first.projectId,
         projectSessionId: selectedSessionId,
       });
-      expect(optionalSnapshot?.attention).toMatchObject({
-        value: [{ itemId: "attention_console_optional_01" }],
+      expect(currentSnapshot?.attention).toMatchObject({
+        value: [{
+          itemId: "attention_console_optional_01",
+          nativeNotification: expect.any(Object),
+        }],
       });
-      expect(optionalSnapshot).not.toHaveProperty("attention.value.0.nativeNotification");
-      await optionalClient.close();
+
+      const optionalTransport = await NdjsonRpcTransport.connect(
+        createConnection(paths.socketPath),
+        {
+          protocolVersion: 1,
+          client: { name: "current-console-without-notifications", version: "0.1.0" },
+          authentication: {
+            scheme: "capability",
+            credential: first.credential.token,
+            clientNonce: "optional_client_current_daemon_nonce_01",
+          },
+          expectedPrincipalKind: "operator",
+          requiredFeatures: ["operator-control.v1", "operator-projection.v1"],
+          optionalFeatures: CURRENT_CONSOLE_OPTIONAL_FEATURES,
+        },
+      );
+      try {
+        const optionalClient = createOperatorClient(optionalTransport);
+        const optionalSnapshot = await optionalClient.projection?.snapshot({
+          credential: first.credential,
+          projectId: first.projectId,
+          projectSessionId: selectedSessionId,
+        });
+        expect(optionalSnapshot?.attention).toMatchObject({
+          value: [{ itemId: "attention_console_optional_01" }],
+        });
+        expect(optionalSnapshot).not.toHaveProperty("attention.value.0.nativeNotification");
+        await optionalClient.close();
+      } finally {
+        await optionalTransport.close();
+      }
     } finally {
-      await optionalTransport.close();
+      const closes = await Promise.allSettled([project.close(), first.close(), replay.close()]);
+      expect(closes.map(({ status }) => status)).toEqual(["fulfilled", "fulfilled", "fulfilled"]);
     }
-    await Promise.all([first.close(), replay.close()]);
     await expectSecretsAbsent(
       [paths.stateDirectory, paths.runtimeDirectory],
-      [first.credential.token, replay.credential.token],
+      [
+        project.credential.token,
+        first.projectCredential.token,
+        first.credential.token,
+        replay.projectCredential.token,
+        replay.credential.token,
+      ],
     );
   });
 
