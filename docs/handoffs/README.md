@@ -1,5 +1,10 @@
 # Handoffs
 
+## Active
+
+- [Simplify the repository README](HANDOFF-2026-07-16-readme-rewrite.md) —
+  research-backed structure, tone, skimmability and verification plan.
+
 [GitHub Issues](https://github.com/mblauberg/provenant/issues) owns current work
 status. Read the relevant open issue, its linked specification and ADRs, then
 inspect live repository and runtime state.
