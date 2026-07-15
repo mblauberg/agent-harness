@@ -1,31 +1,31 @@
 # ADR 0002 — Capability-compiled execution authority (write profiles)
 
-**Status:** Architecture decision accepted 2026-07-13. This ADR does not
-authorise W010 implementation or live provider execution.
+**Status:** Architecture accepted 2026-07-13 (human). This decision grants no
+W010-A implementation or W010-B live-execution authority.
 
 ## Context
 
 Fabric-managed headless provider sessions are compiled read-only, enforced
 twice (both provider adapters and `Fabric.#admitProviderPayload`). This is
 correct for certifying review but blocks Fabric from serving as the managed
-implementation plane. The standalone [authority](../specs/agent-fabric/authority.md)
-and [provider-action](../specs/agent-fabric/provider-actions-and-adapters.md)
-specifications own that contract, so enabling writes is a specification change,
-not only code.
+implementation plane. The standalone [authority](../specs/agent-fabric/authority.md),
+[workspace-containment](../specs/agent-fabric/workspace-containment.md) and
+[provider-action](../specs/agent-fabric/provider-actions-and-adapters.md)
+specifications preserve the read-only posture, so enabling writes requires a
+normative specification change as well as code.
 
 ## Decision
 
 Adopt provider-neutral authority profiles compiled by Fabric into
-provider-native settings in four staged steps:
+provider-native settings in four stages:
 
 1. **Authority contract:** protocol-owned, versioned `AuthorityEnvelopeV2`
    carrying the full human-approved envelope (approval binding with evidence
    digest; secrets, deployment, irreversible-action and network dimensions —
    all missing from Fabric's former `AuthorityInput`), plus exact
-   characterisation goldens of today's read-only projection. Includes the
-   required updates to the standalone authority and provider-action
-   specifications introducing profile-based execution authority. Risk tier:
-   crucial.
+   characterisation goldens of today's read-only projection. Update the
+   authority and provider-action specifications with the profile contract in
+   the same change. Risk tier: crucial.
 2. **Pure admission extraction** into an `AuthorityCompiler`, behaviour
    unchanged.
 3. **One-provider write pilot** (`workspace-write-offline`: one owned
@@ -61,11 +61,7 @@ the local pre-release state is reset — no dual parser is retained.
   effects via the existing `ExternalEffectService` model).
 - The first write pilot provider is chosen by containment evidence, not
   preference; the other stays read-only until it independently passes.
-- [Issue #22](https://github.com/mblauberg/provenant/issues/22) owns the current
-  containment evidence, approval sequence and provider rollout. The standalone
-  [authority](../specs/agent-fabric/authority.md),
-  [provider-action](../specs/agent-fabric/provider-actions-and-adapters.md) and
-  [provider-write containment
-  evidence](../specs/agent-fabric/provider-write-containment.md)
-  specifications own the current contract; earlier work-package detail remains
-  provenance in Git history.
+- The [capability-compiled execution authority
+  effort](../efforts/EFFORT-capability-profiles.md) is the compact current route
+  from the standalone specifications to [issue
+  #22](https://github.com/mblauberg/provenant/issues/22).

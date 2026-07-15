@@ -16,26 +16,26 @@ provider-authority decision. The runtime now has one V2 authority contract and
 one pure compiler, without a legacy decoder, compatibility bridge or duplicate
 runtime schema.
 
-The standalone semantic [authority](../specs/agent-fabric/authority.md),
-[provider-action](../specs/agent-fabric/provider-actions-and-adapters.md) and
+Four standalone semantic specifications own distinct surfaces under [ADR
+0009](../adr/0009-standalone-semantic-specifications.md):
+[authority](../specs/agent-fabric/authority.md), [workspace
+containment](../specs/agent-fabric/workspace-containment.md), [provider
+actions](../specs/agent-fabric/provider-actions-and-adapters.md) and
 [provider-write containment
-evidence](../specs/agent-fabric/provider-write-containment.md) specifications
-own the current requirements under [ADR
-0009](../adr/0009-standalone-semantic-specifications.md). Git owns their history
-and integrity; there are no ordered manifests, per-file hashes or numbered
-aliases.
+evidence](../specs/agent-fabric/provider-write-containment.md). The first three
+own the architecture and mechanisms; the fourth owns the fixed 21-case,
+42-execution matrix, oracles and evidence gate. Git owns their history and
+integrity.
 
-[Issue #22](https://github.com/mblauberg/provenant/issues/22) owns the current
-approval sequence and delivery state; the [provider-write containment
-specification](../specs/agent-fabric/provider-write-containment.md) owns the
-fixed cases, oracles and evidence gate. Earlier review and simplification
-material remains historical provenance in Git, not a current-status,
-specification or governance dependency. Issue #23/W013 owns any later retention
-or retirement decision.
+[Issue #22](https://github.com/mblauberg/provenant/issues/22) owns live W010
+delivery, evidence and human gates. The historical implementation pack is
+non-authoritative provenance pending its retirement decision under [issue
+#23/W013](https://github.com/mblauberg/provenant/issues/23), not an active
+dependency.
 
 ## Remaining route
 
-1. [Issue #22](https://github.com/mblauberg/provenant/issues/22) now begins with
+1. [Issue #22](https://github.com/mblauberg/provenant/issues/22) begins with
    W010-A, a separately human-approved inert prerequisite for the trusted
    write-offline projection and evidence path. It does not begin without the
    explicit scope grant at risk tier `crucial`, and

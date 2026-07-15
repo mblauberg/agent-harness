@@ -2,24 +2,37 @@
 
 Updated: 15 July 2026
 
-Status: active under the [W012/W013 reducer, issue
-#23](https://github.com/mblauberg/provenant/issues/23). GitHub issues own live
+Status: Console implementation lanes are closed, but W012 remains active under
+the [W012/W013 reducer, issue
+#23](https://github.com/mblauberg/provenant/issues/23), through the bounded
+read-only checkpoint-validation slice in [issue
+#96](https://github.com/mblauberg/provenant/issues/96). GitHub issues own live
 implementation and acceptance state; this file is only the compact route.
 
 ## Current W012 route
 
-- The child-bridge, expired-principal, pagination, existing-session and partial
-  first-frame timing repairs are complete in [issues
+- The child-bridge, expired-principal and partial first-frame timing repairs are
+  complete in [issues
   #64](https://github.com/mblauberg/provenant/issues/64),
   [#71](https://github.com/mblauberg/provenant/issues/71),
-  [#72](https://github.com/mblauberg/provenant/issues/72),
   [#74](https://github.com/mblauberg/provenant/issues/74),
-  [#75](https://github.com/mblauberg/provenant/issues/75) and
   [#76](https://github.com/mblauberg/provenant/issues/76).
-- [Issue #82](https://github.com/mblauberg/provenant/issues/82) is queued active
-  W012 work on the daemon-stop custody race. Its focused test/support-only plan
-  still requires the approval recorded in that issue before implementation;
-  this is a bounded plan gate, not W013 programme acceptance.
+- The final bounded Console repairs are complete: pagination in [issue
+  #72](https://github.com/mblauberg/provenant/issues/72) and [PR
+  #90](https://github.com/mblauberg/provenant/pull/90); existing-session reopen
+  in [issue #75](https://github.com/mblauberg/provenant/issues/75), [PR
+  #91](https://github.com/mblauberg/provenant/pull/91) and [PR
+  #92](https://github.com/mblauberg/provenant/pull/92); and daemon-stop custody
+  in [issue #82](https://github.com/mblauberg/provenant/issues/82) and [PR
+  #94](https://github.com/mblauberg/provenant/pull/94). No active Console
+  implementation lane remains.
+- W012 remains active through [issue
+  #96](https://github.com/mblauberg/provenant/issues/96), which wires the
+  existing recovery-checkpoint validation operation as a bounded,
+  mutation-free slice. It does not select or provision the external receipt
+  authority, authorise rotation or destructive abandon, or otherwise grant
+  lifecycle authority owned by [issue
+  #27](https://github.com/mblauberg/provenant/issues/27).
 
 The linked issues own their acceptance criteria and evidence. Merged pull
 requests and historical lane detail remain in Git and are not repeated here.
