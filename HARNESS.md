@@ -51,9 +51,11 @@ actions, disclosure, secrets, deployment, irreversible actions, expiry and
 approver. Delegation only narrows authority. Host access, credentials and
 subscriptions never grant permission.
 
-Create branches or worktrees only when the human asks or an approved authority
-envelope permits it. Authorised worktrees use the owning repository's
-`.worktrees/<task-agent>` path; see `docs/worktrees.md`.
+This constitution is a standing human-approved envelope for routine version
+control: branches and linked worktrees for implementation — including parallel
+— need no per-instance approval. Worktrees use `.worktrees/<task-agent>`, one
+writer each; see `docs/worktrees.md`. Deletion, force-removal, history rewrites
+and integration or pushes to shared branches stay gated on the approvals above.
 
 ## Routing and coverage
 

@@ -11,10 +11,12 @@ before any decision about orchestration, model choice, delegation, or memory.
 - **Memory:** durable project knowledge lands in the project's repo docs
   (state file / specs / ADRs / context digests), never only in
   harness-private memory. Private memory = cross-project user prefs only.
-- **Git:** never create branches or worktrees unless directly told to or an
-  active human-approved project/session authority envelope explicitly grants
-  them. When authorised, linked worktrees live only at the owning repository's
-  `.worktrees/<task-agent>` path; see `docs/worktrees.md`.
+- **Git:** creating feature branches and worktrees for implementation is
+  pre-authorised by the project constitution (`HARNESS.md`) — no per-instance
+  ask needed, including for parallel implementation. Linked worktrees live only
+  at the owning repository's `.worktrees/<task-agent>` path, one writer each;
+  see `docs/worktrees.md`. Branch deletion, force-removal, history rewrites and
+  integration or pushes to shared branches still need explicit human authority.
 - **Style:** terse for inter-agent, mechanical, and status traffic; use
   domain-appropriate human prose. Load `$caveman` only on explicit request.
 
