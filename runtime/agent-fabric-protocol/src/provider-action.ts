@@ -41,13 +41,12 @@ const spawnCommon = {
   operation: literal("spawn"),
   taskId: id256,
   authorityId: id256,
-  routeRequest: routeRequestCodec,
   payload: jsonValue,
   commandId: id256,
 } as const;
 export const PROVIDER_ACTION_DISPATCH_INPUT_V1_CODEC = unionOf([
   objectCodec({ ...spawnCommon, certifyingReview: literal(null) }),
-  objectCodec({ ...spawnCommon, certifyingReview: certifyingReviewBindingCodec }),
+  objectCodec({ ...spawnCommon, routeRequest: routeRequestCodec, certifyingReview: certifyingReviewBindingCodec }),
   objectCodec({
     adapterId: id256,
     actionId: id256,

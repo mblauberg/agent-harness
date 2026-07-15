@@ -119,6 +119,23 @@ Herdr provides pane visibility and process supervision. Fabric events are
 rendered by the explicit least-privilege `fabric-events` observer described
 below; MCP tool responses and the SQLite-backed fabric remain authoritative.
 
+## Provider controls and context
+
+Set controls directly on each admitted provider spawn or turn:
+
+| Control | Operator rule |
+| --- | --- |
+| `model` + `modelFamily` | Use exact provider values. A retained role/model change uses rotate and a fresh context. |
+| `effort` | Use an explicit value supported by that provider/model. |
+| `compact` | Checkpoint first, then continue the same retained task with bounded context. |
+| `rotate` / clear | Checkpoint first, then start fresh for a new task, independent review, stale/confused/unreconciled context, or role/model change. Fabric rotate is the clear equivalent; never clear silently. |
+
+Claude reviewers and one-task workers start fresh and release when done. For a
+retained Claude pair, checkpoint and compact at each stage or work-unit
+boundary, by four answer-bearing provider turns, or before a pause expected to
+exceed five minutes. Codex follows stage boundaries; native auto-compaction is
+only a fallback. Fabric does not enforce these turn/time thresholds.
+
 ## Project Fabric Console
 
 Build and verify the standalone Console before attaching it to live state:

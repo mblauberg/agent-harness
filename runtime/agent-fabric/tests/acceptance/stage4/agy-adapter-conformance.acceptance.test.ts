@@ -16,20 +16,20 @@ import {
 } from "../../support/stage4-pi-agy-testkit.ts";
 
 describe("Stage 4 Agy adapter", () => {
-  it("accepts the checked-in pinned real adapter", async () => {
+  it("keeps the checked-in adapter disabled while portable fixtures remain verifiable", async () => {
     const fixture = process.env.AGENT_FABRIC_PORTABLE_TESTS === "1"
       ? await createResolvedStage4Compatibility("agy")
       : undefined;
     try {
-      await expect(
-        verifyAdapterCompatibility({
-          compatibilityPath: fixture?.compatibilityPath
-            ?? stage4RepositoryPath("config/adapter-compatibility.yaml"),
-          schemaPath: fixture?.schemaPath ?? stage4SchemaPath(),
-          adapterIds: ["agy"],
-          requireEnabled: true,
-        }),
-      ).resolves.toMatchObject({ valid: true, adapterIds: ["agy"] });
+      const verification = verifyAdapterCompatibility({
+        compatibilityPath: fixture?.compatibilityPath
+          ?? stage4RepositoryPath("config/adapter-compatibility.yaml"),
+        schemaPath: fixture?.schemaPath ?? stage4SchemaPath(),
+        adapterIds: ["agy"],
+        requireEnabled: true,
+      });
+      if (fixture === undefined) await expect(verification).rejects.toThrow(/not activated/u);
+      else await expect(verification).resolves.toMatchObject({ valid: true, adapterIds: ["agy"] });
     } finally {
       if (fixture !== undefined) await rm(fixture.directory, { recursive: true, force: true });
     }

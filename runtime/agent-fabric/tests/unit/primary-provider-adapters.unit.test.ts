@@ -558,6 +558,45 @@ describe("Claude Agent SDK fabric adapter", () => {
     })).toThrowError(/effort must be one of low, medium, high, xhigh, max/u);
   });
 
+  it("passes exact model and effort controls to fresh and resumed Claude turns", async () => {
+    let call = 0;
+    const query = vi.fn(() => ({
+      close: vi.fn(),
+      async *[Symbol.asyncIterator]() {
+        call += 1;
+        yield {
+          type: "result",
+          subtype: "success",
+          session_id: `claude-controls-session-${call}`,
+          result: "bounded answer",
+          usage: { input_tokens: 1, output_tokens: 1 },
+          num_turns: 1,
+          total_cost_usd: 0,
+        };
+      },
+    }));
+    const boundary = new InstalledClaudeAgentSdkBoundary({ query: query as never });
+
+    await boundary.spawn({ prompt: "fresh", model: "claude-sonnet-current", effort: "medium" });
+    await boundary.sendTurn({
+      resumeReference: "claude-controls-session-1",
+      prompt: "resume",
+      model: "claude-opus-current",
+      effort: "max",
+    });
+
+    expect(query).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      options: expect.objectContaining({ model: "claude-sonnet-current", effort: "medium" }),
+    }));
+    expect(query).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      options: expect.objectContaining({
+        resume: "claude-controls-session-1",
+        model: "claude-opus-current",
+        effort: "max",
+      }),
+    }));
+  });
+
   it("normalises billed Claude usage into conservative integer budget units", async () => {
     const query = vi.fn((input: unknown) => ({
       close: vi.fn(),
@@ -2304,6 +2343,8 @@ describe("Codex app-server fabric adapter", () => {
     const payload = {
       ...(priorResumeReference === undefined ? {} : { priorResumeReference }),
       prompt: "Run the approved offline case.",
+      model: "gpt-controls-fresh",
+      effort: "high",
       cwd: "/workspace/src",
       readOnlyRoot: "/workspace/src",
       writeRoot: "/workspace/src",
@@ -2324,7 +2365,7 @@ describe("Codex app-server fabric adapter", () => {
     });
 
     expect(requests[0]?.method).toBe(threadMethod);
-    expect(requests[0]?.params).toMatchObject({ sandbox: "read-only" });
+    expect(requests[0]?.params).toMatchObject({ sandbox: "read-only", model: "gpt-controls-fresh" });
     if (threadMethod === "thread/start") expect(requests[0]?.params).toMatchObject({ environments: [] });
     else expect(requests[0]?.params).not.toHaveProperty("environments");
     expect(requests[1]).toEqual({
@@ -2335,6 +2376,8 @@ describe("Codex app-server fabric adapter", () => {
         cwd: "/workspace/src",
         runtimeWorkspaceRoots: ["/workspace/src"],
         environments: [],
+        model: "gpt-controls-fresh",
+        effort: "high",
         sandboxPolicy: {
           type: "workspaceWrite",
           writableRoots: ["/workspace/src"],
@@ -2348,12 +2391,16 @@ describe("Codex app-server fabric adapter", () => {
     await expect(boundary.sendTurn({
       resumeReference: "codex-write-thread",
       prompt: "Continue without write authority.",
+      model: "gpt-controls-resumed",
+      effort: "xhigh",
     })).resolves.toMatchObject({ resumeReference: "codex-write-thread", result: "bounded" });
     expect(requests[3]).toEqual({
       method: "turn/start",
       params: {
         threadId: "codex-write-thread",
         input: [{ type: "text", text: "Continue without write authority." }],
+        model: "gpt-controls-resumed",
+        effort: "xhigh",
         sandboxPolicy: { type: "readOnly", networkAccess: false },
       },
     });

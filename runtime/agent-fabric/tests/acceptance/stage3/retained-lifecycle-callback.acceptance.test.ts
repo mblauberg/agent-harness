@@ -1,4 +1,6 @@
 import Database from "better-sqlite3";
+import { realpathSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { createRetainedLifecycleCallbackFixture } from "../../support/lifecycle-testkit.ts";
@@ -71,6 +73,17 @@ describe("Stage 3 retained provider lifecycle callback", () => {
         expect(JSON.parse(command.result_json)).toEqual(
           (action.result as { lifecycleAcceptance: unknown }).lifecycleAcceptance,
         );
+        const replacement = database.prepare(`
+          SELECT payload_json FROM provider_actions
+           WHERE run_id=? AND adapter_id='fake-lifecycle'
+             AND action_id='retained-lifecycle:rotate:spawn'
+        `).get(fixture.runId) as { payload_json: string };
+        expect(JSON.parse(replacement.payload_json)).toMatchObject({
+          cwd: join(realpathSync(fixture.directory), "src", "retained-child"),
+          model: "claude-opus-current",
+          modelFamily: "anthropic",
+          effort: "high",
+        });
       } finally {
         database.close();
       }

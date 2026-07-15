@@ -7473,10 +7473,29 @@ export class Fabric {
       checkpoint: input.checkpoint,
       nextProviderSessionGeneration: targetProviderGeneration,
     });
+    const actionPayload = (storedActionId: string): Row => {
+      const action = rowOrNotFound(this.#database.prepare(`
+        SELECT payload_json FROM provider_actions
+         WHERE run_id=? AND adapter_id=? AND action_id=?
+      `).get(runId, adapterId, storedActionId), "lifecycle provider action");
+      const payload: unknown = JSON.parse(stringField(action, "payload_json"));
+      if (!isRow(payload)) throw new Error("lifecycle provider action payload is not an object");
+      return payload;
+    };
+    const sessionControls: Record<string, string> = {};
+    for (const payload of [
+      actionPayload(stringField(source, "source_action_id")),
+      actionPayload(stringField(source, "caller_action_id")),
+    ]) {
+      for (const key of ["cwd", "model", "modelFamily", "effort"] as const) {
+        if (typeof payload[key] === "string") sessionControls[key] = payload[key];
+      }
+    }
     const providerPayload = {
       schemaVersion: 1,
       action: input.action,
       agentId,
+      ...sessionControls,
       priorResumeReference: stringField(source, "provider_session_ref"),
       generation: targetProviderGeneration,
       prompt,

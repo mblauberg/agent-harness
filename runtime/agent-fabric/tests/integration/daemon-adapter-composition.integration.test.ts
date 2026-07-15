@@ -161,16 +161,6 @@ describe("daemon adapter composition", () => {
           operation: "spawn",
           taskId: "daemon-ephemeral-review",
           authorityId: reviewAuthority.authorityId,
-          routeRequest: {
-            schemaVersion: 1,
-            adapterAlias: "fake",
-            modelAlias: "fake-reviewer-v1",
-            explicitModel: null,
-            role: "reviewer",
-            leadFamily: "fake",
-            requireDistinct: false,
-            providerEffort: null,
-          },
           payload: {
             taskId: "daemon-ephemeral-review",
             model: "fake-reviewer-v1",

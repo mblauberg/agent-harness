@@ -12,21 +12,21 @@ import {
 } from "../../support/stage4-cursor-kiro-testkit.ts";
 
 describe("Stage 4 Cursor adapter public contract", () => {
-  it("accepts the checked-in pinned Cursor adapter", async () => {
+  it("keeps the checked-in adapter disabled while portable fixtures remain verifiable", async () => {
     const fixture = process.env.AGENT_FABRIC_PORTABLE_TESTS === "1"
       ? await createCursorKiroCompatibilityFixture()
       : undefined;
     try {
-      await expect(
-        verifyAdapterCompatibility({
-          compatibilityPath: fixture?.compatibilityPath
-            ?? repositoryPath("config/adapter-compatibility.yaml"),
-          schemaPath: fixture?.schemaPath
-            ?? repositoryPath("runtime/agent-fabric/schemas/adapter-compatibility.schema.json"),
-          adapterIds: ["cursor-agent"],
-          requireEnabled: true,
-        }),
-      ).resolves.toMatchObject({ valid: true, adapterIds: ["cursor-agent"] });
+      const verification = verifyAdapterCompatibility({
+        compatibilityPath: fixture?.compatibilityPath
+          ?? repositoryPath("config/adapter-compatibility.yaml"),
+        schemaPath: fixture?.schemaPath
+          ?? repositoryPath("runtime/agent-fabric/schemas/adapter-compatibility.schema.json"),
+        adapterIds: ["cursor-agent"],
+        requireEnabled: true,
+      });
+      if (fixture === undefined) await expect(verification).rejects.toThrow(/not activated/u);
+      else await expect(verification).resolves.toMatchObject({ valid: true, adapterIds: ["cursor-agent"] });
     } finally {
       if (fixture !== undefined) await rm(fixture.directory, { recursive: true, force: true });
     }

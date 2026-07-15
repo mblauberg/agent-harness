@@ -38,6 +38,22 @@ export type FabricMcpServerHandle = {
   close(): Promise<void>;
 };
 
+export function createUnprovisionedMcpServer(): FabricMcpServerHandle {
+  const server = new Server(
+    { name: "agent-fabric", version: "1.0.0" },
+    { capabilities: { tools: {}, resources: {} } },
+  );
+  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: [] }));
+  server.setRequestHandler(ListResourcesRequestSchema, () => ({ resources: [] }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, () => ({ resourceTemplates: [] }));
+  return {
+    server,
+    async close(): Promise<void> {
+      await server.close();
+    },
+  };
+}
+
 const agentFeatures = Object.freeze([...new Set(
   [
     ...[...operationsForPrincipal("agent")]

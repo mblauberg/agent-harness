@@ -903,6 +903,10 @@ export async function createRetainedLifecycleCallbackFixture(): Promise<Retained
           agentId: "retained-child",
           providerSessionGeneration: 1,
           taskId: "retained-lifecycle-task",
+          cwd: "src/retained-child",
+          model: "claude-opus-current",
+          modelFamily: "anthropic",
+          effort: "high",
           instruction: "claim the task and rotate from this retained provider turn",
           scenario: "retained-lifecycle-callback",
           lifecycleRequest: {
