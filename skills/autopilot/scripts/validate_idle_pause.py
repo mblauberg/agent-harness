@@ -70,14 +70,17 @@ def _queue_has_active_rows(path: Path) -> tuple[bool, str | None]:
         value = line.strip()
         if not value.startswith("|") or not value.endswith("|"):
             continue
-        cells = [cell.strip() for cell in value[1:-1].split("|")]
-        if len(cells) != len(QUEUE_HEADER):
-            continue
+        # Split on unescaped pipes so a legitimately escaped '\|' inside notes
+        # stays within one cell rather than inflating the column count.
+        cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", value[1:-1])]
         normalized = tuple(cell.lower() for cell in cells)
         if normalized == QUEUE_HEADER:
             continue  # header row
-        if all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
+        if cells and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
             continue  # separator row
+        if len(cells) != len(QUEUE_HEADER):
+            # Fail closed: a malformed queue row is not proof of idleness.
+            return True, f"malformed queue row (expected {len(QUEUE_HEADER)} cells): {value}"
         status = cells[1].strip("`").upper()
         if status in ACTIVE_STATUSES:
             return True, None

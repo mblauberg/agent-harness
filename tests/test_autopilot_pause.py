@@ -183,6 +183,17 @@ def test_pause_fails_closed_on_unrecognized_queue_status(tmp_path):
     assert "unrecognized queue status" in "\n".join(load_module().validate(state))
 
 
+def test_pause_fails_closed_on_malformed_queue_row(tmp_path):
+    state = tmp_path / "STATE.md"
+    state.write_text(base_state())
+    write_clean_queue(
+        tmp_path,
+        CLEAN_QUEUE + "| W001 | DONE | none | missing-cells |\n",
+    )
+
+    assert "malformed queue row" in "\n".join(load_module().validate(state))
+
+
 def test_pause_accepts_closed_queue_rows_with_escaped_pipes(tmp_path):
     state = tmp_path / "STATE.md"
     state.write_text(base_state(resume="restart-on: material-change, explicit-restart"))
