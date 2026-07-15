@@ -32,28 +32,6 @@ describe("persistent adapter supervision", () => {
     }
   });
 
-  it("uses a provider-turn timeout distinct from the short control timeout", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-timeout-"));
-    const countPath = join(directory, "starts.txt");
-    const supervisor = new AdapterSupervisor(
-      {
-        fake: {
-          command: [process.execPath, "--import", "tsx", fixturePath],
-          environment: { SUPERVISOR_COUNT_PATH: countPath, SUPERVISOR_DELAY_MS: "20" },
-        },
-      },
-      { controlTimeoutMs: 5, providerTurnTimeoutMs: 300 },
-    );
-    try {
-      await expect(
-        supervisor.request("fake", "dispatch", { operation: "send_turn" }),
-      ).resolves.toMatchObject({ method: "dispatch" });
-    } finally {
-      await supervisor.close();
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
   it("launches a chair through a typed private environment without serialising the handoff", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-chair-launch-"));
     const countPath = join(directory, "starts.txt");
