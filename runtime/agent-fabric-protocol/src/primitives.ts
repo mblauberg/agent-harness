@@ -96,7 +96,7 @@ export function parseTimestamp(value: unknown, path: string): Timestamp {
   const minute = Number(match[5]);
   const second = Number(match[6]);
   const daysInMonth = month >= 1 && month <= 12 ? new Date(Date.UTC(year, month, 0)).getUTCDate() : 0;
-  if (day < 1 || day > daysInMonth || hour > 23 || minute > 59 || second > 59) {
+  if (year < 1 || day < 1 || day > daysInMonth || hour > 23 || minute > 59 || second > 59) {
     throw new ProtocolValidationError(path, "must be a strict RFC3339 timestamp");
   }
   // A runtime-validated wire primitive is branded at this single boundary.

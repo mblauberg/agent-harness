@@ -53,11 +53,20 @@ const launchPacket = {
   budgetRef: "budget_01",
   resourcePlanRef: { path: "launch/resources.json", digest },
   chairAuthority: {
+    schemaVersion: 2,
+    approval: { approvedBy: "human-maintainer", evidenceId: "authority-approval", evidenceDigest: digest },
     workspaceRoots: ["project"],
-    sourcePaths: ["runtime/agent-fabric"],
-    artifactPaths: [".agent-run/AFAB-005"],
+    sourcePaths: ["project/runtime/agent-fabric"],
+    artifactPaths: ["project/.agent-run/AFAB-005"],
     actions: [FABRIC_OPERATIONS.createTask],
+    deniedPaths: [],
+    deniedActions: [],
+    prohibitedActions: [],
     disclosure: { level: "forbidden" },
+    secrets: { access: "none" },
+    deployment: { allowed: false },
+    irreversibleActions: { allowed: false },
+    network: { toolEgress: "none" },
     expiresAt: "2026-07-12T12:00:00Z",
     budget: { concurrent_turns: 2 },
   },
@@ -198,10 +207,27 @@ describe("launch packet v1", () => {
     })).toThrowError(/executable|unknown field/iu);
   });
 
+  it.each([
+    ["operator-only", FABRIC_OPERATIONS.operatorActionPreview],
+    ["integration-only", FABRIC_OPERATIONS.integrationInputAttest],
+    ["provider-launch-only", FABRIC_OPERATIONS.launchAttest],
+  ] as const)("rejects %s operations from chair authority", (_kind, operation) => {
+    expect(parseLaunchPacketV1(launchPacket).chairAuthority.actions)
+      .toStrictEqual([FABRIC_OPERATIONS.createTask]);
+    expect(() => parseLaunchPacketV1({
+      ...launchPacket,
+      chairAuthority: { ...launchPacket.chairAuthority, actions: [operation] },
+    })).toThrow(/agent authority operation/u);
+  });
+
   it.each(["workspaceRoots", "sourcePaths", "artifactPaths", "deniedPaths"] as const)(
     "permits the exact project root in chairAuthority.%s only",
     (field) => {
-      const authority = { ...launchPacket.chairAuthority, [field]: ["."] };
+      const authority = {
+        ...launchPacket.chairAuthority,
+        ...(field === "sourcePaths" || field === "artifactPaths" ? { workspaceRoots: ["."] } : {}),
+        [field]: ["."],
+      };
       expect(parseLaunchPacketV1({ ...launchPacket, chairAuthority: authority }).chairAuthority[field])
         .toStrictEqual(["."]);
       for (const unsafe of ["../outside", "/absolute"]) {

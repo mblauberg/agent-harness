@@ -2,23 +2,9 @@ import { FABRIC_OPERATIONS } from "./operations.js";
 import type { JsonValue } from "./primitives.js";
 import type { ProviderActionDispatchInputV1, ProviderActionResultV1 } from "./provider-action.js";
 import type { LifecycleAcceptedSuspendedV1, LifecycleCurrentStateV1 } from "./lifecycle.js";
+import type { AuthorityEnvelopeV2 } from "./authority.js";
 
-export type DisclosurePolicy =
-  | { level: "allowed" }
-  | { level: "scoped"; scopes: readonly ("local" | "approved-provider" | "external")[] }
-  | { level: "forbidden" };
-
-export type AuthorityInput = {
-  workspaceRoots: readonly string[];
-  sourcePaths: readonly string[];
-  artifactPaths: readonly string[];
-  actions: readonly string[];
-  deniedPaths?: readonly string[];
-  deniedActions?: readonly string[];
-  disclosure: DisclosurePolicy;
-  expiresAt: string;
-  budget: Readonly<Record<string, number>>;
-};
+export type AuthorityInput = AuthorityEnvelopeV2;
 
 export type MessageInput = {
   audience:

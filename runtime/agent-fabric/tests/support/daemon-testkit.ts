@@ -10,8 +10,10 @@ import {
   untrackTestProcess,
 } from "./test-process-registry.ts";
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "./authority-v2-testkit.ts";
 
 export const DAEMON_ROOT_AUTHORITY = {
+  ...TEST_AUTHORITY_V2_FIELDS,
   workspaceRoots: ["."],
   sourcePaths: ["src"],
   artifactPaths: [".agent-run"],

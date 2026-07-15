@@ -9,8 +9,10 @@ import {
   parseArtifactRef,
   parseLaunchProviderActionJournalRefV1,
   parseOperationResult,
+  parseAuthorityEnvelopeV2,
   FABRIC_OPERATIONS,
   type AgentCustodyResult,
+  type AuthorityEnvelopeV2,
   type ChairBridgeRecoveryIntent,
   type ChairLiveHandoffIntent,
   type ProjectSessionLaunchCurrentState,
@@ -23,11 +25,11 @@ import type Database from "better-sqlite3";
 import { constants, closeSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-import { expandAuthorityActions } from "../domain/operations.js";
 import {
   parseChairLaunchProviderResult,
   type ChairLaunchProviderResult,
 } from "../adapters/providers/types.js";
+import { readStoredAuthority } from "../authority/stored-authority.js";
 import { ProjectFabricCoreError, type AuthenticatedOperatorContext } from "./contracts.js";
 import { supersedeFinalAcceptanceGates } from "./acceptance-cycle.js";
 import { retireProjectSessionBridges } from "./bridge-retirement.js";
@@ -65,17 +67,7 @@ function isDeterministicClosedPreflightFailure(error: unknown): boolean {
 
 export type LaunchCustodyIntent = ProjectSessionLaunchIntent;
 
-export type NormalisedLaunchAuthority = Readonly<{
-  workspaceRoots: readonly string[];
-  sourcePaths: readonly string[];
-  artifactPaths: readonly string[];
-  actions: readonly string[];
-  deniedPaths: readonly string[];
-  deniedActions: readonly string[];
-  disclosure: Readonly<{ level: "allowed" | "forbidden" } | { level: "scoped"; scopes: readonly string[] }>;
-  expiresAt: string;
-  budget: ResourceAmounts;
-}>;
+export type NormalisedLaunchAuthority = AuthorityEnvelopeV2;
 
 export type LaunchAdapterContract = Readonly<{
   schemaVersion: 1;
@@ -518,12 +510,6 @@ function exactArtifact(value: unknown, label: string): ArtifactBinding {
   }, label);
 }
 
-function stringArray(value: unknown, label: string, allowEmpty = true): string[] {
-  if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) protocol(`${label} must be a string array`);
-  const result = value.map((item, index) => nonEmptyString(item, `${label}[${String(index)}]`));
-  return [...new Set(result)].sort();
-}
-
 function safeRelativePath(value: string, label: string): string {
   if (isAbsolute(value) || value === "" || value.includes("\0")) forbidden(`${label} must be workspace-relative`);
   const segments = value.split(/[\\/]/u);
@@ -556,30 +542,6 @@ function resolveAuthorityPath(root: string, value: string, label: string): strin
   return absolute;
 }
 
-function disclosure(value: unknown): NormalisedLaunchAuthority["disclosure"] {
-  if (Array.isArray(value)) {
-    const scopes = stringArray(value, "chair_authority.disclosure");
-    if (scopes.length === 0) return { level: "forbidden" };
-    if (scopes.some((scope) => scope !== "local" && scope !== "approved-provider" && scope !== "external")) {
-      protocol("chair_authority.disclosure contains an unknown scope");
-    }
-    if (scopes.length === 3) return { level: "allowed" };
-    return { level: "scoped", scopes };
-  }
-  const record = exactRecord(value, "chair_authority.disclosure", ["level"], ["scopes"]);
-  const level = nonEmptyString(record.level, "chair_authority.disclosure.level");
-  if (level === "allowed" || level === "forbidden") {
-    if ("scopes" in record) protocol(`chair_authority.disclosure ${level} cannot carry scopes`);
-    return { level };
-  }
-  if (level !== "scoped") protocol("chair_authority.disclosure.level is invalid");
-  const scopes = stringArray(record.scopes, "chair_authority.disclosure.scopes", false);
-  if (scopes.length >= 3 || scopes.some((scope) => scope !== "local" && scope !== "approved-provider" && scope !== "external")) {
-    protocol("chair_authority.disclosure scoped set is invalid");
-  }
-  return { level: "scoped", scopes };
-}
-
 function resourceAmounts(value: unknown, label: string, allowEmpty = false): ResourceAmounts {
   if (!isRow(value)) protocol(`${label} must be an object`);
   if (!allowEmpty && Object.keys(value).length === 0) protocol(`${label} must not be empty`);
@@ -596,38 +558,51 @@ function resourceAmounts(value: unknown, label: string, allowEmpty = false): Res
 
 export function normaliseLaunchChairAuthority(value: unknown, projectRoot: string): NormalisedLaunchAuthority {
   const root = realpathSync(projectRoot);
-  const record = exactRecord(value, "chair_authority", [
-    "workspaceRoots", "sourcePaths", "artifactPaths", "actions", "disclosure", "expiresAt", "budget",
-  ], ["deniedPaths", "deniedActions"]);
-  const expand = (input: unknown, label: string): string[] => {
-    const expanded = expandAuthorityActions(stringArray(input, label));
-    if (!expanded.ok) protocol(`${label} contains unknown actions: ${expanded.unknownActions.join(", ")}`);
-    return expanded.operations;
+  const parsed = parseAuthorityEnvelopeV2(value, "chair_authority");
+  const canonicalPaths = (paths: readonly string[], label: string): string[] => {
+    return [...new Set(paths.map((path) => {
+      const absolute = resolveAuthorityPath(root, path, label);
+      const relativePath = relative(root, absolute);
+      return relativePath === "" ? "." : relativePath.split(sep).join("/");
+    }))].sort();
   };
-  const workspaceRoots = stringArray(record.workspaceRoots, "chair_authority.workspaceRoots", false)
-    .map((path) => resolveAuthorityPath(root, path, "chair_authority.workspaceRoots"));
-  const sourcePaths = stringArray(record.sourcePaths, "chair_authority.sourcePaths")
-    .map((path) => resolveAuthorityPath(root, path, "chair_authority.sourcePaths"));
-  const artifactPaths = stringArray(record.artifactPaths, "chair_authority.artifactPaths")
-    .map((path) => resolveAuthorityPath(root, path, "chair_authority.artifactPaths"));
+  const workspaceRoots = canonicalPaths(parsed.workspaceRoots, "chair_authority.workspaceRoots");
+  const sourcePaths = canonicalPaths(parsed.sourcePaths, "chair_authority.sourcePaths");
+  const artifactPaths = canonicalPaths(parsed.artifactPaths, "chair_authority.artifactPaths");
   if (
     sourcePaths.some((path) => !workspaceRoots.some((workspace) => contained(workspace, path))) ||
     artifactPaths.some((path) => !workspaceRoots.some((workspace) => contained(workspace, path)))
   ) forbidden("chair authority source or artifact path escapes its workspace roots");
-  const expires = Date.parse(nonEmptyString(record.expiresAt, "chair_authority.expiresAt"));
+  const expires = Date.parse(parsed.expiresAt);
   if (!Number.isFinite(expires)) protocol("chair_authority.expiresAt must be an ISO timestamp");
-  const deniedPaths = stringArray(record.deniedPaths ?? [], "chair_authority.deniedPaths")
-    .map((path) => resolveAuthorityPath(root, path, "chair_authority.deniedPaths"));
+  const disclosure = parsed.disclosure.level === "scoped"
+    ? { level: "scoped" as const, scopes: [...parsed.disclosure.scopes].sort() }
+    : parsed.disclosure;
   return {
-    workspaceRoots: [...new Set(workspaceRoots)].sort(),
-    sourcePaths: [...new Set(sourcePaths)].sort(),
-    artifactPaths: [...new Set(artifactPaths)].sort(),
-    actions: expand(record.actions, "chair_authority.actions"),
-    deniedPaths: [...new Set(deniedPaths)].sort(),
-    deniedActions: expand(record.deniedActions ?? [], "chair_authority.deniedActions"),
-    disclosure: disclosure(record.disclosure),
+    schemaVersion: 2,
+    approval: { ...parsed.approval },
+    workspaceRoots,
+    sourcePaths,
+    artifactPaths,
+    actions: [...parsed.actions].sort(),
+    deniedPaths: canonicalPaths(parsed.deniedPaths, "chair_authority.deniedPaths"),
+    deniedActions: [...parsed.deniedActions].sort(),
+    prohibitedActions: [...parsed.prohibitedActions].sort(),
+    disclosure,
+    secrets: parsed.secrets.access === "none"
+      ? { access: "none" }
+      : { access: "use-without-disclosure", references: [...parsed.secrets.references].sort() },
+    deployment: parsed.deployment.allowed
+      ? { allowed: true, targets: [...parsed.deployment.targets].sort() }
+      : { allowed: false },
+    irreversibleActions: parsed.irreversibleActions.allowed
+      ? { allowed: true, actionIds: [...parsed.irreversibleActions.actionIds].sort() }
+      : { allowed: false },
+    network: parsed.network.toolEgress === "none"
+      ? { toolEgress: "none" }
+      : { toolEgress: "allowlist", allowedHosts: [...parsed.network.allowedHosts].sort() },
     expiresAt: new Date(expires).toISOString(),
-    budget: resourceAmounts(record.budget, "chair_authority.budget"),
+    budget: resourceAmounts(parsed.budget, "chair_authority.budget", true),
   };
 }
 
@@ -3332,16 +3307,13 @@ export class LaunchCustodyService {
       SELECT authority_id FROM agents WHERE run_id=? AND agent_id=?
     `).get(input.runId, input.actorAgentId), "agent custody actor");
     const authority = row(this.#database.prepare(`
-      SELECT parent_authority_id, authority_json FROM authorities
+      SELECT parent_authority_id, authority_json, authority_hash FROM authorities
        WHERE run_id=? AND authority_id=?
     `).get(input.runId, input.authorityId), "agent custody authority");
     if (authority.parent_authority_id !== actor.authority_id) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "actor cannot provision this agent authority");
     }
-    const authorityValue = JSON.parse(text(authority, "authority_json")) as unknown;
-    if (!isRow(authorityValue) || typeof authorityValue.expiresAt !== "string") {
-      throw new Error("agent custody authority is invalid");
-    }
+    const authorityValue = readStoredAuthority(authority, "agent custody authority");
     const expiresAt = Date.parse(authorityValue.expiresAt);
     if (!Number.isFinite(expiresAt) || expiresAt <= this.#clock()) {
       throw new ProjectFabricCoreError("CAPABILITY_EXPIRED", "agent custody authority is expired");

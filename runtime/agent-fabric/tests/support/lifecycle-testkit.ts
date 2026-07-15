@@ -22,6 +22,7 @@ import type {
 import { servePublicProtocolConnection } from "../../src/daemon/public-protocol.ts";
 
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "./authority-v2-testkit.ts";
 import { ManualClock } from "./manual-clock.ts";
 import { callTool, spawnMcpProxy, type McpProxy } from "./mcp-testkit.ts";
 
@@ -93,6 +94,7 @@ function adapterOptions(fixture: {
   clock: ManualClock;
   providerJournalPath: string;
   secondaryProviderJournalPath?: string;
+  providerStatusCallsPath?: string;
   providerStatus?: "healthy" | "unmanaged" | "missing-evidence";
   capabilitiesDelayMs?: number;
   spawnDelayMs?: number;
@@ -118,6 +120,9 @@ function adapterOptions(fixture: {
           LIFECYCLE_FAKE_JOURNAL: fixture.providerJournalPath,
           LIFECYCLE_FAKE_ADAPTER_ID: "fake-lifecycle",
           LIFECYCLE_FAKE_STATUS: fixture.providerStatus ?? "healthy",
+          ...(fixture.providerStatusCallsPath === undefined
+            ? {}
+            : { LIFECYCLE_FAKE_STATUS_CALLS: fixture.providerStatusCallsPath }),
           ...(fixture.capabilitiesDelayMs === undefined
             ? {}
             : { LIFECYCLE_FAKE_CAPABILITIES_DELAY_MS: String(fixture.capabilitiesDelayMs) }),
@@ -140,6 +145,9 @@ function adapterOptions(fixture: {
                 LIFECYCLE_FAKE_JOURNAL: fixture.secondaryProviderJournalPath,
                 LIFECYCLE_FAKE_ADAPTER_ID: "fake-lifecycle-secondary",
                 LIFECYCLE_FAKE_STATUS: fixture.providerStatus ?? "healthy",
+                ...(fixture.providerStatusCallsPath === undefined
+                  ? {}
+                  : { LIFECYCLE_FAKE_STATUS_CALLS: fixture.providerStatusCallsPath }),
                 LIFECYCLE_FAKE_MANDATORY_USAGE: fixture.mandatoryUsageUnits === true ? "1" : "0",
                 LIFECYCLE_FAKE_PAYLOAD_MAX_TURNS: fixture.payloadMaxTurns === true ? "1" : "0",
               },
@@ -196,6 +204,7 @@ export async function createLifecycleFixture(
     ...options,
   }));
   const rootAuthority = {
+    ...TEST_AUTHORITY_V2_FIELDS,
     workspaceRoots: ["."],
     sourcePaths: ["src"],
     artifactPaths: [".agent-run/run-stage3"],
@@ -495,6 +504,7 @@ async function createRetainedLifecycleFixture(input: {
   };
   try {
     const rootAuthority = {
+      ...TEST_AUTHORITY_V2_FIELDS,
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: [".agent-run/run-stage3"],
@@ -650,6 +660,7 @@ export async function reopenLifecycleFabric(
   fixture: LifecycleFixture,
   options: {
     providerStatus?: "healthy" | "unmanaged" | "missing-evidence";
+    providerStatusCallsPath?: string;
     fabricSocketPath?: string;
     lifecycleReceiptAuthority?: LifecycleIntegrityReceiptAuthorityPort;
   } = {},
@@ -664,6 +675,9 @@ export async function reopenLifecycleFabric(
         ? {}
         : { secondaryProviderJournalPath: fixture.secondaryProviderJournalPath }),
       ...(options.providerStatus === undefined ? {} : { providerStatus: options.providerStatus }),
+      ...(options.providerStatusCallsPath === undefined
+        ? {}
+        : { providerStatusCallsPath: options.providerStatusCallsPath }),
     }),
     ...(options.fabricSocketPath === undefined ? {} : { fabricSocketPath: options.fabricSocketPath }),
     ...(options.lifecycleReceiptAuthority === undefined
@@ -726,6 +740,7 @@ export async function createRetainedLifecycleCallbackFixture(): Promise<Retained
   try {
     bootstrap = await connectFabricDaemon({ socketPath, capability: daemon.bootstrapCapability });
     const rootAuthority = {
+      ...TEST_AUTHORITY_V2_FIELDS,
       workspaceRoots: ["."],
       sourcePaths: ["src"],
       artifactPaths: [".agent-run/run-retained-lifecycle"],

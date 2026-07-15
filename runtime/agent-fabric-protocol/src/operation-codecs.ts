@@ -3,10 +3,10 @@ import {
   isFabricOperation,
   isActiveFabricOperation,
   OPERATION_REGISTRY,
-  operationsForPrincipal,
   type FabricOperation,
   type OperationPrincipalKind,
 } from "./operations.js";
+import { AUTHORITY_ENVELOPE_V2_CODEC } from "./authority.js";
 import {
   arrayOf,
   boolean,
@@ -487,18 +487,6 @@ const activeOperationCodec = defineCodec<FabricOperation>({
   }
   return value;
 });
-const agentAuthorityOperationValues = [...operationsForPrincipal("agent")].sort();
-const agentAuthorityOperationSet: ReadonlySet<string> = new Set(agentAuthorityOperationValues);
-const agentAuthorityOperationCodec = defineCodec<FabricOperation>({
-  type: "string",
-  enum: agentAuthorityOperationValues,
-}, FABRIC_OPERATIONS.acknowledgeDelivery, (value, path) => {
-  if (typeof value !== "string" || !agentAuthorityOperationSet.has(value)) {
-    throw new TypeError(`${path} must be an active agent protocol operation`);
-  }
-  return value as FabricOperation;
-});
-
 const artifactRefCodec = objectCodec({ path: relativePath, digest: sha256 });
 const artifactRefsCodec = arrayOf(artifactRefCodec, { maximum: 128 });
 const credentialCodec = objectCodec({ capabilityId: identifier, token: secret });
@@ -661,31 +649,7 @@ const chairMutationCodec = parserBacked(
   parseChairMutationContext(chairMutationBaseCodec.example),
 );
 
-const disclosureCodec = unionOf([
-  objectCodec({ level: literal("allowed") }),
-  objectCodec({ level: literal("forbidden") }),
-  objectCodec({
-    level: literal("scoped"),
-    scopes: arrayOf(enumeration(["local", "approved-provider", "external"]), {
-      minimum: 1,
-      maximum: 3,
-      unique: true,
-    }),
-  }),
-]);
-const authorityPathCodec = unionOf([literal("."), relativePath]);
-const authorityCodec = objectCodec({
-  workspaceRoots: arrayOf(authorityPathCodec, { minimum: 1, maximum: 64, unique: true }),
-  sourcePaths: arrayOf(authorityPathCodec, { maximum: 256, unique: true }),
-  artifactPaths: arrayOf(authorityPathCodec, { maximum: 256, unique: true }),
-  actions: arrayOf(agentAuthorityOperationCodec, { maximum: 256, unique: true }),
-  disclosure: disclosureCodec,
-  expiresAt: timestamp,
-  budget: numberRecord,
-}, {
-  deniedPaths: arrayOf(authorityPathCodec, { maximum: 256, unique: true }),
-  deniedActions: arrayOf(agentAuthorityOperationCodec, { maximum: 256, unique: true }),
-});
+const authorityCodec = AUTHORITY_ENVELOPE_V2_CODEC;
 
 const messageAudienceCodec = unionOf([
   objectCodec({ kind: literal("agents"), agentIds: arrayOf(identifier, { minimum: 1, maximum: 64, unique: true }) }),

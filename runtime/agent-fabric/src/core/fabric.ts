@@ -10,6 +10,8 @@ import {
   LIFECYCLE_CURRENT_STATE_V1_CODEC,
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   RUN_SESSION_PROJECTION_FEATURE,
+  authorityEnvelopeV2Contained,
+  parseAuthorityEnvelopeV2,
   type AgentCustodyResult,
   type EvidenceArtifactRegistration,
   type EvidencePublishRequest,
@@ -28,6 +30,8 @@ import {
   parseAgentProvisionProviderResult,
   type AgentProvisionProviderResult,
 } from "../adapters/providers/types.js";
+import { compileProviderPayload } from "../authority/authority-compiler.js";
+import { readStoredAuthority } from "../authority/stored-authority.js";
 
 import type {
   AuthorityInput,
@@ -43,7 +47,6 @@ import {
   FABRIC_OPERATIONS,
   OPERATION_REGISTRY,
   expandAuthorityActions,
-  isAgentAuthorityOperation,
   isReadFabricOperation,
   type FabricOperation,
 } from "../domain/operations.js";
@@ -255,17 +258,7 @@ type TaskCreateInput = {
 };
 const MAXIMUM_EPHEMERAL_PROVIDER_PROMPT_BYTES = 65_536;
 const MAXIMUM_LIFECYCLE_HANDOFF_BYTES = 65_536;
-type StoredAuthority = {
-  workspaceRoots: string[];
-  sourcePaths: string[];
-  artifactPaths: string[];
-  actions: FabricOperation[];
-  deniedPaths: string[];
-  deniedActions: FabricOperation[];
-  disclosure: DisclosurePolicy;
-  expiresAt: string;
-  budget: Record<string, number>;
-};
+type StoredAuthority = AuthorityInput;
 
 class LifecycleAdoptionSourceVectorDriftError extends Error {
   constructor(readonly expectedDigest: string, readonly observedDigest: string) {
@@ -486,13 +479,6 @@ function normaliseDisclosure(value: AuthorityInput["disclosure"]): DisclosurePol
   throw new FabricError("AUTHORITY_WIDENING", "authority disclosure policy is invalid");
 }
 
-function disclosureContained(child: DisclosurePolicy, parent: DisclosurePolicy): boolean {
-  const rank = { allowed: 0, scoped: 1, forbidden: 2 } as const;
-  if (rank[child.level] < rank[parent.level]) return false;
-  if (child.level !== "scoped" || parent.level !== "scoped") return true;
-  return child.scopes.every((scope) => parent.scopes.includes(scope));
-}
-
 function validateIntegerBudget(budget: Record<string, number>): void {
   for (const [dimension, value] of Object.entries(budget)) {
     if (!isBudgetUnitKey(dimension)) {
@@ -512,41 +498,62 @@ function validateBudgetUnitKeys(budget: Record<string, unknown>): void {
 export function normaliseAuthority(
   authority: AuthorityInput,
   workspaceRoot: string,
-  parent?: StoredAuthority,
 ): StoredAuthority {
-  validateIntegerBudget(authority.budget);
-  const expires = Date.parse(authority.expiresAt);
+  let parsed: AuthorityInput;
+  try {
+    parsed = parseAuthorityEnvelopeV2(authority, "authority");
+  } catch (cause: unknown) {
+    throw new FabricError(
+      "AUTHORITY_WIDENING",
+      cause instanceof Error ? cause.message : "authority does not match AuthorityEnvelopeV2",
+      { cause },
+    );
+  }
+  validateIntegerBudget(parsed.budget);
+  const expires = Date.parse(parsed.expiresAt);
   if (!Number.isFinite(expires)) {
     throw new FabricError("AUTHORITY_WIDENING", "authority expiry must be an ISO timestamp");
   }
-  const actionExpansion = expandAuthorityActions(authority.actions);
+  const actionExpansion = expandAuthorityActions(parsed.actions);
   if (!actionExpansion.ok) {
     throw new FabricError("AUTHORITY_WIDENING", `unknown authority actions: ${actionExpansion.unknownActions.join(", ")}`);
   }
-  const deniedActionExpansion = expandAuthorityActions(authority.deniedActions ?? []);
+  const deniedActionExpansion = expandAuthorityActions(parsed.deniedActions);
   if (!deniedActionExpansion.ok) {
     throw new FabricError("AUTHORITY_WIDENING", `unknown denied authority actions: ${deniedActionExpansion.unknownActions.join(", ")}`);
   }
   const canonicalisePath = (path: string): string => canonicalAuthorityPath(workspaceRoot, path);
-  const workspaceRoots = [...new Set(authority.workspaceRoots.map(canonicalisePath))].sort();
-  const sourcePaths = [...new Set(authority.sourcePaths.map(canonicalisePath))].sort();
-  const artifactPaths = [...new Set(authority.artifactPaths.map(canonicalisePath))].sort();
+  const workspaceRoots = [...new Set(parsed.workspaceRoots.map(canonicalisePath))].sort();
+  const sourcePaths = [...new Set(parsed.sourcePaths.map(canonicalisePath))].sort();
+  const artifactPaths = [...new Set(parsed.artifactPaths.map(canonicalisePath))].sort();
   if (workspaceRoots.length === 0 || sourcePaths.some((path) => !workspaceRoots.some((root) => pathContains(root, path))) || artifactPaths.some((path) => !workspaceRoots.some((root) => pathContains(root, path)))) {
     throw new FabricError("AUTHORITY_WIDENING", "source and artifact paths must be inside an authority workspace root");
   }
   return {
+    schemaVersion: 2,
+    approval: parsed.approval,
     workspaceRoots,
     sourcePaths,
     artifactPaths,
     actions: actionExpansion.operations,
-    deniedPaths: [...new Set([
-      ...(parent?.deniedPaths ?? []),
-      ...(authority.deniedPaths ?? []).map(canonicalisePath),
-    ])].sort(),
-    deniedActions: [...new Set([...(parent?.deniedActions ?? []), ...deniedActionExpansion.operations])].sort(),
-    disclosure: normaliseDisclosure(authority.disclosure),
+    deniedPaths: [...new Set(parsed.deniedPaths.map(canonicalisePath))].sort(),
+    deniedActions: [...new Set(deniedActionExpansion.operations)].sort(),
+    prohibitedActions: [...new Set(parsed.prohibitedActions)].sort(),
+    disclosure: normaliseDisclosure(parsed.disclosure),
+    secrets: parsed.secrets.access === "none"
+      ? parsed.secrets
+      : { access: "use-without-disclosure", references: [...parsed.secrets.references].sort() },
+    deployment: !parsed.deployment.allowed
+      ? parsed.deployment
+      : { allowed: true, targets: [...parsed.deployment.targets].sort() },
+    irreversibleActions: !parsed.irreversibleActions.allowed
+      ? parsed.irreversibleActions
+      : { allowed: true, actionIds: [...parsed.irreversibleActions.actionIds].sort() },
+    network: parsed.network.toolEgress === "none"
+      ? parsed.network
+      : { toolEgress: "allowlist", allowedHosts: [...parsed.network.allowedHosts].sort() },
     expiresAt: new Date(expires).toISOString(),
-    budget: Object.fromEntries(Object.entries(authority.budget).sort(([left], [right]) => left.localeCompare(right))),
+    budget: Object.fromEntries(Object.entries(parsed.budget).sort(([left], [right]) => left.localeCompare(right))),
   };
 }
 
@@ -558,54 +565,12 @@ function isNumberRecord(value: unknown): value is Record<string, number> {
   return isRow(value) && Object.values(value).every((item) => typeof item === "number");
 }
 
-function isStoredAuthority(value: unknown): value is StoredAuthority {
-  return (
-    isRow(value) &&
-    isStringArray(value.workspaceRoots) &&
-    isStringArray(value.sourcePaths) &&
-    isStringArray(value.artifactPaths) &&
-    isStringArray(value.actions) && value.actions.every(isAgentAuthorityOperation) &&
-    isStringArray(value.deniedPaths) &&
-    isStringArray(value.deniedActions) && value.deniedActions.every(isAgentAuthorityOperation) &&
-    isRow(value.disclosure) &&
-    (value.disclosure.level === "allowed" || value.disclosure.level === "forbidden" || (value.disclosure.level === "scoped" && isStringArray(value.disclosure.scopes))) &&
-    typeof value.expiresAt === "string" &&
-    isNumberRecord(value.budget)
-  );
-}
-
-function parseAuthority(serialised: string): StoredAuthority {
-  const value: unknown = JSON.parse(serialised);
-  if (!isStoredAuthority(value)) {
-    throw new Error("stored authority is invalid");
-  }
-  return value;
+function parseAuthority(record: Row): StoredAuthority {
+  return readStoredAuthority(record);
 }
 
 function authorityContained(child: StoredAuthority, parent: StoredAuthority): boolean {
-  const pathSets: Array<[string[], string[]]> = [
-    [child.workspaceRoots, parent.workspaceRoots],
-    [child.sourcePaths, parent.sourcePaths],
-    [child.artifactPaths, parent.artifactPaths],
-  ];
-  if (pathSets.some(([children, parents]) => children.some((path) => !parents.some((root) => pathContains(root, path))))) {
-    return false;
-  }
-  if (child.actions.some((action) => !parent.actions.includes(action))) {
-    return false;
-  }
-  if (parent.deniedPaths.some((path) => !child.deniedPaths.includes(path)) || parent.deniedActions.some((action) => !child.deniedActions.includes(action))) {
-    return false;
-  }
-  if (!disclosureContained(child.disclosure, parent.disclosure)) {
-    return false;
-  }
-  if (Date.parse(child.expiresAt) > Date.parse(parent.expiresAt)) {
-    return false;
-  }
-  return Object.entries(child.budget).every(
-    ([dimension, value]) => parent.budget[dimension] !== undefined && value <= parent.budget[dimension],
-  );
+  return authorityEnvelopeV2Contained(child, parent);
 }
 
 function capabilityToken(key: string, runId: string, agentId: string, principalGeneration: number): string {
@@ -2312,7 +2277,7 @@ export class Fabric {
         .sort((left, right) => left.seat.localeCompare(right.seat))
         .map((binding) => {
           const agent = rowOrNotFound(this.#database.prepare(`
-            SELECT agent.lifecycle, authority.authority_json,
+            SELECT agent.lifecycle, authority.authority_json, authority.authority_hash,
                    MAX(capability.principal_generation) AS principal_generation
               FROM agents agent
               JOIN authorities authority ON authority.authority_id=agent.authority_id
@@ -2320,7 +2285,7 @@ export class Fabric {
                 ON capability.run_id=agent.run_id AND capability.agent_id=agent.agent_id
              WHERE agent.run_id=? AND agent.agent_id=?
                AND capability.revoked_at IS NULL AND capability.expires_at>?
-             GROUP BY agent.lifecycle, authority.authority_json
+             GROUP BY agent.lifecycle, authority.authority_json, authority.authority_hash
           `).get(input.runId, binding.agentId, this.#clock()), `current MCP agent ${binding.agentId}`);
           if (agent.lifecycle === "archived" || agent.lifecycle === "suspended") {
             throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", `MCP agent ${binding.agentId} is not active`);
@@ -2329,7 +2294,7 @@ export class Fabric {
           if (principalGeneration !== binding.expectedPrincipalGeneration) {
             throw new FabricError("STALE_PRINCIPAL_GENERATION", `MCP agent ${binding.agentId} principal generation changed`);
           }
-          const authority = parseAuthority(stringField(agent, "authority_json"));
+          const authority = parseAuthority(agent);
           if (Date.parse(authority.expiresAt) < expiresAt) {
             throw new FabricError("AUTHORITY_WIDENING", `MCP credential for ${binding.agentId} outlives its authority`);
           }
@@ -2470,7 +2435,7 @@ export class Fabric {
   verifyProtocolCredential(token: string): VerifiedProtocolCredential {
     const authenticated = this.#database.prepare(`
       SELECT c.run_id, c.agent_id, c.principal_generation, c.expires_at, c.revoked_at,
-             a.authority_json, r.project_session_id,
+             a.authority_json, a.authority_hash, r.project_session_id,
              member.generation AS mcp_seat_generation,
              active.generation AS active_mcp_seat_generation
         FROM capabilities c
@@ -2498,7 +2463,7 @@ export class Fabric {
       throw new FabricError("AUTHENTICATION_FAILED", "protocol credential is expired or revoked");
     }
     assertActiveMcpSeatGeneration(authenticated);
-    const authority = parseAuthority(stringField(authenticated, "authority_json"));
+    const authority = parseAuthority(authenticated);
     const denied = new Set(authority.deniedActions);
     return {
       principal: {
@@ -3116,7 +3081,7 @@ export class Fabric {
   assertCapability(runId: string, agentId: string, tokenHash: string, requiredOperation: FabricOperation, allowSuspended = false): void {
     const row = this.#database
       .prepare(`
-        SELECT c.expires_at,c.revoked_at,a.authority_json,g.lifecycle,
+        SELECT c.expires_at,c.revoked_at,a.authority_json,a.authority_hash,g.lifecycle,
                member.generation AS mcp_seat_generation,
                active.generation AS active_mcp_seat_generation
           FROM capabilities c
@@ -3135,7 +3100,7 @@ export class Fabric {
       throw new FabricError("AUTHENTICATION_FAILED", "capability is expired, revoked or unknown");
     }
     assertActiveMcpSeatGeneration(row);
-    const authority = parseAuthority(stringField(row, "authority_json"));
+    const authority = parseAuthority(row);
     if (authority.deniedActions.includes(requiredOperation) || !authority.actions.includes(requiredOperation)) {
       throw new FabricError("CAPABILITY_FORBIDDEN", `authority does not permit ${requiredOperation}`);
     }
@@ -3208,7 +3173,7 @@ export class Fabric {
       assertRunAcceptingWork(this.#database, runId);
       const parentRow = rowOrNotFound(
         this.#database
-          .prepare("SELECT authority_json FROM authorities WHERE authority_id = ? AND run_id = ?")
+          .prepare("SELECT authority_json, authority_hash FROM authorities WHERE authority_id = ? AND run_id = ?")
           .get(input.parentAuthorityId, runId),
         "parent authority",
       );
@@ -3219,8 +3184,8 @@ export class Fabric {
       if (stringField(actorRow, "authority_id") !== input.parentAuthorityId) {
         throw new FabricError("CAPABILITY_FORBIDDEN", "actor does not hold the parent authority");
       }
-      const parent = parseAuthority(stringField(parentRow, "authority_json"));
-      const child = normaliseAuthority(input.authority, this.#workspaceRootForRun(runId), parent);
+      const parent = parseAuthority(parentRow);
+      const child = normaliseAuthority(input.authority, this.#workspaceRootForRun(runId));
       if (!authorityContained(child, parent)) {
         throw new FabricError("AUTHORITY_WIDENING", "child authority exceeds its parent");
       }
@@ -3266,7 +3231,7 @@ export class Fabric {
     assertRunAcceptingWork(this.#database, runId);
     const authorityRow = rowOrNotFound(
       this.#database
-        .prepare("SELECT authority_json, parent_authority_id FROM authorities WHERE authority_id = ? AND run_id = ?")
+        .prepare("SELECT authority_json, authority_hash, parent_authority_id FROM authorities WHERE authority_id = ? AND run_id = ?")
         .get(input.authorityId, runId),
       "authority",
     );
@@ -3277,7 +3242,7 @@ export class Fabric {
     if (authorityRow.parent_authority_id !== stringField(actorRow, "authority_id")) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "actor cannot register an agent for this authority");
     }
-    const authority = parseAuthority(stringField(authorityRow, "authority_json"));
+    const authority = parseAuthority(authorityRow);
     const existing = this.#database.prepare(`
       SELECT g.parent_agent_id, g.authority_id, g.provider_session_ref, c.principal_generation, c.revoked_at, b.adapter_id
         FROM agents g LEFT JOIN capabilities c ON c.run_id = g.run_id AND c.agent_id = g.agent_id
@@ -4368,7 +4333,7 @@ export class Fabric {
       () => {
         this.#assertChair(runId, actorAgentId);
         const current = rowOrNotFound(this.#database.prepare(`
-          SELECT c.principal_generation, a.authority_json
+          SELECT c.principal_generation, a.authority_json, a.authority_hash
             FROM capabilities c JOIN agents g ON g.run_id = c.run_id AND g.agent_id = c.agent_id
             JOIN authorities a ON a.authority_id = g.authority_id
            WHERE c.run_id = ? AND c.agent_id = ? AND c.revoked_at IS NULL
@@ -4378,7 +4343,7 @@ export class Fabric {
         if (generation !== input.expectedPrincipalGeneration) throw new FabricError("STALE_PRINCIPAL_GENERATION", "principal generation changed");
         const nextGeneration = generation + 1;
         const token = capabilityToken(this.#capabilityKey, runId, input.agentId, nextGeneration);
-        const authority = parseAuthority(stringField(current, "authority_json"));
+        const authority = parseAuthority(current);
         this.#database.prepare("UPDATE capabilities SET revoked_at = ? WHERE run_id = ? AND agent_id = ? AND revoked_at IS NULL").run(this.#clock(), runId, input.agentId);
         this.#database.prepare("INSERT INTO capabilities(token_hash, run_id, agent_id, principal_generation, expires_at) VALUES (?, ?, ?, ?, ?)").run(sha256(token), runId, input.agentId, nextGeneration, Date.parse(authority.expiresAt));
         this.#event(runId, "capability-rotated", actorAgentId, { agentId: input.agentId, priorGeneration: generation, principalGeneration: nextGeneration });
@@ -4398,12 +4363,12 @@ export class Fabric {
     const actor = rowOrNotFound(
       this.#database
         .prepare(
-          "SELECT a.authority_json FROM agents g JOIN authorities a ON a.authority_id = g.authority_id WHERE g.run_id = ? AND g.agent_id = ?",
+          "SELECT a.authority_json, a.authority_hash FROM agents g JOIN authorities a ON a.authority_id = g.authority_id WHERE g.run_id = ? AND g.agent_id = ?",
         )
         .get(runId, actorAgentId),
       "agent authority",
     );
-    const authority = parseAuthority(stringField(actor, "authority_json"));
+    const authority = parseAuthority(actor);
     if (
       scopes.some(
         (scope) =>
@@ -6509,7 +6474,6 @@ export class Fabric {
         relativePath: input.relativePath,
         digest: input.sha256,
         verifyBytes: false,
-        enforcePathAuthority: false,
       });
       const result: ArtifactResult = {
         artifactId: registered.evidenceId,
@@ -6943,55 +6907,18 @@ export class Fabric {
     validateCurrent = true,
   ): Record<string, unknown> {
     const row = rowOrNotFound(
-      this.#database.prepare("SELECT authority_json FROM authorities WHERE run_id = ? AND authority_id = ?").get(runId, authorityId),
+      this.#database.prepare("SELECT authority_json, authority_hash FROM authorities WHERE run_id = ? AND authority_id = ?").get(runId, authorityId),
       "provider authority",
     );
-    const authority = parseAuthority(stringField(row, "authority_json"));
-    if (validateCurrent && Date.parse(authority.expiresAt) <= this.#clock()) {
-      throw new FabricError("AUTHENTICATION_FAILED", "provider authority has expired");
-    }
-    const providerDisclosure = authority.disclosure.level === "allowed" ||
-      (authority.disclosure.level === "scoped" && authority.disclosure.scopes.includes("approved-provider"));
-    if (validateCurrent && !providerDisclosure) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "authority does not permit disclosure to an approved provider");
-    }
-    const forbiddenControls = [
-      "allowedTools",
-      "disallowedTools",
-      "approvalPolicy",
-      "permissions",
-      "permissionMode",
-      "sandbox",
-      "dangerouslySkipPermissions",
-      "developerInstructions",
-      "baseInstructions",
-      "modelProvider",
-      "serviceTier",
-      "readOnlyRoot",
-    ];
-    const forbidden = forbiddenControls.find((field) => Object.hasOwn(payload, field));
-    if (forbidden !== undefined) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", `provider payload cannot override trusted control ${forbidden}`);
-    }
-    if (payload.cwd !== undefined && typeof payload.cwd !== "string") {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "provider cwd must be a workspace-relative path");
-    }
-    const root = this.#workspaceRootForRun(runId);
-    const relativeCwd = canonicalAuthorityPath(root, payload.cwd ?? authority.sourcePaths[0] ?? ".");
-    if (
-      !authority.sourcePaths.some((allowed) => pathContains(allowed, relativeCwd)) ||
-      authority.deniedPaths.some((denied) => scopesOverlap(denied, relativeCwd))
-    ) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "provider cwd is outside delegated authority");
-    }
-    return {
-      ...payload,
-      cwd: resolve(root, relativeCwd),
-      readOnlyRoot: resolve(root, relativeCwd),
-      allowedTools: ["Read", "Glob", "Grep"],
-      approvalPolicy: "never",
-      sandbox: "read-only",
-    };
+    const authority = parseAuthority(row);
+    return compileProviderPayload({
+      authority,
+      workspaceRoot: () => this.#workspaceRootForRun(runId),
+      payload,
+      ...(validateCurrent
+        ? { now: this.#clock(), validateCurrent: true }
+        : { now: null, validateCurrent: false }),
+    });
   }
 
   #assertProviderPrincipalActive(runId: string, agentId: string): void {

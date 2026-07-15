@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AUTHORITY_ACTION_VOCABULARY, openFabric, startFabricDaemon } from "../../../src/index.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 import { parseCliJson, runSourceCli } from "../../support/cli-process.ts";
 import { writeDeliveryRunFixture } from "../../support/delivery-run-fixture.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
@@ -28,6 +29,7 @@ async function createInspectionDatabase(databasePath: string, runId: string, pro
       chair: {
         agentId: "chair",
         authority: {
+          ...TEST_AUTHORITY_V2_FIELDS,
           workspaceRoots: ["."],
           sourcePaths: ["."],
           artifactPaths: [".agent-run"],
@@ -104,6 +106,7 @@ describe("Stage 1 command-line inspection", () => {
       chair: {
         agentId: "chair",
         authority: {
+          ...TEST_AUTHORITY_V2_FIELDS,
           workspaceRoots: ["."],
           sourcePaths: ["."],
           artifactPaths: [".agent-run/run-receipt"],

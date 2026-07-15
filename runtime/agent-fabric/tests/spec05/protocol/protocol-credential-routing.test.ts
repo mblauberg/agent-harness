@@ -34,11 +34,11 @@ describe("public protocol credential routing", () => {
             agentId: "chair",
             authority: {
               ...ROOT_AUTHORITY,
-              actions: [
+              actions: [...new Set([
                 ...ROOT_AUTHORITY.actions,
                 FABRIC_OPERATIONS.scopedGateCheck,
                 FABRIC_OPERATIONS.scopedGateCreate,
-              ],
+              ])],
             },
           },
         });

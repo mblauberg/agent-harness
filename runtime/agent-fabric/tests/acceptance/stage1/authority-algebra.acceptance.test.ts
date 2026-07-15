@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,8 +9,99 @@ import Database from "better-sqlite3";
 import { openFabric } from "../../../src/index.ts";
 import { FABRIC_OPERATIONS } from "../../../src/domain/operations.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 
 describe("Stage 1 authority algebra", () => {
+  it("rejects a valid-V2 stored action widening whose canonical hash no longer matches", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "fabric-authority-hash-tamper-"));
+    const databasePath = join(workspaceRoot, "fabric.sqlite3");
+    const authority = {
+      ...TEST_AUTHORITY_V2_FIELDS,
+      workspaceRoots: ["."],
+      sourcePaths: ["."],
+      artifactPaths: ["."],
+      actions: [FABRIC_OPERATIONS.acquireWriteLease],
+      disclosure: { level: "scoped", scopes: ["local"] } as const,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      budget: {},
+    };
+    let fabric = await openFabric({ databasePath, workspaceRoots: [workspaceRoot] });
+    try {
+      const run = await createCurrentSessionRun({
+        databasePath,
+        workspaceRoot,
+        runId: "authority-hash-tamper",
+        chair: { agentId: "chair", authority },
+      });
+      await fabric.close();
+
+      const database = new Database(databasePath);
+      const stored = database.prepare("SELECT authority_json FROM authorities WHERE authority_id = ?")
+        .get(run.chairAuthorityId) as { authority_json: string };
+      const widened = JSON.parse(stored.authority_json) as Record<string, unknown>;
+      widened.actions = [FABRIC_OPERATIONS.acquireWriteLease, FABRIC_OPERATIONS.getRunStatus];
+      database.prepare("UPDATE authorities SET authority_json = ? WHERE authority_id = ?")
+        .run(JSON.stringify(widened), run.chairAuthorityId);
+      database.close();
+
+      fabric = await openFabric({ databasePath, workspaceRoots: [workspaceRoot] });
+      await expect(fabric.connect(run.chairCapability).getRunStatus({ runId: run.runId }))
+        .rejects.toThrow(/stored authority hash does not match canonical JSON/u);
+    } finally {
+      await fabric.close().catch(() => undefined);
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["sourcePaths", "artifactPaths"] as const)(
+    "rejects syntactically valid stored %s outside workspaceRoots",
+    async (field) => {
+      const workspaceRoot = await mkdtemp(join(tmpdir(), "fabric-authority-semantic-tamper-"));
+      const databasePath = join(workspaceRoot, "fabric.sqlite3");
+      await mkdir(join(workspaceRoot, "project", "src"), { recursive: true });
+      const authority = {
+        ...TEST_AUTHORITY_V2_FIELDS,
+        workspaceRoots: ["project"],
+        sourcePaths: ["project/src"],
+        artifactPaths: ["project/artifacts"],
+        actions: [FABRIC_OPERATIONS.acquireWriteLease],
+        disclosure: { level: "scoped", scopes: ["local"] } as const,
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        budget: { turns: 1 },
+      };
+      let fabric = await openFabric({ databasePath, workspaceRoots: [workspaceRoot] });
+      try {
+        const run = await createCurrentSessionRun({
+          databasePath,
+          workspaceRoot,
+          runId: `semantic-tamper-${field}`,
+          chair: { agentId: "chair", authority },
+        });
+        await fabric.close();
+
+        const database = new Database(databasePath);
+        const row = database.prepare("SELECT authority_json FROM authorities WHERE authority_id = ?")
+          .get(run.chairAuthorityId) as { authority_json: string };
+        const stored = JSON.parse(row.authority_json) as Record<string, unknown>;
+        stored[field] = ["outside"];
+        const serialised = JSON.stringify(stored);
+        database.prepare("UPDATE authorities SET authority_json = ?, authority_hash = ? WHERE authority_id = ?")
+          .run(serialised, createHash("sha256").update(serialised).digest("hex"), run.chairAuthorityId);
+        database.close();
+
+        fabric = await openFabric({ databasePath, workspaceRoots: [workspaceRoot] });
+        await expect(fabric.connect(run.chairCapability).acquireWriteLease({
+          scope: ["project/src"],
+          ttlMs: 1_000,
+          commandId: `semantic-tamper-${field}:lease`,
+        })).rejects.toThrow(/stored authority is invalid/u);
+      } finally {
+        await fabric.close().catch(() => undefined);
+        await rm(workspaceRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("preserves a canonical delegated path when its filesystem target changes before restart", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "fabric-authority-restart-"));
     const databasePath = join(workspaceRoot, "fabric.sqlite3");
@@ -18,6 +110,7 @@ describe("Stage 1 authority algebra", () => {
       mkdir(join(workspaceRoot, "secret")),
     ]);
     const rootAuthority = {
+      ...TEST_AUTHORITY_V2_FIELDS,
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: ["."],
@@ -74,6 +167,7 @@ describe("Stage 1 authority algebra", () => {
       mkdir(join(workspaceRoot, "secret")),
     ]);
     const rootAuthority = {
+      ...TEST_AUTHORITY_V2_FIELDS,
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: ["."],
@@ -115,8 +209,9 @@ describe("Stage 1 authority algebra", () => {
       delete stored.deniedPaths;
       delete stored.deniedActions;
       stored.disclosure = ["local"];
-      database.prepare("UPDATE authorities SET authority_json = ? WHERE authority_id = ?")
-        .run(JSON.stringify(stored), childAuthority.authorityId);
+      const serialised = JSON.stringify(stored);
+      database.prepare("UPDATE authorities SET authority_json = ?, authority_hash = ? WHERE authority_id = ?")
+        .run(serialised, createHash("sha256").update(serialised).digest("hex"), childAuthority.authorityId);
       database.close();
 
       await rm(join(workspaceRoot, "src"), { recursive: true });
@@ -139,6 +234,7 @@ describe("Stage 1 authority algebra", () => {
     const databasePath = join(configuredRoot, "fabric.sqlite3");
     await mkdir(projectRoot);
     const authority = {
+      ...TEST_AUTHORITY_V2_FIELDS,
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: ["."],
@@ -183,6 +279,7 @@ describe("Stage 1 authority algebra", () => {
         chair: {
           agentId: "chair",
           authority: {
+            ...TEST_AUTHORITY_V2_FIELDS,
             workspaceRoots: [workspaceRoot],
             sourcePaths: [join(workspaceRoot, "src")],
             artifactPaths: [runDirectory],
@@ -214,6 +311,7 @@ describe("Stage 1 authority algebra", () => {
         chair: {
           agentId: "chair",
           authority: {
+            ...TEST_AUTHORITY_V2_FIELDS,
             workspaceRoots: ["."],
             sourcePaths: ["src"],
             artifactPaths: [".agent-run"],
