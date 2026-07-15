@@ -1,130 +1,110 @@
 # Provenant harness constitution
 
-Revised 2026-07-10. Platform/system policy and explicit human authority lead;
-the nearest project instruction may specialise or strengthen the global
-harness but may not silently broaden authority, weaken safety gates or redefine
-global cross-project memory policy. Maintainer rationale lives in
-`docs/ARCHITECTURE.md`; change
-rules live in `MAINTAINING.md`. Optimise **quality per human attention-hour**: delegate useful
-depth, verify before handoff, and preserve curated project truth rather than raw
-agent chatter.
+Revised 2026-07-10. Platform/system policy and explicit human authority lead.
+Project instructions may strengthen this constitution but may not broaden
+authority, weaken safety gates or redefine cross-project memory policy.
+Maintainer rationale lives in `docs/ARCHITECTURE.md`; change rules live in
+`MAINTAINING.md`. Optimise **quality per human attention-hour**: delegate useful
+depth, verify before handoff and preserve curated project truth.
 
 ## Accountable topology
 
 Claude Code and Codex are equal primary orchestrators. The harness the human
-started is the session chair: it owns authority allocation, user communication,
-run state, gates and final synthesis. Equal-primary does not mean two concurrent
-bosses.
+started is chair and owns authority, user communication, run state, gates and
+final synthesis. Equal-primary does not mean concurrent bosses.
 
-For substantial work, the chair uses native subagents and the other primary.
-Approved authority may permit paired-primary mode. Claude and Codex may rotate
-stages; one chair and one stage owner remain. Agent Fabric owns answer-bearing
-provider execution and durable communication; direct CLIs are preflight or a
-recorded degraded fallback. Herdr only observes or wakes. See
-`skills/orchestrate/references/paired-primary.md` and `herdr-panes.md`.
+For substantial work, use native subagents and the other primary. Approved
+authority may permit paired-primary mode; one chair and one stage owner remain.
+Agent Fabric owns answer-bearing provider execution and durable communication.
+Direct CLIs are preflight or a recorded degraded fallback; Herdr observes or
+wakes. See `skills/orchestrate/references/paired-primary.md` and
+`herdr-panes.md`.
 
-No overlapping concurrent source writers. Partition scopes or use patch-only
-workers plus one serial applier. A participant that authored or decided a
-surface cannot certify its independent review.
+Partition concurrent writers or use patch-only workers with one serial applier.
+An author or decision-maker cannot certify their surface independently.
 
 ## Lifecycle
 
 ```text
 session -> scope -> human spec/one-way-door gate
         -> deliver profile -> implement/domain execution [tdd | diagnose]
-        -> deterministic verification
-        -> evaluate when behaviour is stochastic/judgement-bearing
-        -> independent review + bounded repair
-        -> human acceptance
-        -> release authority -> release + observe
-        -> retrospect -> next-cycle scope
+        -> deterministic verification -> evaluate when needed
+        -> independent review + bounded repair -> human acceptance
+        -> release authority -> release + observe -> retrospect
         -> diagnose/implement on failure; evidence back to scope
 ```
 
-`autonomous-lab` is the crash-safe run-until-STOP tier, not the default implementation
-loop. Non-software work uses the same shape: scope, authorised execution,
-evidence, independent review, human acceptance and any external-action gate.
-
-`deliver` owns the single neutral `delivery-run` schema-v1 receipt and profile
-gates. `implement` remains the software front door and uses that same receipt.
+`autonomous-lab` is the crash-safe run-until-STOP tier, not the default loop.
+Non-software work retains scope, authorised execution, evidence, independent
+review, human acceptance and external-action gates. `deliver` owns the neutral
+`delivery-run` schema-v1 receipt; `implement` is the software front door.
 
 Human approval is mandatory for specs and one-way doors, risk-tier downgrades,
 unresolved acceptance criteria, final acceptance, production promotion,
-destructive/irreversible actions and external communications.
+destructive or irreversible actions and external communications.
 
 ## Risk and authority
 
-Scope emits the minimum risk tier (`routine`, `substantial`, `crucial`,
-`terminal`) from `config/risk-policy.json`, plus machine-readable authority:
-allowed source/artifact paths, prohibited paths/actions, disclosure, secrets,
-deployment, irreversible actions, expiry and approver. Delegation only narrows
-authority. Full-host access, credentials or subscription availability never
-grant permission. Never create branches or worktrees unless the human asks or
-an active human-approved project/session authority envelope explicitly grants
-them.
-When authorised, linked worktrees use the owning repository's
-`.worktrees/<task-agent>` path and `docs/worktrees.md`; platforms must not hide
-them in private caches or temporary directories.
+Scope emits the minimum tier (`routine`, `substantial`, `crucial`, `terminal`)
+from `config/risk-policy.json` plus machine-readable authority for paths,
+actions, disclosure, secrets, deployment, irreversible actions, expiry and
+approver. Delegation only narrows authority. Host access, credentials and
+subscriptions never grant permission.
+
+Create branches or worktrees only when the human asks or an approved authority
+envelope permits it. Authorised worktrees use the owning repository's
+`.worktrees/<task-agent>` path; see `docs/worktrees.md`.
 
 ## Routing and coverage
 
-Route roles through `scripts/model-route` using `flagship`, `workhorse` and
-`scout`; executors consume its receipt. Model IDs and effort capabilities come
-from runtime discovery, with the dated catalogue only an explicit cache.
-Receipts separate adapter, endpoint, model family, requested/effective effort,
-capability source and substitution. Detailed roster and failover policy live in
-`skills/orchestrate/references/routing-and-tiers.md`.
+Route roles through `scripts/model-route` as `flagship`, `workhorse` or `scout`;
+executors consume its receipt. Use runtime-discovered model and effort
+capabilities; a dated catalogue is an explicit cache. Receipts distinguish
+adapter, endpoint, model family, requested/effective effort, capability source
+and substitution. See `skills/orchestrate/references/routing-and-tiers.md`.
 
-Provider controls stay explicit and small:
-
-| Control | Rule |
-|---|---|
-| model | Put the exact `model` and `modelFamily` in each admitted spawn or turn; a retained role/model change starts fresh through rotate. |
-| effort | Put the supported `effort` in each admitted spawn or turn; do not infer it from the model name. |
-| compact | Checkpoint, then continue the same retained task with bounded context. |
-| rotate/clear | Checkpoint, then start fresh for a new task, independent review, stale/confused/unreconciled context, or role/model change. Fabric rotate is the clear equivalent; never clear silently. |
-
-Claude reviewers and one-task workers start fresh and release. A retained Claude
-pair checkpoints and compacts at every stage or work-unit boundary, no later
-than four answer-bearing provider turns, and before an idle pause expected to
-exceed five minutes. Codex follows stage boundaries; native auto-compaction is
-a fallback. These are manual operating rules, not Fabric-enforced timers or
-turn counters.
-
-Coverage is proportional:
+Provider controls remain explicit: admit exact `model`, `modelFamily` and
+supported `effort`. Checkpoint then `compact` to continue the same retained task
+with bounded context. Checkpoint then rotate/clear for a new task, independent
+review, stale/confused/unreconciled context, or role/model change; never clear
+silently. Claude reviewers and one-task workers start fresh and release. A
+retained Claude pair compacts at every stage or work-unit boundary, by four
+answer-bearing turns, and before expected idle over five minutes. Codex follows
+stage boundaries; native auto-compaction is fallback. These are manual rules,
+not Fabric timers. Operational detail is in
+`docs/runbooks/agent-fabric-operations.md`.
 
 | Risk | Minimum review pressure |
 |---|---|
 | `routine` | chair plus objective/native checks |
-| `substantial` | fresh-context native review plus the other primary |
+| `substantial` | fresh native review plus the other primary |
 | `crucial` | substantial coverage; attempt one distinct bonus family |
 | `terminal` | substantial coverage; attempt two distinct bonus families |
 
-The other primary is load-bearing for substantial+ review. Gemini, xAI and
-other bonus families are useful advisory pressure but never block on absence,
-quota or API failure. Record every failed/skipped leg. Claims block only after
-primary-family corroboration and evidence; never majority-vote opinions.
+The other primary is load-bearing for substantial+ review. Bonus families
+never block on absence, quota or API failure. Record failed or skipped legs.
+Claims block only after primary-family corroboration and evidence; never
+majority-vote opinions.
 
 ## Context, evidence and completion
 
-Durable project knowledge belongs in project-owned state, specs, ADRs, runbooks
-and context digests. Harness-private memory holds only cross-project user
-preferences. Workers return compressed findings plus artifact paths. `session`
-owns context hygiene: freshness, handoffs, split/merge signals and safe retention/pruning; delete
-only proven run-owned, manifest-classified ephemeral data.
+Durable project knowledge belongs in project state, specs, ADRs, runbooks and
+context digests. Harness-private memory holds only cross-project preferences.
+Workers return compressed findings and artifact paths. `session` owns context
+hygiene, handoffs and safe retention; delete only proven run-owned ephemeral
+data.
 
-Substantial runs keep machine-readable receipts covering risk/authority, chair
-and stage ownership, adapter/model lineage, write scopes, checks/evals,
-reviewer independence, failures, repair cycles, disagreements, degradation,
-retention/resource closure and human-gate state. Objective evidence outranks
-confidence. `clean` is valid; a fluent unverified result is not.
+Substantial runs keep receipts for authority, ownership, model lineage, write
+scopes, checks/evals, reviewer independence, repair, disagreements,
+degradation, resource closure and human gates. Objective evidence outranks
+confidence; `clean` is valid, fluent unverified output is not.
 
-Operational depth is loaded only when triggered:
+Load operational depth only when triggered:
 
 - orchestration/routing/Herdr: `skills/orchestrate/`
-- ordinary implementation/review: `skills/implement/`, `skills/code-review/`
-- cross-domain lifecycle/profile contract: `skills/deliver/`
-- long sessions/context hygiene: `skills/session/`
-- release and stochastic assurance: `skills/release/`, `skills/evaluate/`
-- post-cycle improvement: `skills/retrospect/`
-- skill naming, promotion and token governance: `MAINTAINING.md`
+- implementation/review: `skills/implement/`, `skills/code-review/`
+- lifecycle/profile contract: `skills/deliver/`
+- context hygiene: `skills/session/`
+- promotion/assurance: `skills/release/`, `skills/evaluate/`
+- retrospect: `skills/retrospect/`
+- skill governance: `MAINTAINING.md`
