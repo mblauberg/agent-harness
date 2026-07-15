@@ -98,6 +98,59 @@ generation and compare-and-set revision. It
 shall label every projected fact with source, revision and freshness: `live`,
 `snapshot`, `stale`, `unavailable` or `conflict`.
 
+### Run-scoped operator projection
+
+The Adaptive Attention Deck and run drill-down are presentation compositions of
+the eight canonical Console views. They require a current run-scoped operator
+projection; they do not create another run aggregate, issue database, workflow
+engine or narrative authority.
+
+Every projection page and detail read used by a run drill-down shall bind the
+exact `projectSessionId` and a discriminated target: coordination run or delivery
+run/workstream. Project-scoped run discovery may include several sessions, but
+each row retains its session and run-kind identity. Run-scoped Work, Agents,
+Evidence and Activity reads share one snapshot revision/read transaction or
+visibly report mixed freshness; the Console shall not silently join unrelated or
+differently scoped pages.
+
+The current protocol cut shall add only the facts needed to render the accepted
+operator experience:
+
+1. **Run identity and plan.** Run summaries/detail carry run kind, stable parent
+   session/coordination/delivery/workstream IDs, lead, accepted-scope ref,
+   current-plan ref/revision and last-event time. A coordination run and its
+   delivery workstreams remain distinct rows or an explicit parent/child group.
+2. **Declared progress.** Run detail carries a tagged `finite`, `open` or
+   `unknown` progress fact for an exact plan revision. The finite arm carries a
+   denominator and mutually consistent task-state counts. The open arm carries
+   known counts without a denominator. Neither arm carries an inferred
+   percentage or ETA. Stale, unavailable and conflicting facts retain normal
+   projection provenance.
+3. **Workflow facts.** Work items expose their authoritative bounded objective,
+   dependency IDs, parent/workstream/run binding, state, owner, checks, barriers,
+   write scope, plan revision and source freshness. Current and remaining work
+   are server-scoped task states, not a Console count over one incomplete page.
+4. **Topology facts.** Agent items expose the Fabric-owned team, lead/supervisor
+   relationship and topology revision needed to construct a tree. Current task
+   is present only from an authoritative task claim/lease. Provider process or
+   pane presence is separate visibility evidence. Opaque native children and
+   unsupported relationships remain `Unobserved` or `Unknown`.
+5. **Operational narrative.** Activity items may carry daemon-derived grouping
+   ID, ordinal, operation kind and source references that deterministically join
+   a message, tool operation, result, decision, failure or evidence record. The
+   original event and message-body reference remain readable. Grouping adds no
+   lifecycle or completion claim, and model-generated prose is never the
+   canonical activity summary.
+6. **Issue lens.** Gates, blocked/degraded tasks, failed checks, evidence
+   conflicts and typed connection faults remain entities of their existing
+   owners. The Console may present a run-scoped union of references to them; it
+   shall not persist or resolve a parallel `Issue` state.
+
+All new shapes are closed, codec-tested and current-only. The Console may sort,
+filter, collapse and lay out these facts. It may not fill an absent field from
+message prose, a model summary, elapsed time, process state, Herdr layout or an
+older schema.
+
 ### Package and process boundary
 
 The implementation shall preserve these independently versioned seams:
