@@ -480,16 +480,46 @@ describe("public local operator Console session", () => {
       paths,
       daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
       clientId: "console_expiring_01",
-      credentialLifetimeMs: 250,
-      attachmentLeaseMs: 100,
-      heartbeatIntervalMs: 25,
     });
     const expiredCapabilityId = expired.credential.capabilityId;
     const expiredToken = expired.credential.token;
     await expired.close();
-    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 300));
 
-    const [first, second] = await Promise.all([
+    const expiryDatabase = await import("better-sqlite3").then(({ default: Database }) =>
+      new Database(paths.databasePath, { fileMustExist: true }),
+    );
+    try {
+      expect(expiryDatabase.prepare(`
+        UPDATE operator_capabilities SET expires_at=1
+         WHERE capability_id=? AND principal_generation=1 AND revoked_at IS NULL
+      `).run(expiredCapabilityId).changes).toBe(1);
+    } finally {
+      expiryDatabase.close();
+    }
+
+    const originalProvision = FabricDaemonClient.prototype.openLocalOperatorConsoleCapability;
+    let entered = 0;
+    const bothEntered = Promise.withResolvers<void>();
+    const provisionedGenerations: number[] = [];
+    const provisionFailures: unknown[] = [];
+    const provision = vi.spyOn(
+      FabricDaemonClient.prototype,
+      "openLocalOperatorConsoleCapability",
+    ).mockImplementation(async function (this: FabricDaemonClient, input) {
+      entered += 1;
+      if (entered === 2) bothEntered.resolve();
+      await bothEntered.promise;
+      try {
+        const issued = await originalProvision.call(this, input);
+        provisionedGenerations.push(issued.principalGeneration);
+        return issued;
+      } catch (error: unknown) {
+        provisionFailures.push(error);
+        throw error;
+      }
+    });
+
+    const opened = await Promise.allSettled([
       openLocalOperatorConsoleSession({
         projectRoot: projectA,
         surface: "standalone",
@@ -504,7 +534,14 @@ describe("public local operator Console session", () => {
         daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
         clientId: "console_rotated_02",
       }),
-    ]);
+    ]).finally(() => provision.mockRestore());
+    expect(entered).toBe(2);
+    expect(provisionFailures).toEqual([]);
+    expect(provisionedGenerations).toEqual([2, 2]);
+    expect(opened.map(({ status }) => status)).toEqual(["fulfilled", "fulfilled"]);
+    if (opened[0].status === "rejected") throw opened[0].reason;
+    if (opened[1].status === "rejected") throw opened[1].reason;
+    const [first, second] = [opened[0].value, opened[1].value];
     try {
       expect(first.projectId).toBe(expired.projectId);
       expect(second.projectId).toBe(expired.projectId);
