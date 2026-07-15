@@ -577,7 +577,6 @@ describe("public local operator Console session", () => {
       daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
       clientId: "console_pagination_seed",
     });
-    await project.close();
     const database = await import("better-sqlite3").then(({ default: Database }) =>
       new Database(paths.databasePath, { fileMustExist: true }),
     );
@@ -623,15 +622,72 @@ describe("public local operator Console session", () => {
       database.close();
     }
 
-    const selected = await openLocalOperatorConsoleSession({
-      projectRoot: projectA,
-      surface: "standalone",
-      paths,
-      daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
-      clientId: "console_pagination_selected",
+    const projection = project.projectClient.projection;
+    if (projection === undefined) throw new Error("project discovery unavailable");
+    const firstPage = await projection.discover({
+      credential: project.projectCredential,
+      projectId: project.projectId,
+      after: 0,
+      limit: 100,
     });
-    expect(selected.projectSessionId).toBe("session_pagination_active");
-    await selected.close();
+    expect(firstPage).toMatchObject({
+      project: { freshness: "live", value: { projectId: project.projectId } },
+      sessions: { freshness: "live", value: { hasMore: true, nextCursor: 100 } },
+    });
+    if (firstPage.sessions.freshness !== "live") throw new Error("first discovery page unavailable");
+    expect(firstPage.sessions.value.items).toHaveLength(100);
+    expect(firstPage.sessions.value.items.every(({ state }) => state === "launch_failed")).toBe(true);
+    const secondPage = await projection.discover({
+      credential: project.projectCredential,
+      projectId: project.projectId,
+      after: firstPage.sessions.value.nextCursor,
+      limit: 100,
+    });
+    expect(secondPage).toMatchObject({
+      project: { freshness: "live", value: { projectId: project.projectId } },
+      sessions: { freshness: "live", value: { hasMore: false, nextCursor: 102 } },
+    });
+    if (secondPage.sessions.freshness !== "live") throw new Error("second discovery page unavailable");
+    expect(secondPage.sessions.value.items.map(({ projectSessionId }) => projectSessionId)).toEqual([
+      "session_pagination_terminal_000",
+      "session_pagination_active",
+    ]);
+
+    let selected: Awaited<ReturnType<typeof openLocalOperatorConsoleSession>> | undefined;
+    try {
+      selected = await openLocalOperatorConsoleSession({
+        projectRoot: projectA,
+        surface: "standalone",
+        paths,
+        daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
+        clientId: "console_pagination_selected",
+      });
+      expect(selected.attachableProjectSessions.map(({ projectSessionId }) => projectSessionId)).toEqual([
+        "session_pagination_active",
+      ]);
+      expect(selected.projectSessionId).toBe("session_pagination_active");
+      const selectedSessionId = selected.projectSessionId;
+      if (selectedSessionId === undefined) throw new Error("pagination session was not selected");
+      await expect(selected.client.projection?.snapshot({
+        credential: selected.credential,
+        projectId: selected.projectId,
+        projectSessionId: selectedSessionId,
+      })).resolves.toMatchObject({
+        session: {
+          freshness: "live",
+          value: { projectSessionId: "session_pagination_active" },
+        },
+      });
+    } finally {
+      await Promise.allSettled([
+        selected?.close() ?? Promise.resolve(),
+        project.close(),
+      ]);
+    }
+    await expectSecretsAbsent(
+      [paths.stateDirectory, paths.runtimeDirectory],
+      [project.credential.token, ...(selected === undefined ? [] : [selected.credential.token])],
+    );
   });
 
   it("fails closed for untrusted roots and never creates default authority", async () => {
