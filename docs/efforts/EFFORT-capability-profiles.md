@@ -28,11 +28,10 @@ own the architecture and mechanisms; the fourth owns the fixed 21-case,
 integrity.
 
 [Issue #22](https://github.com/mblauberg/provenant/issues/22) owns live W010
-delivery, evidence and human gates. The historical implementation pack is
-non-authoritative provenance pending its retirement under [issue
-#102](https://github.com/mblauberg/provenant/issues/102), not an active
-dependency. [Issue #23](https://github.com/mblauberg/provenant/issues/23)
-continues to own W012 reduction and the later W013 gates.
+delivery, evidence and human gates. The superseded implementation pack was
+retired from the working tree under [issue
+#102](https://github.com/mblauberg/provenant/issues/102); Git history retains
+its provenance.
 
 ## Remaining route
 

@@ -34,7 +34,7 @@ describe("Spec 05 review schemas and checked-in catalogues", () => {
     expect(validate(crossedRisk)).toBe(false);
   });
 
-  it("catalogues every Spec 05 v1.13 acceptance ID under the D-021 council gates", () => {
+  it("catalogues every Spec 05 v1.13 acceptance ID under the current semantic review gates", () => {
     const ajv = new Ajv2020({ allErrors: true, strict: true });
     const validate = ajv.compile(read("runtime/agent-fabric/schemas/spec05-delivery-requirements.v1.schema.json"));
     const catalogue = read("config/spec05-delivery-requirements.v1.json");
