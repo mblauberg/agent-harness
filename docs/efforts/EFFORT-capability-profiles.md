@@ -17,16 +17,18 @@ one pure compiler, without a legacy decoder, compatibility bridge or duplicate
 runtime schema.
 
 Normative requirements live in the standalone semantic
-[specifications](../specs/README.md) under [ADR
+[authority](../specs/agent-fabric/authority.md), [workspace
+containment](../specs/agent-fabric/workspace-containment.md) and [provider
+action](../specs/agent-fabric/provider-actions-and-adapters.md)
+specifications under [ADR
 0009](../adr/0009-standalone-semantic-specifications.md). Git owns their
-history and integrity; there are no ordered manifests, per-file hashes or
-numbered aliases.
+history and integrity.
 
-GitHub issues own current execution and acceptance state. The simplification
-pack remains retained provenance for its decision register and links from live
-ADRs, including ADR 0002, and supplies #22's fixed containment cases. It is not
-a current-status or governance owner. Issue #23/W013 owns any later retention
-or retirement decision; completing #22 alone does not retire the pack.
+GitHub issues own current execution and acceptance state. [Issue
+#22](https://github.com/mblauberg/provenant/issues/22) records the W010
+containment boundary, discarded runner evidence and human gates. Retired
+implementation notes remain available through Git history rather than as a
+live dependency.
 
 ## Remaining route
 

@@ -1,12 +1,9 @@
 # Architecture decision records
 
-Decisions ratified by the human on 2026-07-13 during the review-pack scoping
-session. Each ADR is the canonical owner of its decision. The scoping evidence,
-challenge history, decision riders and rejected-alternatives rationale are
-preserved in the simplification pack's decision register
-(`docs/provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/15_DECISION_REGISTER.md`),
-which supersedes the original review-pack register. ADRs 0009–0010 were ratified
-later, on 2026-07-15.
+Decisions were ratified by the human on 13 July 2026. Each ADR is the canonical
+owner of its decision; linked issues and Git history preserve implementation
+evidence, challenge history and retired source material. ADRs 0009–0010 were
+ratified later, on 15 July 2026.
 
 | ADR | Title | Status |
 |---|---|---|
