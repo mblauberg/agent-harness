@@ -59,6 +59,18 @@ export type HerdrDaemonActionResult =
       reason: "disabled" | "unavailable";
     }>;
 
+export type HerdrDirectSteerResult =
+  | HerdrDaemonActionResult
+  | Readonly<{
+      status: "rejected";
+      reason:
+        | "unknown-reference"
+        | "stale-reference"
+        | "scope-mismatch"
+        | "target-mismatch"
+        | "answer-bearing-reference";
+    }>;
+
 export type HerdrDirectSteerRequest = Readonly<{
   actionId: ProviderActionId;
   fireAndForget: boolean;
@@ -140,7 +152,7 @@ export class HerdrDaemonIntegration {
     return result;
   }
 
-  async executeDirectSteer(request: HerdrDirectSteerRequest): Promise<HerdrDaemonActionResult> {
+  async executeDirectSteer(request: HerdrDirectSteerRequest): Promise<HerdrDirectSteerResult> {
     if (!request.fireAndForget) throw new TypeError("direct Herdr steering requires explicit fire-and-forget acknowledgement");
     if (!/^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/u.test(request.paneRef)) {
       throw new TypeError("direct Herdr steering pane reference is invalid");
@@ -150,11 +162,14 @@ export class HerdrDaemonIntegration {
       /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u009b]/u.test(request.prompt)
     ) throw new TypeError("direct Herdr steering prompt is unsafe or exceeds its bound");
     const validation = await this.#ports.validateSteerReference(request.reference);
-    if (validation.status === "rejected") throw new TypeError(validation.reason);
+    if (validation.status === "rejected") return { status: "rejected", reason: validation.code };
+    if (validation.targetAgentId !== request.targetAgentId) {
+      return { status: "rejected", reason: "target-mismatch" };
+    }
     if (
-      validation.targetAgentId !== request.targetAgentId || validation.purpose !== "steer" ||
-      validation.requiresAck || validation.expectsResult || validation.dependentBarrierId !== null
-    ) throw new TypeError("direct Herdr steering requires a non-answer-bearing exact Fabric reference");
+      validation.purpose !== "steer" || validation.requiresAck || validation.expectsResult ||
+      validation.dependentBarrierId !== null
+    ) return { status: "rejected", reason: "answer-bearing-reference" };
     if (this.#configuration.mode === "disabled") {
       return { status: "unavailable", integration: "herdr-control-v1", reason: "disabled" };
     }

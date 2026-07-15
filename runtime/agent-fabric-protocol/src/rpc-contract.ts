@@ -15,6 +15,7 @@ import type {
   ScopedGateReadResult,
   ScopedGateResolveRequest,
 } from "./gates.js";
+import type { HerdrSteerDispatchRequest, HerdrSteerDispatchResult } from "./herdr-control.js";
 import type {
   Intake,
   IntakeDraft,
@@ -270,6 +271,7 @@ type ExtensionOperationInputMap = {
   [FABRIC_OPERATIONS.reviewCompletionRead]: ReviewCompletionReadRequestV1;
   [FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead]: ProviderRouteIntegrityRecoveryReadRequestV1;
   [FABRIC_OPERATIONS.providerContextPressureRead]: ProviderContextPressureReadRequestV1;
+  [FABRIC_OPERATIONS.herdrSteerDispatch]: HerdrSteerDispatchRequest;
   [FABRIC_OPERATIONS.topologyWaveAppend]: TopologyWaveAppendRequestV1;
   [FABRIC_OPERATIONS.topologyWaveCurrentRead]: TopologyWaveCurrentReadRequestV1;
   [FABRIC_OPERATIONS.topologyWaveList]: TopologyWaveListRequestV1;
@@ -357,6 +359,7 @@ type ExtensionOperationResultMap = {
   [FABRIC_OPERATIONS.reviewCompletionRead]: ReviewCompletionV1 | ReviewReadErrorV1;
   [FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead]: ProviderRouteIntegrityRecoveryProjectionV1 | ProviderRouteIntegrityRecoveryReadErrorV1;
   [FABRIC_OPERATIONS.providerContextPressureRead]: ProviderContextPressureReadV1;
+  [FABRIC_OPERATIONS.herdrSteerDispatch]: HerdrSteerDispatchResult;
   [FABRIC_OPERATIONS.topologyWaveAppend]: TopologyWaveAppendReceiptV1;
   [FABRIC_OPERATIONS.topologyWaveCurrentRead]: TopologyWaveCurrentReadV1;
   [FABRIC_OPERATIONS.topologyWaveList]: TopologyWaveListV1;

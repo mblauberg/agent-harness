@@ -31,6 +31,7 @@ export const OPERATION_FEATURES = [
   "chair-live-handoff.v1",
   "provider-review-evidence.v1",
   "provider-context-pressure.v1",
+  "herdr-control.v1",
   "topology-wave.v1",
 ] as const satisfies readonly OperationFeature[];
 

@@ -517,6 +517,12 @@
       "description": "Invoke the closed fabric.v1.provider-context-pressure.read operation as the authenticated Agent Fabric principal.",
       "receiptRenderer": "generic-v1"
     },
+    "fabric.v1.herdr-steer.dispatch": {
+      "projection": "tool",
+      "name": "fabric_herdr_steer_dispatch",
+      "description": "Dispatch one validated fire-and-forget Herdr steering effect; this cannot return an answer or close a barrier.",
+      "receiptRenderer": "generic-v1"
+    },
     "fabric.v1.topology-wave.append": {
       "projection": "tool",
       "name": "fabric_topology_wave_append",
@@ -1381,6 +1387,7 @@
               "fabric.v1.review-completion.read",
               "fabric.v1.provider-route-integrity-recovery.read",
               "fabric.v1.provider-context-pressure.read",
+              "fabric.v1.herdr-steer.dispatch",
               "fabric.v1.topology-wave.append",
               "fabric.v1.topology-wave.current.read",
               "fabric.v1.topology-wave.list"
@@ -1427,7 +1434,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:a23d76af0207d77e4cc0db517383045c4e4711dfe06809986679452ac703c00a",
+      "inputCodecDigest": "sha256:8a432ef19af55b2b9d689ef2905a3847d40eaa25e84017f07ae8ac31f37b721f",
       "outputCodecDigest": "sha256:ec3940ecbfa767c13e69c430da0e31ef5ba2f3ad21d731b5d0e1af01e2a7e063"
     },
     {
@@ -2916,6 +2923,278 @@
       },
       "inputCodecDigest": "sha256:9b0949b04bc4c69d0e44762848ea1d3039bc98acf65e18ee4ff1eb7ff9b63e43",
       "outputCodecDigest": "sha256:9d4ddd9e69079fc132c925734b92f91f42372be180c4e63147090ee525ef2598"
+    },
+    {
+      "operation": "fabric.v1.herdr-steer.dispatch",
+      "name": "fabric_herdr_steer_dispatch",
+      "description": "Dispatch one validated fire-and-forget Herdr steering effect; this cannot return an answer or close a barrier.",
+      "feature": "herdr-control.v1",
+      "receiptRenderer": "generic-v1",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "actionId",
+          "fireAndForget",
+          "targetAgentId",
+          "paneRef",
+          "reference",
+          "prompt"
+        ],
+        "properties": {
+          "actionId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "fireAndForget": {
+            "const": true
+          },
+          "targetAgentId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "paneRef": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "reference": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "taskId",
+                  "expectedRevision"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "task"
+                  },
+                  "taskId": {
+                    "$ref": "#/$defs/generated_1"
+                  },
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "taskId",
+                  "messageId",
+                  "expectedRevision"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "message"
+                  },
+                  "taskId": {
+                    "$ref": "#/$defs/generated_1"
+                  },
+                  "messageId": {
+                    "$ref": "#/$defs/generated_1"
+                  },
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            ]
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 4096
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "actionId",
+              "revision",
+              "status"
+            ],
+            "properties": {
+              "actionId": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "prepared",
+                  "dispatched"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "actionId",
+              "revision",
+              "status",
+              "reason"
+            ],
+            "properties": {
+              "actionId": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "status": {
+                "const": "ambiguous"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "x-minUtf8Bytes": 1,
+                "x-maxUtf8Bytes": 1024
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "actionId",
+              "revision",
+              "status",
+              "receipt"
+            ],
+            "properties": {
+              "actionId": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "status": {
+                "const": "terminal"
+              },
+              "receipt": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status",
+                  "operation",
+                  "referenceValidation",
+                  "deliveryEvidence",
+                  "canSatisfyExpectedResult",
+                  "canCloseBarrier"
+                ],
+                "properties": {
+                  "status": {
+                    "const": "dispatched-unconfirmed"
+                  },
+                  "operation": {
+                    "const": "steer.inject-fire-and-forget"
+                  },
+                  "referenceValidation": {
+                    "const": "verified"
+                  },
+                  "deliveryEvidence": {
+                    "const": "none"
+                  },
+                  "canSatisfyExpectedResult": {
+                    "const": false
+                  },
+                  "canCloseBarrier": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "reason"
+            ],
+            "properties": {
+              "status": {
+                "const": "rejected"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "unknown-reference",
+                  "stale-reference",
+                  "scope-mismatch",
+                  "target-mismatch",
+                  "answer-bearing-reference"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "integration",
+              "reason"
+            ],
+            "properties": {
+              "status": {
+                "const": "unavailable"
+              },
+              "integration": {
+                "const": "herdr-control-v1"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "disabled",
+                  "unavailable"
+                ]
+              }
+            }
+          }
+        ],
+        "$defs": {
+          "generated_1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "inputCodecDigest": "sha256:cb499db82e8c24fa92e0a4087cdcc91f92ee2598d72e0e404502e798f050aece",
+      "outputCodecDigest": "sha256:3fdb77179e20ac0c14b799ac1f77ecd04ec34a26b6ee00c736c044586706d35d"
     },
     {
       "operation": "fabric.v1.intake.revise",
@@ -23956,6 +24235,7 @@
                   "fabric.v1.review-completion.read",
                   "fabric.v1.provider-route-integrity-recovery.read",
                   "fabric.v1.provider-context-pressure.read",
+                  "fabric.v1.herdr-steer.dispatch",
                   "fabric.v1.topology-wave.append",
                   "fabric.v1.topology-wave.current.read",
                   "fabric.v1.topology-wave.list"
@@ -24072,7 +24352,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:1847b10d9fbd42a50025beff38f66019bb7df6fc2a681d92b9a8bc2b9a87941d",
+      "inputCodecDigest": "sha256:6f1c9c78556067277ad9c4b49372d7f7967955cdf129eef3729ce45ef84693ea",
       "outputCodecDigest": "sha256:1a9ee6767166f5f96ee5be2fbca40d47d2e7e46080ce4af47949c460bbe5c373"
     },
     {
@@ -24348,6 +24628,7 @@
                     "fabric.v1.review-completion.read",
                     "fabric.v1.provider-route-integrity-recovery.read",
                     "fabric.v1.provider-context-pressure.read",
+                    "fabric.v1.herdr-steer.dispatch",
                     "fabric.v1.topology-wave.append",
                     "fabric.v1.topology-wave.current.read",
                     "fabric.v1.topology-wave.list"
@@ -24930,7 +25211,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:ee43cd575d9c7403952b20568e5c8e7b881159ae918e6f4cd033d7a19e63d585",
+      "inputCodecDigest": "sha256:1c9defc0c5df2ecf8fb9c2abf5eeace3cf2a4c9b183bc9dd432062c52f4dc832",
       "outputCodecDigest": "sha256:e3992f43b189bc13c82f3f427051462f757f9bb664ab3b5545b66dfe805b8d0e"
     },
     {
@@ -28185,6 +28466,7 @@
               "fabric.v1.review-completion.read",
               "fabric.v1.provider-route-integrity-recovery.read",
               "fabric.v1.provider-context-pressure.read",
+              "fabric.v1.herdr-steer.dispatch",
               "fabric.v1.topology-wave.append",
               "fabric.v1.topology-wave.current.read",
               "fabric.v1.topology-wave.list"
@@ -28461,7 +28743,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:4f03a7d9292b8057310241d5a7435a70db7fb565191735558a5bb0cb833a7996",
+      "inputCodecDigest": "sha256:5152a1eeed64367d08f67ffb1caca61c345eaa0044e975974aeefc382f5267b2",
       "outputCodecDigest": "sha256:49d61e0c6cc64daa7f79c3bbec4c8d008953ce85acd83d765cdd121029772674"
     },
     {
@@ -31547,6 +31829,7 @@
               "fabric.v1.review-completion.read",
               "fabric.v1.provider-route-integrity-recovery.read",
               "fabric.v1.provider-context-pressure.read",
+              "fabric.v1.herdr-steer.dispatch",
               "fabric.v1.topology-wave.append",
               "fabric.v1.topology-wave.current.read",
               "fabric.v1.topology-wave.list"
@@ -31678,7 +31961,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:bc58a546d685f81202624e6d60688fae5f476cc45af73eaf255e3dbb2535d73c",
+      "inputCodecDigest": "sha256:a68fced5c7c3e184ed229a45304a7f07230e59ef80fc6a1ff95307470d708af4",
       "outputCodecDigest": "sha256:28ebc4507c2708d941fe3fd28d08acd56e5b50788be87fc484bb9bbfd63ec60a"
     },
     {

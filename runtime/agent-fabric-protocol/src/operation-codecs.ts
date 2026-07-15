@@ -125,6 +125,10 @@ import {
   LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATE_REQUEST_V1_CODEC,
   LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATION_V1_CODEC,
 } from "./lifecycle.js";
+import {
+  HERDR_STEER_DISPATCH_REQUEST_CODEC,
+  HERDR_STEER_DISPATCH_RESULT_CODEC,
+} from "./herdr-control.js";
 
 export type ObjectWireShape = {
   kind: "object";
@@ -290,6 +294,7 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.reviewCompletionRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId"]),
   [FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "actionRef"]),
   [FABRIC_OPERATIONS.providerContextPressureRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "agentId"]),
+  [FABRIC_OPERATIONS.herdrSteerDispatch]: object(["actionId", "fireAndForget", "targetAgentId", "paneRef", "reference", "prompt"]),
   [FABRIC_OPERATIONS.topologyWaveAppend]: object(["schemaVersion", "commandId", "projectSessionId", "coordinationRunId", "expectedCurrent", "plan"]),
   [FABRIC_OPERATIONS.topologyWaveCurrentRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "taskId"]),
   [FABRIC_OPERATIONS.topologyWaveList]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "taskId", "pageSize", "cursor"]),
@@ -451,6 +456,7 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.reviewCompletionRead]: object(["schemaVersion", "blockers", "targetGeneration", "targetChair", "reviewedArtifactRef", "publicationLineageDigest", "bundleDigest", "manifestRootDigest", "coverageDigest", "riskReadMapDigest", "mandatoryReadSetDigest", "profileDigest", "unavailableSlots", "slots", "finalReviewComplete"]),
   [FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "taskId", "actionRef", "targetGeneration", "slot", "attemptGeneration", "recoveryGeneration", "state", "reason", "reservationDigest", "routeState", "routeReceiptDigest", "lookupState", "lookupEvidenceDigest", "disposition", "settlementDigest", "recoveryEvidenceDigest", "retirementEligible"]),
   [FABRIC_OPERATIONS.providerContextPressureRead]: object(["schemaVersion", "currency", "pressure", "readAt", "ageSeconds"]),
+  [FABRIC_OPERATIONS.herdrSteerDispatch]: object(["status"], ["actionId", "revision", "reason", "integration", "receipt"]),
   [FABRIC_OPERATIONS.topologyWaveAppend]: object(["schemaVersion", "commandId", "status", "priorPlanRef", "planRef", "pointer", "receiptDigest"]),
   [FABRIC_OPERATIONS.topologyWaveCurrentRead]: object(["schemaVersion", "currency", "plan", "pointer"]),
   [FABRIC_OPERATIONS.topologyWaveList]: object(["schemaVersion", "plans", "nextCursor", "watermarkRevision"]),
@@ -3338,6 +3344,7 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.reviewCompletionRead) return REVIEW_COMPLETION_READ_REQUEST_V1_CODEC;
   if (operation === FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead) return PROVIDER_ROUTE_INTEGRITY_RECOVERY_READ_REQUEST_V1_CODEC;
   if (operation === FABRIC_OPERATIONS.providerContextPressureRead) return PROVIDER_CONTEXT_PRESSURE_READ_REQUEST_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.herdrSteerDispatch) return HERDR_STEER_DISPATCH_REQUEST_CODEC;
   if (operation === FABRIC_OPERATIONS.topologyWaveAppend) return TOPOLOGY_WAVE_APPEND_REQUEST_V1_CODEC;
   if (operation === FABRIC_OPERATIONS.topologyWaveCurrentRead) return TOPOLOGY_WAVE_CURRENT_READ_REQUEST_V1_CODEC;
   if (operation === FABRIC_OPERATIONS.topologyWaveList) return TOPOLOGY_WAVE_LIST_REQUEST_V1_CODEC;
@@ -3386,6 +3393,7 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.reviewCompletionRead) return unionOf([REVIEW_COMPLETION_V1_CODEC, REVIEW_READ_ERROR_V1_CODEC]);
   if (operation === FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead) return unionOf([PROVIDER_ROUTE_INTEGRITY_RECOVERY_PROJECTION_V1_CODEC, PROVIDER_ROUTE_INTEGRITY_RECOVERY_READ_ERROR_V1_CODEC]);
   if (operation === FABRIC_OPERATIONS.providerContextPressureRead) return PROVIDER_CONTEXT_PRESSURE_READ_V1_CODEC;
+  if (operation === FABRIC_OPERATIONS.herdrSteerDispatch) return HERDR_STEER_DISPATCH_RESULT_CODEC;
   if (operation === FABRIC_OPERATIONS.topologyWaveAppend) return TOPOLOGY_WAVE_APPEND_RECEIPT_V1_CODEC;
   if (operation === FABRIC_OPERATIONS.topologyWaveCurrentRead) return TOPOLOGY_WAVE_CURRENT_READ_V1_CODEC;
   if (operation === FABRIC_OPERATIONS.topologyWaveList) return TOPOLOGY_WAVE_LIST_V1_CODEC;

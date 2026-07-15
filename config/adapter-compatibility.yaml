@@ -23,7 +23,7 @@ adapters:
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js"
       wrapper_entrypoint_sha256: "f658fed0654eae9bc970f77dc947f9435804a68e5be386f2001b3fa071116505"
       wrapper_manifest: "config/adapter-manifests/claude-agent-sdk.json"
-      wrapper_manifest_sha256: "8fa5cb5168a1b378bc28856b7cb9e3d1ceda0c361576af001d737201d53a716b"
+      wrapper_manifest_sha256: "f7efde8b15ce16b4b4550f3e06ba5eab47b2c05a3f731f958b9863a72ca1c068"
     contract:
       adapter_version: 1
       protocol: claude-agent-sdk+claude-code-cli

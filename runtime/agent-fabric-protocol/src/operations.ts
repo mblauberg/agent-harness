@@ -26,6 +26,7 @@ export type OperationFeature =
   | "chair-live-handoff.v1"
   | "provider-review-evidence.v1"
   | "provider-context-pressure.v1"
+  | "herdr-control.v1"
   | "topology-wave.v1";
 
 type OperationDefinition = {
@@ -161,6 +162,7 @@ const DEFINITIONS = defineOperations({
   reviewCompletionRead: { operation: "fabric.v1.review-completion.read", feature: "provider-review-evidence.v1", principals: ["agent", "operator"], kind: "extension" },
   providerRouteIntegrityRecoveryRead: { operation: "fabric.v1.provider-route-integrity-recovery.read", feature: "provider-review-evidence.v1", principals: ["agent", "operator"], kind: "extension" },
   providerContextPressureRead: { operation: "fabric.v1.provider-context-pressure.read", feature: "provider-context-pressure.v1", principals: ["agent", "operator"], kind: "extension" },
+  herdrSteerDispatch: { operation: "fabric.v1.herdr-steer.dispatch", feature: "herdr-control.v1", principals: ["agent"], kind: "extension" },
   topologyWaveAppend: { operation: "fabric.v1.topology-wave.append", feature: "topology-wave.v1", principals: ["agent"], kind: "extension" },
   topologyWaveCurrentRead: { operation: "fabric.v1.topology-wave.current.read", feature: "topology-wave.v1", principals: ["agent", "operator"], kind: "extension" },
   topologyWaveList: { operation: "fabric.v1.topology-wave.list", feature: "topology-wave.v1", principals: ["agent", "operator"], kind: "extension" },
