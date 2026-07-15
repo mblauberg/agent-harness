@@ -22,21 +22,25 @@ Normative requirements live in the standalone semantic
 history and integrity; there are no ordered manifests, per-file hashes or
 numbered aliases.
 
-GitHub issues own current execution and acceptance state. The historical
-simplification pack is retained only because #22 still uses its fixed
-containment checklist; it is not a current-status or governance owner.
+GitHub issues own current execution and acceptance state. The simplification
+pack remains retained provenance for its decision register and links from live
+ADRs, including ADR 0002, and supplies #22's fixed containment cases. It is not
+a current-status or governance owner. Issue #23/W013 owns any later retention
+or retirement decision; completing #22 alone does not retire the pack.
 
 ## Remaining route
 
-1. [Issue #22](https://github.com/mblauberg/provenant/issues/22) must first
-   produce a source-clean evaluator and conclusive W010 containment evidence
-   for one exact provider, version, profile and host tuple. Its current source
-   gate is `NO-GO`; no live provider containment run has been authorised and
+1. [Issue #22](https://github.com/mblauberg/provenant/issues/22) now begins with
+   W010-A, a separately human-approved inert prerequisite for the trusted
+   write-offline projection and evidence path. It does not begin without the
+   explicit scope grant at risk tier `crucial`, and
    `workspace-write-offline` remains unavailable.
-2. A successful matrix makes the tuple eligible only. The human must
+2. W010-B requires a separate human grant for the exact live matrix tuple,
+   calls, cost, time and host. No live execution is currently authorised.
+3. A conclusive matrix makes the tuple eligible only. The human must then
    explicitly accept it and authorise the first provider write grant before
    W011 can begin.
-3. W011 admits a second provider through the same compiler and gate, then makes
+4. W011 admits a second provider through the same compiler and gate, then makes
    the narrow behaviour-preserving provider-action extraction. External
    effects, deployment, publishing, credentials and unrestricted egress remain
    out of scope.

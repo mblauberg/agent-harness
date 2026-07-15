@@ -8,14 +8,15 @@ implementation and acceptance state; this file is only the compact route.
 
 ## Current W012 route
 
-- The child-loss cleanup and partial first-frame timing repairs are complete in
-  [issues #64](https://github.com/mblauberg/provenant/issues/64) and
+- The child-loss cleanup, expired-principal timing repair and partial
+  first-frame timing repair are complete in [issues
+  #64](https://github.com/mblauberg/provenant/issues/64),
+  [#71](https://github.com/mblauberg/provenant/issues/71) and
   [#76](https://github.com/mblauberg/provenant/issues/76).
 - [Issue #74](https://github.com/mblauberg/provenant/issues/74) owns the
   remaining deterministic child-bridge test barrier.
-- [Issues #71](https://github.com/mblauberg/provenant/issues/71),
-  [#72](https://github.com/mblauberg/provenant/issues/72) and
-  [#75](https://github.com/mblauberg/provenant/issues/75) own three distinct
+- [Issues #72](https://github.com/mblauberg/provenant/issues/72) and
+  [#75](https://github.com/mblauberg/provenant/issues/75) own two distinct
   Console full-suite failures whose public error currently hides the failing
   internal stage. Each remains diagnose-first and independently reviewable.
 - [Issue #82](https://github.com/mblauberg/provenant/issues/82) owns the
@@ -31,16 +32,16 @@ requests and historical lane detail remain in Git and are not repeated here.
 - [Issue #20](https://github.com/mblauberg/provenant/issues/20): verify the
   private W007 receipt against the exact hosted and mutation evidence, then
   explicitly accept W007. The public machine evidence is complete.
-- [Issue #22](https://github.com/mblauberg/provenant/issues/22): keep provider
-  write authority inert until the containment source gate and matrix are
-  conclusive; then explicitly accept the exact tuple and authorise the first
-  provider write grant before W011.
+- [Issue #22](https://github.com/mblauberg/provenant/issues/22): separately
+  approve the inert W010-A prerequisite, separately grant the W010-B live
+  matrix, then explicitly accept a conclusive exact tuple and authorise the
+  first provider write grant before W011.
 - [Issue #27](https://github.com/mblauberg/provenant/issues/27): choose and
   provision the external lifecycle receipt authority boundary, and separately
   authorise destructive abandon.
 - [Issue #30](https://github.com/mblauberg/provenant/issues/30): ratify the
-  narrow crucial envelope used by merged PR #62 or direct a revert; after
-  ratification, explicitly accept the machine-verified result.
+  narrow risk-tier `crucial` envelope used by merged PR #62 or direct a revert;
+  after ratification, explicitly accept the machine-verified result.
 - [Issue #82](https://github.com/mblauberg/provenant/issues/82): approve the
   focused test/support repair plan before implementation.
 - [Issue #23](https://github.com/mblauberg/provenant/issues/23): explicitly
