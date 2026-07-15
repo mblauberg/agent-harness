@@ -31,8 +31,8 @@ otherwise return it without writing. Use
 
 Keep at most one active handoff per effort/leg. A fresh session resumes from it.
 In the same update, archive a consumed handoff, mark it consumed/time-stamped
-and index it; never delete it. Update `work-map` only when a multi-session
-effort changes leg, blocker, dependency, gate or next work.
+and index it; never delete it. Update `work-map` only when the
+durable route changes; live state belongs to the work tracker.
 
 Before checkpoint load [context-hygiene.md](references/context-hygiene.md). Run
 its read-only audit when run directories, logs, handoffs or large agent-facing
