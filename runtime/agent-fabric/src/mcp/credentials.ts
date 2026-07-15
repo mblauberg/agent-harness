@@ -6,6 +6,15 @@ import { MCP_SEATS, projectKey, resolveSeatPaths } from "../cli/seat-store.js";
 
 const CAPABILITY_PATTERN = /^af[bc]_[A-Za-z0-9_-]{43}$/u;
 
+export class McpSeatNotProvisionedError extends Error {
+  readonly code = "MCP_SEAT_NOT_PROVISIONED" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "McpSeatNotProvisionedError";
+  }
+}
+
 function errorCode(error: unknown): string | undefined {
   return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
     ? error.code
@@ -116,7 +125,9 @@ async function resolveProjectSeatFile(
     if (parent === candidate) break;
     candidate = parent;
   }
-  throw new Error(`agent fabric MCP seat ${seat} is not provisioned for ${cwd} or an ancestor project`);
+  throw new McpSeatNotProvisionedError(
+    `agent fabric MCP seat ${seat} is not provisioned for ${cwd} or an ancestor project`,
+  );
 }
 
 export async function resolveMcpCapability(
