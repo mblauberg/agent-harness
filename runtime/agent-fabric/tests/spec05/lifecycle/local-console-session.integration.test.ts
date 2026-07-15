@@ -373,11 +373,18 @@ describe("public local operator Console session", () => {
         await optionalTransport.close();
       }
     } finally {
-      await Promise.allSettled([project.close(), first.close(), replay.close()]);
+      const closes = await Promise.allSettled([project.close(), first.close(), replay.close()]);
+      expect(closes.map(({ status }) => status)).toEqual(["fulfilled", "fulfilled", "fulfilled"]);
     }
     await expectSecretsAbsent(
       [paths.stateDirectory, paths.runtimeDirectory],
-      [first.credential.token, replay.credential.token],
+      [
+        project.credential.token,
+        first.projectCredential.token,
+        first.credential.token,
+        replay.projectCredential.token,
+        replay.credential.token,
+      ],
     );
   });
 
