@@ -11,17 +11,25 @@ CONTRIBUTING, SBOM/signing, transport abstraction, unified product CLI).
 ## Decision
 
 Optimise for single-operator macOS use. Keep product-compatible seams —
-portable/local configuration split (F-003) and a root workspace (F-011) — but
-defer installer, cross-platform, supply-chain and contribution-surface work
-until productisation is actually pursued.
+portable/local configuration split and a root workspace — but defer installer,
+cross-platform, supply-chain and contribution-surface work until productisation
+is actually pursued.
 
 ## Consequences
 
-- F-024, F-035, F-038, F-040, F-043, F-045 deferred to a productisation cycle.
-- F-003 and F-011 remain in scope as seams (see review-pack roadmap).
-- Branch protection with required checks on `main` is still wanted (F-036:
-  affirmatively verified absent) — it protects a solo operator from their own
-  agents.
+- Installer, cross-platform, supply-chain and contribution-surface work remains
+  deferred to a productisation cycle.
+- Portable/local configuration boundaries are owned by the standalone
+  [scope and invariants](../specs/agent-fabric/scope-and-invariants.md) and
+  [architecture assurance](../specs/agent-fabric/architecture-assurance.md)
+  specifications. The root workspace is implemented by the root `package.json`
+  and `package-lock.json`, landed through [PR
+  #7](https://github.com/mblauberg/provenant/pull/7). Earlier roadmap labels and
+  rationale remain in Git history rather than a live roadmap dependency.
+- Branch protection remains an unresolved human decision in [issue
+  #97](https://github.com/mblauberg/provenant/issues/97). Live verification on
+  15 July 2026 found `main` unprotected and no repository rulesets. This ADR
+  authorises no repository-setting mutation.
 
 ## Clarification — 14 July 2026
 

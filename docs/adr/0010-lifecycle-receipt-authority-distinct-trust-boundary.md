@@ -12,20 +12,21 @@ false circular dependency:
    `_batch_completions`, `_batch_authorizations`, `lifecycle_transition_applies`
    and `lifecycle_admitted_run_scopes`.
 
-   The W005 branch implements this schema in
-   `runtime/agent-fabric/migrations/0001-current-baseline.sql`. This ADR describes
-   the state that W005 and the ADR are intended to land together; it does not
-   assert that the branch has already been merged or shipped.
+   [PR #24](https://github.com/mblauberg/provenant/pull/24) merged this schema
+   and its runtime port into
+   `runtime/agent-fabric/migrations/0001-current-baseline.sql` and the current
+   lifecycle implementation.
 2. **`AuthorityEnvelopeV2`** / the provider authority-compilation receipt —
-   *provider capability compilation* (ADR 0002). It does not exist in code yet.
+   *provider capability compilation* (ADR 0002). [PR
+   #38](https://github.com/mblauberg/provenant/pull/38) merged the V2 schema,
+   parser, stored-envelope validation and provider payload compiler.
 3. **"receipt portability"** — publication of *release evidence*. Unrelated to
    both.
 
-The false circularity: W008 (the `AuthorityEnvelopeV2` cutover) depends on W005,
-but W005's frozen lifecycle schema appears to require an authority receipt — so
-W005 looks like it needs W008. It does not. These are different trust
-boundaries: one attests that a lifecycle transition happened; the other compiles
-what a provider is permitted to do.
+The historical false circularity made W005 appear to need W008 because both used
+the word "receipt". The merged implementations remain distinct trust
+boundaries: one attests that a lifecycle transition happened; the other
+compiles what a provider is permitted to do.
 
 ## Decision
 
@@ -38,7 +39,7 @@ text. Specifically, for the lifecycle receipt authority:
   following the existing `externalEffects` ports/adapters precedent in the same
   options block.
 
-  W005 exposes the port on `FabricRuntimeOpenOptions`, wires it through
+  PR #24 exposes the port on `FabricRuntimeOpenOptions`, wires it through
   `runtime/agent-fabric/src/core/fabric.ts`, and keeps the external contract in
   `runtime/agent-fabric/src/lifecycle/receipt-authority.ts`. The live
   receipt/custody persistence path is repository-backed; the retired in-memory
@@ -48,19 +49,22 @@ text. Specifically, for the lifecycle receipt authority:
   `(project_session_id, run_id)` — the receipt chain is also hash-linked, with
   sequence 1 forbidden a predecessor and every later sequence required to name
   one. An in-process default may never forge an authority, and must not claim
-  third-party attestation it does not hold. (Verified against the W005 branch;
-  see the Context note.)
-- **The W005 landing includes the lifecycle receipt authority** and keeps an
-  **explicitly labelled transitional unrouted provider-action arm** that claims **no** Spec-04
-  v1.32 authority conformance. W008 closes that arm.
+  third-party attestation it does not hold.
+- PR #24 landed a labelled transitional provider-action arm. PR #38 then made
+  `AuthorityEnvelopeV2` the current `AuthorityInput`, validated stored V2
+  envelopes and compiled provider payloads from them. Current generic
+  provider-action admission still calls
+  `admitUnroutedInCurrentTransaction`; this ADR therefore does not claim that
+  every transitional provider-action route was removed or is unreachable.
 
 There is therefore no circular dependency.
 
 ## Consequences
 
-- W005 is **not** blocked on W008 and must not be sequenced as though it were.
-- The transitional arm is labelled, not silent: it states in-band that it
-  carries no Spec-04 authority conformance.
+- W005 and W008 are merged through PR #24 and PR #38 respectively.
+- Any remaining generic or unrouted provider-action path must be assessed from
+  live reachability and authority evidence; it does not create a lifecycle
+  receipt-authority dependency.
 - The vocabulary collision is retired in new text; "receipt" is never used
   unqualified across these three boundaries.
 
