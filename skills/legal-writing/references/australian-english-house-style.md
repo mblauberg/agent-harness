@@ -1,7 +1,13 @@
-# Australian English House Style
+# Australian English House Style (legal overlay)
 
 Use this reference for prose-level editing. Use the verified forum adapter for
-law, procedure, forms, fees, deadlines, layout and filing method.
+law, procedure, forms, fees, deadlines, layout and filing method. Load the hub
+default first:
+`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/au-english.md`,
+for general spelling, punctuation, numbers, dates and terminology
+mechanics. This file adds only the legal-specific overlay: forum labels,
+citation and defined-term conventions, document structure, tone, and the
+lint-enforced rules the hub does not know about.
 
 This reference follows mainstream Australian usage (the Australian Government
 Style Manual, the Macquarie Dictionary and the current *Australian Guide to
@@ -40,45 +46,30 @@ extract.
 | `send`, `give` or `provide` | `furnish` | Match the rule or form if it uses a specific verb. |
 | `about` or `for` | `in relation to` | Use the precise legal relationship if `about` is too broad. |
 
-## Punctuation
+## Punctuation (legal-specific enforcement)
 
-- Do not use the em dash character (U+2014) in legal output **(skill default,
-  lint-enforced)**. Mainstream Australian style permits it. For a parenthetical
-  break, use a comma, colon, semicolon, full stop or parentheses. In a document
-  title, follow the verified template or use a spaced hyphen (`Orders Sought -
-  Extension and Directions`) as a house default. Reserve the en dash for number,
-  date or page ranges only.
-- The en dash (`–`, U+2013) is permitted but used sparingly **(skill default)**. Its clearest use is a closed number, date or page range (`pp 12–18`, `2024–2025`). Do not use a spaced en dash as a habitual parenthetical; restructure or use other punctuation first. The deterministic lint warns on every en dash so a human keeps the count low.
-- The **spaced hyphen** (` - `, a hyphen with a space each side) is **not**
-  caught by the lint. Use it only where the governing template or sibling-title
-  convention requires it, such as `Orders Sought - Extension and Directions`.
-  Avoid it as a clause separator in body prose, section headings or paragraph
-  labels. Prefer a colon for a label gloss (`B. The requested direction:
-  opposed`) and normal punctuation in a sentence.
-- Prefer full stops for clarity. Where a semicolon or colon joins two complete,
-  independent clauses, a full stop is usually cleaner. Use a comma plus a real
-  connective only where the logical relation matters. For example, `the form
-  records receipt; it does not prove agreement` is better as `The form records
-  receipt. It does not prove agreement.`
-- Use a colon before a short list, a genuine explanation that completes the lead clause, or a label gloss (`[LABEL]: official transcript of reasons`). Do not use a colon merely to splice on a second free-standing sentence. Use a full stop.
-- Use parentheses sparingly for true parenthetical detail.
-- Use semicolons for their two reliable jobs: separating list or citation items
-  that themselves contain commas (for example `[AUTHORITY 1]; [AUTHORITY 2]`),
-  and, occasionally, binding two short balanced clauses in a deliberate
-  antithesis (`Submissions argue; they do not prove`). Default to a full stop for
-  ordinary independent clauses. A submission peppered with clause-joining
-  semicolons reads as machine rhythm.
-- Use single quotation marks (`'...'`) for quoted words, phrases and document-field names; this is the Australian and AGLC convention. Use double quotation marks only for a quotation inside a quotation. Be consistent within a document and do not mix. Set a long quotation (more than about three lines) as an indented block without quotation marks.
+The hub `au-english.md` sets the general em-dash ban, en-dash-for-ranges
+rule, semicolon and quotation-mark conventions. This skill's overlay:
+
+- The em-dash ban is **lint-enforced** here (`scripts/lint_legal_style.py`
+  fails on U+2014); the en dash is a lint warning only, not a ban.
+- In a document title, follow the verified template or use a spaced hyphen
+  (`Orders Sought - Extension and Directions`) as a house default.
+- The **spaced hyphen** (` - `) is **not** caught by the lint. Use it only
+  where the governing template or sibling-title convention requires it.
+  Avoid it as a clause separator in body prose, section headings or
+  paragraph labels; prefer a colon for a label gloss (`B. The requested
+  direction: opposed`).
+- Single quotation marks are the AGLC convention as well as the hub default;
+  set a long quotation (more than about three lines) as an indented block
+  without quotation marks.
 
 ## Spelling
 
-- Use Australian spelling: `-ise` not `-ize` (`organise`, `recognise`, `emphasise`); `-our` (`favour`, `behaviour`, `honour`); `-re` (`centre`, `metre`).
-- Keep the noun/verb pairs distinct: the nouns `licence` and `practice` against the verbs `license` and `practise`; `defence` and `offence` with `-ce`.
-- Use `program` (not `programme`) for all senses; `judgment` (not `judgement`) for a court decision; `acknowledgement` and `enrolment`.
-- Avoid American spellings (`organize`, `defense`, `color`, `aging`, the noun `license`).
-- Watch common import errors: `finalize`, `summarize`, `offense`, `honor`, `behavior`, `center`, `meter`, `labeled` and `traveling`.
-- Preserve spelling in exact quotations, official document titles, form fields, filenames and source extracts even where it differs from house style.
-- Verify any uncertain term against the Macquarie Dictionary.
+Use the hub default. The one legal-specific note: preserve spelling in exact
+quotations, official document titles, form fields, filenames and source
+extracts even where it differs from house style, and verify any uncertain
+term against the Macquarie Dictionary.
 
 ## Capitalisation And Defined Terms
 
@@ -103,10 +94,16 @@ extract.
 
 ## Numbers, Money And Dates
 
-- Use figures for money, with a thousands separator and two decimals where exactness matters: `$14,132.18`, `$1,800`.
-- Preserve competing figures exactly. Do not silently round or normalise an amount.
-- In prose, generally write whole numbers under ten as words and use figures from 10 up, unless the forum or a calculation needs figures throughout.
-- Dates in prose use day-month-year order, for example `25 May 2025`. A date entered into an official form field follows that form's required format (for example `dd/mm/yyyy`); do not reformat a form-field value to match prose style.
+The hub sets the general day-month-year and numeral conventions. Legal
+specifics:
+
+- Use figures for money, with a thousands separator and two decimals where
+  exactness matters: `$14,132.18`, `$1,800`.
+- Preserve competing figures exactly. Do not silently round or normalise an
+  amount.
+- A date entered into an official form field follows that form's required
+  format (for example `dd/mm/yyyy`); do not reformat a form-field value to
+  match prose style.
 
 ## Headings, Numbering And Document Structure
 

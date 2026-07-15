@@ -10,22 +10,24 @@ Stricter project and forum instructions override it. This is drafting
 assistance, not legal advice: verify current law, forms and procedure against
 official sources and retain qualified or human review for filing-facing work.
 
+This skill is a specialization of the `natural-writing` hub: it owns
+jurisdiction, forum and filing-facing rules, and links to the hub for the
+Australian English default, the anti-AI taxonomy and the condense pass (see
+`references/australian-english-house-style.md`,
+`references/legal-concision-and-anti-ai.md` and
+`references/forbidden-patterns.md` for where each hub link applies). The
+Legal Function Test remains this skill's own claim-classification scheme; it
+does not map to the hub's observed/inferred evidence schema.
+
 ## Workflow
 
 1. Read project instructions, live matter state and source-boundary rules. Load
    the matching jurisdiction, forum and document skill where one exists.
 2. Choose `draft`, `rewrite`, `condense`, `diagnose`, `correspondence` or
    `final-scrub`. Load [legal concision](references/legal-concision-and-anti-ai.md)
-   for all prose, plus only the relevant [argument structure](references/argument-structure-and-paragraphing.md),
-   [forum/document](references/forum-and-document-recipes.md),
-   [correspondence](references/legal-correspondence-style.md),
-   [family-violence/redaction](references/family-violence-and-redaction.md),
-   [house style](references/australian-english-house-style.md),
-   [source boundary](references/source-boundary-and-citations.md),
-   [forbidden patterns](references/forbidden-patterns.md), or
-   [validation](references/validation-checklists.md) reference. Use
-   [verification and escalation](references/verification-and-escalation.md)
-   for current-source and human-authority gates.
+   for all prose; see the reference map in
+   [validation-checklists.md](references/validation-checklists.md) for which
+   remaining reference a mode or content type needs.
 3. Classify each sentence by legal function before polishing. Affidavits and
    witness statements give evidence; submissions argue; orders command;
    chronologies organise; internal notes analyse; correspondence communicates.

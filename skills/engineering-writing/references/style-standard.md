@@ -58,21 +58,20 @@ An authentication issue may occur in certain situations.
 
 ## Claim discipline
 
-Classify a claim before wording it, and make the verb match the evidence class:
+Load the hub schema:
+`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/claim-discipline.md`,
+for the claim classes, the safer-wording table, and the implicit-completion
+tense trap. Engineering-specific application:
 
-| Class | Meaning | Safer verbs |
-|---|---|---|
-| observed | directly measured, run, or reproduced | `measured`, `recorded`, `observed`, `reproduced`, `returns` |
-| inferred | supported by evidence, not directly measured | `suggests`, `indicates`, `is consistent with`, `likely` |
-| designed | what the code or contract requires | `rejects`, `enforces`, `validates`, `retries`, `caps` |
-| limitation | what was not measured, tested, or included | `not tested`, `not measured`, `does not establish` |
-| planned | specified but not built or not run | `planned`, `scheduled`, `is intended to`, `will` |
-| pending | placeholder or unverified result | `pending`, `unverified`, `[FLAG: verify]` |
-
-- **The implicit-completion tense trap.** Neutral present tense silently asserts that planned work is done: `The service handles failover` reads as shipped behaviour. If it is unbuilt or untested, scope it (`the design routes failover through the standby region`) or state the status. README feature lists claim only what ships today.
-- **Comparatives carry their number.** Ban bare `faster`, `better`, `improved`, `higher`, `more scalable` on their own. Give the measurement and its conditions, or point to it: `cold start dropped from 3.1 s to 0.9 s (M2, cache warm)`, not `startup is much faster`.
-- **State the scope of the evidence.** `Passes the integration suite on Linux` is a different claim from `works`. Name the environment, versions, data, and load under which a result held.
-- **Do not mix classes in one sentence** when it creates ambiguity; split the observed part from the inference and the plan.
+- **README feature lists claim only what ships today.** If a feature is
+  unbuilt or untested, scope it (`the design routes failover through the
+  standby region`) or state the status; do not let neutral present tense
+  imply it shipped.
+- **State the scope of the evidence.** `Passes the integration suite on
+  Linux` is a different claim from `works`. Name the environment, versions,
+  data, and load under which a result held.
+- **Do not mix classes in one sentence** when it creates ambiguity; split
+  the observed part from the inference and the plan.
 
 ## Objectivity
 
@@ -83,7 +82,12 @@ Classify a claim before wording it, and make the verb match the evidence class:
 
 ## Australian English
 
-Use Australian English unless the project, product, API, quoted source, or repository convention requires another variant. The full mechanics checklist (spelling, the licence/practice noun-verb splits, `program` not `programme`, dates, numbers, terminology, punctuation) lives in `australian-english.md`. In short: `-ise`/`-yse`, `-our`, `-re`, doubled-`l` inflections; `per cent` in prose and `%` in values; dates spelled out (`2 July 2026`); no em dash.
+Use Australian English unless the project, product, API, quoted source, or
+repository convention requires another variant. This is the hub's always-on
+default; the full mechanics checklist (spelling exceptions, punctuation,
+numbers, terminology) lives in
+`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/au-english.md`.
+No engineering-specific exception applies.
 
 ## Editing Checklist
 

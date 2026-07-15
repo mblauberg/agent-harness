@@ -41,6 +41,8 @@ Prefer PlantUML source (`.puml`) and inspect a render before finalising.
    ```bash
    python3 "${AGENTS_HOME:-$HOME/.agents}/skills/uml-diagrams/scripts/render_plantuml.py" path/to/diagram.puml --format svg
    ```
+   Set `PLANTUML_JAR=/path/to/plantuml.jar` and `--format png` to render through a
+   local PlantUML JAR instead of the default installation.
 6. Inspect the image using `references/rendering-quality-checklist.md`; fix and
    re-render until the objective gates pass. For a read-only request, write only
    to an assigned run-owned temporary output and report proposed source changes.

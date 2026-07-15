@@ -68,8 +68,10 @@ which findings are supported; do not majority-vote weak claims into truth.
 
 ## Portable workflow execution
 
-Express a workflow as phases, receipts, gates and recovery transitions first.
-Claude may bind that graph to `Workflow()` JavaScript. Codex Ultra/native
+This is the Codex/Cursor adapter to the substrate-neutral stage/gate/recovery
+graph in `orchestration-contract.md`: express a workflow as phases, receipts,
+gates and recovery transitions first. Claude may bind that graph to
+`Workflow()` JavaScript (`dynamic-workflows.md`). Codex Ultra/native
 multi-agent may choose and coordinate subagents adaptively; explicit waves keep
 the same graph available at lower efforts:
 
@@ -79,6 +81,12 @@ the same graph available at lower efforts:
 
 Use a driver script only when repeatability, resume state, or a large slice list justifies the extra
 surface. Otherwise, native subagents plus run-dir files are the Codex-native path.
+
+**Human gate mechanics.** Neither native subagent collaboration nor an explicit-wave script can pause a
+live Codex run mid-collaboration and block on human approval. Realise the contract's human gate by
+ending the run at the gate-adjacent stage and recording `awaiting-human` in the run-dir manifest/receipt;
+a human-approved follow-up invocation continues the graph — it is a new run reading the prior run-dir
+state, not an in-process resume of a suspended session.
 
 GPT-5.6 Programmatic Tool Calling is a separate Responses API substrate for
 bounded, tool-heavy stages with predictable data flow. It can run generated

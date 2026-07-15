@@ -1,6 +1,6 @@
 ---
 name: retrospect
-description: "Use after delivery, release, incident, evaluation, or a long run to derive evidence-backed process improvements and regression gates. Not for session cleanup, one skill audit, or an active defect; use session, skill-audit, or implement."
+description: "Use after delivery, release, incident, evaluation, or a long run to derive evidence-backed process improvements and regression gates. Not for session cleanup, one skill audit, or an active defect; use session, skill-craft, or implement."
 ---
 
 # Retrospect
@@ -54,7 +54,7 @@ comparable later cycles meeting predeclared target/guard metrics.
 Underpowered or confounded evidence is `inconclusive`.
 
 Route unclear intent to `scope`, deterministic defects to `implement`,
-stochastic behaviour to `evaluate`, skill evidence to `skill-audit`, and
+stochastic behaviour to `evaluate`, skill evidence to `skill-craft`, and
 context/docs cleanup to `session` or `engineering-docs`.
 
 ## Learning and authority

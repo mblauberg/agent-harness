@@ -4,7 +4,7 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LOADER = ROOT / "skills" / "frontend-design" / "scripts" / "load-context.mjs"
+LOADER = ROOT / "skills" / "ui-ux-design" / "scripts" / "load-context.mjs"
 
 
 def test_context_loader_reads_legacy_file_without_renaming_it(tmp_path):
@@ -111,14 +111,14 @@ def test_context_loader_matches_unusual_filename_case(tmp_path):
 
 
 def test_frontend_docs_do_not_claim_read_only_loader_mutates_legacy_context():
-    references = ROOT / "skills" / "frontend-design" / "reference"
+    references = ROOT / "skills" / "ui-ux-design" / "reference"
     corpus = "\n".join(path.read_text() for path in references.glob("*.md")).lower()
     assert "auto-renamed legacy" not in corpus
     assert "loader auto-renamed" not in corpus
 
 
 def test_frontend_guidance_does_not_claim_a_universal_16px_minimum():
-    references = ROOT / "skills" / "frontend-design" / "reference"
+    references = ROOT / "skills" / "ui-ux-design" / "reference"
     corpus = "\n".join(path.read_text() for path in references.glob("*.md"))
     for false_absolute in (
         "16px minimum",
@@ -131,6 +131,6 @@ def test_frontend_guidance_does_not_claim_a_universal_16px_minimum():
 
 
 def test_read_only_frontend_review_isolates_build_outputs():
-    review = (ROOT / "skills" / "frontend-review" / "SKILL.md").read_text()
+    review = (ROOT / "skills" / "ui-ux-design" / "reference" / "review.md").read_text()
     assert "assigned isolated output/cache path" in review
     assert "not tested" in review

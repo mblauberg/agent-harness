@@ -76,7 +76,7 @@ def test_structural_errors_fail_without_an_extra_flag(tmp_path):
 
 def test_state_freshness_rejects_template_placeholder_and_accepts_utc(tmp_path):
     state = tmp_path / "STATE.md"
-    template = Path(__file__).resolve().parents[1] / "skills" / "autonomous-lab" / "templates" / "STATE.template.md"
+    template = Path(__file__).resolve().parents[1] / "skills" / "autopilot" / "templates" / "STATE.template.md"
     state.write_text(template.read_text())
     findings = context_audit.audit(tmp_path)
     assert "state-freshness-missing" in codes(findings)

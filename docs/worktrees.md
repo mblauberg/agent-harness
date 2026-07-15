@@ -1,9 +1,10 @@
 # Shared worktree policy
 
-Linked worktrees require human authority supplied either directly or through an
-active human-approved project/session envelope. Authority to use a worktree
-does not imply authority to delete a branch, force-remove state, integrate
-changes or let agents write overlapping scopes.
+The project constitution (`HARNESS.md`) is a standing human-approved envelope:
+creating linked worktrees for implementation work needs no per-instance
+approval. That authority still does not imply authority to delete a branch,
+force-remove state, integrate changes or let agents write overlapping scopes —
+each of those remains separately gated.
 
 ## Canonical location
 

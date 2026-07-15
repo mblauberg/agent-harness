@@ -20,6 +20,7 @@ def seed_required(root: Path) -> None:
         "ACKNOWLEDGEMENTS.md",
         "README.md",
         "LICENSE",
+        "NOTICE",
         "MAINTAINING.md",
         "SECURITY.md",
         "THIRD_PARTY_NOTICES.md",
@@ -2266,27 +2267,16 @@ def test_raw_parent_traversal_fails_closed_on_missing_parent_object(tmp_path):
 
 
 def test_public_tree_retains_ui_ux_pro_max_attribution():
+    # Epic #124 Workstream E: third-party licence texts are centralised in the
+    # top-level LICENSES/ directory (not beside each skill), and the prose
+    # provenance index lives in THIRD_PARTY_NOTICES.md.
     root = Path(__file__).resolve().parents[1]
-    licence = root / "skills/frontend-design/UI_UX_PRO_MAX_LICENSE"
-    notice = (root / "skills/frontend-design/NOTICE.md").read_text()
+    licence = root / "LICENSES/ui-ux-pro-max-MIT.txt"
     repository_notice = (root / "THIRD_PARTY_NOTICES.md").read_text()
+    assert licence.is_file()
     assert "Copyright (c) 2024 Next Level Builder" in licence.read_text()
-    assert "UI UX Pro Max" in notice
-    assert "UI_UX_PRO_MAX_LICENSE" in notice
     assert "UI UX Pro Max v2.0.0" in repository_notice
-    assert "UI_UX_PRO_MAX_LICENSE" in repository_notice
-
-
-def test_public_tree_retains_natural_writing_attribution():
-    root = Path(__file__).resolve().parents[1]
-    licence = root / "skills" / "natural-writing" / "BLADER_HUMANIZER_LICENSE"
-    notice = (root / "skills" / "natural-writing" / "NOTICE.md").read_text()
-    repository_notice = (root / "THIRD_PARTY_NOTICES.md").read_text()
-    assert "Copyright (c) 2025 Siqi Chen" in licence.read_text()
-    assert "blader/humanizer" in notice
-    assert "BLADER_HUMANIZER_LICENSE" in notice
-    assert "Natural writing" in repository_notice
-    assert "BLADER_HUMANIZER_LICENSE" in repository_notice
+    assert "ui-ux-pro-max-MIT.txt" in repository_notice
 
 
 # --- D-032 regression group 1: streaming decoy-bridged restart equivalence ---

@@ -163,6 +163,30 @@ def test_reconcile_applies_safe_managed_rename_with_history(tmp_path):
     assert (target / "gamma").resolve() == (source / "gamma").resolve()
 
 
+def test_reconcile_merges_two_sources_into_one_target(tmp_path):
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    assert manager(target, "install", source).returncode == 0
+    # A many-to-one skill merge: alpha + beta collapse into a single gamma.
+    (source / "alpha").rename(source / "gamma")
+    (source / "beta" / "SKILL.md").unlink()
+    (source / "beta").rmdir()
+    renames = tmp_path / "renames.json"
+    renames.write_text(json.dumps({"schema_version": 1, "renames": [
+        {"from": "alpha", "to": "gamma"},
+        {"from": "beta", "to": "gamma"},
+    ]}))
+    result = manager(target, "reconcile", source, renames)
+    assert result.returncode == 0, result.stderr
+    manifest = json.loads(manifest_for(target).read_text())
+    assert set(manifest["managed"]) == {"gamma"}
+    assert not (target / "alpha").exists()
+    assert not (target / "beta").exists()
+    assert (target / "gamma").resolve() == (source / "gamma").resolve()
+    froms = {entry["from"] for entry in manifest["managed"]["gamma"]["history"]}
+    assert {"alpha", "beta"} <= froms
+
+
 def test_plain_install_then_reconcile_merges_an_already_installed_rename(tmp_path):
     source = tiny_source(tmp_path)
     target = tmp_path / "installed"

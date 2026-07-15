@@ -264,7 +264,7 @@ authority.
 
 ## Local skill evidence and shared exports
 
-`skill-audit` defaults to static analysis. A direct human request authorises
+`skill-craft`'s audit branch defaults to static analysis. A direct human request authorises
 read-only, in-place analysis of the named local session histories. When the
 provider roots and useful window are unambiguous from that request and the live
 environment, the agent proceeds without a second receipt, redaction pass,
@@ -420,7 +420,7 @@ cases are labelled separately.
 
 ### Phase 1 — evidence foundations
 
-- Make `skill-audit` static-first with separate local and shared/export evidence
+- Make `skill-craft`'s audit branch static-first with separate local and shared/export evidence
   modes. Use a deterministic contract and routing fixture; do not claim native
   provider telemetry without real adapters and producers.
 - Add `skills/retrospect/templates/RETROSPECT.template.json`, a validator and pass/fail fixtures.
@@ -499,7 +499,7 @@ The refactor is complete when:
 | Criterion | Evidence |
 |---|---|
 | 1–3 | `config/delivery-profiles.json`, `skills/deliver/`, `tests/test_delivery_contract.py` |
-| 4 | `skills/skill-audit/SKILL.md`, `references/method.md`, local-history routing fixture and `test_skill_audit_contract.py` |
+| 4 | `skills/skill-craft/SKILL.md`, `skills/skill-craft/references/audit.md`, `skills/skill-craft/references/method.md`, local-history routing fixture and `test_skill_audit_contract.py` |
 | 5 | `skills/retrospect/templates/RETROSPECT.template.json`, `validate_retrospect.py`, adversarial receipt tests |
 | 6 | `config/security-evidence.json`, security selector and crucial-gate tests |
 | 7 | typed observation contract and strengthened `RELEASE.json` observation gate |

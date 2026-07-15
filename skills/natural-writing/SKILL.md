@@ -9,14 +9,24 @@ Rewrite general prose in a natural, direct voice. Preserve meaning, facts,
 citations, numbers and intent while removing filler, canned framing, synthetic
 rhythm and chatbot residue.
 
+## Hub role
+
+This skill is the writing family's hub: it owns the shared prose doctrine,
+the anti-AI taxonomy, condense pass, claim-discipline/evidence schema, voice
+matching, and the always-on Australian English default. `academic-writing`,
+`engineering-writing` and `legal-writing` link here instead of cloning it,
+keeping only their own domain specialization and linking back for the rest.
+Load [au-english.md](references/au-english.md) as the default house style for
+any prose without a project convention that overrides it.
+
 ## Boundary
 
 Use this skill for general, mixed or unclassified prose. Defer technical docs
 and READMEs to `engineering-writing`, scholarly work to `academic-writing`, and
 Australian legal drafting to `legal-writing`.
 
-Do not fabricate experience, invent sources, add fake messiness or optimise for
-AI-detector scores. Formal or predictable prose is not proof of AI authorship.
+Do not fabricate experience, invent sources, add fake messiness or optimise
+for AI-detector scores. Formal prose is not proof of AI authorship.
 
 ## Modes
 
@@ -43,9 +53,12 @@ Choose the least invasive mode that solves the problem. Combine any mode with
 5. Repair remaining quality and voice mismatches, then compare the result
    against the locked invariants and any writing sample.
 
-Load [patterns.md](references/patterns.md) for the evidence-based sign
-catalogue, current research, voice-matching rubric, genre guidance or a
-stubborn second pass.
+Load [patterns.md](references/patterns.md) for the sign catalogue, research,
+voice-matching rubric, genre guidance or a stubborn second pass. Load
+[anti-ai-taxonomy.md](references/anti-ai-taxonomy.md) for the tiered sweep,
+[condense-pass.md](references/condense-pass.md) for shortening without losing
+meaning, and [claim-discipline.md](references/claim-discipline.md) for wording
+observed, inferred, limitation and pending claims.
 
 ## Bright-line rules
 

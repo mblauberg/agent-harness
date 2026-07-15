@@ -104,7 +104,7 @@ implementation run. `retrospect` closes the quality flywheel by benchmarking
 the completed trajectory, clustering root causes, proposing small
 evidence-backed harness changes, adding regression gates and monitoring the
 next comparable run. It promotes durable learning into canonical project docs
-instead of accumulating retrospective logs. `autonomous-lab` adds crash-safe
+instead of accumulating retrospective logs. `autopilot` adds crash-safe
 persistence for genuinely sprawling run-until-STOP work, but does not replace
 the ordinary delivery loop.
 
@@ -208,9 +208,10 @@ information hiding, cohesion, coupling, simplicity, idempotency and similar
 principles are hypothesis generators; a finding still needs a concrete failure
 mechanism, impact, evidence and validation route.
 
-Frontend authority is similarly split: `frontend-design` supplies authorised
-design mutation methods inside `implement`, while `frontend-review` owns
-read-only UX, visual, accessibility and responsive evidence. `scope` owns the
+Frontend authority is similarly split: `ui-ux-design`'s design/make branch
+supplies authorised design mutation methods inside `implement`, while its
+review branch owns read-only UX, visual, accessibility and responsive
+evidence. `scope` owns the
 design decision and `engineering-docs` owns canonical placement. `playwright`,
 `web-stack-conventions` and
 `react-performance` provide tool or standards evidence without taking over the

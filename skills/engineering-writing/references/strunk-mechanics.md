@@ -8,10 +8,11 @@ one-topic paragraphs, topic sentences, and parallel ideas. This file adds the
 mechanical faults those references do not name. It does not restate them.
 
 Australian English governs punctuation choices here: for the serial comma,
-quotation marks, dashes, and semicolons, `australian-english.md` wins over
-Strunk's American conventions (Strunk mandates the Oxford comma; Australian
-style makes it optional, used only to remove ambiguity). Use the rules below for
-sentence structure, not for house punctuation style.
+quotation marks, dashes, and semicolons, the hub's
+`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/au-english.md`
+wins over Strunk's American conventions (Strunk mandates the Oxford comma;
+Australian style makes it optional, used only to remove ambiguity). Use the
+rules below for sentence structure, not for house punctuation style.
 
 ## Dangling and misrelated openers
 

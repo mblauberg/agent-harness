@@ -1,5 +1,22 @@
 # Validation Checklists
 
+## Reference Map
+
+`legal-concision-and-anti-ai.md` loads for all prose. Add only what the task
+needs:
+
+| Task/mode or content | Load |
+|---|---|
+| submissions / written advocacy | `argument-structure-and-paragraphing.md` |
+| forms, affidavits, orders, annexures | `forum-and-document-recipes.md` |
+| correspondence | `legal-correspondence-style.md` |
+| family-violence or redaction-sensitive material | `family-violence-and-redaction.md` |
+| house style questions | `australian-english-house-style.md` |
+| source anchors and citations | `source-boundary-and-citations.md` |
+| banned phrasing/patterns | `forbidden-patterns.md` |
+| checking the finished draft | this file (`validation-checklists.md`) |
+| current-source and human-authority gates | `verification-and-escalation.md` |
+
 Run the checks the task needs, not all of them:
 
 | Task/mode | Run |

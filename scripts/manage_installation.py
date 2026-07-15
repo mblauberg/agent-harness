@@ -185,6 +185,11 @@ def _prepare_renames(source: Path, target: Path, manifest: dict[str, Any], renam
     skills = _skills(source)
     managed = manifest["managed"]
     operations: list[dict[str, Any]] = []
+    # Several sources may converge on one target (a many-to-one skill merge):
+    # only the first such rename creates the shared link, the rest just retire
+    # their old link, and every source's history merges into the one target entry.
+    creating: set[str] = set()
+    target_history: dict[str, list[dict[str, str]]] = {}
     for rename in renames:
         old, new = rename["from"], rename["to"]
         if old not in managed or new not in skills:
@@ -199,10 +204,13 @@ def _prepare_renames(source: Path, target: Path, manifest: dict[str, Any], renam
             raise InstallError(f"conflicting rename target: {new}")
         if new_is_correct and new in managed and Path(managed[new]["source_target"]).resolve() != skills[new]:
             raise InstallError(f"conflicting managed rename target: {new}")
-        history = list(managed.get(old, {}).get("history", []))
-        if new in managed:
-            history.extend(managed[new].get("history", []))
-        history.append({"from": old, "to": new, "at": _now()})
+        if new not in target_history:
+            target_history[new] = list(managed.get(new, {}).get("history", []))
+        target_history[new].extend(managed.get(old, {}).get("history", []))
+        target_history[new].append({"from": old, "to": new, "at": _now()})
+        create_new = not new_is_correct and new not in creating
+        if create_new:
+            creating.add(new)
         operations.append({
             "old": old,
             "new": new,
@@ -210,8 +218,8 @@ def _prepare_renames(source: Path, target: Path, manifest: dict[str, Any], renam
             "old_source": old_source,
             "new_destination": new_destination,
             "new_source": skills[new],
-            "create_new": not new_is_correct,
-            "entry": _entry(new, skills[new], history),
+            "create_new": create_new,
+            "entry": _entry(new, skills[new], list(target_history[new])),
         })
     return operations
 

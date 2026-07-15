@@ -34,7 +34,7 @@ session -> scope -> human spec/one-way-door gate
         -> diagnose/implement on failure; evidence back to scope
 ```
 
-`autonomous-lab` is the crash-safe run-until-STOP tier, not the default loop.
+`autopilot` is the crash-safe run-until-STOP tier, not the default loop.
 Non-software work retains scope, authorised execution, evidence, independent
 review, human acceptance and external-action gates. `deliver` owns the neutral
 `delivery-run` schema-v1 receipt; `implement` is the software front door.
@@ -51,9 +51,11 @@ actions, disclosure, secrets, deployment, irreversible actions, expiry and
 approver. Delegation only narrows authority. Host access, credentials and
 subscriptions never grant permission.
 
-Create branches or worktrees only when the human asks or an approved authority
-envelope permits it. Authorised worktrees use the owning repository's
-`.worktrees/<task-agent>` path; see `docs/worktrees.md`.
+This constitution is a standing human-approved envelope for routine version
+control: branches and linked worktrees for implementation, including parallel,
+need no per-instance approval. Worktrees use `.worktrees/<task-agent>`, one
+writer each; see `docs/worktrees.md`. Deletion, force-removal, history rewrites
+and integration or pushes to shared branches stay gated on the approvals above.
 
 ## Routing and coverage
 

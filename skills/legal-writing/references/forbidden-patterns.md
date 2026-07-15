@@ -1,6 +1,11 @@
 # Forbidden Patterns
 
-Use this as a scrub list before filing-facing work or correspondence leaves the workspace.
+Use this as a scrub list before filing-facing work or correspondence leaves the workspace. This file is the
+legal overlay on the hub taxonomy:
+`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/anti-ai-taxonomy.md`.
+It lists only the filing-facing hard bans, affidavit-specific overreach, quotation integrity, and the
+legal-register carve-outs the hub's general list would otherwise misclassify as tells (`reasonably arguable`,
+formal connectives, correct passives).
 
 The deterministic lint in `scripts/lint_legal_style.py` enforces only a subset
 of this list as hard failures, including em dashes, US legalese, internal
@@ -65,76 +70,27 @@ sentence boundary as the signal to re-open the source.
 
 ## AI Writing Tells
 
-No single word or mark proves machine drafting; density, clustering and convergence of signals are the signal.
-Formal legal register legitimately uses many flagged words, so work in three tiers: remove artifacts outright,
-cap density signals, and police structural tells hardest (they survive synonym swaps and formal register does
-not excuse them).
+Run the hub taxonomy's Tier 1/2/3 sweep (chatbot framing, throat-clearing, markup and tool residue, puffery,
+inflation vocabulary, copula avoidance, formulaic contrast, metronome rhythm, over-signposting, hollow topic
+sentences, recap endings, evenly weighted lists, participle synthesis, template sections, uniform confidence,
+unanchored claims). Formal legal register legitimately uses many flagged words, so calibrate on density and
+clustering, never a lone word; the same three-tier discipline (remove artefacts, cap density, police structure
+hardest) applies.
 
-### Tier 1: artifacts (remove on sight; no register value)
+Legal-specific additions the hub does not cover:
 
-- chat or assistant register: sycophantic openers/closers, `I hope this helps`, prompt restatement,
-  `As an AI language model`, knowledge-cutoff or refusal text;
-- markup residue: stray `**bold**` markers or `#` headings in rendered prose, literal tool strings such as
-  `turn0search0`, `oai_citation` or `contentReference`, emoji, Title Case Headings against house sentence style;
-- empty openings such as `It is important to note that`, `It is worth noting that`, `At the outset`;
-- stock document openers (`This submission explores/sets out to/delves into ...`);
-- self-narrating meta-discourse (`This Part gathers, in one place, ...`, `is stated once, here`,
-  `is not reproduced here`, `this section will address`); see also Meta-Discourse And Absence Statements below;
 - agent, build or workspace process language in filing-facing text: `agent summary`, `review set`,
-  `render check`, `manifest proves`, `router status`, `gate fired`, `workflow`, `source pack`, or
-  `audit found`. Translate to the legal act or cite the actual source.
-
-### Tier 2: density signals (each legitimate in isolation; a cluster is the tell)
-
-- inflated adjectives: `crucial`, `vital`, `pivotal`, `robust`, `seamless`, `comprehensive` unless literally
-  accurate;
-- machine-era lexicon: `delve`, `leverage`, `realm`, `tapestry`, `testament`, `multifaceted`, `meticulous`;
-- editorialising adverbs as a tic: `importantly`, `notably`, `interestingly`, `arguably` outside a genuine
-  arguability qualifier. The leave-stage register marker `reasonably arguable` is the required standard, not a
-  tell: never strip it to satisfy this list (see `legal-concision-and-anti-ai.md`, Register Discipline);
-- repeated additive openers: `Moreover`, `Furthermore`, `Additionally`, `In addition`. Use them only for a real
-  logical relation and never as a paragraph-starting habit;
-- formulaic transitions such as `In light of the foregoing`, `Having regard to the above`, `As outlined above`
-  where they do no work;
-- copula-avoidance phrases such as `serves as`, `serves to`, `plays a role in`, `is indicative of`,
-  `stands as` or `represents` where `is`, `shows`, `records`, `requires` or another direct verb works;
-- stock consequence openers such as `This highlights`, `This underscores`, `This demonstrates` or
-  `This showcases` where the sentence does not identify the legal consequence;
-- negative-parallelism padding such as `not merely X but Y`, `not only X but also Y`, or `not just X, but Y`
-  when the contrast is rhetorical rather than legally necessary;
-- significance templates: `stands as a testament to`, `plays a pivotal role in`, `marks a turning point`;
+  `render check`, `manifest proves`, `router status`, `gate fired`, `source pack`, or `audit found`. Translate
+  to the legal act or cite the actual source;
+- the leave-stage register marker `reasonably arguable` is the required standard, not a tell: never strip it to
+  satisfy this list (see `legal-concision-and-anti-ai.md`, Register Discipline);
+- legal noun towers such as `multi-forum procedural consequence context`, `source-boundary filing-facing
+  assertion risk`, or `family-violence safety-context material`. Keep the defined legal term, then move
+  qualifiers into a clause (see Legal Noun Stacks in `legal-concision-and-anti-ai.md`);
 - rule-of-three triads as default cadence: one genuine triad per document is rhetoric; a triad in every
   paragraph is machine rhythm;
-- ceremonial doublets (`null and void`, `each and every`, `any and all`): collapse to the operative word unless
-  the pair carries distinct legal content or is quoted/statutory (repairs in `legal-concision-and-anti-ai.md`);
-- legal noun towers such as `multi-forum procedural consequence context`,
-  `source-boundary filing-facing assertion risk`, or `family-violence
-  safety-context material`. Keep the defined legal term, then move
-  qualifiers into a clause;
-- empty `-ing` phrases such as `ensuring fairness`, `highlighting concerns`, `showcasing evidence` without a
-  concrete actor and action;
 - formal connectives generally (`accordingly`, `thus`, `however`, `moreover`) are proper legal register: govern
-  by density (never three successive paragraphs opening the same way), not prohibition.
-
-### Tier 3: structural tells (word-independent; police hardest)
-
-- uniform sentence and paragraph length: metronome rhythm. Fix by varying length deliberately and landing the
-  decisive point in the shortest sentence;
-- over-signposting: a connective opening every paragraph, plus meta-signposts (`As mentioned earlier`); prefer
-  substantive connectors (`Because X, it follows that Y`) and delete the rest;
-- symmetrical both-sides seesaw (`on the one hand ... on the other`) ending noncommittally: an AI tell and weak
-  advocacy at once. Commit to the position the record supports; a named, specific contrast is fine;
-- hollow topic sentences that restate the heading without adding a checkable proposition;
-- recap conclusions that restate what was said: end on the final substantive point (relief, consequence);
-- evenly weighted lists (every item the same length regardless of importance) and bolded-lead-in bullets as
-  every section's default shape. Genuine enumerations (statutory elements, chronology) correctly stay parallel;
-- sentence-ending participle synthesis (`, highlighting ...`, `, underscoring ...`, `, reflecting ...`) that
-  appends an unsourced conclusion to a factual sentence: stop at the fact or make the consequence its own
-  sourced proposition;
-- every section built to the same template (preview, three equal blocks, recap). Swap-test: if paragraphs can
-  swap without breaking anything, the section has no load-bearing spine;
-- uniform confidence regardless of point strength: calibrate (see `legal-concision-and-anti-ai.md`,
-  Persuasive Strength);
+  by density (never three successive paragraphs opening the same way), not prohibition;
 - the legal-specific hollowness pair: authority recited with no sentence applying it to these facts, and
   factual assertions with no record anchor. Polish without record engagement is the core tell judges name in
   AI-drafted filings; pinpoints and application are the strongest human signals available.
@@ -154,11 +110,11 @@ wording.
 
 ## Meta-Discourse And Absence Statements
 
-Cut statements that only narrate the drafting process, such as `this section will address`, `as requested`, or an
-explanation that a topic is omitted because a draft instruction removed it.
-
-Keep absence, non-reliance, non-admission, no-concession, no-finding and no-order statements where they define
-legal status, evidentiary scope, procedural position, safety framing or the boundary of relief sought.
+Cut statements that only narrate the drafting process, such as `this section will address` or `as requested`.
+See Absence tombstones in the hub taxonomy for the general test (would the sentence exist if no one had asked to
+remove anything?). The legal form of a genuine, author-owned exception is broader than most domains: keep
+absence, non-reliance, non-admission, no-concession, no-finding and no-order statements where they define legal
+status, evidentiary scope, procedural position, safety framing or the boundary of relief sought.
 
 ## Email And Correspondence Tells
 

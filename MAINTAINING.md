@@ -15,8 +15,9 @@ platform-specific.
 ## Change a skill
 
 1. Confirm the capability belongs globally and is not better kept in a project.
-2. Use `skill-audit` for read-only assessment and `skill-authoring` for a new or
-   materially revised skill. `implement` owns end-to-end delivery and
+2. Use `skill-craft` for a skill change: its audit branch for read-only
+   assessment, its author branch for a new or materially revised skill under an
+   explicit write envelope. `implement` owns end-to-end delivery and
    verification.
 3. Use a consistent kebab-case capability name. Related writing skills use
    parallel names: `engineering-writing`, `academic-writing`, `legal-writing`.
@@ -35,10 +36,15 @@ platform-specific.
    invalid, omitted, timed-out and failed attempts with model lineage.
 9. Re-run the public-safety and full harness gates.
 
-Split a skill when its triggers, authority, artifacts or completion gates differ
-meaningfully. Merge skills when they compete for the same request and lack a
-stable boundary. Retain only rules that change behaviour or prevent observed
-failures.
+Split a skill when its triggers, artifacts or completion gates differ
+meaningfully and a single-entrypoint branch selector cannot keep them
+behaviourally separate at runtime. A branched skill may unify procedures of
+differing authority under one frontmatter when each branch enforces its own
+authority gate: for example an audit branch that can never write without an
+explicit envelope naming the acting lifecycle owner. The runtime authority
+boundary, not the file boundary, is what must hold. Merge skills when they
+compete for the same request and lack a stable boundary. Retain only rules that
+change behaviour or prevent observed failures.
 
 Choose the smallest correct owner: an always-loaded project rule, occasional
 skill, deterministic script or hook, external MCP or app capability, or stable
@@ -46,9 +52,13 @@ independently versioned plugin. Do not import popular packs wholesale. Extract
 only licensed, evidence-backed mechanisms into the nearest owner; create a skill
 only when its trigger, authority, artifact and gate remain distinct.
 
-The writing parity set shares a tiered anti-AI base. Structural changes to
-`engineering-writing`, `academic-writing` or `legal-writing` must be checked
-against the other two. `natural-writing` remains the general fallback.
+`natural-writing` is the writing hub and single owner of the shared prose
+doctrine (tiered anti-AI taxonomy, Australian-English house style, condense pass
+and claim discipline); `engineering-writing`, `academic-writing` and
+`legal-writing` keep only their domain overlay and link back to the hub. Change
+the shared doctrine in the hub, not in a domain skill. The hub's
+`scripts/style_lint.py` owns the shared lint vocabulary the domain linters
+import, so a change there ripples to all of them.
 
 ## Promote and retire
 

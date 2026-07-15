@@ -5,10 +5,16 @@ plans (Pro enables via `/config`). This file is Claude-specific; for Codex nativ
 agents, see `codex-subagents.md`. Feature drift expected — re-check
 `code.claude.com/docs/en/workflows` before relying on exact limits or flags.
 
+This is the **Claude-Code adapter** to the substrate-neutral stage/gate/recovery
+contract in [orchestration-contract.md](orchestration-contract.md) — read that
+first for the graph; this file only binds the graph to Claude's JS runtime.
+External consumers of orchestration doctrine should point at the contract, not
+at this file.
+
 A dynamic workflow is a JavaScript orchestration script Claude writes for the task; an isolated
 runtime executes it in the background. The script holds loops, branching, and intermediate results,
-so the orchestrator's context holds only the final answer. This is one native realisation of this
-skill's doctrine: adaptive waves, file/variable-backed intermediate state, cross-family pressure, and
+so the orchestrator's context holds only the final answer. This is Claude's native realisation of the
+contract's stages: adaptive waves, file/variable-backed intermediate state, cross-family pressure, and
 validation gates before synthesis.
 
 ## Triggering
@@ -61,10 +67,9 @@ A workflow saved to `.claude/workflows/` (project) or `~/.claude/workflows/` (pe
   `mkdir -p <dir>/patches` and agents emit patches into that subdir.
   Workers write full output to files and return only headline findings + the path. The manifest is the
   resume/audit ledger.
-- **Adaptive waves.** Do not bake every workflow into the same sequence. Long runs may use several
-  waves that widen, narrow, repair, verify, and document over time; small features may use a compact
-  scout/implement/review/verify loop. After each reduce step, the script or orchestrator decides the
-  next wave: `continue`, `narrow`, `repair`, `verify`, `document`, or `stop`.
+- **Adaptive waves.** Contract stage 6 (`orchestration-contract.md`), realised as script control
+  flow: long runs may use several waves that widen, narrow, repair, verify, and document over time;
+  small features may use a compact scout/implement/review/verify loop.
 - **`args` conventions.** Read structured input from the `args` global verbatim (pass JSON values, not
   stringified JSON; `undefined` if absent). The script has no clock and no RNG: derive `runId`/timestamps
   from `args` or from the first agent (agents have Bash/FS), and vary per-item by index, never
@@ -74,10 +79,14 @@ A workflow saved to `.claude/workflows/` (project) or `~/.claude/workflows/` (pe
   for drafting/review legwork, flagship for synthesis/adjudication, cross-family for decorrelated
   review. Override per stage via `agent(…, { model })`; default to omitting `model` so agents inherit the
   session model.
-- **Escalation as output.** The runtime cannot pause for mid-run approval. End the workflow at the
-  escalation boundary: a serial applier lands low-risk patches after objective checks; high-risk patches
-  are left in `patches/` with rationale and validation evidence for a separate approve-then-apply step.
-  See the skill's "Cross-Family Workers & Escalation Gate".
+- **Escalation as output.** Contract's escalation boundary and human gate: the runtime cannot pause a
+  live script mid-run for approval — there is no adapter mechanism to suspend a running workflow and
+  wait on a human. A gate-adjacent stage instead ends the workflow there and records `awaiting-human`
+  in the manifest/receipt; a human resumes the graph only by approving and triggering a fresh
+  workflow/session, never by unpausing the terminated one. Split stages into separate saved workflows
+  at each sign-off point so the boundary is a clean stop, not a mid-script wait. A serial applier lands
+  low-risk patches after objective checks; high-risk patches are left in `patches/` with rationale and
+  validation evidence for a separate approve-then-apply step.
 
 **Static-check checklist** (run before saving / committing a workflow):
 
@@ -120,10 +129,11 @@ not run. Use the three distinct statuses — `cross_family_certified`, `cross_fa
 `CROSS-FAMILY-NOT-RUN: <reason>` (no safe route, failure, or out of scope) — and never silently
 downgrade or collapse them.
 
-Codex does not execute Claude workflow JavaScript unchanged. Port the stage,
-gate and recovery graph: eligible GPT-5.6 Ultra/native multi-agent can
-coordinate it adaptively; lower efforts use explicit waves plus run-dir state.
-Use a driver only when repeatability or cross-session re-invocation justifies it.
+Codex does not execute Claude workflow JavaScript unchanged. Port the
+`orchestration-contract.md` stage/gate/recovery graph instead: eligible
+GPT-5.6 Ultra/native multi-agent can coordinate it adaptively; lower efforts
+use explicit waves plus run-dir state (`codex-subagents.md`). Use a driver
+only when repeatability or cross-session re-invocation justifies it.
 
 ## Quality patterns worth codifying in the script
 

@@ -41,7 +41,7 @@ version-sensitive APIs.
 - When edits are authorised, use `implement` and apply `tdd` to behaviour
   changes. Use `tanstack-query` for React Query server state,
   `web-stack-conventions` for Lighthouse/WCAG version deltas, and
-  `frontend-design` when measured performance work affects UX/accessibility.
+  `ui-ux-design` when measured performance work affects UX/accessibility.
 - Re-measure under the same conditions. Reject improvements that merely move
   work, weaken freshness/authentication, or improve synthetic data while field
   behaviour regresses.
@@ -49,5 +49,6 @@ version-sensitive APIs.
   before/after evidence, trade-offs and any unmeasured residual risk.
 
 The detailed rules are adapted material; provenance and licence terms are in
-[NOTICE.md](NOTICE.md) and [LICENSE](LICENSE). Current primary sources are
-indexed in [sources.md](references/sources.md).
+the repository [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) and
+the [Vercel React best-practices licence](../../LICENSES/vercel-react-best-practices-MIT.txt).
+Current primary sources are indexed in [sources.md](references/sources.md).

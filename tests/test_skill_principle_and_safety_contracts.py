@@ -37,14 +37,14 @@ def test_refactor_preserves_behaviour_and_rejects_acronym_compliance():
     assert "Unknown, user-owned and unrelated files stay untouched" in skill
 
 
-def test_tdd_and_lab_cleanup_never_delete_unknown_or_preexisting_work():
+def test_tdd_and_autopilot_cleanup_never_delete_unknown_or_preexisting_work():
     tdd = text("skills/tdd/SKILL.md")
-    recovery = text("skills/autonomous-lab/references/recovery-and-cadence.md")
-    filesystem = text("skills/autonomous-lab/references/filesystem-memory.md")
-    combined = squash("\n".join((tdd, recovery, filesystem))).lower()
+    skill = text("skills/autopilot/SKILL.md")
+    recovery = text("skills/autopilot/references/recovery-and-cadence.md")
+    combined = squash("\n".join((tdd, skill, recovery))).lower()
     assert "delete it and reconstruct" not in combined
     assert "delete cruft" not in combined
-    assert "unknown, pre-existing or user-authored work" in combined
+    assert "never delete unknown files" in combined
     assert "unknown or user-owned material stays untouched" in combined
 
 

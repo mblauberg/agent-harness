@@ -78,17 +78,46 @@ Separate observations from interpretations.
 
 ## README
 
-Use when the reader needs orientation.
+Use when the reader needs orientation. A repository README is a landing page, so
+write for a capable reader who does not yet know the project.
 
-Structure:
+Answer these first, in the reader's order (GitHub's README guidance):
 
-1. What this is
-2. How to run or use it
-3. Important constraints
-4. Common commands or workflows
-5. Where deeper detail lives
+1. What is this? One plain sentence, no positioning against inferior tools.
+2. Why would I use it? A few concrete outcome bullets, not adjectives.
+3. What do I need, and how do I start? Prerequisites *before* the first command.
+4. What are the important limits? The constraints that change how it is used.
+5. Where is the deeper detail, and how do I get help? Links to canonical owners.
 
-Keep status, roadmap, and changelog material out unless the repository uses README as the current-state authority.
+Structure that usually follows:
+
+1. Name, one-sentence purpose, badges, and a compact status note.
+2. What it adds: outcome bullets plus a short component map.
+3. Quick start: requirements, install, verify, expected result.
+4. Choose a workflow: a `Need → Skill` (or `Task → Command`) table.
+5. How it works: one diagram, optional worked example in a collapsed section.
+6. Important constraints and where the deeper docs live.
+
+Discipline:
+
+- Include only high-value orientation. Link the canonical owner (architecture,
+  maintenance, security, policy) instead of restating it; duplicated detail
+  makes the important content harder to find and drifts out of date.
+- Make the quick start procedural: state audience, prerequisites and expected
+  result; keep only essential steps; put verification in its own step. Do not
+  round exact supported versions (`Node.js >=24.15.0 <25`, not `Node.js 24`).
+- Match formatting to information type: bullets for benefits and independent
+  constraints, numbered lists for procedures, tables only for compact mappings,
+  short prose for reasoning and trade-offs, and `<details>` for optional depth
+  (full catalogues, installer edge cases, long examples). Do not shatter
+  connected reasoning into fragments just to make more bullets.
+- Use confident, neutral language. Show value through specific outcomes, not by
+  contrasting the project with a worse reader or tool.
+
+Keep status, roadmap, and changelog material out unless the repository uses the
+README as the current-state authority. Preserve every load-bearing fact
+(versions, commands, security-reporting path, machine-managed/generated blocks)
+verbatim through a rewrite; a shorter README must not drop an obligation.
 
 ## ADR
 
