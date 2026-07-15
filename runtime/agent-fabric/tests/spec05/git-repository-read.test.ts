@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -49,7 +49,7 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 
 async function setupFixture(options: {
   worktree?: "admitted" | "unadmitted";
-  untrackedCount?: number;
+  untrackedSymlinkCount?: number;
   largeDiff?: boolean;
   hostedChecks?: GitHostedChecksPort;
 } = {}): Promise<Fixture> {
@@ -79,9 +79,12 @@ async function setupFixture(options: {
     "utf8",
   );
   await writeFile(join(repositoryRoot, "untracked.txt"), "untracked\n", "utf8");
-  for (let index = 0; index < (options.untrackedCount ?? 0); index += 1) {
-    await writeFile(join(repositoryRoot, `untracked-${String(index).padStart(3, "0")}.txt`), `${String(index)}\n`, "utf8");
-  }
+  await Promise.all(Array.from({ length: options.untrackedSymlinkCount ?? 0 }, async (_, index) => {
+    await symlink(
+      "missing-target",
+      join(repositoryRoot, `untracked-${String(index).padStart(3, "0")}.txt`),
+    );
+  }));
 
   const databasePath = join(stateRoot, "fabric.sqlite3");
   const initial = await openFabric({ databasePath, workspaceRoots: [repositoryRoot], clock: () => now });
@@ -582,7 +585,7 @@ describe("operator repository read", () => {
   });
 
   it("marks bounded path pages as truncated without losing repository state", async () => {
-    const fixture = await setupFixture({ untrackedCount: 260 });
+    const fixture = await setupFixture({ untrackedSymlinkCount: 256 });
     try {
       const result = await readAfterNovelArtifactRegistration(
         fixture.request,
@@ -594,7 +597,9 @@ describe("operator repository read", () => {
       );
       if (result.status !== "current") throw new Error("expected current Git projection");
       expect(result.repository.changes.untracked).toMatchObject({ truncated: true });
-      expect(result.repository.changes.untracked.paths).toHaveLength(256);
+      expect(result.repository.changes.untracked.paths).toEqual(
+        Array.from({ length: 256 }, (_, index) => `untracked-${String(index).padStart(3, "0")}.txt`),
+      );
       expect(result.repository.repositoryStateDigest).toMatch(/^sha256:[0-9a-f]{64}$/u);
     } finally {
       await fixture.fabric.close();
