@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -22,6 +22,28 @@ const handles: FabricDaemonHandle[] = [];
 const roots: string[] = [];
 
 type StartOptions = Parameters<typeof startFabricDaemon>[0];
+
+async function provisionLifecycleReceiptAuthority(
+  stateDirectory: string,
+  authorityId = "production-local-authority",
+): Promise<void> {
+  await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  await chmod(stateDirectory, 0o700);
+  const databasePath = join(stateDirectory, "lifecycle-receipts.sqlite3");
+  const database = new Database(databasePath);
+  database.exec(await readFile(
+    new URL("../../../schemas/lifecycle-receipt-authority-v1.sql", import.meta.url),
+    "utf8",
+  ));
+  database.prepare("INSERT INTO authority_metadata VALUES(1,1,?)").run(authorityId);
+  database.close();
+  await chmod(databasePath, 0o600);
+  await writeFile(
+    join(stateDirectory, "lifecycle-receipts.hmac.key"),
+    randomBytes(32),
+    { mode: 0o600 },
+  );
+}
 
 async function launchAndReleaseFromSeparateProcess(
   options: StartOptions,
@@ -157,6 +179,74 @@ afterEach(async () => {
 });
 
 describe("production daemon bootstrap wiring", () => {
+  it("opens and owns the configured local lifecycle receipt authority", async () => {
+    const root = await mkdtemp(join(tmpdir(), "f-pra-"));
+    roots.push(root);
+    const stateDirectory = join(root, "state");
+    const runtimeDirectory = join(root, "runtime");
+    await provisionLifecycleReceiptAuthority(stateDirectory);
+    const options = {
+      databasePath: join(stateDirectory, "fabric.sqlite3"),
+      stateDirectory,
+      runtimeDirectory,
+      socketPath: join(runtimeDirectory, "fabric.sock"),
+      workspaceRoots: [root],
+      lifecycleReceiptAuthorityId: "production-local-authority",
+    };
+
+    const first = await startFabricDaemon(options);
+    handles.push(first);
+    await first.stop();
+    const restarted = await startFabricDaemon(options);
+    handles.push(restarted);
+    expect(restarted.pid).not.toBe(first.pid);
+  });
+
+  it("fails closed when a configured local lifecycle receipt authority is absent or crossed", async () => {
+    const absentRoot = await mkdtemp(join(tmpdir(), "f-pra-a-"));
+    const crossedRoot = await mkdtemp(join(tmpdir(), "f-pra-x-"));
+    roots.push(absentRoot, crossedRoot);
+
+    await expect(startFabricDaemon({
+      databasePath: join(absentRoot, "state", "fabric.sqlite3"),
+      stateDirectory: join(absentRoot, "state"),
+      runtimeDirectory: join(absentRoot, "runtime"),
+      socketPath: join(absentRoot, "runtime", "fabric.sock"),
+      workspaceRoots: [absentRoot],
+      lifecycleReceiptAuthorityId: "production-local-authority",
+    })).rejects.toThrow();
+
+    const crossedState = join(crossedRoot, "state");
+    await provisionLifecycleReceiptAuthority(crossedState, "ledger-authority");
+    await expect(startFabricDaemon({
+      databasePath: join(crossedState, "fabric.sqlite3"),
+      stateDirectory: crossedState,
+      runtimeDirectory: join(crossedRoot, "runtime"),
+      socketPath: join(crossedRoot, "runtime", "fabric.sock"),
+      workspaceRoots: [crossedRoot],
+      lifecycleReceiptAuthorityId: "configured-authority",
+    })).rejects.toThrow(/identity mismatch/u);
+  });
+
+  it("does not attach a configured caller to an incumbent with a different receipt authority", async () => {
+    const root = await mkdtemp(join(tmpdir(), "f-pra-m-"));
+    roots.push(root);
+    const options = {
+      databasePath: join(root, "state", "fabric.sqlite3"),
+      stateDirectory: join(root, "state"),
+      runtimeDirectory: join(root, "runtime"),
+      socketPath: join(root, "runtime", "fabric.sock"),
+      workspaceRoots: [root],
+    };
+    const incumbent = await startFabricDaemon(options);
+    handles.push(incumbent);
+
+    await expect(startFabricDaemon({
+      ...options,
+      lifecycleReceiptAuthorityId: "requested-authority",
+    })).rejects.toThrow(/lifecycle receipt authority configuration mismatch/u);
+  });
+
   it("rejects process startup when the authoritative daemon epoch is absent", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-missing-daemon-epoch-"));
     roots.push(root);
@@ -655,7 +745,9 @@ describe("production daemon bootstrap wiring", () => {
     expect(new Set(contenders.map((handle) => handle.pid)).size).toBe(1);
     expect(contenders.filter((handle) => handle.ownsProcess)).toHaveLength(1);
     const discovery = JSON.parse(await readFile(join(runtimeDirectory, "fabric-v1.discovery.json"), "utf8")) as Record<string, unknown>;
-    expect(Object.keys(discovery).sort()).toEqual(["bootstrapCapability", "pid", "schemaVersion", "socketPath"]);
+    expect(Object.keys(discovery).sort()).toEqual([
+      "bootstrapCapability", "lifecycleReceiptAuthorityId", "pid", "schemaVersion", "socketPath",
+    ]);
     expect((await stat(join(runtimeDirectory, "fabric-v1.discovery.json"))).mode & 0o777).toBe(0o600);
     expect([
       ...await readdir(stateDirectory),
@@ -720,6 +812,7 @@ describe("production daemon bootstrap wiring", () => {
       socketPath,
       pid: 2_147_483_647,
       bootstrapCapability: `afb_${"a".repeat(43)}`,
+      lifecycleReceiptAuthorityId: null,
     })}\n`, { mode: 0o600 });
 
     await expect(startFabricDaemon({

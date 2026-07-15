@@ -18,13 +18,18 @@ function digest(domain: string, value: unknown): LifecycleDigest {
     .digest("hex")}`;
 }
 
-async function provisionAuthority(authorityId = "local-authority"): Promise<string> {
+async function provisionAuthority(
+  authorityId = "local-authority",
+  transformSchema: (schema: string) => string = (schema) => schema,
+): Promise<string> {
   const stateDirectory = await mkdtemp(join(tmpdir(), "fabric-local-receipts-"));
   roots.push(stateDirectory);
   await chmod(stateDirectory, 0o700);
   const databasePath = join(stateDirectory, "lifecycle-receipts.sqlite3");
   const database = new Database(databasePath);
-  database.exec(await readFile(new URL("../../../schemas/lifecycle-receipt-authority-v1.sql", import.meta.url), "utf8"));
+  database.exec(transformSchema(
+    await readFile(new URL("../../../schemas/lifecycle-receipt-authority-v1.sql", import.meta.url), "utf8"),
+  ));
   database.prepare(`INSERT INTO authority_metadata VALUES(1,1,?)`).run(authorityId);
   database.close();
   await chmod(databasePath, 0o600);
@@ -226,6 +231,42 @@ describe("local lifecycle receipt authority", () => {
     const stateDirectory = await provisionAuthority();
     const database = new Database(join(stateDirectory, "lifecycle-receipts.sqlite3"));
     database.exec(`CREATE TABLE unexpected(value TEXT) STRICT`);
+    database.close();
+
+    expect(() => openLocalLifecycleReceiptAuthority({ stateDirectory, expectedAuthorityId: "local-authority" }))
+      .toThrowError(/schema mismatch/u);
+  });
+
+  it.each([
+    ["CHECK", (schema: string) => schema.replace(
+      "authority_sequence INTEGER NOT NULL CHECK(authority_sequence>0)",
+      "authority_sequence INTEGER NOT NULL",
+    )],
+    ["UNIQUE", (schema: string) => schema.replace(
+      "  UNIQUE(kind,project_session_id,run_id,agent_id,owner_ref_digest,owner_revision),\n",
+      "",
+    )],
+    ["FOREIGN KEY", (schema: string) => schema.replace(
+      ",\n  FOREIGN KEY(project_session_id,run_id) REFERENCES admitted_scopes(project_session_id,run_id)\n) STRICT;",
+      "\n) STRICT;",
+    )],
+  ] as const)("rejects a ledger missing its load-bearing %s constraint", async (_label, transformSchema) => {
+    const stateDirectory = await provisionAuthority("local-authority", transformSchema);
+
+    expect(() => openLocalLifecycleReceiptAuthority({ stateDirectory, expectedAuthorityId: "local-authority" }))
+      .toThrowError(/schema mismatch/u);
+  });
+
+  it.each(["INDEX", "VIEW", "TRIGGER"] as const)("rejects an unexpected schema %s", async (kind) => {
+    const stateDirectory = await provisionAuthority();
+    const database = new Database(join(stateDirectory, "lifecycle-receipts.sqlite3"));
+    if (kind === "INDEX") {
+      database.exec("CREATE INDEX receipt_digest_index ON receipts(receipt_digest)");
+    } else if (kind === "VIEW") {
+      database.exec("CREATE VIEW receipt_view AS SELECT * FROM receipts");
+    } else {
+      database.exec("CREATE TRIGGER receipt_trigger AFTER INSERT ON receipts BEGIN SELECT 1; END");
+    }
     database.close();
 
     expect(() => openLocalLifecycleReceiptAuthority({ stateDirectory, expectedAuthorityId: "local-authority" }))

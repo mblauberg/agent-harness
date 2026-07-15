@@ -64,6 +64,7 @@ describe("machine status and doctor", () => {
       socketPath: value.socketPath,
       pid: process.pid,
       bootstrapCapability: `afb_${"A".repeat(43)}`,
+      lifecycleReceiptAuthorityId: null,
     })}\n`, { mode: 0o600 });
     const agentsHome = resolve(import.meta.dirname, "../../../..");
     await expect(fabricStatus(["--agents-home", agentsHome, "--project", agentsHome], value)).resolves.toMatchObject({
@@ -80,7 +81,8 @@ describe("machine status and doctor", () => {
     });
     try {
       await writeFile(join(value.runtimeDirectory, "fabric-v1.discovery.json"), `${JSON.stringify({
-        schemaVersion: 1, socketPath: value.socketPath, pid: daemon.pid, bootstrapCapability: daemon.bootstrapCapability,
+        schemaVersion: 1, socketPath: value.socketPath, pid: daemon.pid,
+        bootstrapCapability: daemon.bootstrapCapability, lifecycleReceiptAuthorityId: null,
       })}\n`, { mode: 0o600 });
       const agentsHome = resolve(import.meta.dirname, "../../../..");
       await expect(fabricStatus(["--agents-home", agentsHome, "--project", agentsHome], value)).resolves.toMatchObject({
