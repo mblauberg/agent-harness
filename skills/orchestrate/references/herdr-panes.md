@@ -95,23 +95,26 @@ and resolved model in the run receipt.
 ## Send steering
 
 Use the bundled helper only for fire-and-forget steering with no expected
-answer. It resolves the pane, calls Herdr's `pane run`, waits for paste
-settlement, then sends a harmless trailing Enter because Herdr 0.7.3 can leave
-long Claude/Codex drafts unsubmitted. Its result is `dispatched-unconfirmed`,
-not proof that the target process consumed the prompt:
+answer. It is a thin client for the authenticated public Fabric operation;
+Fabric validates the exact task or message revision and target before its
+daemon-owned Herdr integration performs any pane I/O. Its terminal result is
+`dispatched-unconfirmed`, not proof that the target process consumed the
+prompt:
 
 ```sh
 printf '%s' '<bounded prompt>' | \
   "${AGENTS_HOME:-$HOME/.agents}/skills/orchestrate/scripts/herdr_prompt.sh" \
-  <name> --fire-and-forget --task-ref <task-or-message-id>
+  <name> --fire-and-forget --action-id <stable-action-id> \
+  --pane-ref <pane-id> --task-ref <task-id> --expected-revision <revision>
 ```
 
 The helper never waits and cannot return an answer. Do not use it for an
 assignment, review, research request or any work the lead must consume. Prefer
 it over separate raw text/key sends only for steering an already tracked task.
-The current shell helper records the caller-supplied reference but cannot prove
-that it exists; its receipt therefore says `task-ref-unverified`. Authoritative
-task validation belongs at the Fabric-backed Console/provider boundary.
+The helper has no direct Herdr fallback. Unknown, stale, target-mismatched or
+answer-bearing references fail before pane I/O; unavailable Fabric or Herdr
+fails closed with a typed result. Exact retries reuse the stable action without
+duplicating the pane effect.
 
 ## Send answer-bearing work
 

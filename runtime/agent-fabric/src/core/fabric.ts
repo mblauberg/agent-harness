@@ -16,6 +16,7 @@ import {
   type EvidenceArtifactRegistration,
   type EvidencePublishRequest,
   type GateOperationTarget,
+  type HerdrSteerDispatchResult,
   type LifecycleAcceptedSuspendedV1,
   type LifecycleCustodyRowV1,
   type LifecycleCurrentStateV1,
@@ -95,6 +96,7 @@ import {
   type HerdrDaemonActionResult,
   type HerdrDaemonIntegrationConfiguration,
   type HerdrDirectSteerRequest,
+  type HerdrDirectSteerResult,
 } from "../integrations/herdr-daemon-integration.js";
 import { ArtifactContentReadService } from "../operator/artifact-content-read.js";
 import {
@@ -894,6 +896,25 @@ type ProviderActionDispatchRequest = {
   commandId: string;
 };
 
+function publicHerdrSteerResult(result: HerdrDirectSteerResult): HerdrSteerDispatchResult {
+  if (result.status === "rejected" || result.status === "unavailable") return result;
+  const base = { actionId: result.actionId, revision: result.revision };
+  if (result.status === "prepared" || result.status === "dispatched") {
+    return { ...base, status: result.status };
+  }
+  if (result.status === "ambiguous") {
+    if (result.ambiguityReason === undefined) {
+      throw new TypeError("ambiguous Herdr steering action has no bounded reason");
+    }
+    return { ...base, status: "ambiguous", reason: result.ambiguityReason };
+  }
+  if (
+    result.receipt?.status !== "dispatched-unconfirmed" ||
+    result.receipt.operation !== "steer.inject-fire-and-forget"
+  ) throw new TypeError("terminal Herdr steering action has no direct-steer receipt");
+  return { ...base, status: "terminal", receipt: result.receipt };
+}
+
 export class Fabric {
   readonly #database: Database.Database;
   readonly #workspaceRoots: string[];
@@ -1214,7 +1235,7 @@ export class Fabric {
     return await this.#herdr.executeAction(request);
   }
 
-  async executeHerdrDirectSteer(request: HerdrDirectSteerRequest): Promise<HerdrDaemonActionResult> {
+  async executeHerdrDirectSteer(request: HerdrDirectSteerRequest): Promise<HerdrDirectSteerResult> {
     return await this.#herdr.executeDirectSteer(request);
   }
 
@@ -2630,6 +2651,26 @@ export class Fabric {
             context.principal.agentId,
             input as OperationInputMap[typeof FABRIC_OPERATIONS.evidencePublish],
           );
+        case FABRIC_OPERATIONS.herdrSteerDispatch: {
+          const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.herdrSteerDispatch];
+          const run = rowOrNotFound(this.#database.prepare(`
+            SELECT session.project_id, coordination.project_session_id
+              FROM runs coordination
+              JOIN project_sessions session
+                ON session.project_session_id=coordination.project_session_id
+             WHERE coordination.run_id=?
+          `).get(context.principal.runId), "Herdr steering coordination run");
+          const result = await this.#herdr.executeDirectSteer({
+            ...request,
+            reference: {
+              ...request.reference,
+              projectId: stringField(run, "project_id") as never,
+              projectSessionId: context.principal.projectSessionId,
+              coordinationRunId: context.principal.runId as never,
+            },
+          });
+          return publicHerdrSteerResult(result);
+        }
         default:
           throw Object.assign(new Error(`agent protocol operation is not wired: ${operation}`), {
             code: "PROTOCOL_UNSUPPORTED",

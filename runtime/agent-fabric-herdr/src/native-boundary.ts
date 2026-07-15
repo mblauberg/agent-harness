@@ -74,37 +74,6 @@ export class HerdrCliBoundary implements HerdrControlPort, HerdrPresencePort {
     return { version: this.#options.expectedVersion, protocol: this.#options.expectedProtocol };
   }
 
-  async dispatchUnverifiedFireAndForget(
-    paneRef: string,
-    prompt: string,
-  ): Promise<{
-    status: "dispatched-unconfirmed";
-    operation: "steer.inject-fire-and-forget";
-    referenceValidation: "unverified";
-    deliveryEvidence: "none";
-    canSatisfyExpectedResult: false;
-    canCloseBarrier: false;
-  }> {
-    if (!validPaneId(paneRef)) throw new TypeError("degraded Herdr steering pane reference is invalid");
-    const promptBytes = Buffer.byteLength(prompt, "utf8");
-    if (promptBytes < 1 || promptBytes > 4_096 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u009b]/u.test(prompt) || CREDENTIAL_PATTERN.test(prompt)) {
-      throw new TypeError("degraded Herdr steering prompt is unsafe or exceeds its bound");
-    }
-    await this.#run(["pane", "run", paneRef, prompt], 5_000, 262_144);
-    // Herdr 0.7.3 may acknowledge pane-run before the pasted draft is visible.
-    // Match the contract-tested shell helper's settling interval before Enter.
-    await delay(150);
-    await this.#run(["pane", "send-keys", paneRef, "enter"], 5_000, 262_144);
-    return {
-      status: "dispatched-unconfirmed",
-      operation: "steer.inject-fire-and-forget",
-      referenceValidation: "unverified",
-      deliveryEvidence: "none",
-      canSatisfyExpectedResult: false,
-      canCloseBarrier: false,
-    };
-  }
-
   async lookupAction(actionId: ProviderActionId): Promise<HerdrEffectLookup> {
     return this.#options.effectJournal.lookupAction(actionId).catch(() => ({ status: "unknown" }));
   }

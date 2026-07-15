@@ -54,7 +54,7 @@ def test_herdr_reference_and_degradation_doctrines_are_contract_invariants() -> 
         "herdr-panes.md",
         "HERDR-NOT-USED",
         "dispatched-unconfirmed",
-        "task-ref-unverified",
+        "referenceValidation: verified",
         "FABRIC-ROUNDTRIP-UNAVAILABLE",
         "Herdr then wakes or focuses the peer; it is not the transport of record",
     } <= invariants

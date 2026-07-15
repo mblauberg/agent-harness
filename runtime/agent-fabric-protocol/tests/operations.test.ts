@@ -51,6 +51,17 @@ describe("public operation vocabulary", () => {
     expect(Object.values(protocol.FABRIC_OPERATIONS)).not.toContain("fabric.v1.operator.input-attest");
     expect(Object.values(protocol.FABRIC_OPERATIONS)).not.toContain("fabric.v1.operator.command");
   });
+
+  it("publishes one agent-only Herdr steering dispatch operation", () => {
+    expect(protocol.FABRIC_OPERATIONS.herdrSteerDispatch).toBe(
+      "fabric.v1.herdr-steer.dispatch",
+    );
+    expect(protocol.OPERATION_REGISTRY[protocol.FABRIC_OPERATIONS.herdrSteerDispatch]).toMatchObject({
+      feature: "herdr-control.v1",
+      principals: ["agent"],
+      kind: "extension",
+    });
+  });
 });
 
 describe("protocol negotiation", () => {

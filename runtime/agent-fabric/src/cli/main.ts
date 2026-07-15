@@ -1,16 +1,26 @@
 #!/usr/bin/env node
 import Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
+import { createConnection } from "node:net";
 import { dirname } from "node:path";
+import {
+  FABRIC_OPERATIONS,
+  NdjsonRpcTransport,
+  ProtocolTransportError,
+  type HerdrSteerDispatchResult,
+} from "@local/agent-fabric-protocol";
 
 import { verifyFabricReceiptLink } from "../exports/receipt.js";
 import { runForegroundDaemon } from "./daemon-run.js";
 import { runEventObserver } from "./event-observer.js";
+import { HERDR_STEER_USAGE, parseHerdrSteerArguments } from "./herdr-steer.js";
 import { mcpSeatPath, provisionMcpSeats } from "./mcp-provision.js";
 import { provisionObserverCredential } from "./observer-provision.js";
 import { resolveFabricPaths } from "./paths.js";
 import { runRetentionCli } from "./retention.js";
 import { fabricDoctor, fabricStatus } from "./status.js";
 import { runWorkspaceTrust } from "./workspace-trust.js";
+import { resolveMcpCapability } from "../mcp/credentials.js";
 import {
   privateDiscoveryPaths,
   readPrivateDiscovery,
@@ -81,6 +91,52 @@ async function verifyReceipt(arguments_: string[]): Promise<void> {
   process.stdout.write(`verified ${result.relativePath} sha256 ${result.sha256}\n`);
 }
 
+async function herdrSteer(arguments_: string[]): Promise<void> {
+  const request = await parseHerdrSteerArguments(arguments_);
+  const paths = resolveFabricPaths();
+  const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH ??
+    await servingSocketPath(paths.runtimeDirectory, paths.socketPath);
+  const capability = await resolveMcpCapability(
+    process.env,
+    process.cwd(),
+    (message) => process.stderr.write(`warning: ${message}\n`),
+  );
+  delete process.env.AGENT_FABRIC_CAPABILITY;
+  let transport: Awaited<ReturnType<typeof NdjsonRpcTransport.connect>> | undefined;
+  let result: HerdrSteerDispatchResult | {
+    status: "unavailable";
+    integration: "agent-fabric";
+    reason: "unavailable";
+  };
+  try {
+    transport = await NdjsonRpcTransport.connect(createConnection(socketPath), {
+      protocolVersion: 1,
+      client: { name: "agent-fabric-herdr-steer", version: "1.0.0" },
+      authentication: {
+        scheme: "capability",
+        credential: capability,
+        clientNonce: `herdr_steer_${randomUUID()}`,
+      },
+      expectedPrincipalKind: "agent",
+      requiredFeatures: ["herdr-control.v1"],
+      optionalFeatures: [],
+    });
+    result = await transport.call(FABRIC_OPERATIONS.herdrSteerDispatch, request);
+  } catch (error: unknown) {
+    if (!(error instanceof ProtocolTransportError) && !isConnectionFailure(error)) throw error;
+    result = { status: "unavailable", integration: "agent-fabric", reason: "unavailable" };
+  } finally {
+    await transport?.close();
+  }
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+  if (result.status !== "terminal") process.exitCode = 1;
+}
+
+function isConnectionFailure(error: unknown): boolean {
+  return error instanceof Error && "code" in error &&
+    typeof error.code === "string" && ["ECONNREFUSED", "ENOENT", "EPIPE", "ECONNRESET"].includes(error.code);
+}
+
 async function main(arguments_: string[]): Promise<void> {
   if (arguments_[0] === "status") {
     process.stdout.write(`${JSON.stringify(await fabricStatus(arguments_.slice(1), resolveFabricPaths()), null, 2)}\n`);
@@ -106,6 +162,14 @@ async function main(arguments_: string[]): Promise<void> {
   }
   if (arguments_[0] === "observe") {
     await runEventObserver(arguments_.slice(1));
+    return;
+  }
+  if (arguments_[0] === "herdr" && arguments_[1] === "steer") {
+    if (arguments_.length === 3 && ["--help", "-h"].includes(arguments_[2] ?? "")) {
+      process.stdout.write(`${HERDR_STEER_USAGE}\n`);
+      return;
+    }
+    await herdrSteer(arguments_.slice(2));
     return;
   }
   if (arguments_[0] === "mcp" && arguments_[1] === "provision") {
@@ -137,7 +201,7 @@ async function main(arguments_: string[]): Promise<void> {
     return;
   }
   throw new Error(
-    "usage: agent-fabric status|doctor [--project PATH] [--agents-home PATH] [--trusted-config PATH] [--compatibility PATH] [--compatibility-schema PATH] | inspect [--database PATH] [--runtime-directory PATH] [--json] | workspace trust|inspect|list|revoke [PATH] | retention status|preview [--database PATH] | retention archive --run-id ID --output ABSOLUTE_DIRECTORY [--database PATH] | receipt verify --run-receipt PATH | daemon run (...) | observe --socket PATH --capability-file PATH --run-id ID --cursor PATH [--once] [--interval-ms N] | mcp provision --project PATH --project-session-id ID --session-revision N --session-generation N --run-id ID --run-revision N --chair-seat SEAT --chair-agent-id ID --chair-generation N --chair-lease-id ID --seat-bindings SEAT=AGENT@GENERATION,... --expires-at ISO_TIMESTAMP | mcp seat-path --project PATH --seat SEAT",
+    "usage: agent-fabric status|doctor [--project PATH] [--agents-home PATH] [--trusted-config PATH] [--compatibility PATH] [--compatibility-schema PATH] | inspect [--database PATH] [--runtime-directory PATH] [--json] | workspace trust|inspect|list|revoke [PATH] | retention status|preview [--database PATH] | retention archive --run-id ID --output ABSOLUTE_DIRECTORY [--database PATH] | receipt verify --run-receipt PATH | daemon run (...) | observe --socket PATH --capability-file PATH --run-id ID --cursor PATH [--once] [--interval-ms N] | herdr steer (...) | mcp provision --project PATH --project-session-id ID --session-revision N --session-generation N --run-id ID --run-revision N --chair-seat SEAT --chair-agent-id ID --chair-generation N --chair-lease-id ID --seat-bindings SEAT=AGENT@GENERATION,... --expires-at ISO_TIMESTAMP | mcp seat-path --project PATH --seat SEAT",
   );
 }
 
