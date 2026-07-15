@@ -25,10 +25,12 @@ All staged implement work landed on branch `issue-124-skill-audit-register`. Cat
 
 **Frozen routing evidence — SUPERSEDED, deferred to #135 (owner-approved):** the catalogue restructure invalidates the spec05 and skill-portfolio-2026 digests, which bind to real Agent-Fabric routing receipts. These were **not** hand-edited — fabricating evaluation evidence is forbidden — so the 8 affected tests are marked `xfail(strict=False)` with a reason pointing at #135. Honest re-greening requires a live fabric routing run against the new catalogue, tracked in #135, before this reaches main.
 
+**Done since (this branch):**
+- **Workstream E licensing consolidation — DONE:** the 8 third-party licence texts moved to a top-level `LICENSES/` directory (descriptive `<component>-<licence>.txt` names); a new top-level `NOTICE` aggregates the Apache-2.0 §4(d) attributions (Impeccable, Microsoft Playwright); `THIRD_PARTY_NOTICES.md` rewritten as the single prose index re-pointing to `LICENSES/` and folding in the retired per-skill NOTICE prose; the 5 per-skill `NOTICE` files and in-skill breadcrumbs re-pointed. `NOTICE` added to `public_release_check.py` REQUIRED + the coupling test (`test_public_tree_retains_ui_ux_pro_max_attribution`) rewritten to the centralised paths. `public-release-check` PASS.
+- **autopilot hardening — DONE:** `validate_idle_pause.py` now fails closed on unrecognized queue status **and** malformed queue rows (escaped-pipe-aware cell split), with 2 added regression tests; the removed cross-file STATE corroboration is intentional (its `.orchestrator/runs.md` source was consolidated into `QUEUE.md` by design).
+
 **Remaining (not on this branch):**
-- **Workstream E licensing consolidation** (`LICENSES/` + top-level `NOTICE` + `THIRD_PARTY_NOTICES.md` as index): per-skill notices are currently valid and correctly re-pointed to the new skill paths; the reorganisation moves ~15 legally-sensitive files and needs coordinated test-path updates, so it is a focused follow-up rather than a rushed change here.
 - **#135**: spec05 retirement + eval regeneration (now also the owner of re-greening the superseded frozen evidence above).
-- **autopilot hardening**: malformed-queue-row detection and the removed cross-file STATE corroboration (its `.orchestrator/runs.md` source was consolidated into `QUEUE.md` by design) — flagged by review as follow-ups.
 
 ## Owner decisions (grill-me R1–R5)
 

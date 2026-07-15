@@ -1,4 +1,4 @@
-<!-- Modified from Impeccable for this harness; see ../NOTICE.md. -->
+<!-- Modified from Impeccable for this harness; see the repository THIRD_PARTY_NOTICES.md. -->
 # Codex: Visual Direction & Asset Production
 
 This file is loaded by `$ui-ux-design craft` when the harness has native image generation (currently Codex via `image_gen`). Other harnesses skip it. It covers the two craft steps that depend on real image generation: landing the visual direction, and producing the raster assets the implementation will compose.

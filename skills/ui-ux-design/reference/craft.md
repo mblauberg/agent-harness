@@ -1,4 +1,4 @@
-<!-- Modified from Impeccable for this harness; see ../NOTICE.md. -->
+<!-- Modified from Impeccable for this harness; see the repository THIRD_PARTY_NOTICES.md. -->
 # Craft Flow
 
 Build a feature with impeccable UX and UI quality: shape the design, land the visual direction, build real production code, inspect and improve in-browser until it meets a high-end studio bar.

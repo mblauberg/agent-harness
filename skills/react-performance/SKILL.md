@@ -49,5 +49,6 @@ version-sensitive APIs.
   before/after evidence, trade-offs and any unmeasured residual risk.
 
 The detailed rules are adapted material; provenance and licence terms are in
-[NOTICE.md](NOTICE.md) and [LICENSE](LICENSE). Current primary sources are
-indexed in [sources.md](references/sources.md).
+the repository [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) and
+[LICENSES/vercel-react-best-practices-MIT.txt](../../LICENSES/vercel-react-best-practices-MIT.txt).
+Current primary sources are indexed in [sources.md](references/sources.md).

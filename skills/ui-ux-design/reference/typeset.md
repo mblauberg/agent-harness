@@ -1,4 +1,4 @@
-<!-- Modified from Impeccable for this harness; see ../NOTICE.md. -->
+<!-- Modified from Impeccable for this harness; see the repository THIRD_PARTY_NOTICES.md. -->
 Typography carries most of the information on the page. Replace generic defaults (Inter, Roboto, system fallback at flat scale) with type that reflects the brand and scales with intentional contrast.
 
 ---

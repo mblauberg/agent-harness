@@ -1,4 +1,4 @@
-<!-- Modified from Impeccable for this harness; see ../NOTICE.md. -->
+<!-- Modified from Impeccable for this harness; see the repository THIRD_PARTY_NOTICES.md. -->
 > **Additional context needed**: performance constraints.
 
 Add motion that conveys state, gives feedback, and clarifies hierarchy. Cut motion that exists only for decoration. Animation fatigue is a real cost; spend the budget on the moments that need it.

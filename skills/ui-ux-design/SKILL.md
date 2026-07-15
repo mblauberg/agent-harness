@@ -3,7 +3,7 @@ name: ui-ux-design
 description: "Use for frontend UI/UX: read-only review (default — visual, accessibility, responsive, interaction) or authorised design, redesign, and live iteration. Not for source-diff review or React profiling; use code-review or react-performance."
 ---
 
-<!-- Modified from Impeccable for this harness; see NOTICE.md. -->
+<!-- Modified from Impeccable for this harness; see the repository THIRD_PARTY_NOTICES.md. -->
 
 # UI/UX design
 

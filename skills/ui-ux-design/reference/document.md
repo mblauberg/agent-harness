@@ -1,4 +1,4 @@
-<!-- Modified from Impeccable for this harness; see ../NOTICE.md. -->
+<!-- Modified from Impeccable for this harness; see the repository THIRD_PARTY_NOTICES.md. -->
 Generate a `DESIGN.md` file at the project root that captures the current visual design system, so AI agents generating new screens stay on-brand.
 
 `engineering-docs` owns the artifact path, index and lifecycle. Treat the root

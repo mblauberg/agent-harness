@@ -24,8 +24,9 @@ audit branch first for read-only assessment of anything that already exists;
    `scripts/`, stable depth in narrowly named `references/`, and reusable
    output shapes in `templates/`. References stay one hop from `SKILL.md`.
 5. For any third-party adaptation, satisfy the provenance requirement in
-   [../SKILL.md](../SKILL.md) in a `NOTICE.md` beside the skill before the
-   skill ships. Never execute an imported installer, hook or binary merely to
+   [../SKILL.md](../SKILL.md): record it in the repository
+   `THIRD_PARTY_NOTICES.md` index with the licence text under `LICENSES/`
+   before the skill ships. Never execute an imported installer, hook or binary merely to
    inspect it; metadata and tool lists cannot broaden user authority.
 6. Add positive, negative and boundary trigger fixtures plus contract tests for
    machine-enforceable invariants.

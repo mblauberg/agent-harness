@@ -43,5 +43,7 @@ Both branches follow this without restating it in two voices:
   words and the nearest exclusion; keep boundary-routing negation explicit
   (name the skill to use instead) — never drop it for brevity.
 - **Provenance:** any adaptation from a third-party source records source
-  URL, version/commit, retrieval date and licence in a `NOTICE.md` beside
-  the skill. See [NOTICE.md](NOTICE.md) for this skill's own lineage.
+  URL, version/commit, retrieval date and licence in the repository
+  `THIRD_PARTY_NOTICES.md` index, with the full licence text under `LICENSES/`.
+  See [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) for this skill's
+  own Skill Optimizer lineage.

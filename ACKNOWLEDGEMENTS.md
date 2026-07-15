@@ -2,8 +2,9 @@
 
 This file records intellectual and practical influences. Formal copyright and
 licence obligations live in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-and in licence files beside each component; this is credit, not the legal
-record.
+(the prose index), the top-level [NOTICE](NOTICE) (Apache-2.0 §4(d)
+attributions) and the licence texts in [LICENSES/](LICENSES); this is credit,
+not the legal record.
 
 ## Adapted or redistributed components
 

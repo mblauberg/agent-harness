@@ -1,4 +1,4 @@
-// Modified from Impeccable for this harness; see ../NOTICE.md.
+// Modified from Impeccable for this harness; see the repository THIRD_PARTY_NOTICES.md.
 /**
  * Impeccable Live Variant Mode — Browser Script
  *

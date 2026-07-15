@@ -24,6 +24,7 @@ REQUIRED = {
     "ACKNOWLEDGEMENTS.md",
     "README.md",
     "LICENSE",
+    "NOTICE",  # Apache-2.0 §4(d) attribution aggregate (Epic #124 Workstream E)
     "MAINTAINING.md",
     "SECURITY.md",
     "THIRD_PARTY_NOTICES.md",
