@@ -34,6 +34,7 @@ import {
   type ProviderAdapterCapabilities,
 } from "./types.js";
 import type { ProviderSessionToolResult } from "./provider-session-fabric-surface.js";
+import { parseWorkspaceWriteOfflineProjection } from "./workspace-write-offline.js";
 
 export type CodexAppServerBoundary = ProviderBoundary & {
   steer(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -191,13 +192,43 @@ function copyString(payload: Record<string, unknown>, key: string, target: Recor
   if (value !== undefined) target[key] = value;
 }
 
-export function codexThreadConfiguration(payload: Record<string, unknown>): Record<string, unknown> {
-  const configuration: Record<string, unknown> = { sandbox: "read-only", approvalPolicy: "never" };
+export function codexThreadConfiguration(
+  payload: Record<string, unknown>,
+  operation: "start" | "resume" = "start",
+): Record<string, unknown> {
+  const writeOffline = parseWorkspaceWriteOfflineProjection(payload);
+  const configuration: Record<string, unknown> = {
+    sandbox: "read-only",
+    approvalPolicy: "never",
+    ...(writeOffline === undefined ? {} : {
+      runtimeWorkspaceRoots: [writeOffline.writeRoot],
+      ...(operation === "start" ? { environments: [] } : {}),
+    }),
+  };
   for (const key of ["cwd", "model", "modelProvider", "developerInstructions", "baseInstructions", "serviceTier"]) {
     copyString(payload, key, configuration);
   }
   if (typeof payload.ephemeral === "boolean") configuration.ephemeral = payload.ephemeral;
   return configuration;
+}
+
+function codexTurnContainment(payload: Record<string, unknown>): Record<string, unknown> {
+  const writeOffline = parseWorkspaceWriteOfflineProjection(payload);
+  if (writeOffline === undefined) {
+    return { sandboxPolicy: { type: "readOnly", networkAccess: false } };
+  }
+  return {
+    cwd: writeOffline.writeRoot,
+    runtimeWorkspaceRoots: [writeOffline.writeRoot],
+    environments: [],
+    sandboxPolicy: {
+      type: "workspaceWrite",
+      writableRoots: [writeOffline.writeRoot],
+      networkAccess: false,
+      excludeTmpdirEnvVar: true,
+      excludeSlashTmp: true,
+    },
+  };
 }
 
 type CodexConnection = Pick<
@@ -341,6 +372,7 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     const response = await connection.request("turn/start", {
       threadId: resumeReference,
       input: instruction,
+      ...codexTurnContainment(payload),
       ...(typeof payload.model === "string" ? { model: payload.model } : {}),
       ...(typeof payload.effort === "string" ? { effort: payload.effort } : {}),
     });
@@ -422,8 +454,8 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     try {
       const prior = optionalString(payload.priorResumeReference, "priorResumeReference");
       const response = prior === undefined
-        ? await connection.request("thread/start", codexThreadConfiguration(payload))
-        : await connection.request("thread/resume", { threadId: prior, ...codexThreadConfiguration(payload) });
+        ? await connection.request("thread/start", codexThreadConfiguration(payload, "start"))
+        : await connection.request("thread/resume", { threadId: prior, ...codexThreadConfiguration(payload, "resume") });
       const thread = threadFromResponse(response, prior === undefined ? "thread/start" : "thread/resume");
       const resumeReference = String(thread.id);
       const completed = await this.#completeTurn(connection, resumeReference, payload);
@@ -489,7 +521,7 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
         }));
       });
       const response = await connection.request("thread/start", {
-        ...codexThreadConfiguration(input.payload),
+        ...codexThreadConfiguration(input.payload, "start"),
         dynamicTools: codexChairDynamicTools(bridge),
       });
       const thread = threadFromResponse(response, "thread/start");
@@ -559,7 +591,7 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
       });
       const response = await connection.request("thread/resume", {
         threadId: input.resumeReference,
-        ...codexThreadConfiguration(input.payload),
+        ...codexThreadConfiguration(input.payload, "resume"),
         dynamicTools: codexChairDynamicTools(bridge),
       });
       const thread = threadFromResponse(response, "thread/resume");
@@ -638,12 +670,12 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
       });
       const response = input.operation === "spawn"
         ? await connection.request("thread/start", {
-            ...codexThreadConfiguration(input.payload),
+            ...codexThreadConfiguration(input.payload, "start"),
             dynamicTools: codexChairDynamicTools(bridge),
           })
         : await connection.request("thread/resume", {
             threadId: requiredString(input.providerSessionRef, "providerSessionRef"),
-            ...codexThreadConfiguration(input.payload),
+            ...codexThreadConfiguration(input.payload, "resume"),
             dynamicTools: codexChairDynamicTools(bridge),
           });
       const thread = threadFromResponse(response, input.operation === "spawn" ? "thread/start" : "thread/resume");
@@ -673,7 +705,7 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
     try {
       const response = await connection.request("thread/resume", {
         threadId: input.resumeReference,
-        ...codexThreadConfiguration(input.payload),
+        ...codexThreadConfiguration(input.payload, "resume"),
       });
       const thread = threadFromResponse(response, "thread/resume");
       this.#connections.set(String(thread.id), connection);

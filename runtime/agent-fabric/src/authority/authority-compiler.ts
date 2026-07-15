@@ -20,13 +20,24 @@ const FORBIDDEN_PROVIDER_CONTROLS = [
   "permissions",
   "permissionMode",
   "sandbox",
+  "sandboxPolicy",
   "dangerouslySkipPermissions",
   "developerInstructions",
   "baseInstructions",
   "modelProvider",
   "serviceTier",
   "readOnlyRoot",
+  "executionProfile",
+  "writeRoot",
+  "networkAccess",
+  "runtimeWorkspaceRoots",
+  "environments",
 ] as const;
+
+type WorkspaceWriteOfflineProjection = Readonly<{
+  kind: "workspace-write-offline";
+  workspacePath: string;
+}>;
 
 function pathContains(parent: string, child: string): boolean {
   const path = posix.relative(parent, child);
@@ -73,10 +84,35 @@ type CompileProviderPayloadInput = Readonly<{
   authority: AuthorityInput;
   workspaceRoot: () => string;
   payload: Readonly<Record<string, unknown>>;
+  trustedProjection?: WorkspaceWriteOfflineProjection;
 }> & (
   | Readonly<{ now: number; validateCurrent: true }>
   | Readonly<{ now: null; validateCurrent: false }>
 );
+
+function validateWorkspaceWriteOfflineProjection(
+  authority: AuthorityInput,
+  projection: WorkspaceWriteOfflineProjection,
+  payload: Readonly<Record<string, unknown>>,
+): void {
+  if (projection.kind !== "workspace-write-offline") {
+    throw new FabricError("CAPABILITY_FORBIDDEN", "write-offline projection is invalid");
+  }
+  if (
+    typeof projection.workspacePath !== "string" ||
+    projection.workspacePath.length === 0 ||
+    !authority.sourcePaths.some((path) => pathContains(path, projection.workspacePath)) ||
+    payload.cwd !== projection.workspacePath
+  ) {
+    throw new FabricError("CAPABILITY_FORBIDDEN", "write-offline grant does not match the exact provider cwd");
+  }
+  if (
+    authority.network.toolEgress !== "none" || authority.deployment.allowed ||
+    authority.irreversibleActions.allowed || authority.secrets.access !== "none"
+  ) {
+    throw new FabricError("CAPABILITY_FORBIDDEN", "write-offline authority permits a prohibited external effect");
+  }
+}
 
 export function compileProviderPayload(input: CompileProviderPayloadInput): Record<string, unknown> {
   if (input.validateCurrent && Date.parse(input.authority.expiresAt) <= input.now) {
@@ -87,6 +123,9 @@ export function compileProviderPayload(input: CompileProviderPayloadInput): Reco
       input.authority.disclosure.scopes.includes("approved-provider"));
   if (input.validateCurrent && !providerDisclosure) {
     throw new FabricError("CAPABILITY_FORBIDDEN", "authority does not permit disclosure to an approved provider");
+  }
+  if (input.trustedProjection !== undefined) {
+    validateWorkspaceWriteOfflineProjection(input.authority, input.trustedProjection, input.payload);
   }
   const forbidden = FORBIDDEN_PROVIDER_CONTROLS.find((field) => Object.hasOwn(input.payload, field));
   if (forbidden !== undefined) {
@@ -107,6 +146,19 @@ export function compileProviderPayload(input: CompileProviderPayloadInput): Reco
     throw new FabricError("CAPABILITY_FORBIDDEN", "provider cwd is outside delegated authority");
   }
   const absoluteCwd = resolve(workspaceRoot, relativeCwd);
+  if (input.trustedProjection?.kind === "workspace-write-offline") {
+    return {
+      ...input.payload,
+      cwd: absoluteCwd,
+      executionProfile: "workspace-write-offline",
+      writeRoot: absoluteCwd,
+      readOnlyRoot: absoluteCwd,
+      allowedTools: ["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
+      approvalPolicy: "never",
+      sandbox: "workspace-write",
+      networkAccess: "none",
+    };
+  }
   return {
     ...input.payload,
     cwd: absoluteCwd,

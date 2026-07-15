@@ -24,6 +24,22 @@ The matrix uses existing Fabric provider-action custody, adapter evidence,
 receipts and compatibility pins. It creates no parallel evaluator, receipt
 schema, activation registry or integrity manifest.
 
+The inert prerequisite is implemented as a trusted compiler input, not a
+caller payload field. Its workspace path must exactly match the request and
+remain inside the stored authority before the workspace is resolved. The
+normal provider-action row and adapter action journal retain the compiled
+payload and attempt history. Git commit and path identify repository artifacts;
+existing evidence and compatibility records remain with their current owners.
+Both adapters reject an incomplete projection before provider dispatch.
+Ordinary provider requests remain read-only, and no live matrix or provider
+call is activated by this prerequisite.
+
+Codex threads remain read-only. The adapter grants the exact writable root,
+no-network policy, temp exclusions and empty environment list only on an
+admitted write turn; every ordinary turn explicitly restores read-only. New
+threads also start with no environment, while thread resume omits that
+unsupported thread-level field and relies on the following turn-level control.
+
 ## Disposable fixture
 
 Each case starts from a clean disposable Git repository containing a primary
