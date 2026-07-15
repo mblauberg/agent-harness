@@ -34,14 +34,33 @@ authority:
 stored-envelope contract. `AuthorityInput` is only its type alias, not a second
 wire shape. An envelope contains exactly:
 
-- `schemaVersion: 2` and the human approval binding (`approvedBy`, `evidenceId`
-  and `evidenceDigest`);
-- `workspaceRoots`, `sourcePaths`, `artifactPaths`, `actions`, `deniedPaths`,
-  `deniedActions` and `prohibitedActions`;
-- closed disclosure, secret-access, deployment, irreversible-action and
-  network policies; and
-- `expiresAt` plus a non-negative integer budget keyed by recognised
-  budget-unit keys.
+```text
+schemaVersion: 2
+approval: { approvedBy, evidenceId, evidenceDigest: sha256 }
+workspaceRoots: [workspace-relative-path]
+sourcePaths: [workspace-relative-path]
+artifactPaths: [workspace-relative-path]
+actions: [daemon-grantable-agent-operation]
+deniedPaths: [workspace-relative-path]
+deniedActions: [daemon-grantable-agent-operation]
+prohibitedActions: [action-name]
+disclosure: { level: allowed | forbidden }
+  | { level: scoped, scopes: [local | approved-provider | external] }
+secrets: { access: none }
+  | { access: use-without-disclosure, references: [secret-reference] }
+deployment: { allowed: false }
+  | { allowed: true, targets: [deployment-target] }
+irreversibleActions: { allowed: false }
+  | { allowed: true, actionIds: [approved-action-id] }
+network: { toolEgress: none }
+  | { toolEgress: allowlist, allowedHosts: [host] }
+expiresAt: RFC3339-timestamp
+budget: { recognised-budget-unit-key: non-negative safe integer }
+```
+
+Enabled/scoped policy lists are non-empty and unique. The protocol codec owns
+the bounded string, collection and timestamp validation for this closed shape;
+it may not add fields or policy arms outside this contract.
 
 Source and artifact paths must be workspace-relative and contained by an
 envelope's workspace roots. Delegation must not widen the parent: the approval
