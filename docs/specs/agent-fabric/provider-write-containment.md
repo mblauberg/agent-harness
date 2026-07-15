@@ -8,10 +8,10 @@ This specification owns the fixed containment matrix for
 execution and decision state. This specification grants no implementation,
 provider-call or write authority.
 
-This specification supersedes the historical implementation pack as the live
-matrix owner. The pack remains non-authoritative historical provenance in the
-working tree pending its retirement under [issue
-#102](https://github.com/mblauberg/provenant/issues/102).
+This specification is the live matrix owner. The superseded implementation
+pack was retired from the working tree under [issue
+#102](https://github.com/mblauberg/provenant/issues/102); Git history retains
+its provenance.
 
 - W010-A cannot begin without separate human approval of the crucial-scope
   profile/compiler change and thin evidence recorder.

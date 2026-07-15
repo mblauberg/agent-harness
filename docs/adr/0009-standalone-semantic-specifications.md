@@ -11,11 +11,10 @@ mirrored versions, per-file hashes and a dedicated acceptance map. That design
 duplicated guarantees Git already provides and coupled otherwise independent
 documents through routine hash and ordering updates.
 
-The simplification pack already defines the better underlying document model:
-one current owner per claim, unnumbered domain/topic paths, and Git as the owner
-of source history. The human confirmed that compatibility with the numbered
-monoliths is unnecessary and that the split should not create new numbering or
-cross-reference dependencies.
+The replacement model uses one current owner per claim, unnumbered domain/topic
+paths, and Git as the owner of source history. The human confirmed that
+compatibility with the numbered monoliths is unnecessary and that the split
+should not create new numbering or cross-reference dependencies.
 
 ## Decision
 
