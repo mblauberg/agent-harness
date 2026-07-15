@@ -11,6 +11,12 @@ import { inspectFabricDatabase } from "../../src/core/migrations.ts";
 
 const directories: string[] = [];
 
+async function expectExactFileBytes(path: string, expected: Buffer): Promise<void> {
+  const actual = await readFile(path);
+  expect(actual.byteLength).toBe(expected.byteLength);
+  expect(actual.equals(expected)).toBe(true);
+}
+
 async function preservationSnapshot(directory: string): Promise<unknown> {
   const directoryStat = await lstat(directory);
   const entries = await Promise.all((await readdir(directory)).sort().map(async (name) => {
@@ -65,7 +71,7 @@ describe("SQLite connection hardening", () => {
       expect.objectContaining({ code: "SCHEMA_CUTOVER_REQUIRED", preserved: true }),
     );
 
-    expect(await readFile(path)).toEqual(beforeBytes);
+    await expectExactFileBytes(path, beforeBytes);
     expect((await stat(path)).mode).toBe(beforeStat.mode);
     expect((await stat(path)).mtimeMs).toBe(beforeStat.mtimeMs);
     expect(await readdir(directory)).toEqual(beforeEntries);
@@ -91,7 +97,7 @@ describe("SQLite connection hardening", () => {
       expect.objectContaining({ code: "SCHEMA_CUTOVER_REQUIRED", preserved: true }),
     );
 
-    expect(await readFile(path)).toEqual(beforeBytes);
+    await expectExactFileBytes(path, beforeBytes);
     expect((await stat(path)).mode).toBe(beforeStat.mode);
     expect((await stat(path)).mtimeMs).toBe(beforeStat.mtimeMs);
     expect(await readdir(directory)).toEqual(beforeEntries);
@@ -137,11 +143,11 @@ describe("SQLite connection hardening", () => {
       expect.objectContaining({ code: "SCHEMA_CUTOVER_REQUIRED", preserved: true }),
     );
 
-    expect(await readFile(path)).toEqual(beforeBytes);
+    await expectExactFileBytes(path, beforeBytes);
     expect((await stat(path)).mode).toBe(beforeStat.mode);
     expect((await stat(path)).mtimeMs).toBe(beforeStat.mtimeMs);
     expect(await readdir(directory)).toEqual(beforeEntries);
-  });
+  }, 5_000);
 
   it("detects catalog drift committed only to WAL through a private clone without touching the source tree", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-cutover-wal-"));
@@ -154,7 +160,7 @@ describe("SQLite connection hardening", () => {
     writer.pragma("wal_checkpoint(TRUNCATE)");
     const checkpointedMain = await readFile(path);
     writer.exec("DROP INDEX tasks_by_state");
-    expect(await readFile(path)).toEqual(checkpointedMain);
+    await expectExactFileBytes(path, checkpointedMain);
     expect((await stat(`${path}-wal`)).size).toBeGreaterThan(0);
     await writeFile(join(directory, "custody-marker"), "preserve every entry\n", { mode: 0o640 });
     const before = await preservationSnapshot(directory);
