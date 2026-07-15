@@ -2,12 +2,10 @@
 
 Updated: 15 July 2026
 
-Status: Console implementation lanes are closed, but W012 remains active under
-the [W012/W013 reducer, issue
-#23](https://github.com/mblauberg/provenant/issues/23), through the bounded
-read-only checkpoint-validation slice in [issue
-#96](https://github.com/mblauberg/provenant/issues/96). GitHub issues own live
-implementation and acceptance state; this file is only the compact route.
+Status: Console implementation lanes are closed. W012 remains active under the
+[W012/W013 reducer, issue
+#23](https://github.com/mblauberg/provenant/issues/23), through its issue-owned
+human gates and governance cleanup. This file is only the compact route.
 
 ## Current W012 route
 
@@ -26,13 +24,11 @@ implementation and acceptance state; this file is only the compact route.
   in [issue #82](https://github.com/mblauberg/provenant/issues/82) and [PR
   #94](https://github.com/mblauberg/provenant/pull/94). No active Console
   implementation lane remains.
-- W012 remains active through [issue
-  #96](https://github.com/mblauberg/provenant/issues/96), which wires the
-  existing recovery-checkpoint validation operation as a bounded,
-  mutation-free slice. It does not select or provision the external receipt
-  authority, authorise rotation or destructive abandon, or otherwise grant
-  lifecycle authority owned by [issue
-  #27](https://github.com/mblauberg/provenant/issues/27).
+- [Issue #96](https://github.com/mblauberg/provenant/issues/96) is closed after
+  its read-only audit found that public checkpoint validation depends on
+  lifecycle revision, gate-binding and digest semantics owned by [issue
+  #27](https://github.com/mblauberg/provenant/issues/27). No source change or
+  lifecycle authority landed from that slice.
 
 The linked issues own their acceptance criteria and evidence. Merged pull
 requests and historical lane detail remain in Git and are not repeated here.
