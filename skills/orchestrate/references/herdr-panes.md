@@ -1,7 +1,20 @@
 # Herdr pane operating contract
 
-Herdr is the control plane for substantial interactive, long-running and
-cross-family work. It does not replace native subagents or decide model routing.
+Herdr is orchestrate-owned progressive disclosure for observing, waking and
+degraded manual control of substantial interactive, long-running and
+cross-family work. It does not replace native subagents, carry authoritative
+answers or decide model routing.
+
+## Source grounding
+
+The mechanics below were independently checked against the installed Herdr
+0.7.3 CLI and protocol 16 pinned in
+[`config/adapter-compatibility.yaml`](../../../config/adapter-compatibility.yaml).
+The installed CLI is syntax authority. The upstream
+[`SKILL.md` at commit `c76e968`](https://github.com/ogulcancelik/herdr/blob/c76e96878b866bf01639c8a1d8beb9c93a8ab95f/SKILL.md)
+was consulted on 2026-07-15, not copied or vendored. That upstream component is
+licensed AGPL-3.0-or-later or commercially; this repository has no runtime or
+mutable-branch dependency on it.
 
 ## Use a pane when
 
@@ -28,9 +41,9 @@ Operate the live session only from a Herdr-managed pane. If `HERDR_ENV` is not
 focused session from outside Herdr.
 
 Treat the installed CLI as the syntax authority. Use `herdr --help` and the
-relevant non-mutating command-group help; never run bare `herdr` for discovery
-because it launches or attaches the TUI. Do not probe a potentially mutating
-subcommand by omitting arguments.
+relevant non-mutating command-group help. Calling `herdr` without arguments
+opens the UI. Supply every required argument when checking nested commands;
+an incomplete mutating command can execute its defaults.
 
 Workspace, tab, pane and terminal IDs are opaque. Parse them from JSON after
 every create, split or move; never derive them from display order or examples.
@@ -43,12 +56,34 @@ agent. An installed CLI without an integration can still run, but its state is
 dormant until its provider/model route is approved and `herdr integration
 install pi` has been evaluated.
 
-## Start and name
+Herdr never grants worktree authority. Create or remove a worktree only under a
+human-approved authority envelope, and only at the owning repository's
+`.worktrees/<task-agent>` path. Herdr control cannot broaden model-routing,
+disclosure, receipt, cleanup or resource-ownership rules.
 
-Discover the current CLI/model options first. Start one role per pane:
+## Place, start and name
+
+Inspect the caller's layout before choosing a split:
 
 ```sh
-herdr agent start review-other-primary --cwd "$PWD" --split right --no-focus -- <agent command>
+herdr pane layout --current
+```
+
+Explicit human direction wins. Otherwise choose `right` or `down` from the
+returned pane geometry so neither child is needlessly cramped. Preserve the
+caller's focus with `--no-focus` unless the human asks to move it.
+
+Discover the current CLI/model options first. Start the selected agent's normal
+interactive executable without a prompt, record the returned pane and terminal
+IDs, wait once for the agent-level `idle` readiness state, inspect the pane, and
+only then steer it:
+
+```sh
+split_direction=right  # or down, chosen from the returned layout
+herdr agent start review-other-primary --cwd "$PWD" \
+  --split "$split_direction" --no-focus -- claude
+herdr agent wait review-other-primary --status idle --timeout 30000
+herdr agent read review-other-primary --source recent-unwrapped --lines 80
 ```
 
 Use role names such as `review-claude`, `review-codex`, `scout-gemini` or
@@ -76,8 +111,7 @@ assignment, review, research request or any work the lead must consume. Prefer
 it over separate raw text/key sends only for steering an already tracked task.
 The current shell helper records the caller-supplied reference but cannot prove
 that it exists; its receipt therefore says `task-ref-unverified`. Authoritative
-task validation belongs to the Fabric-backed Console/provider operation in
-Spec 05.
+task validation belongs at the Fabric-backed Console/provider boundary.
 
 ## Send answer-bearing work
 
@@ -133,6 +167,22 @@ expected output, objective checks and human gates. The peer replies through the
 correlated Fabric exchange and writes any named artifact; pane scrollback is
 never the authoritative negotiation.
 
+## Observe ordinary commands
+
+For an ordinary command, make it emit a unique terminal marker. Read a bounded
+tail first. Only when the marker is absent and the lead has no other useful work
+should it wait once, with a deadline, then read the bounded tail again:
+
+```sh
+herdr pane read "$pane_id" --source recent-unwrapped --lines 80
+herdr wait output "$pane_id" --match '<terminal marker>' \
+  --source recent-unwrapped --lines 80 --timeout 120000
+herdr pane read "$pane_id" --source recent-unwrapped --lines 80
+```
+
+This output wait is the ordinary-command completion path. It is not agent
+completion evidence and never upgrades scrollback into an authoritative result.
+
 ## Observe steering without poll loops
 
 - Continue useful local work after dispatch.
@@ -148,10 +198,13 @@ can be stale. If status conflicts with a live session, inspect
 `herdr pane process-info`, `herdr agent explain`, and a bounded pane tail before
 declaring failure.
 
-`idle` and `done` both mean the agent is no longer working: `done` is an unseen
-completion and `idle` is a seen/waiting completion. Accept either after checking
-the pane record and bounded output. A `blocked` agent needs input; `unknown`
-means integration/detection is not yet reliable.
+Keep the two wait surfaces distinct. `idle` is the agent-level integration
+state used by `herdr agent wait <name> --status idle`; that command does not
+accept `done`. The `done` pane-level unseen-completion attention state is used
+by `herdr wait agent-status "$pane_id" --status done --timeout <ms>`. Neither is
+proof of a correct result: inspect the pane record and bounded output, then use
+the Fabric reply or named artifact. A `blocked` agent needs input; `unknown`
+means integration or detection is not yet reliable.
 
 For answer-bearing Fabric work, await or subscribe to the correlated terminal
 result instead of polling pane state. Delivery to the lead occurs at a safe turn
@@ -161,10 +214,17 @@ boundary and survives lead compaction or restart as unread Fabric state.
 
 Capture the worker's concise result and artifact paths, adjudicate them in the
 lead context, preserve a bounded status/failure receipt, then close or reuse the
-pane deliberately. Never close a pane, tab, workspace or session you did not
-create unless the human explicitly requests it, and never stop the Herdr server
-from an active session as incidental cleanup. Do not retain a full pane transcript when the named artifact
-and receipt are sufficient. Clean pane-local temporary payload only when the
-run owns it; lifecycle and retention follow `session`'s context-hygiene
-contract. A pane being idle does not prove its work is correct; objective checks
-and review still gate the result.
+pane deliberately. Only close panes, tabs, workspaces or sessions created by
+this run; touching another owner's resource requires an explicit human request.
+Never stop the Herdr server from an active session as incidental cleanup. Do not
+retain a full pane transcript when the named artifact and receipt are sufficient.
+Clean pane-local temporary payload only when the run owns it; lifecycle and
+retention follow `session`'s context-hygiene contract. A pane being idle does
+not prove its work is correct; objective checks and review still gate the result.
+
+After closing a pane, discard its pane and terminal IDs. After a cross-workspace
+move, replace cached workspace, tab and pane IDs with those returned by Herdr;
+never reuse the old tuple. For caller-context receipts, the stable environment
+keys are `HERDR_ENV`, `HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`, `HERDR_PANE_ID` and,
+when endpoint lineage matters, `HERDR_SOCKET_PATH`. They describe context, not
+authority, and cached values are not a lookup mechanism after a move.

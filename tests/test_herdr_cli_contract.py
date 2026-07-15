@@ -31,6 +31,8 @@ herdr agent explain <target> [--json]
 herdr agent wait <target> --status <idle|working|blocked|unknown> [--timeout MS]
 """
 PANE_HELP = """\
+herdr pane layout [--pane ID|--current]
+herdr pane read <pane_id> [--source visible|recent|recent-unwrapped] [--lines N]
 herdr pane process-info [--pane ID|--current]
 herdr pane run <pane_id> <command>
 """
@@ -184,6 +186,25 @@ def test_cli_gate_rejects_missing_documented_pane_run_shorthand(tmp_path: Path) 
 
     assert result.returncode == 1
     assert "documented command is absent from help: herdr pane run" in result.stdout
+
+
+def test_cli_gate_rejects_missing_documented_pane_observation_commands(
+    tmp_path: Path,
+) -> None:
+    for index, command in enumerate(("herdr pane layout", "herdr pane read")):
+        case = tmp_path / str(index)
+        case.mkdir()
+        fake, _ = _fake_herdr(
+            case,
+            pane_help=PANE_HELP.replace(
+                next(line for line in PANE_HELP.splitlines() if line.startswith(command)) + "\n",
+                "",
+            ),
+        )
+        result = _run(fake)
+
+        assert result.returncode == 1
+        assert f"documented command is absent from help: {command}" in result.stdout
 
 
 def test_cli_gate_rejects_a_documented_status_absent_from_help(tmp_path: Path) -> None:
