@@ -50,6 +50,9 @@ requests and historical lane detail remain in Git and are not repeated here.
 - [Issue #30](https://github.com/mblauberg/provenant/issues/30): ratify the
   narrow risk-tier `crucial` envelope used by merged PR #62 or direct a revert;
   after ratification, explicitly accept the machine-verified result.
+- [Issue #97](https://github.com/mblauberg/provenant/issues/97): enable the
+  proposed minimal main ruleset requiring pull requests and current CI without
+  a required human reviewer, or explicitly defer/remove that commitment.
 - [Issue #23](https://github.com/mblauberg/provenant/issues/23): explicitly
   accept the programme only after W013 passes on one current head.
 
