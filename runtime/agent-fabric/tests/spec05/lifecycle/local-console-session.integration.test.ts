@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createConnection } from "node:net";
 import { join } from "node:path";
@@ -87,15 +87,68 @@ async function regularFiles(root: string): Promise<string[]> {
 async function expectSecretsAbsent(
   rootsToScan: readonly string[],
   secrets: readonly string[],
+  read: (path: string) => Promise<Buffer> = readFile,
 ): Promise<void> {
   const files = (await Promise.all(rootsToScan.map(regularFiles))).flat();
   for (const path of files) {
-    const bytes = await readFile(path);
+    let bytes;
+    try {
+      bytes = await read(path);
+    } catch (error: unknown) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") continue;
+      throw error;
+    }
     for (const secret of secrets) {
       expect(bytes.includes(Buffer.from(secret))).toBe(false);
     }
   }
 }
+
+describe("secret-absence scan", () => {
+  it("tolerates a file disappearing after enumeration and scans stable files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-secret-scan-"));
+    roots.push(root);
+    const disappearing = join(root, "fabric.sqlite3-wal");
+    const stable = join(root, "fabric.sqlite3");
+    await Promise.all([
+      writeFile(disappearing, "transient"),
+      writeFile(stable, "stable"),
+    ]);
+    const readPaths: string[] = [];
+
+    await expect(expectSecretsAbsent([root], ["credential-token"], async (path) => {
+      readPaths.push(path);
+      if (path === disappearing) await rm(path);
+      return readFile(path);
+    })).resolves.toBeUndefined();
+    expect(readPaths).toEqual(expect.arrayContaining([disappearing, stable]));
+  });
+
+  it.each(["credential-token-a", "credential-token-b"])(
+    "still fails when %s persists in a stable file",
+    async (persistedSecret) => {
+      const root = await mkdtemp(join(tmpdir(), "fabric-secret-scan-"));
+      roots.push(root);
+      await writeFile(join(root, "fabric.sqlite3"), persistedSecret);
+
+      await expect(expectSecretsAbsent(
+        [root],
+        ["credential-token-a", "credential-token-b"],
+      )).rejects.toThrow();
+    },
+  );
+
+  it("propagates read failures other than a disappearing file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-secret-scan-"));
+    roots.push(root);
+    await writeFile(join(root, "fabric.sqlite3"), "stable");
+    const denial = Object.assign(new Error("injected read denial"), { code: "EACCES" });
+
+    await expect(expectSecretsAbsent([root], ["credential-token"], async () => {
+      throw denial;
+    })).rejects.toBe(denial);
+  });
+});
 
 describe("public local operator Console session", () => {
   it("reuses one daemon and one project authority while attaching concurrent projects and clients", async () => {
