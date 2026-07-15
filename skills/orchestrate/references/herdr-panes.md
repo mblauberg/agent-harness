@@ -98,8 +98,8 @@ Use the bundled helper only for fire-and-forget steering with no expected
 answer. It is a thin client for the authenticated public Fabric operation;
 Fabric validates the exact task or message revision and target before its
 daemon-owned Herdr integration performs any pane I/O. Its terminal result is
-`dispatched-unconfirmed`, not proof that the target process consumed the
-prompt:
+`dispatched-unconfirmed` with `referenceValidation: verified`, not proof that
+the target process consumed the prompt:
 
 ```sh
 printf '%s' '<bounded prompt>' | \
