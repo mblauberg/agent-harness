@@ -1,4 +1,4 @@
-# Project Fabric Console artifact review and human attention
+# Project Fabric Console artifact review and user attention
 
 ## Scoping and artifact review
 
@@ -56,7 +56,7 @@ trigger clarification and shall not silently approve. One-way, destructive,
 external-effect, release and final-acceptance decisions require an interpreted
 decision preview showing the gate, revision, digests and consequence plus an
 explicit confirmation; low-consequence decisions may commit directly when the
-gate reference is explicit. The human may always use the typed Console action.
+gate reference is explicit. The user may always use the typed Console action.
 
 After acceptance, `Implement...` shall prepare an editable launch packet. It
 may target the current chair for minor work, a fresh lead/provider context under
@@ -363,9 +363,9 @@ fresh other-primary, cross-family or no-unresolved-P0-P2 completion gate. The
 review must be rerun through Fabric before completion; post-hoc import,
 self-attested family and caller-selected independence are unavailable.
 
-## Human-attention policy
+## User-attention policy
 
-Human intervention is required for judgement or consequential boundaries, not
+User intervention is required for judgement or consequential boundaries, not
 ordinary replanning. At minimum, gates cover:
 
 - unresolved intent or material subjective trade-offs;

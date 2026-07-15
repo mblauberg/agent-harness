@@ -1,16 +1,16 @@
 # Autonomous-implementation mode
 
-Pulls issues already marked **accepted/ready** by a human or governance gate
+Pulls issues already marked **accepted/ready** by a user or governance gate
 (an issue tracker `ready`/`accepted` label or column, or equivalent) and
 drives each through the existing lifecycle skills, unattended, up to the
-human PR-review/merge gate. This is a thin mode of `orchestrate`: it selects
+user PR-review/merge gate. This is a thin mode of `orchestrate`: it selects
 and sequences work; it does not scope, review, or accept it, and it does not
 fork a new receipt format.
 
 This mode never assumes a delivery-run receipt already exists for a queued
 issue. `implement`'s own entry gate only requires `RUN.json` for
 substantial+ work and lets routine minor work proceed without one (see
-`implement/SKILL.md`); an unattended queue has no human in the loop to
+`implement/SKILL.md`); an unattended queue has no user in the loop to
 notice a missing receipt, so this mode cannot rely on that per-issue
 discretion. It always directs `implement` to create the canonical
 `delivery-run` (`deliver/templates/RUN.template.json`) for **every** queued
@@ -37,7 +37,7 @@ one.
 ## Loop
 
 1. **SELECT** the next ready/accepted issue from the queue (oldest-first
-   unless the human orders otherwise). One issue in flight per lease unless
+   unless the user orders otherwise). One issue in flight per lease unless
    independent partitions justify parallel issues — apply the normal
    decomposition/value gate ("When This Pays" in `SKILL.md`) before running
    more than one at once.
@@ -48,7 +48,7 @@ one.
    adds no parallel review path of its own — it delegates the entire
    verified-implementation loop, including receipt creation; it never
    pre-supposes a receipt is already sitting there.
-3. **STOP** at `implement`'s own human-acceptance gate (`awaiting_acceptance`
+3. **STOP** at `implement`'s own user-acceptance gate (`awaiting_acceptance`
    / PR opened for review). Do not merge, do not promote, and do not carry
    that issue's `RUN.json` past the state `implement` leaves it in. **Never
    fork a new receipt** — the canonical `delivery-run` from
@@ -58,36 +58,36 @@ one.
    receipt of its own.
 4. **RECORD** the stopped issue (id, receipt path, gate reached) and advance
    to the next ready/accepted issue.
-5. **DEFER** a blocked or repair-exhausted issue back to the human/`scope`,
+5. **DEFER** a blocked or repair-exhausted issue back to the user/`scope`,
    exactly as a standalone `implement` run would (its two-repair-cycle stop);
    this mode does not retry past that boundary or route around it.
 6. **FINISH** when the ready/accepted queue snapshot is empty. There is no
    STOP file, no cross-session resume state, and no continuation past a
-   human decision — each run is bounded to the queue it started with.
+   user decision — each run is bounded to the queue it started with.
 
 ## Distinguishing from autopilot
 
 | | Autonomous-implementation mode | `autopilot` |
 |---|---|---|
 | Scope source | pre-scoped accepted/ready issues only; never scopes | self-scopes open-ended missions |
-| Duration | one bounded pass over the current queue snapshot | persistent, survives sessions/crashes, until human `STATUS: STOP` |
-| Human gate | stops at PR-review/merge for every single issue | human-out-of-loop during the loop; reaches humans only at hard/one-way-door gates |
+| Duration | one bounded pass over the current queue snapshot | persistent, survives sessions/crashes, until user `STATUS: STOP` |
+| User gate | stops at PR-review/merge for every single issue | user-out-of-loop during the loop; reaches users only at hard/one-way-door gates |
 | State | uses `implement`/`deliver` receipts only, no durable lab state | `GOAL.md`/`STATE.md`/ADR/queue durable cross-session state |
-| Authority | lower — never proceeds past human review | higher — authorised to keep driving without per-item human sign-off |
+| Authority | lower — never proceeds past user review | higher — authorised to keep driving without per-item user sign-off |
 
 Trigger this mode only on an explicit **bounded, pre-scoped issue queue**
 ("work through the ready/accepted issues", "implement the accepted backlog to
 PR"). A request for a standing, run-until-STOP mission — even one whose work
 is also software implementation — is `autopilot`'s territory; keep the
 two triggers from overlapping. When a mission's boundedness is unclear,
-default to this lower-authority mode and let the human explicitly promote to
+default to this lower-authority mode and let the user explicitly promote to
 `autopilot` if the work turns out to be open-ended.
 
 ## What this mode is not
 
 - Not a scoping tool — an issue without acceptance criteria stops the mode;
   it does not trigger ad hoc scoping to make the issue runnable.
-- Not a merge/release tool — `release` and human merge remain separate,
-  human-authorised steps that happen after this mode stops.
+- Not a merge/release tool — `release` and user merge remain separate,
+  user-authorised steps that happen after this mode stops.
 - Not a new receipt format — every issue's evidence lives in its own
   `implement`/`deliver` receipt; this mode only sequences and reports them.

@@ -21,7 +21,7 @@ requires an explicit user request or an authorised `implement` scope.
 
 1. **Feedback loop.** Create the fastest sharp signal that reaches the reported
    failure: failing test, CLI/HTTP/browser fixture, replay, property loop,
-   bisection, differential harness or structured human loop. Pin time/randomness
+   bisection, differential harness or structured user loop. Pin time/randomness
    and isolate mutable dependencies. For flakes, raise the reproduction rate.
    If no useful loop is possible, stop and request the missing environment or
    artifact; do not guess.

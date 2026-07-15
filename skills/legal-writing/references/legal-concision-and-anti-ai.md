@@ -61,7 +61,7 @@ de-duplicate to one home, cut fluff, narrow-not-soften, stop rule, report the
 delta). Legal-specific application:
 
 - **Lock invariants**: facts, dates, amounts, parties, source anchors, exhibit labels, rule numbers, defined terms,
-  disputed-status wording, redaction limits and human-authority conditions.
+  disputed-status wording, redaction limits and user-authority conditions.
 - **Put the operative point first**: relief, request, answer, contention or next step.
 - **Reverse-outline** the paragraphs by legal function (see the Legal Function Test above), not by the hub's
   generic paragraph test.
@@ -150,7 +150,7 @@ cut-or-keep test. Legal symptoms:
   the position.
 
 Keep one qualifier that defines a genuine boundary: a source limit, a reserved issue, a non-admission, a
-redaction condition, a disputed status, a human-authority gap. Cut the repetition around it.
+redaction condition, a disputed status, a user-authority gap. Cut the repetition around it.
 
 | Anxious over-qualification (cut to one clean limit) | Necessary boundary (keep) |
 |---|---|
@@ -198,7 +198,7 @@ carry it.
   concession on the weak one.
 
 This does not licence overstatement: keep honest negatives, source limits, disputed-status wording, reserved
-issues and human-authority gaps. Confident ≠ overclaiming; the leave/threshold test is "reasonably arguable",
+issues and user-authority gaps. Confident ≠ overclaiming; the leave/threshold test is "reasonably arguable",
 and a contested fact stays a contention.
 
 ## Register Discipline (Leave And Interlocutory Stages)

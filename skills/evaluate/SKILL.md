@@ -56,7 +56,7 @@ ${AGENTS_HOME:-$HOME/.agents}/skills/evaluate/scripts/validate_evaluation.py \
 ```
 
 `pass` is a machine assurance result for the named distribution, not general
-safety or human acceptance. Attach it to the canonical delivery receipt; only
-that lifecycle's human gate can mark the outcome accepted. Unsupported receipt
+safety or user acceptance. Attach it to the canonical delivery receipt; only
+that lifecycle's user gate can mark the outcome accepted. Unsupported receipt
 shapes fail closed; rerun them from a freshly frozen plan instead of migrating
 or guessing missing evidence.

@@ -3,7 +3,7 @@
 Status: current pre-release operations; query live machine state before action
 Applies to: `runtime/agent-fabric` and `scripts/agent-fabric*`
 
-## Human gates
+## User gates
 
 The following remain separate approvals. One does not imply another:
 
@@ -305,4 +305,4 @@ the artifact digest before stopping the daemon. The fabric receipt hashes
 provider resume references and records full coordination fields; it does not
 expose provider secrets. Do not create or adopt a second run-receipt shape.
 
-Do not delete the SQLite database, capability key, provider-native session, or `.agent-run` evidence as part of normal completion. Retention or destructive cleanup requires its own human decision.
+Do not delete the SQLite database, capability key, provider-native session, or `.agent-run` evidence as part of normal completion. Retention or destructive cleanup requires its own user decision.

@@ -15,7 +15,7 @@ needs:
 | source anchors and citations | `source-boundary-and-citations.md` |
 | banned phrasing/patterns | `forbidden-patterns.md` |
 | checking the finished draft | this file (`validation-checklists.md`) |
-| current-source and human-authority gates | `verification-and-escalation.md` |
+| current-source and user-authority gates | `verification-and-escalation.md` |
 
 Run the checks the task needs, not all of them:
 

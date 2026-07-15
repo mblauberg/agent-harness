@@ -6,7 +6,7 @@ Inspect the live diff and preserve unrelated work. `HARNESS.md` owns lifecycle,
 risk, authority, orchestration and review policy; [`docs/worktrees.md`](docs/worktrees.md)
 owns branch and linked-worktree operation. Use the
 [GitHub work-item workflow](docs/runbooks/github-workflow.md) for issue intake,
-Project status, pull-request linking and human gates.
+Project status, pull-request linking and user gates.
 
 This repository is loaded by multiple agent platforms. A convenient
 Claude-only or Codex-only change is a regression unless the approved scope is

@@ -18,7 +18,7 @@ Use panels to create independent defect pressure. Do not treat panel agreement a
 - Vary prompt framing across families to reduce correlation.
 - Ask for locations, evidence, and fixes, not global scores alone.
 - Let weak/cheap models scout; do not let them veto stronger grounded work.
-- Escalate real disagreement to objective checks, a stronger judge, or the human.
+- Escalate real disagreement to objective checks, a stronger judge, or the user.
 - Prefer sparse, bounded communication over open-ended debate loops.
 
 ## Vote handling
@@ -30,7 +30,7 @@ least one of:
 - reproducible command/test;
 - exact quote/location;
 - arithmetic/schema reconciliation;
-- human decision.
+- user decision.
 
 ## Evidence council (inspired by LLM Council)
 
@@ -53,7 +53,7 @@ incorporated.
 Do not let a reviewer judge its own authored surface. Avoid showing all raw
 responses to every model when claim packets suffice; this reduces anchoring and
 context cost. Use a fresh-context reducer for crucial decisions. A council adds
-pressure, not authority: deterministic gates and human one-way-door decisions
+pressure, not authority: deterministic gates and user one-way-door decisions
 still win.
 
 ## Research anchors
