@@ -29,6 +29,9 @@ human gates and governance cleanup. This file is only the compact route.
   lifecycle revision, gate-binding and digest semantics owned by [issue
   #27](https://github.com/mblauberg/provenant/issues/27). No source change or
   lifecycle authority landed from that slice.
+- [Issue #115](https://github.com/mblauberg/provenant/issues/115) owns the
+  bounded pre-release and historical source-truth cleanup required before
+  W013. It changes no runtime behaviour or release state.
 
 The linked issues own their acceptance criteria and evidence. Merged pull
 requests and historical lane detail remain in Git and are not repeated here.
@@ -53,6 +56,9 @@ requests and historical lane detail remain in Git and are not repeated here.
 - [Issue #97](https://github.com/mblauberg/provenant/issues/97): enable the
   proposed minimal main ruleset requiring pull requests and current CI without
   a required human reviewer, or explicitly defer/remove that commitment.
+- [Issue #114](https://github.com/mblauberg/provenant/issues/114): approve the
+  recommended removal or deferral of unused backlog and retention commitments,
+  or separately scope their implementation.
 - [Issue #23](https://github.com/mblauberg/provenant/issues/23): explicitly
   accept the programme only after W013 passes on one current head.
 
