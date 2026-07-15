@@ -10,6 +10,8 @@ const countPath = process.env.SUPERVISOR_COUNT_PATH;
 if (countPath === undefined) throw new Error("SUPERVISOR_COUNT_PATH is required");
 const count = existsSync(countPath) ? Number(readFileSync(countPath, "utf8")) : 0;
 writeFileSync(countPath, String(count + 1), { mode: 0o600 });
+const innerBridgeLossMarkerPath = process.env.SUPERVISOR_INNER_BRIDGE_LOSS_MARKER_PATH;
+
 const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
 lines.on("line", async (line) => {
   const request = JSON.parse(line) as {
@@ -69,7 +71,8 @@ lines.on("line", async (line) => {
   if (request.method === "retained_bridge_health") {
     const initialLive = process.env.SUPERVISOR_INNER_BRIDGE_INITIAL_LIVE !== "0";
     const delay = Number(process.env.SUPERVISOR_INNER_BRIDGE_LOSS_DELAY_MS ?? "0");
-    const live = initialLive && (delay <= 0 || Date.now() - innerBridgeActivatedAt < delay);
+    const markerRequestsLoss = innerBridgeLossMarkerPath !== undefined && existsSync(innerBridgeLossMarkerPath);
+    const live = initialLive && !markerRequestsLoss && (delay <= 0 || Date.now() - innerBridgeActivatedAt < delay);
     process.stdout.write(`${JSON.stringify({
       id: request.id,
       result: { schemaVersion: 1, kind: request.params?.kind, live },
