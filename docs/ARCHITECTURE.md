@@ -350,9 +350,12 @@ location and lifecycle are defined in [worktrees.md](worktrees.md).
 Project knowledge must remain visible to every family. Durable facts therefore
 live in project-owned state files, specifications, ADRs ([adr/](adr/)), runbooks
 and context digests. Private harness memory is limited to cross-project user
-preferences. Architecture decisions ratified 2026-07-13 (execution authority
-profiles, seam-completion refactoring, per-domain truth owners, backlog and
-retention posture) are recorded in [adr/0001–0008](adr/README.md).
+preferences. Project-local work maps and GitHub issues remain the current work
+owners. Retention follows project and risk policy plus bounded run-artifact
+rules. A canonical backlog contract, cross-store migration, universal
+retention classes and typed deletion are deferred until concrete requirements
+justify them. The governing decisions are recorded in
+[adr/0001–0008](adr/README.md).
 
 Workers return compressed findings and artifact paths. Session hygiene checks
 freshness, size, duplication, stale logs, scratch manifests and handoff quality.
