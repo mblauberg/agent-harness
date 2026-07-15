@@ -22,6 +22,7 @@ final verification remain pending where their owning issues say so.
 - [Architecture assurance](agent-fabric/architecture-assurance.md)
 - [Daemon and wire](agent-fabric/daemon-and-wire.md)
 - [Workspace containment](agent-fabric/workspace-containment.md)
+- [Provider-write containment evidence](agent-fabric/provider-write-containment.md)
 - [Provider custody](agent-fabric/provider-custody.md)
 - [Review custody](agent-fabric/review-custody.md)
 - [Persistence and cutover](agent-fabric/persistence.md)

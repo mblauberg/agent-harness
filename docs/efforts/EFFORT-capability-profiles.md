@@ -16,29 +16,30 @@ provider-authority decision. The runtime now has one V2 authority contract and
 one pure compiler, without a legacy decoder, compatibility bridge or duplicate
 runtime schema.
 
-The current architecture and mechanisms live in the standalone semantic
+Four standalone semantic specifications own distinct surfaces under [ADR
+0009](../adr/0009-standalone-semantic-specifications.md):
 [authority](../specs/agent-fabric/authority.md), [workspace
-containment](../specs/agent-fabric/workspace-containment.md) and [provider
-action](../specs/agent-fabric/provider-actions-and-adapters.md)
-specifications under [ADR
-0009](../adr/0009-standalone-semantic-specifications.md). Git owns their
-history and integrity.
+containment](../specs/agent-fabric/workspace-containment.md), [provider
+actions](../specs/agent-fabric/provider-actions-and-adapters.md) and
+[provider-write containment
+evidence](../specs/agent-fabric/provider-write-containment.md). The first three
+own the architecture and mechanisms; the fourth owns the fixed 21-case,
+42-execution matrix, oracles and evidence gate. Git owns their history and
+integrity.
 
 [Issue #22](https://github.com/mblauberg/provenant/issues/22) owns live W010
-delivery, evidence and human gates. The existing specifications do not own the
-fixed containment matrix. Under [issue
-#85](https://github.com/mblauberg/provenant/issues/85), that matrix awaits
-migration to a trimmed standalone semantic owner and human ratification before
-the historical implementation pack retires.
+delivery, evidence and human gates. The historical implementation pack is
+non-authoritative provenance pending its retirement decision under [issue
+#23/W013](https://github.com/mblauberg/provenant/issues/23), not an active
+dependency.
 
 ## Remaining route
 
-1. Once the matrix owner is ratified, [issue
-   #22](https://github.com/mblauberg/provenant/issues/22) begins with W010-A, a
-   separately human-approved inert prerequisite for the trusted write-offline
-   projection and evidence path. It does not begin without the explicit scope
-   grant at risk tier `crucial`, and `workspace-write-offline` remains
-   unavailable.
+1. [Issue #22](https://github.com/mblauberg/provenant/issues/22) begins with
+   W010-A, a separately human-approved inert prerequisite for the trusted
+   write-offline projection and evidence path. It does not begin without the
+   explicit scope grant at risk tier `crucial`, and
+   `workspace-write-offline` remains unavailable.
 2. W010-B requires a separate human grant for the exact live matrix tuple,
    calls, cost, time and host. No live execution is currently authorised.
 3. A conclusive matrix makes the tuple eligible only. The human must then

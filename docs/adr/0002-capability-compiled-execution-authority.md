@@ -29,24 +29,31 @@ provider-native settings in four stages:
 2. **Pure admission extraction** into an `AuthorityCompiler`, behaviour
    unchanged.
 3. **One-provider write pilot** (`workspace-write-offline`: one owned
-   worktree, no network egress, no external effects), gated on the
-   pre-approved adversarial containment spike — worktrees are not permission
-   boundaries; provider settings are intent, not containment proof; model
-   refusal without a tool attempt is inconclusive.
+   worktree, no network egress, no external effects), gated by the standalone
+   [provider-write containment
+   specification](../specs/agent-fabric/provider-write-containment.md) —
+   worktrees are not permission boundaries; provider settings are intent, not
+   containment proof; model refusal without a tool attempt is inconclusive.
 4. **Second provider, then structural extraction** from the merged
    `ProviderActionDispatchInputV1` contract shape.
 
-Only `review-readonly` and `workspace-write-offline` exist initially. Effective
-authority is the monotone intersection of the human envelope, task/worktree
-ownership, risk policy, provider capability and local attestation; providers
-cannot broaden a profile; receipts bind requested/effective profile, compiler
-version and exact native settings.
+The architecture initially defines only `review-readonly` and
+`workspace-write-offline`. Effective authority is the monotone intersection of
+the human envelope, task/worktree ownership, risk policy, provider capability
+and local attestation; providers cannot broaden a profile; receipts bind
+requested/effective profile, compiler version and exact native settings.
+
+The architecture decision does not authorise either execution slice. W010-A
+requires separate human approval of the crucial-scope profile/compiler change
+and thin recorder. W010-B requires a separate human grant naming the exact live
+tuple, calls, cost, time and host. Until those gates are granted,
+`workspace-write-offline` remains unavailable.
 
 **Direct cutover, no legacy bridge** (human directive, overriding codex-pair's
 proposed `LegacyAuthorityInputV1` quarantine): the repo is pre-release with no
-external consumers; migrate all callers, tests and stored state to V2 in
-Step 1. Pre-existing stored authorities are regenerated or the local
-pre-release state is reset — no dual parser is retained.
+external consumers; migrate all callers, tests and stored state to V2 in the
+authority-contract cutover. Pre-existing stored authorities are regenerated or
+the local pre-release state is reset — no dual parser is retained.
 
 ## Consequences
 
@@ -54,11 +61,12 @@ pre-release state is reset — no dual parser is retained.
   effects via the existing `ExternalEffectService` model).
 - The first write pilot provider is chosen by containment evidence, not
   preference; the other stays read-only until it independently passes.
-- The standalone authority, workspace-containment and provider-action
-  specifications own the architecture and mechanisms, not the fixed
-  containment matrix. [Issue
+- The authority, workspace-containment and provider-action specifications own
+  the architecture and mechanisms. The provider-write containment
+  specification owns the fixed 21-case, 42-execution matrix, oracles and
+  evidence gate. [Issue
   #22](https://github.com/mblauberg/provenant/issues/22) owns live W010
-  delivery, evidence and human gates. Under [issue
-  #85](https://github.com/mblauberg/provenant/issues/85), the matrix awaits
-  migration to a trimmed standalone semantic owner and human ratification
-  before the historical implementation pack retires.
+  delivery, evidence and human gates. The historical implementation pack is
+  non-authoritative provenance pending retirement under [issue
+  #23/W013](https://github.com/mblauberg/provenant/issues/23), not an active
+  dependency.

@@ -12,7 +12,7 @@ live implementation and acceptance state; this file is only the compact route.
   complete in [issues
   #64](https://github.com/mblauberg/provenant/issues/64),
   [#71](https://github.com/mblauberg/provenant/issues/71),
-  [#74](https://github.com/mblauberg/provenant/issues/74) and
+  [#74](https://github.com/mblauberg/provenant/issues/74),
   [#76](https://github.com/mblauberg/provenant/issues/76).
 - The final bounded Console repairs are complete: pagination in [issue
   #72](https://github.com/mblauberg/provenant/issues/72) and [PR
@@ -32,10 +32,12 @@ requests and historical lane detail remain in Git and are not repeated here.
 - [Issue #20](https://github.com/mblauberg/provenant/issues/20): verify the
   private W007 receipt against the exact hosted and mutation evidence, then
   explicitly accept W007. The public machine evidence is complete.
-- [Issue #22](https://github.com/mblauberg/provenant/issues/22): separately
-  approve the inert W010-A prerequisite, separately grant the W010-B live
-  matrix, then explicitly accept a conclusive exact tuple and authorise the
-  first provider write grant before W011.
+- [Issue #22](https://github.com/mblauberg/provenant/issues/22): under the
+  [provider-write containment
+  specification](../specs/agent-fabric/provider-write-containment.md),
+  separately approve the inert W010-A prerequisite, separately grant the
+  W010-B live matrix, then explicitly accept a conclusive exact tuple and
+  authorise the first provider write grant before W011.
 - [Issue #27](https://github.com/mblauberg/provenant/issues/27): choose and
   provision the external lifecycle receipt authority boundary, and separately
   authorise destructive abandon.

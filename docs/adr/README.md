@@ -1,9 +1,9 @@
 # Architecture decision records
 
-Decisions were ratified by the human on 13 July 2026. Each ADR is the canonical
-owner of its decision; linked issues and Git history preserve implementation
-evidence, challenge history and retired source material. ADRs 0009–0010 were
-ratified later, on 15 July 2026.
+Decisions ratified by the human on 2026-07-13. Each ADR is the canonical owner
+of its decision; supporting scoping evidence, challenge history and rejected
+alternatives remain available in Git history without forming a live
+cross-reference dependency. ADRs 0009–0010 were ratified later, on 2026-07-15.
 
 | ADR | Title | Status |
 |---|---|---|
