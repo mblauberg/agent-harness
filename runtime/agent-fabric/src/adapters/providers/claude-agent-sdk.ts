@@ -49,6 +49,10 @@ import {
   type ChairLaunchProviderResult,
   type ProviderAdapterCapabilities,
 } from "./types.js";
+import {
+  parseWorkspaceWriteOfflineProjection,
+  WORKSPACE_WRITE_OFFLINE_TOOLS,
+} from "./workspace-write-offline.js";
 
 export type ClaudeAgentSdkBoundary = ProviderBoundary;
 
@@ -255,6 +259,73 @@ export function claudeReadOnlyOptions(
     skills: [],
     plugins: [],
   };
+}
+
+function claudeWorkspaceWriteOfflineOptions(
+  payload: Record<string, unknown>,
+  resume?: string,
+  executable?: string,
+  environment?: Record<string, string>,
+): Options {
+  const projection = parseWorkspaceWriteOfflineProjection(payload);
+  if (projection === undefined) {
+    throw new ProviderAdapterError("INVALID_PARAMS", "write-offline projection is absent");
+  }
+  const model = optionalString(payload.model, "model");
+  const maxTurns = positiveInteger(payload.maxTurns, "maxTurns");
+  const effort = claudeEffort(payload.effort);
+  const root = projection.writeRoot;
+  return {
+    cwd: root,
+    ...(model === undefined ? {} : { model }),
+    ...(maxTurns === undefined ? {} : { maxTurns }),
+    ...(effort === undefined ? {} : { effort }),
+    ...(resume === undefined ? {} : { resume }),
+    ...(executable === undefined ? {} : { pathToClaudeCodeExecutable: executable }),
+    ...(environment === undefined ? {} : { env: { ...process.env, ...environment } }),
+    tools: [...WORKSPACE_WRITE_OFFLINE_TOOLS],
+    permissionMode: "acceptEdits",
+    sandbox: {
+      enabled: true,
+      failIfUnavailable: true,
+      autoAllowBashIfSandboxed: true,
+      allowUnsandboxedCommands: false,
+      filesystem: {
+        allowWrite: [root],
+        denyWrite: [resolve(root, ".git")],
+        allowRead: [root],
+        allowManagedReadPathsOnly: true,
+      },
+      network: {
+        allowedDomains: [],
+        allowManagedDomainsOnly: true,
+        allowUnixSockets: [],
+        allowAllUnixSockets: false,
+        allowLocalBinding: false,
+      },
+    },
+    settings: {
+      permissions: {
+        defaultMode: "acceptEdits",
+        disableBypassPermissionsMode: "disable",
+        additionalDirectories: [],
+      },
+    },
+    settingSources: [],
+    skills: [],
+    plugins: [],
+  };
+}
+
+export function claudeProviderOptions(
+  payload: Record<string, unknown>,
+  resume?: string,
+  executable?: string,
+  environment?: Record<string, string>,
+): Options {
+  return payload.executionProfile === undefined
+    ? claudeReadOnlyOptions(payload, resume, executable, environment)
+    : claudeWorkspaceWriteOfflineOptions(payload, resume, executable, environment);
 }
 
 function prompt(payload: Record<string, unknown>): string {
@@ -544,7 +615,7 @@ function claudeChairOptions(
   mcp: ClaudeChairMcpBridge,
 ): Options {
   return {
-    ...claudeReadOnlyOptions(payload, resume, executable),
+    ...claudeProviderOptions(payload, resume, executable),
     mcpServers: { [mcp.serverName]: mcp.server },
     allowedTools: [...mcp.allowedToolNames],
   };
@@ -622,7 +693,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
     const prior = optionalString(payload.priorResumeReference, "priorResumeReference");
     const completed = await consumeQuery(this.#query({
       prompt: prompt(payload),
-      options: claudeReadOnlyOptions(payload, prior, this.#executable),
+      options: claudeProviderOptions(payload, prior, this.#executable),
     }));
     return {
       resumeReference: completed.resumeReference,
@@ -804,7 +875,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
     const resumeReference = requiredString(payload.resumeReference, "resumeReference");
     const session = this.#chairSessions.get(resumeReference);
     if (session === undefined) {
-      return await consumeQuery(this.#query({ prompt: prompt(payload), options: claudeReadOnlyOptions(payload, resumeReference, this.#executable) }));
+      return await consumeQuery(this.#query({ prompt: prompt(payload), options: claudeProviderOptions(payload, resumeReference, this.#executable) }));
     }
     const mcp = session.mcp;
     if (mcp === undefined) {

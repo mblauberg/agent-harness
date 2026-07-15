@@ -15,6 +15,7 @@ import {
 } from "@local/agent-fabric-protocol";
 
 import {
+  claudeProviderOptions,
   claudeReadOnlyOptions,
   createClaudeChairMcpBridge,
   createClaudeAgentSdkAdapter,
@@ -510,6 +511,45 @@ describe("Claude Agent SDK fabric adapter", () => {
     });
   });
 
+  it("renders only a compiled write-offline projection as a fail-closed SDK sandbox", () => {
+    expect(claudeProviderOptions({
+      cwd: "/workspace/src",
+      readOnlyRoot: "/workspace/src",
+      writeRoot: "/workspace/src",
+      executionProfile: "workspace-write-offline",
+      networkAccess: "none",
+      sandbox: "workspace-write",
+      approvalPolicy: "never",
+      allowedTools: ["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
+    })).toMatchObject({
+      cwd: "/workspace/src",
+      tools: ["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
+      permissionMode: "acceptEdits",
+      sandbox: {
+        enabled: true,
+        failIfUnavailable: true,
+        autoAllowBashIfSandboxed: true,
+        allowUnsandboxedCommands: false,
+        filesystem: {
+          allowWrite: ["/workspace/src"],
+          denyWrite: ["/workspace/src/.git"],
+          allowRead: ["/workspace/src"],
+          allowManagedReadPathsOnly: true,
+        },
+        network: {
+          allowedDomains: [],
+          allowManagedDomainsOnly: true,
+          allowUnixSockets: [],
+          allowAllUnixSockets: false,
+          allowLocalBinding: false,
+        },
+      },
+      settingSources: [],
+      skills: [],
+      plugins: [],
+    });
+  });
+
   it("rejects an unrecognised Claude effort before provider work", () => {
     expect(() => claudeReadOnlyOptions({
       cwd: "/workspace/src",
@@ -686,6 +726,55 @@ describe("Claude Agent SDK fabric adapter", () => {
       executionCount: 1,
       effectCount: 1,
     });
+    actionJournal.close();
+  });
+
+  it("records a compiled write-offline attempt in the existing adapter action journal", async () => {
+    const actionJournal = await journal();
+    const boundary = claudeBoundary();
+    const adapter = createClaudeAgentSdkAdapter({ boundary, journal: actionJournal });
+    const payload = {
+      prompt: "Run the approved offline case.",
+      cwd: "/workspace/src",
+      readOnlyRoot: "/workspace/src",
+      writeRoot: "/workspace/src",
+      executionProfile: "workspace-write-offline",
+      networkAccess: "none",
+      sandbox: "workspace-write",
+      approvalPolicy: "never",
+      allowedTools: ["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
+    };
+
+    await adapter.request("spawn", { actionId: "claude-write-offline-1", payload });
+
+    expect(boundary.spawn).toHaveBeenCalledWith(payload);
+    expect(await adapter.request("lookup_action", { actionId: "claude-write-offline-1" })).toMatchObject({
+      actionId: "claude-write-offline-1",
+      operation: "spawn",
+      status: "terminal",
+      history: ["prepared", "dispatched", "accepted", "terminal"],
+      executionCount: 1,
+      effectCount: 1,
+    });
+    actionJournal.close();
+  });
+
+  it("rejects an incomplete write-offline projection before provider dispatch or journal preparation", async () => {
+    const actionJournal = await journal();
+    const boundary = claudeBoundary();
+    const adapter = createClaudeAgentSdkAdapter({ boundary, journal: actionJournal });
+
+    await expect(adapter.request("spawn", {
+      actionId: "claude-write-offline-incomplete",
+      payload: {
+        cwd: "/workspace/src",
+        executionProfile: "workspace-write-offline",
+      },
+    })).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(boundary.spawn).not.toHaveBeenCalled();
+    await expect(adapter.request("lookup_action", {
+      actionId: "claude-write-offline-incomplete",
+    })).rejects.toMatchObject({ code: "ACTION_NOT_FOUND" });
     actionJournal.close();
   });
 
@@ -2157,6 +2246,118 @@ describe("Codex app-server fabric adapter", () => {
       approvalPolicy: "on-request",
       permissions: "read-only",
     })).toEqual({ cwd: "/workspace/src", sandbox: "read-only", approvalPolicy: "never" });
+  });
+  it("keeps the Codex thread read-only while preparing the exact write-offline root", () => {
+    expect(codexThreadConfiguration({
+      cwd: "/workspace/src",
+      readOnlyRoot: "/workspace/src",
+      writeRoot: "/workspace/src",
+      executionProfile: "workspace-write-offline",
+      networkAccess: "none",
+      sandbox: "workspace-write",
+      approvalPolicy: "never",
+      allowedTools: ["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
+    })).toEqual({
+      cwd: "/workspace/src",
+      sandbox: "read-only",
+      approvalPolicy: "never",
+      runtimeWorkspaceRoots: ["/workspace/src"],
+      environments: [],
+    });
+  });
+  it.each([
+    { label: "fresh", priorResumeReference: undefined, threadMethod: "thread/start" },
+    { label: "resumed", priorResumeReference: "codex-write-thread", threadMethod: "thread/resume" },
+  ])("pins a $label write turn and restores the ordinary read-only policy", async ({ priorResumeReference, threadMethod }) => {
+    const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const connection = {
+      get closed() { return false; },
+      initialize: vi.fn(async () => undefined),
+      setServerRequestHandler: vi.fn(),
+      request: vi.fn(async (method: string, params: Record<string, unknown>) => {
+        requests.push({ method, params });
+        if (method === "thread/start" || method === "thread/resume") {
+          return { thread: { id: "codex-write-thread" } };
+        }
+        if (method === "turn/start") return { turn: { id: "codex-write-turn", status: "inProgress" } };
+        if (method === "thread/read") {
+          return {
+            thread: {
+              id: "codex-write-thread",
+              turns: [{
+                id: "codex-write-turn",
+                status: "completed",
+                items: [{ type: "agentMessage", text: "bounded" }],
+              }],
+            },
+          };
+        }
+        throw new Error(`unexpected write-offline method ${method}`);
+      }),
+      waitForNotification: vi.fn(async () => ({
+        threadId: "codex-write-thread",
+        turn: { id: "codex-write-turn", status: "completed" },
+      })),
+      close: vi.fn(async () => undefined),
+    };
+    const boundary = new InstalledCodexAppServerBoundary(vi.fn(() => connection) as never);
+    const payload = {
+      ...(priorResumeReference === undefined ? {} : { priorResumeReference }),
+      prompt: "Run the approved offline case.",
+      cwd: "/workspace/src",
+      readOnlyRoot: "/workspace/src",
+      writeRoot: "/workspace/src",
+      executionProfile: "workspace-write-offline",
+      networkAccess: "none",
+      sandbox: "workspace-write",
+      approvalPolicy: "never",
+      allowedTools: ["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
+      sandboxPolicy: { type: "dangerFullAccess" },
+      runtimeWorkspaceRoots: ["/host"],
+      environments: [{ environmentId: "host", cwd: "/host" }],
+    };
+
+    await expect(boundary.spawn(payload)).resolves.toMatchObject({
+      resumeReference: "codex-write-thread",
+      turnId: "codex-write-turn",
+      result: "bounded",
+    });
+
+    expect(requests[0]?.method).toBe(threadMethod);
+    expect(requests[0]?.params).toMatchObject({ sandbox: "read-only" });
+    if (threadMethod === "thread/start") expect(requests[0]?.params).toMatchObject({ environments: [] });
+    else expect(requests[0]?.params).not.toHaveProperty("environments");
+    expect(requests[1]).toEqual({
+      method: "turn/start",
+      params: {
+        threadId: "codex-write-thread",
+        input: [{ type: "text", text: "Run the approved offline case." }],
+        cwd: "/workspace/src",
+        runtimeWorkspaceRoots: ["/workspace/src"],
+        environments: [],
+        sandboxPolicy: {
+          type: "workspaceWrite",
+          writableRoots: ["/workspace/src"],
+          networkAccess: false,
+          excludeTmpdirEnvVar: true,
+          excludeSlashTmp: true,
+        },
+      },
+    });
+
+    await expect(boundary.sendTurn({
+      resumeReference: "codex-write-thread",
+      prompt: "Continue without write authority.",
+    })).resolves.toMatchObject({ resumeReference: "codex-write-thread", result: "bounded" });
+    expect(requests[3]).toEqual({
+      method: "turn/start",
+      params: {
+        threadId: "codex-write-thread",
+        input: [{ type: "text", text: "Continue without write authority." }],
+        sandboxPolicy: { type: "readOnly", networkAccess: false },
+      },
+    });
+    await boundary.closeAll();
   });
   it("matches the exact current Codex review-readonly golden without a positive network fence", async () => {
     const admitted = await providerPermissionGolden("admitted");

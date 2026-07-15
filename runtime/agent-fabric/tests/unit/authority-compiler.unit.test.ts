@@ -51,7 +51,16 @@ describe("AuthorityCompiler", () => {
     });
   });
 
-  it.each(["allowedTools", "disallowedTools", "permissions", "sandbox", "readOnlyRoot"])(
+  it.each([
+    "allowedTools",
+    "disallowedTools",
+    "permissions",
+    "sandbox",
+    "sandboxPolicy",
+    "readOnlyRoot",
+    "runtimeWorkspaceRoots",
+    "environments",
+  ])(
     "rejects caller control override %s",
     async (field) => {
       const { root, authority } = await fixture();
@@ -64,6 +73,71 @@ describe("AuthorityCompiler", () => {
       })).toThrow(`provider payload cannot override trusted control ${field}`);
     },
   );
+
+  it("rejects caller selection of the trusted write-offline projection", async () => {
+    const { root, authority } = await fixture();
+    let workspaceRequested = false;
+    expect(() => compileProviderPayload({
+      authority,
+      workspaceRoot: () => {
+        workspaceRequested = true;
+        return root;
+      },
+      payload: { executionProfile: "workspace-write-offline" },
+      now: Date.parse("2026-01-01T00:00:00Z"),
+      validateCurrent: true,
+    })).toThrow("provider payload cannot override trusted control executionProfile");
+    expect(workspaceRequested).toBe(false);
+  });
+
+  it("compiles the trusted write-offline projection from an exact workspace grant", async () => {
+    const { root, authority } = await fixture();
+    const input = {
+      authority,
+      workspaceRoot: () => root,
+      payload: { cwd: "src/public", prompt: "Run the approved offline case." },
+      now: Date.parse("2026-01-01T00:00:00Z"),
+      validateCurrent: true,
+      trustedProjection: {
+        kind: "workspace-write-offline",
+        workspacePath: "src/public",
+      },
+    } as Parameters<typeof compileProviderPayload>[0];
+
+    expect(compileProviderPayload(input)).toEqual({
+      cwd: join(root, "src", "public"),
+      prompt: "Run the approved offline case.",
+      executionProfile: "workspace-write-offline",
+      writeRoot: join(root, "src", "public"),
+      readOnlyRoot: join(root, "src", "public"),
+      allowedTools: ["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
+      approvalPolicy: "never",
+      sandbox: "workspace-write",
+      networkAccess: "none",
+    });
+  });
+
+  it("rejects a mismatched write-offline workspace grant before resolving the workspace", async () => {
+    const { root, authority } = await fixture();
+    let workspaceRequested = false;
+    const input = {
+      authority,
+      workspaceRoot: () => {
+        workspaceRequested = true;
+        return root;
+      },
+      payload: { cwd: "src/public" },
+      now: Date.parse("2026-01-01T00:00:00Z"),
+      validateCurrent: true,
+      trustedProjection: {
+        kind: "workspace-write-offline",
+        workspacePath: "src/private",
+      },
+    } as Parameters<typeof compileProviderPayload>[0];
+
+    expect(() => compileProviderPayload(input)).toThrow("write-offline grant does not match the exact provider cwd");
+    expect(workspaceRequested).toBe(false);
+  });
 
   it("rejects expiry before resolving the run workspace", async () => {
     const { authority } = await fixture();

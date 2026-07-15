@@ -22,6 +22,7 @@ import {
   type ProviderAdapterCapabilities,
 } from "./types.js";
 import type { SqliteAdapterActionJournal } from "./journal.js";
+import { parseWorkspaceWriteOfflineProjection } from "./workspace-write-offline.js";
 
 export type ProviderBoundary = {
   status(input: { resumeReference?: string }): Promise<Record<string, unknown>>;
@@ -577,6 +578,7 @@ export function createProviderAdapter(options: {
     result: Record<string, unknown>;
   }> {
     if (!supported.has(operation)) capabilityUnavailable(operation);
+    parseWorkspaceWriteOfflineProjection(payload);
     const prepared = options.journal.prepare(actionId, operation, payload);
     if (!prepared.created) {
       if (prepared.record.status === "terminal" && isRecord(prepared.record.result)) {
