@@ -1,8 +1,10 @@
 import Database from "better-sqlite3";
+import { once } from "node:events";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -25,31 +27,37 @@ const authority = {
   budget: { turns: 100, descendants: 10 },
 };
 
-async function triggerChildBridgeLoss(controlSocketPath: string): Promise<string> {
-  return await new Promise<string>((resolve, reject) => {
-    const socket = createConnection(controlSocketPath);
-    let response = "";
-    let settled = false;
-    const timeout = setTimeout(() => {
-      if (settled) return;
-      settled = true;
+function createChildBridgeLossBarrier(controlSocketPath: string): Readonly<{
+  waitForAuditReady(): Promise<void>;
+  requestLoss(): Promise<string>;
+  cancel(): void;
+}> {
+  const socket = createConnection(controlSocketPath);
+  const connected = once(socket, "connect");
+  const input = createInterface({ input: socket, crlfDelay: Infinity });
+  const lines = input[Symbol.asyncIterator]();
+  const nextLine = async (expected: string): Promise<string> => {
+    const line = await lines.next();
+    if (line.done || line.value !== expected) {
+      throw new Error(`expected fake provider ${expected}, received ${line.done ? "EOF" : line.value}`);
+    }
+    return `${line.value}\n`;
+  };
+  return {
+    async waitForAuditReady(): Promise<void> {
+      await connected;
+      socket.write("ARM\n");
+      await nextLine("AUDIT_READY");
+    },
+    async requestLoss(): Promise<string> {
+      socket.write("LOSS_REQUEST\n");
+      return await nextLine("LOSS_OBSERVED");
+    },
+    cancel(): void {
+      input.close();
       socket.destroy();
-      reject(new Error("fake provider did not observe child bridge loss"));
-    }, 5_000);
-    const finish = (error?: Error): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      socket.destroy();
-      if (error === undefined) resolve(response);
-      else reject(error);
-    };
-    socket.setEncoding("utf8");
-    socket.once("connect", () => socket.write("lose-child-bridge\n"));
-    socket.on("data", (chunk: string) => { response += chunk; });
-    socket.once("end", () => finish());
-    socket.once("error", (error) => finish(error));
-  });
+    },
+  };
 }
 
 describe("Spec 05 provider child custody", () => {
@@ -230,6 +238,7 @@ describe("Spec 05 provider child custody", () => {
     const bootstrap = await connectFabricDaemon({ socketPath, capability: daemon.bootstrapCapability });
     let chair: Awaited<ReturnType<typeof connectFabricDaemon>> | undefined;
     let chairProxy: Awaited<ReturnType<typeof spawnMcpProxy>> | undefined;
+    let lossBarrier: ReturnType<typeof createChildBridgeLossBarrier> | undefined;
     try {
       const run = await createCurrentSessionRun({ databasePath, workspaceRoot: directory, runId: "run-child-loss", chair: { agentId: "chair", authority } });
       chair = await connectFabricDaemon({ socketPath, capability: run.chairCapability });
@@ -248,7 +257,9 @@ describe("Spec 05 provider child custody", () => {
       expect(spawned.isError, spawned.text).toBe(false);
       expect(spawned.structured).toMatchObject({ bridgeState: "active", bridgeGeneration: 1 });
 
-      expect(await triggerChildBridgeLoss(lossControlSocketPath)).toBe("child-bridge-loss-observed\n");
+      lossBarrier = createChildBridgeLossBarrier(lossControlSocketPath);
+      await lossBarrier.waitForAuditReady();
+      expect(await lossBarrier.requestLoss()).toBe("LOSS_OBSERVED\n");
       expect(await readFile(lossObservedPath, "utf8")).toBe("child-bridge-loss-observed\n");
       const listed = await callTool(chairProxy.client, "fabric_agent_list", { runId: run.runId });
       expect((listed.structured.agents as Array<Record<string, unknown>>).find(({ agentId }) => agentId === "lost-child"))
@@ -278,6 +289,7 @@ describe("Spec 05 provider child custody", () => {
       expect(rebound.isError, rebound.text).toBe(false);
       expect(rebound.structured).toMatchObject({ bridgeState: "active", bridgeGeneration: 2 });
     } finally {
+      lossBarrier?.cancel();
       await Promise.allSettled([chairProxy?.close(), chair?.close(), bootstrap.close()]);
       await daemon.stop();
       await rm(directory, { recursive: true, force: true });
