@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -481,22 +481,28 @@ describe("persistent adapter supervision", () => {
   });
 
   it("rejects and supervises the deep child bridge independently of the live wrapper", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-inner-child-live-"));
+    const directory = await mkdtemp(join(tmpdir(), "af-inner-child-"));
     const countPath = join(directory, "starts.txt");
+    const lossMarkerPath = join(directory, "lose-inner-bridge");
     const supervisor = new AdapterSupervisor({
       fake: {
         command: [process.execPath, "--import", "tsx", fixturePath],
         environment: {
           SUPERVISOR_COUNT_PATH: countPath,
-          SUPERVISOR_INNER_BRIDGE_LOSS_DELAY_MS: "30",
+          SUPERVISOR_INNER_BRIDGE_LOSS_MARKER_PATH: lossMarkerPath,
         },
       },
     }, { bridgeHealthIntervalMs: 5 });
     const loss = vi.fn();
-    supervisor.setChildBridgeLossHandler(loss);
+    let resolveLoss!: () => void;
+    const lossObserved = new Promise<void>((resolve) => { resolveLoss = resolve; });
+    supervisor.setChildBridgeLossHandler((entry, reason) => {
+      loss(entry, reason);
+      resolveLoss();
+    });
     const expectedPrincipal = { agentId: "child", projectSessionId: "session-1", runId: "run-1", principalGeneration: 2 };
     try {
-      await supervisor.provisionAgent("fake", {
+      const provisioned = await supervisor.provisionAgent("fake", {
         schemaVersion: 1,
         runId: "run-1",
         operation: "spawn",
@@ -511,7 +517,18 @@ describe("persistent adapter supervision", () => {
         socketPath: "/private/inner-child-loss.sock",
         expectedPrincipal,
       });
-      await vi.waitFor(() => expect(loss).toHaveBeenCalledOnce(), { timeout: 1_000 });
+      expect(supervisor.hasRetainedChildBridge({
+        runId: "run-1",
+        agentId: "child",
+        adapterId: "fake",
+        actionId: "child-inner-loss-idle",
+        providerSessionRef: provisioned.providerSessionRef,
+        providerSessionGeneration: provisioned.providerSessionGeneration,
+        bridgeGeneration: provisioned.bridgeGeneration,
+      })).toBe(true);
+      await writeFile(lossMarkerPath, "", { mode: 0o600 });
+      await lossObserved;
+      expect(loss).toHaveBeenCalledOnce();
       expect(loss.mock.calls[0]?.[1]).toContain("inner retained child bridge");
       expect(await readFile(countPath, "utf8")).toBe("1");
     } finally {
