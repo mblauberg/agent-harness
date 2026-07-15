@@ -61,12 +61,7 @@ the local pre-release state is reset — no dual parser is retained.
   effects via the existing `ExternalEffectService` model).
 - The first write pilot provider is chosen by containment evidence, not
   preference; the other stays read-only until it independently passes.
-- The authority, workspace-containment and provider-action specifications own
-  the architecture and mechanisms. The provider-write containment
-  specification owns the fixed 21-case, 42-execution matrix, oracles and
-  evidence gate. [Issue
-  #22](https://github.com/mblauberg/provenant/issues/22) owns live W010
-  delivery, evidence and human gates. The historical implementation pack is
-  non-authoritative provenance pending retirement under [issue
-  #23/W013](https://github.com/mblauberg/provenant/issues/23), not an active
-  dependency.
+- The [capability-compiled execution authority
+  effort](../efforts/EFFORT-capability-profiles.md) is the compact current route
+  from the standalone specifications to [issue
+  #22](https://github.com/mblauberg/provenant/issues/22).
