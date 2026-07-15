@@ -1,6 +1,6 @@
 ---
 name: implement
-description: "Use for an approved software change through verified implementation, independent review, bounded repair, and human acceptance. Not for unsettled scope, diagnosis-only, read-only review, or release."
+description: "Use for an approved software change through verified implementation, independent review, bounded repair, and user acceptance. Not for unsettled scope, diagnosis-only, read-only review, or release."
 ---
 
 # Implement
@@ -27,7 +27,7 @@ name a reconciliation run.
 1. For substantial+ work, create the canonical `delivery-run` from
    `../deliver/templates/RUN.template.json`, set profile `software`, and follow
    [run-contract.md](references/run-contract.md). Routine minor work may proceed
-   without `RUN.json` unless the human or project policy requests one.
+   without `RUN.json` unless the user or project policy requests one.
 2. Keep an adaptive plan. Per slice use `tdd` for observable change, `refactor`
    for approved behaviour-preserving structure and `diagnose` for unknown
    causes. Migrations may also need behaviour tests and equivalence evidence.
@@ -42,7 +42,7 @@ name a reconciliation run.
    native and other-primary reviews load-bear; bonus families are
    opportunistic. Record adapter and actual family.
 5. Repair blockers, then repeat verification and independent review. Stop after
-   two repair cycles or scope/design drift; return evidence to the human or
+   two repair cycles or scope/design drift; return evidence to the user or
    `scope`.
 6. Update owned docs for behavioural, architectural, operational or decision
    change. For substantial+ apply `session`: refresh the recovery checkpoint,
@@ -52,11 +52,11 @@ name a reconciliation run.
    `"${AGENTS_HOME:-$HOME/.agents}/skills/deliver/scripts/validate_delivery.py" \
    .agent-run/<id>/RUN.json --workspace-root "$PWD" --verify-hashes`.
    Hand off only after this machine gate.
-8. Human final acceptance is mandatory; promotion needs separate `release`
+8. User final acceptance is mandatory; promotion needs separate `release`
    authority. When a run directory exists, after acceptance, failure or
    cancellation, terminalise with
    `${AGENTS_HOME:-$HOME/.agents}/skills/orchestrate/scripts/run_dir_finalize.py`;
-   an outer orchestrator's `awaiting-human` transport remains active and does
+   an outer orchestrator's `awaiting-user` transport remains active and does
    not rename the canonical receipt state.
 
 ## Authority and completion
@@ -69,7 +69,7 @@ name a reconciliation run.
   never vote.
 - Substantial+ starts a fresh implementation session bound to approved digests.
 - `awaiting_acceptance` is the successful machine-gate state. Move the
-  canonical receipt to `accepted` only after explicit human acceptance.
+  canonical receipt to `accepted` only after explicit user acceptance.
 
 ## Adapter-absent path
 

@@ -17,5 +17,5 @@ continuity: it must name its current issue or run and be removed when consumed.
 For W010, start with the canonical [capability-compiled execution authority
 route](../efforts/EFFORT-capability-profiles.md), then inspect [issue
 #22](https://github.com/mblauberg/provenant/issues/22) for live delivery,
-evidence and human-gate state. That route links the governing ADR and each
+evidence and user-gate state. That route links the governing ADR and each
 standalone specification, and records the disposition of supporting history.

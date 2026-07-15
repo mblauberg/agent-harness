@@ -24,7 +24,7 @@ changes where old and new producers or consumers may coexist.
    assume every migration needs a destructive down migration.
 6. Bind rehearsal results, data invariants, compatibility matrices and residual
    risk to the enclosing delivery receipt. Promotion remains owned by
-   `release`; irreversible data loss or disclosure requires direct human
+   `release`; irreversible data loss or disclosure requires direct user
    authority.
 
 Stop and return to `scope` when the compatibility window, ownership, data-loss

@@ -273,7 +273,7 @@ def test_repository_policy_covers_sensitive_fabric_surfaces() -> None:
         "exact head",
         "reviewer role",
         "model family",
-        "human gates still pending",
+        "user gates still pending",
         "later commit invalidates",
     ):
         assert evidence in template
@@ -302,7 +302,7 @@ def test_github_work_item_and_runbook_cover_the_intake_contract() -> None:
         "ready",
         "in progress",
         "in review",
-        "awaiting human",
+        "awaiting user",
         "done",
     ):
         assert status in runbook

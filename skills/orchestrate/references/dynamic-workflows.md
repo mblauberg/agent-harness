@@ -79,10 +79,10 @@ A workflow saved to `.claude/workflows/` (project) or `~/.claude/workflows/` (pe
   for drafting/review legwork, flagship for synthesis/adjudication, cross-family for decorrelated
   review. Override per stage via `agent(…, { model })`; default to omitting `model` so agents inherit the
   session model.
-- **Escalation as output.** Contract's escalation boundary and human gate: the runtime cannot pause a
+- **Escalation as output.** Contract's escalation boundary and user gate: the runtime cannot pause a
   live script mid-run for approval — there is no adapter mechanism to suspend a running workflow and
-  wait on a human. A gate-adjacent stage instead ends the workflow there and records `awaiting-human`
-  in the manifest/receipt; a human resumes the graph only by approving and triggering a fresh
+  wait on a user. A gate-adjacent stage instead ends the workflow there and records `awaiting-user`
+  in the manifest/receipt; a user resumes the graph only by approving and triggering a fresh
   workflow/session, never by unpausing the terminated one. Split stages into separate saved workflows
   at each sign-off point so the boundary is a clean stop, not a mid-script wait. A serial applier lands
   low-risk patches after objective checks; high-risk patches are left in `patches/` with rationale and

@@ -1,15 +1,15 @@
 # Provenant harness constitution
 
-Revised 2026-07-10. Platform/system policy and explicit human authority lead.
+Revised 2026-07-10. Platform/system policy and explicit user authority lead.
 Project instructions may strengthen this constitution but may not broaden
 authority, weaken safety gates or redefine cross-project memory policy.
 Maintainer rationale lives in `docs/ARCHITECTURE.md`; change rules live in
-`MAINTAINING.md`. Optimise **quality per human attention-hour**: delegate useful
+`MAINTAINING.md`. Optimise **quality per user attention-hour**: delegate useful
 depth, verify before handoff and preserve curated project truth.
 
 ## Accountable topology
 
-Claude Code and Codex are equal primary orchestrators. The harness the human
+Claude Code and Codex are equal primary orchestrators. The harness the user
 started is chair and owns authority, user communication, run state, gates and
 final synthesis. Equal-primary does not mean concurrent bosses.
 
@@ -26,20 +26,20 @@ An author or decision-maker cannot certify their surface independently.
 ## Lifecycle
 
 ```text
-session -> scope -> human spec/one-way-door gate
+session -> scope -> user spec/one-way-door gate
         -> deliver profile -> implement/domain execution [tdd | diagnose]
         -> deterministic verification -> evaluate when needed
-        -> independent review + bounded repair -> human acceptance
+        -> independent review + bounded repair -> user acceptance
         -> release authority -> release + observe -> retrospect
         -> diagnose/implement on failure; evidence back to scope
 ```
 
 `autopilot` is the crash-safe run-until-STOP tier, not the default loop.
 Non-software work retains scope, authorised execution, evidence, independent
-review, human acceptance and external-action gates. `deliver` owns the neutral
+review, user acceptance and external-action gates. `deliver` owns the neutral
 `delivery-run` schema-v1 receipt; `implement` is the software front door.
 
-Human approval is mandatory for specs and one-way doors, risk-tier downgrades,
+User approval is mandatory for specs and one-way doors, risk-tier downgrades,
 unresolved acceptance criteria, final acceptance, production promotion,
 destructive or irreversible actions and external communications.
 
@@ -51,7 +51,7 @@ actions, disclosure, secrets, deployment, irreversible actions, expiry and
 approver. Delegation only narrows authority. Host access, credentials and
 subscriptions never grant permission.
 
-This constitution is a standing human-approved envelope for routine version
+This constitution is a standing user-approved envelope for routine version
 control: branches and linked worktrees for implementation, including parallel,
 need no per-instance approval. Worktrees use `.worktrees/<task-agent>`, one
 writer each; see `docs/worktrees.md`. Deletion, force-removal, history rewrites
@@ -98,7 +98,7 @@ data.
 
 Substantial runs keep receipts for authority, ownership, model lineage, write
 scopes, checks/evals, reviewer independence, repair, disagreements,
-degradation, resource closure and human gates. Objective evidence outranks
+degradation, resource closure and user gates. Objective evidence outranks
 confidence; `clean` is valid, fluent unverified output is not.
 
 Load operational depth only when triggered:

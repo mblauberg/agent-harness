@@ -15,7 +15,7 @@ against the new head.
 - Risk tier:
 - Authorised write scope:
 - Prohibited or external actions:
-- Human gates still pending:
+- User gates still pending:
 
 ## Test evidence
 
@@ -58,4 +58,4 @@ List exact commands, results and any unavailable or intentionally skipped gate.
 
 ## Acceptance
 
-State which machine gates pass and which human acceptance or release gates remain pending.
+State which machine gates pass and which user acceptance or release gates remain pending.

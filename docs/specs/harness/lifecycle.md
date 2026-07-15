@@ -1,6 +1,6 @@
 # Adaptive agent harness lifecycle
 
-Status: Base implementation machine verified; final human acceptance pending
+Status: Base implementation machine verified; final user acceptance pending
 Chair: Codex
 Paired design peer: Claude Code, Fable 5 (Opus fallback)
 
@@ -8,7 +8,7 @@ The current contract permits direct read-only analysis of local session history,
 
 ## Authority and decision
 
-The human instruction on 10 July 2026 approved this specification, authorised
+The user instruction on 10 July 2026 approved this specification, authorised
 the complete harness refactor and authorised a repository commit. It permits
 reversible repository changes, tests and documentation within the existing
 harness. It does not authorise provider login, external communications,
@@ -39,7 +39,7 @@ to Git. The target is a small stable kernel plus profiles and existing skills.
   from the shared contract.
 - Bind scope, authority, design, evidence, review, acceptance, release,
   observation and improvement through typed receipts.
-- Keep humans at consequential intent, one-way-door, disclosure, acceptance and
+- Keep users at consequential intent, one-way-door, disclosure, acceptance and
   promotion gates.
 - Make harness improvement measurable, privacy-safe and regression-tested.
 - Keep Claude Code and Codex equal primaries; use other families as additive
@@ -62,14 +62,14 @@ to Git. The target is a small stable kernel plus profiles and existing skills.
 ```text
 context
   -> intent and risk
-  -> [HUMAN: material scope/design]
+  -> [USER: material scope/design]
   -> authorised delivery profile
   -> deterministic evidence
   -> behavioural/domain evaluation where needed
   -> independent multi-lens review
   -> bounded repair loop
-  -> [HUMAN: final acceptance]
-  -> [HUMAN: external release/promotion]
+  -> [USER: final acceptance]
+  -> [USER: external release/promotion]
   -> observation window
   -> retrospective proposal and regression
   -> next intent
@@ -77,7 +77,7 @@ context
 
 A failed deterministic or review gate returns to delivery. A finding that
 changes accepted intent, authority or a one-way-door design returns to the
-human design gate. Observation can open `diagnose`, incident response or a new
+user design gate. Observation can open `diagnose`, incident response or a new
 delivery cycle. No status may jump a missing gate.
 
 ## Target architecture
@@ -134,7 +134,7 @@ than trusting a free-form receipt claim. When selected, the profile's
 repeated-trial and sample-size minima still apply.
 
 High-stakes work is an orthogonal safeguard, not a file type: it adds source
-authority, privacy, qualified-domain review and explicit human-action gates to
+authority, privacy, qualified-domain review and explicit user-action gates to
 any base profile.
 
 ### Skills remain composable
@@ -221,7 +221,7 @@ Required invariants:
 Risk tiers remain `routine`, `substantial`, `crucial` and `terminal`.
 Substantial, crucial and terminal runs require an intent/design artifact.
 Crucial and terminal runs additionally require alternatives, threat/failure
-analysis, rollback or containment, unresolved decisions and named human
+analysis, rollback or containment, unresolved decisions and named user
 approval; terminal keeps the strongest review and external-action gates in
 `config/risk-policy.json`.
 
@@ -230,7 +230,7 @@ The validator rejects:
 - `approved` with a missing artifact, digest, approver or approval evidence;
 - an artifact modified after its recorded approval digest;
 - an unresolved one-way-door decision marked as implementation detail; and
-- a risk downgrade without human evidence.
+- a risk downgrade without user evidence.
 
 ## Verification and review
 
@@ -259,29 +259,29 @@ readability/maintainability and structural simplification.
 Substantial work requires a fresh native reviewer and the other primary family.
 Crucial work also attempts an advisory family. Reviewers work independently
 before synthesis. The reducer adjudicates against evidence and records
-disagreement; no majority vote can override a deterministic failure or human
+disagreement; no majority vote can override a deterministic failure or user
 authority.
 
 ## Local skill evidence and shared exports
 
-`skill-craft`'s audit branch defaults to static analysis. A direct human request authorises
+`skill-craft`'s audit branch defaults to static analysis. A direct user request authorises
 read-only, in-place analysis of the named local session histories. When the
 provider roots and useful window are unambiguous from that request and the live
 environment, the agent proceeds without a second receipt, redaction pass,
 retention date or minimum-cell gate. Raw histories remain local, are never
 committed and do not become project truth.
 
-A compact aggregate or paraphrased report to the requesting human in the same
+A compact aggregate or paraphrased report to the requesting user in the same
 authorised session is local delivery, not sharing/export, and requires no
 second disclosure confirmation. Run-owned local scratch is also allowed.
 Creating a persistent repository/shared artifact, sending raw excerpts to
 another provider, or disclosing to a new audience or external destination
-requires separate authority. Once authorised, the human confirms the audience,
+requires separate authority. Once authorised, the user confirms the audience,
 destination and whether excerpts are allowed; output excludes secrets and
 out-of-scope third-party private content.
 
 Invocation, correction and completion claims require structured attribution or
-human-reviewed, provenance-valid evidence. Loading a skill is not selection.
+user-reviewed, provenance-valid evidence. Loading a skill is not selection.
 Unsupported or unattributable evidence is `N/A`, never zero. The harness claims
 no generic native-provider history collector until real adapters and producers
 exist. History predating a skill may inform broad harness patterns but cannot
@@ -360,11 +360,11 @@ operations support `plan`, `install`, `reconcile` and `uninstall-managed`.
 Unmanaged existing paths are never claimed or overwritten. Broken managed
 links and safe managed renames are repaired with receipts. The target-bound
 manifest hashes full skill-tree bytes and executable modes; link mutations roll
-back if its atomic commit fails. Conflicts stop for human resolution.
+back if its atomic commit fails. Conflicts stop for user resolution.
 
 Instruction precedence is one sentence across all entrypoints:
 
-> Platform/system policy and explicit human authority lead; the nearest
+> Platform/system policy and explicit user authority lead; the nearest
 > project instruction may specialise or strengthen the global harness but may
 > not silently broaden authority, weaken safety gates or redefine global
 > cross-project memory policy.
@@ -416,7 +416,7 @@ cases are labelled separately.
 | 2 — neutral kernel | One public v1 contract for every profile |
 | 3 — bound gates | Implemented and tested |
 | 4 — managed evolution | Implemented; live installation not performed |
-| 5 — prove and accept | Deterministic proof complete; independent final review and human acceptance pending |
+| 5 — prove and accept | Deterministic proof complete; independent final review and user acceptance pending |
 
 ### Phase 1 — evidence foundations
 
@@ -454,7 +454,7 @@ cases are labelled separately.
 - Run regression and public-safety checks.
 - Exercise all profiles with reference runs and negative cases.
 - Obtain independent native, Fable/Opus and optional-family review.
-- Repair, record remaining degradation and request final human acceptance.
+- Repair, record remaining degradation and request final user acceptance.
 
 ## Stability and rollback
 
@@ -492,7 +492,7 @@ The refactor is complete when:
     budgets pass.
 11. A Fable/Opus peer and a fresh Codex/native reviewer independently report no
     unresolved blocking findings.
-12. The human accepts the completed lifecycle; release remains a separate gate.
+12. The user accepts the completed lifecycle; release remains a separate gate.
 
 ### Implementation evidence
 
@@ -507,31 +507,31 @@ The refactor is complete when:
 | 9 | balanced core fixtures, held-out dataset and repeated Fable routing receipts |
 | 10 | `scripts/check-harness`, public-release check, clean-install and context-budget suites |
 | 11 | HREF-002 fresh native and Fable review artifacts after the final source freeze |
-| 12 | Pending explicit human acceptance; no release or push is authorised |
+| 12 | Pending explicit user acceptance; no release or push is authorised |
 
 ## Known risks and controls
 
 | Risk | Control |
 |---|---|
 | Kernel becomes a bloated mega-skill | Stable state machine only; profiles and references hold depth; word-budget test. |
-| Generic gates weaken domain requirements | Profiles may strengthen only; high-stakes release is always human action. |
+| Generic gates weaken domain requirements | Profiles may strengthen only; high-stakes release is always user action. |
 | Receipt ceremony overwhelms small tasks | Risk threshold; routine one-shot work may use an ephemeral receipt or none. |
 | Local history escapes its requested scope | Read in place, never commit raw history and keep sharing/export behind explicit destination and content authority. |
-| Evals optimise to their own fixtures | Held-out cases, repeated trials, mixed graders and human calibration. |
+| Evals optimise to their own fixtures | Held-out cases, repeated trials, mixed graders and user calibration. |
 | Multi-agent cost exceeds value | Decomposability gate, one writer and proportional lanes. |
 | Concurrent agent-fabric work conflicts | Unique files in Phase 1; shared entrypoints deferred until fabric ownership closes. |
 | Research becomes stale | Dated evidence cut-off, 90-day decision expiry and retrospective refresh proposal. |
 
-## Remaining human gates
+## Remaining user gates
 
 The held-out baseline justifies `deliver`; the instruction to implement this
 approved specification entirely selects that named entrypoint. Non-trivial
 neutral runs persist receipts; tiny routine one-shot work remains exempt.
 Requested local history is read in place and not retained as project truth.
-Sharing or exporting derived evidence remains a separate human decision.
+Sharing or exporting derived evidence remains a separate user decision.
 
 Final lifecycle acceptance remains pending. Runtime activation, live
-installation, provider login, push and release remain separate human decisions.
+installation, provider login, push and release remain separate user decisions.
 
 ## Route and topology evaluation evidence
 

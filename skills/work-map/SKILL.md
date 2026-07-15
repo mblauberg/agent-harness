@@ -9,7 +9,7 @@ A `session` handoff carries one session's baton. Across many sessions or agents,
 the work map holds the route: one file per effort, updated as legs complete and
 read first on resume.
 
-Record curated project/run/lead dependencies, outcome legs and human gates.
+Record curated project/run/lead dependencies, outcome legs and user gates.
 The map is not live task truth: link canonical Fabric or project artifacts and
 never infer claims, completion, leases or current membership from the map.
 

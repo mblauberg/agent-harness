@@ -166,7 +166,7 @@ def test_context_hygiene_is_owned_by_session_and_delivery_checkpoints():
     assert "checkpoint" in (ROOT / "skills" / "deliver" / "templates" / "RUN.template.json").read_text()
 
 
-def test_retired_change_identity_is_absent_and_readme_diagram_has_human_gates():
+def test_retired_change_identity_is_absent_and_readme_diagram_has_user_gates():
     assert not (ROOT / "skills" / "change").exists()
     readme = (ROOT / "README.md").read_text()
     assert "$change" not in readme
@@ -183,7 +183,7 @@ def test_retired_change_identity_is_absent_and_readme_diagram_has_human_gates():
     # Mermaid quotes every drawn label (nodes and edges) and leaves accTitle and
     # accDescr unquoted, so this is what a sighted reader actually sees.
     drawn = "\n".join(re.findall(r'"([^"]*)"', semantics))
-    assert drawn.count("HUMAN ·") == 3
+    assert drawn.count("USER ·") == 3
     for stage in ("scope", "implement", "verify", "review", "release", "observe", "retrospect"):
         assert stage in drawn, f"{stage} is not drawn in the lifecycle diagram"
     # A blocking finding must visibly return the work to implement, otherwise the
@@ -473,4 +473,4 @@ def test_retrospect_closes_the_quality_flywheel_without_log_bloat():
         assert term in skill
     assert "one dated log per run" in skill
     assert "proposal-first and read-only by default" in skill
-    assert "human-approved scope" in skill
+    assert "user-approved scope" in skill

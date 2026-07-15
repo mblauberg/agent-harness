@@ -3,15 +3,15 @@
 ## Operator experience
 
 The default `Attention` view is the **Adaptive Attention Deck**. It shall let the
-human identify project, session, active runs, current phase, owners, next
+user identify project, session, active runs, current phase, owners, next
 milestone, health and required judgement within 10 seconds. The Deck composes
 the canonical views below; it is not a ninth view or a new state owner.
 
 Its primary **Needs you** queue contains only unresolved explicit questions,
 approval or decision gates, acceptance-ready work, expiring authority and
-critical blockers that require human judgement. It shall not promote elapsed
+critical blockers that require user judgement. It shall not promote elapsed
 time, inactivity, message volume, context pressure, pane absence or an optional
-integration outage into human need. It groups duplicate events and orders them
+integration outage into user need. It groups duplicate events and orders them
 by safety/integrity, critical-path blocked, expiring authority, then
 acceptance-ready. Each row shows source freshness, last-event age, exact affected
 scope and available action. Non-blocking `FYI` and advisory items live in a
@@ -89,7 +89,7 @@ is labelled advisory with its model, source range, generation time and
 freshness, and is evaluated separately before enablement.
 
 The bottom input is a contextual intervention surface, not a second global chat
-or arbitrary shell. Depending on focus it may answer the exact human gate,
+or arbitrary shell. Depending on focus it may answer the exact user gate,
 submit a reviewed steer/pause/resume/cancel intent against the selected
 revision-bound task/run target, or attach to a supported provider session.
 Before a consequential submission it shows target, affected scope, authority,

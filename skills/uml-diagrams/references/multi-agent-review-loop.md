@@ -41,7 +41,7 @@ objective checks.
 After an authorised repair, rerun lint, render and affected document checks,
 then request fresh review of the changed surface. Follow the enclosing delivery
 run's repair cap; do not loop until every reviewer prefers the style. Escalate
-unresolved semantics or project-profile conflicts to the human.
+unresolved semantics or project-profile conflicts to the user.
 
 Completion requires clean objective gates, no unresolved blocking finding and
-explicit human acceptance where the enclosing lifecycle requires it.
+explicit user acceptance where the enclosing lifecycle requires it.

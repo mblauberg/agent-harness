@@ -16,7 +16,7 @@ state `docs/STATE.md` (about 120 lines), handoffs `docs/handoffs/`, archive
 
 For substantial work, start at the approved phase/slice and reopen disk state;
 never trust injected state. Resume from the digest-bound handoff, reading only
-relevant docs/open decisions. Human gates stay unanswered until decided.
+relevant docs/open decisions. User gates stay unanswered until decided.
 Routine bounded work may continue with context inside authority.
 
 ## Checkpoint
@@ -55,7 +55,7 @@ expiry and ownership before reuse.
    Never delete unknown, pre-existing or user-owned untracked files. Revalidate
    time-sensitive memory against its owning source or mark it stale.
 3. **Handoff version control:** run project checks; report the exact diff.
-   Commit only with human/project authority; never commit another actor's state.
+   Commit only with user/project authority; never commit another actor's state.
 4. **Signal:** capture only a compact friction pointer in the handoff/state when
    it may recur. `retrospect` owns analysis and process changes after a completed
    cycle; session closure does not start a mini-retrospective.

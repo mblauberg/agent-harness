@@ -67,7 +67,7 @@ memory policy.
 
 This skill is proposal-first and read-only by default. Apply project/global
 harness changes only under explicit authority or an enclosing `implement` run;
-material cross-project changes return through human-approved scope. Finish with
+material cross-project changes return through user-approved scope. Finish with
 a compact table: finding, evidence, root cause, change, regression gate,
 owner/destination, status (`promote`, `experiment`, `defer`, `reject`).
 
