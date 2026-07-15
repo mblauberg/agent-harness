@@ -7,6 +7,11 @@ export type {
   LifecycleAuthenticatedReceipt,
   LifecycleAuthenticatedScopeCheckpoint,
 } from "./lifecycle/receipt-authority.js";
+export {
+  LocalLifecycleReceiptAuthority,
+  openLocalLifecycleReceiptAuthority,
+} from "./lifecycle/local-receipt-authority.js";
+export type { LocalLifecycleReceiptAuthorityOptions } from "./lifecycle/local-receipt-authority.js";
 export type { TeamCreateInput, TeamResult } from "./core/contracts.js";
 export {
   connectFabricDaemon,
