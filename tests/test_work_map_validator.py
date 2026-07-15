@@ -14,99 +14,187 @@ def load_module():
     return module
 
 
-def map_text(*route_rows: str, status: str = "active") -> str:
+def map_text(*route_rows: str) -> str:
     rows = "\n".join(route_rows)
-    return f"""# EFFORT: Example        Updated: 2026-07-14  Status: {status}
+    return f"""# EFFORT: Example
 
 ## Destination
-Ship the accepted outcome.
+Ship the accepted outcome. See [the specification](../specs/example.md).
 
-## Route (legs, ordered)
+## Route
 {rows}
 
-## Blocked / parked
-- none
-
-## Invariants for every leg
-- Preserve user work.
-
-## Trail (one line per route transition, newest first)
-- 2026-07-14: activated leg 2.
+## Invariants
+- [Governing decision](../adr/0001-example.md)
 """
 
 
-def test_active_map_has_one_claimed_leg_and_a_live_handoff(tmp_path):
+def test_link_only_route_map_is_valid(tmp_path):
     path = tmp_path / "EFFORT-example.md"
     path.write_text(
         map_text(
-            "- [x] Leg 1 — scoped (done 2026-07-13)",
-            "- [>] Leg 2 — implement — IN PROGRESS, handoff: HANDOFF-current.md",
-            "- [ ] Leg 3 — verify (depends: leg 2)",
+            "- [Issue #1](https://github.com/example/project/issues/1)",
+            "- [PR #2](https://github.com/example/project/pull/2)",
         )
     )
 
     assert load_module().validate(path) == []
 
 
-def test_active_map_rejects_multiple_claimed_legs(tmp_path):
+def test_route_row_requires_a_link_to_its_owner(tmp_path):
+    path = tmp_path / "EFFORT-example.md"
+    path.write_text(map_text("- Implement the next leg"))
+
+    assert "route row must contain a link" in "\n".join(load_module().validate(path))
+
+
+def test_map_rejects_a_restatement_of_live_status(tmp_path):
     path = tmp_path / "EFFORT-example.md"
     path.write_text(
-        map_text(
-            "- [>] Leg 1 — implement — handoff: HANDOFF-one.md",
-            "- [>] Leg 2 — verify — handoff: HANDOFF-two.md",
-        )
+        map_text("- [Issue #1](https://github.com/example/project/issues/1)")
+        .replace("# EFFORT: Example", "# EFFORT: Example\n\nStatus: active")
     )
 
-    assert "at most one active [>] leg" in "\n".join(load_module().validate(path))
+    assert "must not restate live status" in "\n".join(load_module().validate(path))
 
 
-def test_completed_leg_cannot_retain_an_apparently_current_handoff(tmp_path):
+def test_map_rejects_live_state_narration_outside_the_route(tmp_path):
     path = tmp_path / "EFFORT-example.md"
     path.write_text(
-        map_text(
-            "- [x] Leg 1 — scoped, handoff: HANDOFF-stale.md",
-            "- [>] Leg 2 — implement — handoff: HANDOFF-current.md",
-        )
+        map_text("- [Issue #1](https://github.com/example/project/issues/1)")
+        .replace("Ship the accepted outcome.", "Current status is complete; owner is Alice.")
     )
 
-    assert "completed [x] leg still names a handoff" in "\n".join(
+    assert "must not narrate live work state" in "\n".join(
         load_module().validate(path)
     )
 
 
-def test_done_map_has_no_active_or_pending_legs(tmp_path):
+def test_map_rejects_stateful_route_checkboxes(tmp_path):
     path = tmp_path / "EFFORT-example.md"
-    path.write_text(map_text("- [x] Leg 1 — shipped", status="done"))
+    path.write_text(map_text("- [x] [Issue #1](https://github.com/example/project/issues/1)"))
+
+    assert "route rows must not encode live state" in "\n".join(
+        load_module().validate(path)
+    )
+
+
+def test_map_rejects_live_state_narration_in_route(tmp_path):
+    path = tmp_path / "EFFORT-example.md"
+    path.write_text(
+        map_text(
+            "- [Issue #1](https://github.com/example/project/issues/1) is complete"
+        )
+    )
+
+    assert "route rows must link, not narrate live state" in "\n".join(
+        load_module().validate(path)
+    )
+
+
+def test_map_rejects_bare_completion_state_in_route(tmp_path):
+    path = tmp_path / "EFFORT-example.md"
+    path.write_text(
+        map_text(
+            "- [Issue #1](https://github.com/example/project/issues/1) — complete"
+        )
+    )
+
+    assert "route rows must link, not narrate live state" in "\n".join(
+        load_module().validate(path)
+    )
+
+
+def test_stable_destination_acceptance_condition_is_allowed(tmp_path):
+    path = tmp_path / "EFFORT-example.md"
+    path.write_text(
+        map_text("- [Issue #1](https://github.com/example/project/issues/1)")
+        .replace("Ship the accepted outcome.", "The design is complete when its tests pass.")
+    )
 
     assert load_module().validate(path) == []
 
 
-def test_active_leg_requires_a_real_handoff_target(tmp_path):
-    path = tmp_path / "EFFORT-example.md"
-    path.write_text(map_text("- [>] Leg 1 — implement — handoff:"))
-
-    assert "non-empty handoff target" in "\n".join(load_module().validate(path))
-
-
-def test_completed_leg_rejects_markdown_handoff_link(tmp_path):
+def test_live_words_inside_a_link_label_are_not_state_narration(tmp_path):
     path = tmp_path / "EFFORT-example.md"
     path.write_text(
         map_text(
-            "- [x] Leg 1 — scoped ([handoff](HANDOFF-stale.md))",
-            "- [>] Leg 2 — implement — handoff: HANDOFF-current.md",
+            "- [Current architecture issue](https://github.com/example/project/issues/1)"
         )
     )
 
-    assert "completed [x] leg still names a handoff" in "\n".join(
+    assert load_module().validate(path) == []
+
+
+def test_route_rejects_delivery_state_suffixes_outside_the_link(tmp_path):
+    path = tmp_path / "EFFORT-example.md"
+    path.write_text(
+        map_text("- [PR #2](https://github.com/example/project/pull/2) — merged")
+    )
+
+    assert "route section permits only link rows" in "\n".join(
         load_module().validate(path)
     )
 
 
-def test_trail_rejects_oldest_first_order(tmp_path):
+def test_route_rejects_prose_around_an_otherwise_valid_link(tmp_path):
     path = tmp_path / "EFFORT-example.md"
     path.write_text(
-        map_text("- [>] Leg 1 — implement — handoff: HANDOFF-current.md")
-        + "- 2026-07-15: later transition appended in the wrong direction.\n"
+        map_text("Maintainer Alice owns this effort.\n- [Issue #1](https://github.com/example/project/issues/1)")
     )
 
-    assert "trail must be newest first" in "\n".join(load_module().validate(path))
+    assert "route section permits only link rows" in "\n".join(
+        load_module().validate(path)
+    )
+
+
+def test_map_rejects_temporary_handoff_state(tmp_path):
+    path = tmp_path / "EFFORT-example.md"
+    path.write_text(
+        map_text(
+            "- [Issue #1](https://github.com/example/project/issues/1), handoff: HANDOFF-current.md"
+        )
+    )
+
+    assert "temporary handoffs stay outside route maps" in "\n".join(
+        load_module().validate(path)
+    )
+
+
+def test_invariants_reject_live_status_prose(tmp_path):
+    path = tmp_path / "EFFORT-example.md"
+    path.write_text(
+        map_text("- [Issue #1](https://github.com/example/project/issues/1)")
+        .replace(
+            "- [Governing decision](../adr/0001-example.md)",
+            "The work is complete.\n- [Governing decision](../adr/0001-example.md)",
+        )
+    )
+
+    assert "invariants section permits only link rows" in "\n".join(
+        load_module().validate(path)
+    )
+
+
+def test_map_rejects_work_state_prose_before_destination(tmp_path):
+    path = tmp_path / "EFFORT-example.md"
+    path.write_text(
+        map_text("- [Issue #1](https://github.com/example/project/issues/1)")
+        .replace("# EFFORT: Example", "# EFFORT: Example\n\nWork complete")
+    )
+
+    assert "work map prelude permits only the title" in "\n".join(
+        load_module().validate(path)
+    )
+
+
+def test_map_rejects_work_state_prose_before_the_title(tmp_path):
+    path = tmp_path / "EFFORT-example.md"
+    path.write_text(
+        "Work complete\n"
+        + map_text("- [Issue #1](https://github.com/example/project/issues/1)")
+    )
+
+    assert "work map prelude permits only the title" in "\n".join(
+        load_module().validate(path)
+    )

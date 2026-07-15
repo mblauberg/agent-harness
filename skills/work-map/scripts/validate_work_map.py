@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
-"""Validate structural invariants shared by current and newly authored work maps."""
+"""Validate that an effort map is a link-only route, not a work-state store."""
 
 from __future__ import annotations
 
 import argparse
-from datetime import date, datetime
 from pathlib import Path
 import re
 
 
-INLINE_HEADER_RE = re.compile(
-    r"^# EFFORT:\s*.+?\s+Updated:\s*(.+?)\s+Status:\s*(.+?)\s*$"
-)
 TITLE_RE = re.compile(r"^# EFFORT:\s*\S.*$")
-UPDATED_RE = re.compile(r"^Updated:\s*(\S.*)$")
-STATUS_RE = re.compile(r"^Status:\s*(\S.*)$")
-ROUTE_RE = re.compile(r"^\s*-\s+\[([x> ])\]\s+(.+?)\s*$")
-HANDOFF_RE = re.compile(
-    r"\bhandoff\s*:\s*(\[[^\]]+\]\([^)]+\)|\S+)", re.IGNORECASE
+LINK_RE = re.compile(r"\[[^\]]+\]\([^)]+\)")
+ROUTE_ROW_RE = re.compile(r"^-\s+\[[^\]]+\]\([^)]+\)$")
+STATEFUL_ROUTE_RE = re.compile(r"^\s*-\s+\[[ xX>]\]\s+")
+LIVE_NARRATION_RE = re.compile(
+    r"\b(?:status|owner|dependencies?|user gates?)\s*(?:is|are|:)\s*\S+|"
+    r"\b(?:blocked by|depends on|waiting on)\b",
+    re.IGNORECASE,
 )
-DAY_PREFIX_RE = re.compile(
-    r"^(\d{4}-\d{2}-\d{2}|\d{1,2}\s+[A-Za-z]+\s+\d{4})(?:\s|:)"
+ROUTE_NARRATION_RE = re.compile(
+    r"\b(active|blocked|complete(?:d)?|current|done|in progress|integrated|"
+    r"owner|owns|pending|remaining|waiting)\b|\bdepends\s*:",
+    re.IGNORECASE,
 )
+HANDOFF_RE = re.compile(r"\bhandoff\b", re.IGNORECASE)
 HEADING_MATCHERS = {
     "destination": lambda line: line == "## Destination",
     "route": lambda line: line == "## Route" or line.startswith("## Route ("),
     "invariants": lambda line: line == "## Invariants" or line.startswith("## Invariants "),
-    "trail": lambda line: line == "## Trail" or line.startswith("## Trail ("),
 }
 
 
@@ -39,81 +39,6 @@ def _section(lines: list[str], heading_index: int) -> list[str]:
     return lines[start:end]
 
 
-def _day(value: str) -> date | None:
-    try:
-        return date.fromisoformat(value)
-    except ValueError:
-        pass
-    for pattern in ("%d %B %Y", "%d %b %Y"):
-        try:
-            return datetime.strptime(value, pattern).date()
-        except ValueError:
-            continue
-    return None
-
-
-def _route_rows(lines: list[str]) -> list[tuple[str, str]]:
-    rows: list[tuple[str, str]] = []
-    state = ""
-    text = ""
-    for line in lines:
-        match = ROUTE_RE.fullmatch(line)
-        if match:
-            if state:
-                rows.append((state, text))
-            state, text = match.groups()
-        elif state and line.strip() and not line.lstrip().startswith("-"):
-            text += " " + line.strip()
-    if state:
-        rows.append((state, text))
-    return rows
-
-
-def _posture(value: str) -> str:
-    normalised = value.strip().lower()
-    if re.match(r"^(done|complete(?:d)?|closed|archived)\b", normalised):
-        return "done"
-    if re.match(r"^blocked\b", normalised):
-        return "blocked"
-    return "active"
-
-
-def _header(lines: list[str], errors: list[str]) -> str | None:
-    nonempty = [(index, line) for index, line in enumerate(lines) if line.strip()]
-    if not nonempty:
-        errors.append("work map is empty")
-        return None
-    first_index, first = nonempty[0]
-    inline = INLINE_HEADER_RE.fullmatch(first)
-    if inline:
-        updated, status = inline.groups()
-    else:
-        if not TITLE_RE.fullmatch(first) or sum(bool(TITLE_RE.fullmatch(line)) for line in lines) != 1:
-            errors.append("work map must contain exactly one # EFFORT title")
-            return None
-        prelude_end = next(
-            (index for index in range(first_index + 1, len(lines)) if lines[index].startswith("## ")),
-            len(lines),
-        )
-        updated_rows = [
-            match.group(1)
-            for line in lines[first_index + 1:prelude_end]
-            if (match := UPDATED_RE.fullmatch(line))
-        ]
-        status_rows = [
-            match.group(1)
-            for line in lines[first_index + 1:prelude_end]
-            if (match := STATUS_RE.fullmatch(line))
-        ]
-        if len(updated_rows) != 1 or len(status_rows) != 1:
-            errors.append("work map needs one Updated line and one Status line before sections")
-            return None
-        updated, status = updated_rows[0], status_rows[0]
-    if _day(updated) is None:
-        errors.append("Updated must be an ISO or day-month-name date")
-    return _posture(status)
-
-
 def validate(path: Path) -> list[str]:
     try:
         lines = path.read_text().splitlines()
@@ -121,7 +46,17 @@ def validate(path: Path) -> list[str]:
         return [f"cannot read work map: {exc}"]
 
     errors: list[str] = []
-    status = _header(lines, errors)
+    title_indices = [index for index, line in enumerate(lines) if TITLE_RE.fullmatch(line)]
+    if len(title_indices) != 1:
+        errors.append("work map must contain exactly one # EFFORT title")
+
+    if any(re.match(r"^\s*(Updated|Status):", line, re.IGNORECASE) for line in lines):
+        errors.append("work map must not restate live status or freshness")
+
+    prose_without_links = LINK_RE.sub("", "\n".join(lines))
+    if LIVE_NARRATION_RE.search(prose_without_links):
+        errors.append("work map must not narrate live work state")
+
     headings: dict[str, int] = {}
     for name, matcher in HEADING_MATCHERS.items():
         matches = [index for index, line in enumerate(lines) if matcher(line)]
@@ -132,41 +67,55 @@ def validate(path: Path) -> list[str]:
     if len(headings) != len(HEADING_MATCHERS):
         return errors
 
-    route_rows = _route_rows(_section(lines, headings["route"]))
-    if not route_rows:
-        errors.append("route must contain at least one [x], [>] or [ ] leg")
-    active = [row for state, row in route_rows if state == ">"]
-    pending = [row for state, row in route_rows if state == " "]
-    completed = [row for state, row in route_rows if state == "x"]
+    if title_indices:
+        title_index = title_indices[0]
+        if not title_index < headings["destination"] < headings["route"] < headings["invariants"]:
+            errors.append("work map sections must follow title, Destination, Route, Invariants order")
+        if any(line.strip() for line in lines[:title_index]) or any(
+            line.strip() for line in lines[title_index + 1:headings["destination"]]
+        ):
+            errors.append("work map prelude permits only the title")
 
-    if len(active) > 1:
-        errors.append("map permits at most one active [>] leg")
-    if status == "done" and (active or pending):
-        errors.append("done map cannot contain active [>] or pending [ ] legs")
-    for row in active:
-        if not HANDOFF_RE.search(row):
-            errors.append("active [>] leg must name a non-empty handoff target")
-    for row in completed:
-        if re.search(r"\bhandoff\b", row, re.IGNORECASE):
-            errors.append("completed [x] leg still names a handoff")
-
-    trail_lines = [
-        line.strip()[2:]
-        for line in _section(lines, headings["trail"])
-        if line.strip().startswith("- ")
+    known_heading_indices = set(headings.values())
+    extra_headings = [
+        line for index, line in enumerate(lines)
+        if line.startswith("## ") and index not in known_heading_indices
     ]
-    if len(trail_lines) > 20:
-        errors.append("trail exceeds 20 curated route transitions")
-    trail_days: list[date] = []
-    for line in trail_lines:
-        match = DAY_PREFIX_RE.match(line)
-        parsed = _day(match.group(1)) if match else None
-        if parsed is None:
-            errors.append(f"trail row must begin with a valid date: {line}")
-        else:
-            trail_days.append(parsed)
-    if any(later > earlier for earlier, later in zip(trail_days, trail_days[1:])):
-        errors.append("trail must be newest first")
+    if extra_headings:
+        errors.append("work map permits only Destination, Route and Invariants sections")
+
+    route_rows = [
+        line.strip()
+        for line in _section(lines, headings["route"])
+        if line.strip()
+    ]
+    if not route_rows:
+        errors.append("route must contain at least one linked row")
+        return errors
+
+    for row in route_rows:
+        prose = LINK_RE.sub("", row)
+        if STATEFUL_ROUTE_RE.match(row):
+            errors.append("route rows must not encode live state with checkboxes")
+        if not LINK_RE.search(row):
+            errors.append(f"route row must contain a link: {row}")
+        if not ROUTE_ROW_RE.fullmatch(row):
+            errors.append(f"route section permits only link rows: {row}")
+        if ROUTE_NARRATION_RE.search(prose):
+            errors.append(f"route rows must link, not narrate live state: {row}")
+        if HANDOFF_RE.search(prose):
+            errors.append(f"temporary handoffs stay outside route maps: {row}")
+
+    invariant_rows = [
+        line.strip()
+        for line in _section(lines, headings["invariants"])
+        if line.strip()
+    ]
+    if not invariant_rows:
+        errors.append("invariants must contain at least one linked row")
+    for row in invariant_rows:
+        if not ROUTE_ROW_RE.fullmatch(row):
+            errors.append(f"invariants section permits only link rows: {row}")
 
     return errors
 
@@ -180,7 +129,7 @@ def main() -> int:
         for error in errors:
             print(f"ERROR: {error}")
         return 1
-    print(f"PASS: valid work map {args.path}")
+    print(f"PASS: valid link-only work map {args.path}")
     return 0
 
 

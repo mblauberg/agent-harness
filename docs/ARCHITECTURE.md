@@ -349,14 +349,14 @@ location and lifecycle are defined in [worktrees.md](worktrees.md).
 ## Context and durable memory
 
 Project knowledge must remain visible to every family. Durable facts therefore
-live in project-owned state files, specifications, ADRs ([adr/](adr/)), runbooks
-and context digests. Private harness memory is limited to cross-project user
-preferences. Project-local work maps and GitHub issues remain the current work
-owners. Retention follows project and risk policy plus bounded run-artifact
-rules. A canonical backlog contract, cross-store migration, universal
-retention classes and typed deletion are deferred until concrete requirements
-justify them. The governing decisions are recorded in
-[adr/0001–0008](adr/README.md).
+live in specifications, ADRs ([adr/](adr/)), runbooks and context digests.
+Private harness memory is limited to cross-project user preferences. For this
+repository, GitHub issues own the current owner, dependencies and user gates;
+Project Status owns workflow state. Project-local effort maps link that work
+without restating it. Retention follows project and risk policy plus bounded
+run-artifact rules. No canonical backlog contract, cross-store migration or god
+manifest is introduced. The governing decisions are recorded in the
+[ADR index](adr/README.md).
 
 Workers return compressed findings and artifact paths. Session hygiene checks
 freshness, size, duplication, stale logs, scratch manifests and handoff quality.

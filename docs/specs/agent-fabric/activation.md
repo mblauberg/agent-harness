@@ -1,8 +1,8 @@
 # Agent Fabric activation and operations
 
-Status: Base activation implemented; final human acceptance pending
-Decision owner: Human maintainer
-Approval: Direct instruction to implement, activate and provider-smoke all listed capabilities, with quota use authorised
+[Issue #23](https://github.com/mblauberg/provenant/issues/23) and its Project
+Status field own delivery state, owner, dependencies and user gates for these
+requirements.
 
 The current contract closes effective-configuration identity, subject lineage and permission semantics across activation, smoke and provider actions. It permits authorised write-capable generic work while retaining enforced read-only as a hard certifying-review requirement. Every active adapter publishes the shared capability snapshot and effective launch configuration, with requested, actual or honestly unknown route identity in its activation evidence.
 

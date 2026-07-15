@@ -239,7 +239,7 @@ def test_old_raw_log_is_a_retention_signal(tmp_path):
     assert "stale-raw-log" in codes(findings)
 
 
-def test_done_effort_cannot_retain_active_handoff(tmp_path):
+def test_effort_markdown_does_not_own_handoff_state(tmp_path):
     docs = tmp_path / "docs"
     efforts = docs / "efforts"
     handoffs = docs / "handoffs"
@@ -250,4 +250,4 @@ def test_done_effort_cannot_retain_active_handoff(tmp_path):
         "Status: active\nEffort: one\nLeg: final\nSupersedes: none\nConsumed-at: pending\n"
     )
     findings = context_audit.audit(tmp_path)
-    assert "done-effort-active-handoff" in codes(findings)
+    assert "done-effort-active-handoff" not in codes(findings)
