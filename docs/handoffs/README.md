@@ -14,5 +14,6 @@ but are not live dependencies. [Issue
 #22](https://github.com/mblauberg/provenant/issues/22), [ADR
 0002](../adr/0002-capability-compiled-execution-authority.md) and the standalone
 [authority](../specs/agent-fabric/authority.md) and
-[workspace-containment](../specs/agent-fabric/workspace-containment.md)
-specifications own the current W010 route and contract.
+[provider-write containment
+evidence](../specs/agent-fabric/provider-write-containment.md) specifications
+own the current W010 route and contract.

@@ -8,20 +8,18 @@ implementation and acceptance state; this file is only the compact route.
 
 ## Current W012 route
 
-- The child-bridge, expired-principal, pagination and partial first-frame timing
-  repairs are complete in [issues
+- The child-bridge, expired-principal, pagination, existing-session and partial
+  first-frame timing repairs are complete in [issues
   #64](https://github.com/mblauberg/provenant/issues/64),
   [#71](https://github.com/mblauberg/provenant/issues/71),
   [#72](https://github.com/mblauberg/provenant/issues/72),
-  [#74](https://github.com/mblauberg/provenant/issues/74) and
+  [#74](https://github.com/mblauberg/provenant/issues/74),
+  [#75](https://github.com/mblauberg/provenant/issues/75) and
   [#76](https://github.com/mblauberg/provenant/issues/76).
-- [Issue #75](https://github.com/mblauberg/provenant/issues/75) remains the
-  active Console existing-session concurrent-reopen repair.
-- [Issue #82](https://github.com/mblauberg/provenant/issues/82) is queued after
-  #75 as active W012 work on the daemon-stop custody race. Its focused
-  test/support-only plan still requires the approval recorded in that issue
-  before implementation; this is a bounded plan gate, not W013 programme
-  acceptance.
+- [Issue #82](https://github.com/mblauberg/provenant/issues/82) is queued active
+  W012 work on the daemon-stop custody race. Its focused test/support-only plan
+  still requires the approval recorded in that issue before implementation;
+  this is a bounded plan gate, not W013 programme acceptance.
 
 The linked issues own their acceptance criteria and evidence. Merged pull
 requests and historical lane detail remain in Git and are not repeated here.
@@ -31,10 +29,12 @@ requests and historical lane detail remain in Git and are not repeated here.
 - [Issue #20](https://github.com/mblauberg/provenant/issues/20): verify the
   private W007 receipt against the exact hosted and mutation evidence, then
   explicitly accept W007. The public machine evidence is complete.
-- [Issue #22](https://github.com/mblauberg/provenant/issues/22): separately
-  approve the inert W010-A prerequisite, separately grant the W010-B live
-  matrix, then explicitly accept a conclusive exact tuple and authorise the
-  first provider write grant before W011.
+- [Issue #22](https://github.com/mblauberg/provenant/issues/22): under the
+  [provider-write containment
+  specification](../specs/agent-fabric/provider-write-containment.md),
+  separately approve the inert W010-A prerequisite, separately grant the
+  W010-B live matrix, then explicitly accept a conclusive exact tuple and
+  authorise the first provider write grant before W011.
 - [Issue #27](https://github.com/mblauberg/provenant/issues/27): choose and
   provision the external lifecycle receipt authority boundary, and separately
   authorise destructive abandon.

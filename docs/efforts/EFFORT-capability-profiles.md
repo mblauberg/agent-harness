@@ -18,17 +18,20 @@ runtime schema.
 
 The standalone semantic [authority](../specs/agent-fabric/authority.md),
 [provider-action](../specs/agent-fabric/provider-actions-and-adapters.md) and
-[workspace-containment](../specs/agent-fabric/workspace-containment.md)
-specifications own the current requirements under [ADR
+[provider-write containment
+evidence](../specs/agent-fabric/provider-write-containment.md) specifications
+own the current requirements under [ADR
 0009](../adr/0009-standalone-semantic-specifications.md). Git owns their history
 and integrity; there are no ordered manifests, per-file hashes or numbered
 aliases.
 
 [Issue #22](https://github.com/mblauberg/provenant/issues/22) owns the current
-containment cases, approval sequence and evidence requirements. Earlier review
-and simplification material remains historical provenance in Git, not a
-current-status, specification or governance dependency. Issue #23/W013 owns
-any later retention or retirement decision.
+approval sequence and delivery state; the [provider-write containment
+specification](../specs/agent-fabric/provider-write-containment.md) owns the
+fixed cases, oracles and evidence gate. Earlier review and simplification
+material remains historical provenance in Git, not a current-status,
+specification or governance dependency. Issue #23/W013 owns any later retention
+or retirement decision.
 
 ## Remaining route
 
