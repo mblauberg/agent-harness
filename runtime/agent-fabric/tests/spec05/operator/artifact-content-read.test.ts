@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../../src/index.ts";
 import { ArtifactContentReadService } from "../../../src/operator/artifact-content-read.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const directories: string[] = [];
@@ -53,6 +54,7 @@ async function fixture<Content extends string | Buffer>(
     chair: {
       agentId: "chair",
       authority: {
+        ...TEST_AUTHORITY_V2_FIELDS,
         workspaceRoots: ["."],
         sourcePaths: ["."],
         artifactPaths: [options.projectFile === true ? "." : ".agent-run/run-content"],

@@ -93,6 +93,7 @@ import {
 import { OPERATION_REGISTRY } from "./operations.js";
 import { parseJsonValue, type JsonValue } from "./primitives.js";
 import { PROTOCOL_ERROR_CODES, PROTOCOL_LIMITS, type ProtocolOperation } from "./rpc-contract.js";
+import { AUTHORITY_ENVELOPE_V2_CODEC } from "./authority.js";
 
 type JsonSchema = Readonly<Record<string, JsonValue>>;
 
@@ -118,6 +119,10 @@ export const LAUNCH_CONTRACT_SCHEMAS = Object.freeze({
   launchAdapterOutcomeV1: standaloneLaunchSchema(LAUNCH_ADAPTER_OUTCOME_V1_CODEC.schema),
   providerActionRefV1: standaloneLaunchSchema(PROVIDER_ACTION_REF_V1_CODEC.schema),
   launchProviderActionJournalRefV1: standaloneLaunchSchema(LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC.schema),
+});
+
+export const CORE_CONTRACT_SCHEMAS = Object.freeze({
+  "authority-envelope.v2": AUTHORITY_ENVELOPE_V2_CODEC.schema,
 });
 
 export const SPEC05_CONTRACT_SCHEMAS = Object.freeze({

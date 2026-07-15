@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { FabricError } from "../../../src/errors.ts";
 import { FABRIC_OPERATIONS } from "../../../src/domain/operations.ts";
 import { DurableEventObserver } from "../../../src/visibility/event-observer.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 import { createStage1Fixture, ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";
 
 describe("read-only Herdr event observer", () => {
@@ -39,8 +40,11 @@ describe("read-only Herdr event observer", () => {
     const restricted = await fixture.chair.delegateAuthority({
       parentAuthorityId: fixture.run.chairAuthorityId,
       authority: {
+        ...TEST_AUTHORITY_V2_FIELDS,
         workspaceRoots: ["."], sourcePaths: [], artifactPaths: [], actions: [],
-        disclosure: { level: "scoped", scopes: ["local"] } as const, expiresAt: "2099-01-01T00:00:00.000Z", budget: {},
+        disclosure: { level: "scoped", scopes: ["local"] } as const,
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        budget: {},
       },
     });
     const registration = await fixture.chair.registerAgent({ agentId: "observer-denied", authorityId: restricted.authorityId });

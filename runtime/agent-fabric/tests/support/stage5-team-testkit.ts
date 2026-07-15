@@ -10,8 +10,10 @@ import type {
   TeamResult,
 } from "../../src/index.ts";
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "./authority-v2-testkit.ts";
 
 export const TEAM_ROOT_AUTHORITY: AuthorityInput = {
+  ...TEST_AUTHORITY_V2_FIELDS,
   workspaceRoots: ["."],
   sourcePaths: ["src"],
   artifactPaths: [".agent-run"],

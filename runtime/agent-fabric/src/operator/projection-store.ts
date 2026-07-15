@@ -45,6 +45,7 @@ import {
 } from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
 
+import { readStoredAuthority } from "../authority/stored-authority.js";
 import { ProjectFabricCoreError, type CoreServiceOptions } from "../project-session/contracts.js";
 import { digest, integer, isRow, nullableText, row, text, type Row } from "../project-session/store-support.js";
 import type { AuthenticatedOperatorCredential, OperatorStore } from "./store.js";
@@ -681,12 +682,9 @@ export class OperatorProjectionStore {
         ? parseIdentifier<"WorkstreamId">(text(workstreamValue, "workstream_id"), "workPage.workstreamId")
         : null;
       const authority = row(this.#database.prepare(`
-        SELECT authority_json FROM authorities WHERE authority_id=?
+        SELECT authority_json, authority_hash FROM authorities WHERE authority_id=?
       `).get(text(task, "authority_id")), "task authority");
-      const authorityValue = jsonObject(text(authority, "authority_json"), "task authority");
-      const sourcePrefixes = Array.isArray(authorityValue.sourcePaths)
-        ? authorityValue.sourcePaths.filter((value): value is string => typeof value === "string")
-        : [];
+      const sourcePrefixes = [...readStoredAuthority(authority, "task authority").sourcePaths];
       const ownerAgentId = nullableText(task, "owner_agent_id");
       const barrierIds = this.#database.prepare(`
         SELECT scope, stage_id FROM barriers WHERE run_id=? ORDER BY scope, stage_id

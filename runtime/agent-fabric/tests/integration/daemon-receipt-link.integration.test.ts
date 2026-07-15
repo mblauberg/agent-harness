@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { AUTHORITY_ACTION_VOCABULARY, openFabric, verifyFabricReceiptLink } from "../../src/index.ts";
 import { describe, expect, it } from "vitest";
+import { TEST_AUTHORITY_V2_FIELDS } from "../support/authority-v2-testkit.ts";
 import { writeDeliveryRunFixture } from "../support/delivery-run-fixture.ts";
 import { createCurrentSessionRun } from "../support/current-session-testkit.ts";
 
@@ -64,6 +65,7 @@ describe("Stage 1 chair receipt link", () => {
         chair: {
           agentId: "chair",
           authority: {
+            ...TEST_AUTHORITY_V2_FIELDS,
             workspaceRoots: ["."],
             sourcePaths: ["."],
             artifactPaths: [".agent-run/run-link"],
@@ -131,6 +133,7 @@ describe("Stage 1 chair receipt link", () => {
         chair: {
           agentId: "chair",
           authority: {
+            ...TEST_AUTHORITY_V2_FIELDS,
             workspaceRoots: ["."],
             sourcePaths: ["."],
             artifactPaths: [".agent-run/run-stochastic-link"],
@@ -185,6 +188,7 @@ describe("Stage 1 chair receipt link", () => {
         chair: {
           agentId: "chair",
           authority: {
+            ...TEST_AUTHORITY_V2_FIELDS,
             workspaceRoots: ["."],
             sourcePaths: ["."],
             artifactPaths: [".agent-run/run-legacy-link"],
@@ -228,6 +232,7 @@ describe("Stage 1 chair receipt link", () => {
         chair: {
           agentId: "chair",
           authority: {
+            ...TEST_AUTHORITY_V2_FIELDS,
             workspaceRoots: ["."],
             sourcePaths: ["."],
             artifactPaths: [".agent-run/run-partial"],
@@ -270,6 +275,7 @@ describe("Stage 1 chair receipt link", () => {
         chair: {
           agentId: "chair",
           authority: {
+            ...TEST_AUTHORITY_V2_FIELDS,
             workspaceRoots: ["."],
             sourcePaths: ["."],
             artifactPaths: [".agent-run/run-directory"],

@@ -3,6 +3,7 @@ import { rm } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ROOT_AUTHORITY, createStage1Fixture } from "../../support/stage1-fixture.ts";
+import type { FabricOperation } from "../../../src/domain/operations.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -15,7 +16,7 @@ describe("Stage 1 authority and budget delegation narrowing", () => {
     ["workspace root", { workspaceRoots: ["/"] }],
     ["source path", { sourcePaths: ["./other"] }],
     ["artifact path", { artifactPaths: ["/tmp"] }],
-    ["action", { actions: [...ROOT_AUTHORITY.actions, "deploy"] }],
+    ["action", { actions: [...ROOT_AUTHORITY.actions, "deploy" as FabricOperation] }],
     ["disclosure", { disclosure: { level: "scoped", scopes: ["external"] } as const }],
     ["expiry", { expiresAt: "2100-01-01T00:00:00.000Z" }],
     ["budget dimension", { budget: { turns: 20, "cost:USD": 10, tokens: 1 } }],

@@ -7,12 +7,14 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { AUTHORITY_ACTION_VOCABULARY, connectFabricDaemon, startFabricDaemon } from "../../../src/index.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 import { callTool, spawnMcpProxy } from "../../support/mcp-testkit.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const fakeAdapter = fileURLToPath(new URL("../../support/agent-bridge-fake-provider.ts", import.meta.url));
 
 const authority = {
+  ...TEST_AUTHORITY_V2_FIELDS,
   workspaceRoots: ["."],
   sourcePaths: ["src"],
   artifactPaths: [".agent-run"],

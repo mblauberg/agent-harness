@@ -22,6 +22,7 @@ import type {
 import { servePublicProtocolConnection } from "../../src/daemon/public-protocol.ts";
 
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "./authority-v2-testkit.ts";
 import { ManualClock } from "./manual-clock.ts";
 import { callTool, spawnMcpProxy, type McpProxy } from "./mcp-testkit.ts";
 
@@ -203,6 +204,7 @@ export async function createLifecycleFixture(
     ...options,
   }));
   const rootAuthority = {
+    ...TEST_AUTHORITY_V2_FIELDS,
     workspaceRoots: ["."],
     sourcePaths: ["src"],
     artifactPaths: [".agent-run/run-stage3"],
@@ -502,6 +504,7 @@ async function createRetainedLifecycleFixture(input: {
   };
   try {
     const rootAuthority = {
+      ...TEST_AUTHORITY_V2_FIELDS,
       workspaceRoots: ["."],
       sourcePaths: ["."],
       artifactPaths: [".agent-run/run-stage3"],
@@ -737,6 +740,7 @@ export async function createRetainedLifecycleCallbackFixture(): Promise<Retained
   try {
     bootstrap = await connectFabricDaemon({ socketPath, capability: daemon.bootstrapCapability });
     const rootAuthority = {
+      ...TEST_AUTHORITY_V2_FIELDS,
       workspaceRoots: ["."],
       sourcePaths: ["src"],
       artifactPaths: [".agent-run/run-retained-lifecycle"],
