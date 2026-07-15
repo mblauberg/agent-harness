@@ -160,7 +160,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/adapter.js",
-      "sha256": "c171c3f1f7f14ea0bad8978019d0cfcadeb9baa859fc52cf90804caf5a26f910"
+      "sha256": "0c849ae65bd26f31ddfd1a856d3d40e49af992d1d7804566a51ee7ffa13976ea"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/agent-session-continuity.js",
@@ -172,7 +172,7 @@
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js",
-      "sha256": "f658fed0654eae9bc970f77dc947f9435804a68e5be386f2001b3fa071116505"
+      "sha256": "bd7e49552a5157f488d377799939d797232d1507feeef234eb127fab84073d2c"
     },
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/journal.js",
@@ -189,6 +189,10 @@
     {
       "path": "runtime/agent-fabric/dist/adapters/providers/types.js",
       "sha256": "ee3f3500c6fed21b0b3610457b808bc5744a95d5f5a9bc61eca3c1fde6f753ee"
+    },
+    {
+      "path": "runtime/agent-fabric/dist/adapters/providers/workspace-write-offline.js",
+      "sha256": "729b63f4647473c4b4a1ab2cd1b78cc8c82161046e906f36bf077c72c73290b1"
     },
     {
       "path": "runtime/agent-fabric/dist/transport/bounded-ndjson.js",

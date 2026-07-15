@@ -32,6 +32,7 @@ const FORBIDDEN_PROVIDER_CONTROLS = [
   "networkAccess",
   "runtimeWorkspaceRoots",
   "environments",
+  "trustedProjection",
 ] as const;
 
 type WorkspaceWriteOfflineProjection = Readonly<{
