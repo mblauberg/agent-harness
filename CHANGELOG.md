@@ -60,8 +60,8 @@ tags and no releases.
 - Repository documentation: `docs/ARCHITECTURE.md`, specs, evals, runbooks,
   `MAINTAINING.md`, `SECURITY.md`, `ACKNOWLEDGEMENTS.md` and
   `THIRD_PARTY_NOTICES.md`, under the MIT licence.
-- Community files: this changelog, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` and
-  the bug, feature and skill-proposal issue forms.
+- Community files: this changelog and the bug, feature and skill-proposal issue
+  forms.
 
 ### Notes
 

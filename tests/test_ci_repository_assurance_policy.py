@@ -14,7 +14,6 @@ ROOT_LOCK = ROOT / "package-lock.json"
 FABRIC_PACKAGE = ROOT / "runtime" / "agent-fabric" / "package.json"
 IMMUTABLE_ACTION = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
 WORKSPACE_GUIDES = (
-    ROOT / "CONTRIBUTING.md",
     ROOT / "docs" / "runbooks" / "agent-fabric-operations.md",
     ROOT / "docs" / "runbooks" / "agent-fabric-traceability.md",
     ROOT / "runtime" / "agent-fabric" / "README.md",
@@ -256,7 +255,7 @@ def test_live_workspace_guides_use_only_the_root_install_and_build_graph() -> No
         assert "npm --prefix" not in source, guide
         assert not re.search(r"(?m)^npm install(?:\s|$)", source), guide
 
-    operations = WORKSPACE_GUIDES[1].read_text(encoding="utf-8")
+    operations = WORKSPACE_GUIDES[0].read_text(encoding="utf-8")
     for command in (
         "npm ci --no-audit --no-fund",
         "npm run build",
