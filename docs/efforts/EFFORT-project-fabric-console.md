@@ -2,71 +2,48 @@
 
 Updated: 15 July 2026
 
-Status: Console implementation lanes are closed. W012 remains active under the
-[W012/W013 reducer, issue
-#23](https://github.com/mblauberg/provenant/issues/23), through its issue-owned
-human gates and governance cleanup. This file is only the compact route.
+Status: Console implementation is complete. [Issue
+#23](https://github.com/mblauberg/provenant/issues/23) owns the remaining
+programme closeout.
 
-## Current W012 route
+## Current route
 
-- The child-bridge, expired-principal and partial first-frame timing repairs are
-  complete in [issues
-  #64](https://github.com/mblauberg/provenant/issues/64),
-  [#71](https://github.com/mblauberg/provenant/issues/71),
-  [#74](https://github.com/mblauberg/provenant/issues/74),
-  [#76](https://github.com/mblauberg/provenant/issues/76).
-- The final bounded Console repairs are complete: pagination in [issue
-  #72](https://github.com/mblauberg/provenant/issues/72) and [PR
-  #90](https://github.com/mblauberg/provenant/pull/90); existing-session reopen
-  in [issue #75](https://github.com/mblauberg/provenant/issues/75), [PR
-  #91](https://github.com/mblauberg/provenant/pull/91) and [PR
-  #92](https://github.com/mblauberg/provenant/pull/92); and daemon-stop custody
-  in [issue #82](https://github.com/mblauberg/provenant/issues/82) and [PR
-  #94](https://github.com/mblauberg/provenant/pull/94). No active Console
-  implementation lane remains.
-- [Issue #96](https://github.com/mblauberg/provenant/issues/96) is closed after
-  its read-only audit found that public checkpoint validation depends on
-  lifecycle revision, gate-binding and digest semantics owned by [issue
-  #27](https://github.com/mblauberg/provenant/issues/27). No source change or
-  lifecycle authority landed from that slice.
-- [Issue #115](https://github.com/mblauberg/provenant/issues/115) owns the
-  bounded pre-release and historical source-truth cleanup required before
-  W013. It changes no runtime behaviour or release state.
+The bounded Console repairs, pre-release source-truth cleanup, main-branch
+ruleset and lightweight GitHub workflow are complete. Their evidence remains
+in the linked issues, pull requests and Git history rather than being repeated
+here.
 
-The linked issues own their acceptance criteria and evidence. Merged pull
-requests and historical lane detail remain in Git and are not repeated here.
+Two functional steps remain:
 
-## Human gates
+1. [Issue #129](https://github.com/mblauberg/provenant/issues/129) is verified
+   in [draft PR #133](https://github.com/mblauberg/provenant/pull/133), with
+   hosted checks green. It awaits explicit human acceptance and merge.
+2. [Issue #134](https://github.com/mblauberg/provenant/issues/134) owns the
+   concise Codex and Claude controls for model, effort, compact, clear/fresh
+   context and worker release.
 
-- [Issue #20](https://github.com/mblauberg/provenant/issues/20): verify the
-  private W007 receipt against the exact hosted and mutation evidence, then
-  explicitly accept W007. The public machine evidence is complete.
-- [Issue #22](https://github.com/mblauberg/provenant/issues/22): under the
-  [provider-write containment
-  specification](../specs/agent-fabric/provider-write-containment.md),
-  separately approve the inert W010-A prerequisite, separately grant the
-  W010-B live matrix, then explicitly accept a conclusive exact tuple and
-  authorise the first provider write grant before W011.
-- [Issue #27](https://github.com/mblauberg/provenant/issues/27): choose and
-  provision the external lifecycle receipt authority boundary, and separately
-  authorise destructive abandon.
-- [Issue #30](https://github.com/mblauberg/provenant/issues/30): ratify the
-  narrow risk-tier `crucial` envelope used by merged PR #62 or direct a revert;
-  after ratification, explicitly accept the machine-verified result.
-- [Issue #97](https://github.com/mblauberg/provenant/issues/97): enable the
-  proposed minimal main ruleset requiring pull requests and current CI without
-  a required human reviewer, or explicitly defer/remove that commitment.
-- [Issue #114](https://github.com/mblauberg/provenant/issues/114): approve the
-  recommended removal or deferral of unused backlog and retention commitments,
-  or separately scope their implementation.
-- [Issue #23](https://github.com/mblauberg/provenant/issues/23): explicitly
-  accept the programme only after W013 passes on one current head.
+The following are non-blocking Backlog residue, not closeout prerequisites:
 
-## Completion
+- [#125](https://github.com/mblauberg/provenant/issues/125): direct-open
+  abandon custody and recovery;
+- [#128](https://github.com/mblauberg/provenant/issues/128): receipt-history
+  and subject hardening;
+- [#131](https://github.com/mblauberg/provenant/issues/131): a terminal-owner
+  seam for generation loss; and
+- [#132](https://github.com/mblauberg/provenant/issues/132): removal of
+  redundant repository-local wrapper hash manifests.
 
-Issue #23 is the only programme reducer and W013 owner. W013 begins only when
-W012 has no required implementation gap without an explicit disposition. It
-then runs the programme-wide deterministic, security, publication, evaluation,
-load, live-MCP, provider-family and usability gates with fresh independent
-native and other-primary review. Passing or merging machine work does not
-replace the human gates in [HARNESS.md](../../HARNESS.md).
+## Programme acceptance
+
+When the two functional steps are integrated, #23 runs one current-head pass:
+
+- deterministic, evaluation and load checks;
+- hosted CI on the exact head;
+- current repository links and durable owners;
+- supported local usability checks; and
+- fresh independent native and other-primary review.
+
+External-provider or live-MCP work runs only when expressly authorised. If it
+is unnecessary or unauthorised, record it as not run rather than inventing an
+acceptance dependency. Final programme acceptance remains a separate human
+decision.
