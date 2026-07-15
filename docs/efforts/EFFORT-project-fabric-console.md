@@ -19,10 +19,9 @@ here.
 #137](https://github.com/mblauberg/provenant/pull/137), are complete and
 integrated.
 
-One functional step remains. The [#136 startup
-fix](https://github.com/mblauberg/provenant/issues/136) in [PR
-#138](https://github.com/mblauberg/provenant/pull/138) is human-accepted and
-rebased on current main. Its hosted checks are running; it is not yet merged.
+The [#136 startup fix](https://github.com/mblauberg/provenant/issues/136) in
+[PR #138](https://github.com/mblauberg/provenant/pull/138) is complete and
+integrated. All minimum functional closeout steps are now on main.
 
 The following are non-blocking Backlog residue, not closeout prerequisites:
 
@@ -39,7 +38,7 @@ The following are non-blocking Backlog residue, not closeout prerequisites:
 
 ## Programme acceptance
 
-When #138 is integrated, #23 runs one current-head pass:
+#23 now runs one current-head pass:
 
 - deterministic, evaluation and load checks;
 - hosted CI on the exact head;

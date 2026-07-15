@@ -29,8 +29,9 @@ task-scoped delegated-write path and minimum live Claude proof. [Issue
 Codex and Claude model, effort and context controls. Both are integrated.
 
 The [#136 startup fix](https://github.com/mblauberg/provenant/issues/136) in
-[PR #138](https://github.com/mblauberg/provenant/pull/138) is human-accepted and
-rebased on current main. Its hosted checks are running; it is not yet merged.
+[PR #138](https://github.com/mblauberg/provenant/pull/138) completed current
+Codex startup compatibility and the truthful unprovisioned handshake. It is
+integrated.
 
 ## Deferred residue
 
@@ -49,7 +50,7 @@ These Backlog items do not block the minimum functional closeout:
 
 ## Completion
 
-After #138 is integrated, #23 owns one current-head programme verification pass
-and explicit human acceptance. Passing checks or a merged pull request does not
-itself grant provider calls, destructive actions, release, deployment or other
-external effects.
+All minimum functional lanes are integrated. #23 now owns one current-head
+programme verification pass and explicit human acceptance. Passing checks or a
+merged pull request does not itself grant provider calls, destructive actions,
+release, deployment or other external effects.
