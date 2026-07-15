@@ -9,7 +9,6 @@ METHOD = ROOT / "skills" / "skill-audit" / "references" / "method.md"
 FIXTURES = ROOT / "skills" / "skill-audit" / "evals" / "trigger_cases.yaml"
 SPEC = ROOT / "docs" / "specs" / "harness" / "lifecycle.md"
 ADR = ROOT / "docs" / "adr" / "0001-personal-first-product-compatible.md"
-EFFORT = ROOT / "docs" / "efforts" / "EFFORT-harness-lifecycle-refactor.md"
 
 
 def test_local_history_audit_is_local_first_and_export_gated():
@@ -89,9 +88,7 @@ def test_local_history_routing_separates_audit_from_export():
 def test_normative_docs_match_the_local_first_contract():
     spec = SPEC.read_text()
     adr = ADR.read_text()
-    effort = EFFORT.read_text()
     compact_adr = " ".join(adr.split())
-    compact_effort = " ".join(effort.split())
     compact_spec = " ".join(spec.split())
 
     assert "Status: Base implementation machine verified" in spec
@@ -106,8 +103,6 @@ def test_normative_docs_match_the_local_first_contract():
     assert "Unsupported or unattributable evidence is `N/A`, never zero" in spec
     assert "direct request for read-only local history analysis" in compact_adr
     assert "raw cross-provider handoff" in compact_adr
-    assert "synthetic collector" in compact_effort
-
     retired_names = (
         "collect_telemetry.py",
         "validate_telemetry.py",

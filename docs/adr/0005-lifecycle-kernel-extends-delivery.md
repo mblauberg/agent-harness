@@ -24,5 +24,6 @@ Skills reference the kernel instead of restating gates.
 ## Consequences
 
 - `HARNESS.md` stays a short constitution.
-- Amendment-history cleanup proceeds via the separately mandated standalone-spec split
-  (1,000-line cap, `docs/handoffs/HANDOFF-2026-07-13-project-fabric-console.md`).
+- Amendment-history cleanup follows the [standalone semantic specification
+  decision](0009-standalone-semantic-specifications.md); current contracts are
+  discovered through the [specification index](../specs/README.md).

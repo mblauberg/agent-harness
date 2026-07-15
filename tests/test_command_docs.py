@@ -52,15 +52,3 @@ def test_managed_reconciliation_stays_documented_for_maintainers():
 def test_delivery_scenario_replay_command_is_portable():
     source = read("skills/deliver/references/contract.md")
     assert 'python3 "${AGENTS_HOME:-$HOME/.agents}/scripts/validate_delivery_scenarios.py"' in source
-
-
-def test_harness_handoff_validation_command_is_complete_and_portable():
-    source = read("docs/handoffs/HANDOFF-2026-07-10-harness-lifecycle-refactor.md")
-    assert VALIDATE in source
-    assert '.agent-run/HREF-002/RUN.json --workspace-root "$PWD" --verify-hashes' in source
-    assert "Current validated pre-v1.3 paired run: `.agent-run/HREF-002/`" in source
-    assert "`.agent-run/SKAUD-20260714/` is noncanonical supporting evidence" in source
-    assert "not a current delivery receipt" in source
-    assert "Human acceptance of the machine-complete v1.3 static batch remains pending" in source
-    assert '"${AGENTS_HOME:-$HOME/.agents}/scripts/check-harness"' in source
-    assert '"${AGENTS_HOME:-$HOME/.agents}/scripts/public-release-check"' in source
