@@ -9,11 +9,6 @@ contact_links:
       Report privately through GitHub's private vulnerability-reporting or
       draft security-advisory flow. Never put exploit details, credentials,
       private prompts or personal data in a public issue.
-  - name: Contributing guide
-    url: https://github.com/mblauberg/provenant/blob/main/CONTRIBUTING.md
-    about: >-
-      The scripts/check-harness gate, which changes need a spec first, the risk
-      and authority fields, and the Australian-English house style.
   - name: Harness constitution
     url: https://github.com/mblauberg/provenant/blob/main/HARNESS.md
     about: >-
