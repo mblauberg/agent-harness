@@ -24,11 +24,11 @@ D-023 accepts the design in the
 [provider-action](../specs/agent-fabric/provider-actions-and-adapters.md),
 [activation](../specs/agent-fabric/activation.md) and
 [provider/lifecycle custody](../specs/agent-fabric/provider-custody.md)
-owners. It does not record runtime implementation or accept the remaining
-Console draft by implication. The
-direct `AuthorityEnvelopeV2` cutover, monotone compiler, immutable native-
-settings/persistence receipts and the exact per-provider Step-3 containment
-tuple still require implementation and deterministic evidence.
+owners. It does not accept the remaining Console draft by implication. The
+direct `AuthorityEnvelopeV2` cutover and narrow, stateless, write-free compiler
+are implemented. Immutable native-settings/persistence receipts and the exact
+per-provider Step-3 containment tuple still require implementation and
+deterministic evidence.
 
 `workspace-write-offline` therefore remains inert. Every certifying action
 continues to request and execute `review-readonly`; no generic write result can

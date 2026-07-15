@@ -26,8 +26,8 @@ provider-native settings in four stages:
    characterisation goldens of today's read-only projection. Update the
    authority and provider-action specifications with the profile contract in
    the same change. Risk tier: crucial.
-2. **Pure admission extraction** into an `AuthorityCompiler`, behaviour
-   unchanged.
+2. **Narrow admission extraction** into a single stateless, write-free
+   `AuthorityCompiler`, behaviour unchanged.
 3. **One-provider write pilot** (`workspace-write-offline`: one owned
    worktree, no network egress, no external effects), gated by the standalone
    [provider-write containment

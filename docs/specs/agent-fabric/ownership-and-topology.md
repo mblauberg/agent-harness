@@ -345,7 +345,7 @@ launch_packet_v1:
   topology_mode: coordinated-or-independent
   budget_ref: exact-session-budget-ref
   resource_plan_ref: exact-path-and-sha256
-  chair_authority: existing-AuthorityInput-wire-shape
+  chair_authority: AuthorityEnvelopeV2
   provider:
     adapter_id: exact-registered-adapter
     action_id: stable-launch-attempt-id

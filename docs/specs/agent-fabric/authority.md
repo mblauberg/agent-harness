@@ -28,6 +28,48 @@ authority:
     secrets: prohibited
 ```
 
+## AuthorityEnvelopeV2 contract and containment
+
+`AuthorityEnvelopeV2` is the sole current authority input, delegation and
+stored-envelope contract. `AuthorityInput` is only its type alias, not a second
+wire shape. An envelope contains exactly:
+
+- `schemaVersion: 2` and the human approval binding (`approvedBy`, `evidenceId`
+  and `evidenceDigest`);
+- `workspaceRoots`, `sourcePaths`, `artifactPaths`, `actions`, `deniedPaths`,
+  `deniedActions` and `prohibitedActions`;
+- closed disclosure, secret-access, deployment, irreversible-action and
+  network policies; and
+- `expiresAt` plus a non-negative integer budget keyed by recognised
+  budget-unit keys.
+
+Source and artifact paths must be workspace-relative and contained by an
+envelope's workspace roots. Delegation must not widen the parent: the approval
+binding is unchanged; allowed roots, paths and actions narrow; path, action and
+prohibited-action denials are preserved or strengthened; disclosure, secret,
+deployment, irreversible-action and network policy narrow; expiry does not
+extend; and each child budget key and amount is present in and no greater than
+the parent. Invalid, extra-field, unknown-version and widening envelopes fail
+closed before storage or use.
+
+Provider projection has one narrow, stateless, write-free compiler. It accepts
+a validated V2 envelope, the workspace-root resolver and an immutable provider
+payload, then returns a new payload. On fresh admission for the current
+`review-readonly` profile it rejects expired or provider-undisclosable
+authority. Fresh admission and exact replay both reject caller-supplied trusted
+provider controls and a working directory outside the delegated source paths
+or overlapping a denied path. Exact replay may skip only the time-varying
+expiry and disclosure checks for the already-bound envelope. The compiler
+injects the canonical working directory, read-only root, exact read tools,
+`approvalPolicy: never` and a read-only sandbox. It neither stores authority
+nor invokes a provider; those remain separate owners.
+
+This is a direct V2 cutover. There is no legacy decoder, dual parser or
+compatibility bridge. Pre-release local state must already contain V2 authority
+or be regenerated or reset. Any future write profile must extend this canonical
+contract and preserve the same monotone containment boundary; it is unavailable
+until its separate human and evidence gates pass.
+
 ## Leases, delegation and barriers
 
 The daemon issues fenced, generation-bearing leases:

@@ -10,8 +10,8 @@ provider-call or write authority.
 
 This specification supersedes the historical implementation pack as the live
 matrix owner. The pack remains non-authoritative historical provenance in the
-working tree pending its retirement decision in [issue
-#23/W013](https://github.com/mblauberg/provenant/issues/23).
+working tree pending its retirement under [issue
+#102](https://github.com/mblauberg/provenant/issues/102).
 
 - W010-A cannot begin without separate human approval of the crucial-scope
   profile/compiler change and thin evidence recorder.
