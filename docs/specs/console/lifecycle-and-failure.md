@@ -45,6 +45,43 @@ Required behaviour:
 - Direct terminal intervention: journal it where detectable and reconcile the
   affected task revision.
 
+### Connection diagnosis
+
+Connection is a staged, typed projection owned by the bootstrap, daemon and
+protocol clients. The Console presents these stages in order:
+
+1. configuration discovery;
+2. compatibility manifests and generated-artifact pins;
+3. daemon election and process readiness;
+4. socket or transport connection;
+5. protocol handshake and authentication;
+6. feature negotiation;
+7. project discovery; and
+8. project-session attachment.
+
+Each stage reports its stable stage ID, `pending`, `running`, `passed`, `failed`,
+`blocked`, `unavailable` or `not-applicable` state, safe error code and summary,
+observed time, source/freshness/revision, relevant non-secret version or digest
+references, owning component and bounded remediation. A failed stage is failed;
+downstream stages that did not execute are blocked, not falsely failed. Unknown
+or absent evidence remains unavailable. The Console shall preserve the first
+causal failure while allowing later reconciliation evidence to append.
+
+The top status bar and System detail keep four axes separate: transport
+connection, projection freshness, project/session attachment and optional
+integration health. `connected`, `stale`, `degraded`, `unavailable` and
+`attached` are not interchangeable labels. A healthy GitHub or Herdr adapter
+cannot make Fabric connected, and an optional adapter outage cannot make live
+local Fabric state unavailable.
+
+Retry is a typed, idempotent action against the failed stage or its owning
+bootstrap operation. It binds the current configuration and compatibility
+digests and reconciles an ambiguous prior action before another effect. A
+diagnostic command may be shown as inert copyable text; the Console does not
+embed a shell or execute arbitrary remediation. Supported fresh launch and
+bootstrap sequencing remains owned by GitHub issue `#139`; the Console owns the
+stage presentation, diagnostics and reviewed retry path.
+
 On the first Console/Fabric read or command, the client library uses a
 lock-safe, idempotent bootstrap protocol to attach to the existing machine-wide
 daemon or spawn it if the socket is absent. The daemon becomes the sole shared
@@ -95,6 +132,16 @@ Every changed skill shall receive focused positive, negative and adjacent
 trigger evaluations plus portability coverage proving that its workflow still
 works when the Console, Herdr and GitHub adapters are absent. Shared lifecycle
 schema belongs to the protocol/delivery contract, not to any UI package.
+
+Issue `#141` does not by itself justify installing a framework-specific TUI
+skill or adding another global catalogue entry. During this scope, the Console
+specs own the product and terminal contract; `frontend-design` may supply a
+companion design lens under the lifecycle owner. A future portable
+`terminal-interface-design` technique skill may be proposed after the method
+proves useful in at least two projects and passes catalogue-budget, overlap,
+licence/provenance and trigger evaluations. Such a skill may own reusable
+layout, input, resize, terminal-safety and PTY evidence methods, but shall not
+contain Agent Fabric authority, lifecycle, projection or geometry policy.
 
 ## Explicit exclusions
 

@@ -276,6 +276,72 @@ Implementation is accepted only when objective tests demonstrate:
     source/confidence/token invariants, crossed-arm rejection, scoped read,
     age/stale derivation without mutation, spend separation and absence of
     percentages or automatic lifecycle effects.
+46. The default Adaptive Attention Deck keeps the exact project/session,
+    connection/freshness state, active-run count and Needs you count reachable
+    at every usable geometry. At 80x24 it presents stacked Needs you and
+    active-runs surfaces; at 120x32 it presents the expanded composition. Across
+    empty, coordinated-multi-workstream, independent-multi-session and degraded
+    fixtures, the human identifies the highest-priority required judgement and
+    active run within 10 seconds. Inactivity, message volume, context pressure,
+    pane absence and optional-integration outage produce no false Needs you row;
+    advisory/FYI items remain in the collapsed Watch stream.
+47. Selecting a coordination or delivery run opens only run-scoped Work,
+    Agents, Evidence and Activity facts bound to its exact `projectSessionId`
+    and snapshot/read transaction. Across three timed repetitions per fixture,
+    at least 90% of the required lead, current-milestone, current-task,
+    remaining-work, next-dependency, blocking-issue and evidence-path answers
+    are correct within 20 seconds. Coordinated and independent topology fixtures
+    never flatten a session, coordination run or delivery workstream identity.
+48. Progress fixtures cover finite, open, unknown, stale, unavailable and
+    conflicting plan facts plus a replan that adds and removes work. The finite
+    arm shows the exact declared denominator and consistent state counts. Open
+    and unknown arms show no percentage, completion ratio or ETA. Message/tool
+    floods, elapsed time, agent count, token use and model-authored completion
+    claims do not change progress. Plan revisions and deltas remain visible.
+49. For a fixed event set, projection revision, clock and geometry, processed
+    activity grouping and ordering are byte-identical. Each group retains actor,
+    target, event kind, time, freshness, revision and source references; every
+    available ordinary message or tool detail is reachable on demand. Repeated
+    mechanical events collapse without losing their count or source range.
+    Missing detail is labelled. Terminal controls and bidi controls remain inert
+    and visible, and capability or credential values remain withheld. No
+    model-generated synthesis is presented as lifecycle, progress or completion
+    truth.
+50. Contextual intervention fixtures prove that gate answers and steer/pause/
+    resume/cancel intents bind the exact visible target kind, stable IDs and
+    revision. The preview shows affected scope, authority and expected effect;
+    stale or wrong-scope submission fails closed with a visible diff. Free text
+    in search, filter, command-palette or attach modes cannot approve a gate,
+    satisfy a result barrier or become an ambiguous global steer.
+51. The pure layout/cell-grid property suite covers every integer geometry from
+    1..240 columns by 1..80 rows, with dedicated semantic and PTY fixtures for
+    invalid/extreme, 29x5 inert, exact 30x6 compact, 40x40 narrow-tall, 80x24,
+    120x32 and 200x10 short-wide shapes. It proves bounded allocation, complete
+    rows, valid hit regions and no two-dimensional scrolling for primary lists.
+    Resize bursts and live inserts preserve stable selection, focus, scroll
+    anchor/follow-tail state, drafts and pending commands without dispatch.
+    Detach and idempotent terminal restoration survive inert mode, normal exit,
+    signals, suspend/resume, PTY loss and forced render failure.
+52. Colour, no-colour and high-contrast fixtures pair every urgency, lifecycle,
+    freshness, focus and action state with text, symbol, border or position.
+    Every required action is keyboard reachable and uses the same reviewed
+    command path as mouse activation. Human no-colour task success remains
+    within five percentage points of the default theme; visual inspection in
+    supported light/dark terminal palettes supplements byte snapshots.
+53. Connection fixtures cover configuration, compatibility/pins, daemon
+    election/process, transport, handshake/authentication, feature negotiation,
+    project discovery and session attachment. Each failure identifies the exact
+    causal stage, safe code, time/freshness, relevant version/digest and bounded
+    remediation; downstream unexecuted stages are blocked, never falsely failed.
+    Transport, projection freshness, attachment and optional integration health
+    remain independent. Retry reconciles an ambiguous prior action and cannot
+    duplicate bootstrap, launch or attachment effects.
+54. Protocol conformance proves closed current-only run-kind, run-scope,
+    declared-progress, workflow/topology and narrative-grouping shapes through
+    codec, daemon, client and Console fixtures. An obsolete peer is explicitly
+    incompatible. The Console can sort, filter, collapse and lay out the facts
+    but cannot infer absent task, hierarchy, issue, progress or narrative facts
+    from prose, panes, process presence or an older schema.
 
 
 ## Authority and implementation gate
