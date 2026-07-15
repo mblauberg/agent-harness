@@ -49,6 +49,10 @@ path and branch/detached state.
   worktrees or artifact-only scopes.
 - Worktrees share Git objects, configuration and hooks; they are not security
   sandboxes. Secrets, LFS and submodules need their own deliberate setup.
+- Worktrees do not share ignored dependencies or build output. Before treating
+  a suite failure as a product defect, run the owning repository's declared
+  lockfile bootstrap and build commands in that worktree, then record the exact
+  commands and results. Do not guess the package manager or install mode.
 - Before removal, confirm a clean status, no live agent/pane and no unconsumed
   handoff. Use `git worktree remove`, never filesystem deletion.
 - Force removal, pruning and branch deletion require separate human authority.

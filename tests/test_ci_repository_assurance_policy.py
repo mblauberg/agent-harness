@@ -268,6 +268,52 @@ def test_repository_policy_covers_sensitive_fabric_surfaces() -> None:
         assert evidence in current_contract
     assert "historical formats remain readable" not in current_contract
 
+    for evidence in (
+        "exact base",
+        "exact head",
+        "reviewer role",
+        "model family",
+        "human gates still pending",
+        "later commit invalidates",
+    ):
+        assert evidence in template
+
+
+def test_github_work_item_and_runbook_cover_the_intake_contract() -> None:
+    form = yaml.safe_load(
+        (ROOT / ".github" / "ISSUE_TEMPLATE" / "work-item.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert {item.get("id") for item in form["body"] if "id" in item} >= {
+        "problem-evidence",
+        "outcome",
+        "scope",
+        "acceptance",
+        "dependencies",
+        "risk-authority-gates",
+    }
+
+    runbook = (ROOT / "docs" / "runbooks" / "github-workflow.md").read_text(
+        encoding="utf-8"
+    ).lower()
+    for status in (
+        "backlog",
+        "ready",
+        "in progress",
+        "in review",
+        "awaiting human",
+        "done",
+    ):
+        assert status in runbook
+    for outcome in ("accepted", "rejected", "deferred", "duplicate"):
+        assert outcome in runbook
+    assert "`closes #n`" in runbook
+    assert "`references #n`" in runbook
+
+    maintaining = (ROOT / "MAINTAINING.md").read_text(encoding="utf-8")
+    assert maintaining.count("(docs/runbooks/github-workflow.md)") == 1
+
 
 def test_live_workspace_guides_use_only_the_root_install_and_build_graph() -> None:
     for guide in WORKSPACE_GUIDES:
