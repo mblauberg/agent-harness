@@ -291,6 +291,12 @@ describe("Spec 05 provider child custody", () => {
     } finally {
       lossBarrier?.cancel();
       await Promise.allSettled([chairProxy?.close(), chair?.close(), bootstrap.close()]);
+      try {
+        process.kill(daemon.pid, "SIGKILL");
+      } catch (error: unknown) {
+        if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+      }
+      await daemon.waitForExit();
       await daemon.stop();
       await rm(directory, { recursive: true, force: true });
     }
