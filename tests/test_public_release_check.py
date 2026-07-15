@@ -826,6 +826,51 @@ def test_streamed_commit_parser_preserves_malformed_input_checks_across_chunks(
         consumer.finish()
 
 
+def test_streamed_commit_parser_scans_gpgsig_continuations():
+    object_id = "a" * 40
+    raw = (
+        f"tree {object_id}\n".encode("ascii")
+        + b"author Release Test <release@example.test> 1 +0000\n"
+        + b"committer Release Test <release@example.test> 1 +0000\n"
+        + b"gpgsig -----BEGIN PGP SIGNATURE-----\n"
+        + b" github" + b"_pat_abcdefghijklmnopqrstuvwxyz123456\n"
+        + b" -----END PGP SIGNATURE-----\n\n"
+        + b"portable message\n"
+    )
+    expected = frozenset({"possible GitHub token"})
+
+    for chunk_size in (len(raw), 1, 7, 17):
+        consumer = release_check._CommitObjectConsumer(
+            "b" * 40, release_check.EvidenceMemoryAccounting(),
+        )
+        feed_consumer_in_chunks(consumer, raw, chunk_size)
+
+        assert consumer.finish().message_findings == expected
+
+
+def test_streamed_commit_parser_preserves_ordinary_signed_commits():
+    object_id = "a" * 40
+    raw = (
+        f"tree {object_id}\n".encode("ascii")
+        + b"author Release Test <release@example.test> 1 +0000\n"
+        + b"committer Release Test <release@example.test> 1 +0000\n"
+        + b"gpgsig -----BEGIN PGP SIGNATURE-----\n"
+        + b" \n"
+        + b" iQEzBAABCgAdFiEEportable-signature-material\n"
+        + b" =ABCD\n"
+        + b" -----END PGP SIGNATURE-----\n\n"
+        + b"portable message\n"
+    )
+
+    for chunk_size in (len(raw), 1, 7, 17):
+        consumer = release_check._CommitObjectConsumer(
+            "b" * 40, release_check.EvidenceMemoryAccounting(),
+        )
+        feed_consumer_in_chunks(consumer, raw, chunk_size)
+
+        assert consumer.finish().message_findings == frozenset()
+
+
 @pytest.mark.parametrize("chunk_size", [1, 7, 17])
 @pytest.mark.parametrize(
     "malformation", ["missing", "duplicate", "invalid", "continuation"],
@@ -855,6 +900,26 @@ def test_streamed_tag_parser_rejects_malformed_tagger_across_chunks(
     with pytest.raises(RuntimeError, match="publication tag .* is malformed"):
         feed_consumer_in_chunks(consumer, raw, chunk_size)
         consumer.finish()
+
+
+def test_streamed_tag_parser_scans_nonrequired_header_continuations():
+    object_id = "a" * 40
+    raw = (
+        f"object {object_id}\ntype commit\ntag portable\n".encode("ascii")
+        + b"x-release-note portable\n"
+        + b" /" + b"Users/alice/private/\n"
+        + b"tagger Release Test <release@example.test> 1700000000 +0000\n\n"
+        + b"portable message\n"
+    )
+    expected = frozenset({"personal absolute home path"})
+
+    for chunk_size in (len(raw), 1, 7, 17):
+        consumer = release_check._TagObjectConsumer(
+            object_id, release_check.EvidenceMemoryAccounting(),
+        )
+        feed_consumer_in_chunks(consumer, raw, chunk_size)
+
+        assert consumer.finish().message_findings == expected
 
 
 @pytest.mark.parametrize("chunk_size", [1, 7, 17])
