@@ -1,6 +1,6 @@
 # EFFORT: capability-compiled execution authority
 
-Updated: 15 July 2026
+Updated: 16 July 2026
 
 Status: closeout in progress under [issue
 #23](https://github.com/mblauberg/provenant/issues/23).
@@ -21,16 +21,16 @@ authority are complete in [issues
 #118](https://github.com/mblauberg/provenant/issues/118) and
 [#123](https://github.com/mblauberg/provenant/issues/123).
 
-[Issue #129](https://github.com/mblauberg/provenant/issues/129) and [draft PR
-#133](https://github.com/mblauberg/provenant/pull/133) provide the verified
-task-scoped delegated-write path and minimum live Claude proof. The checks are
-green; the exact candidate still requires human acceptance and merge.
+[Issue #129](https://github.com/mblauberg/provenant/issues/129) and [PR
+#133](https://github.com/mblauberg/provenant/pull/133) completed the verified
+task-scoped delegated-write path and minimum live Claude proof. [Issue
+#134](https://github.com/mblauberg/provenant/issues/134) and [PR
+#137](https://github.com/mblauberg/provenant/pull/137) completed the explicit
+Codex and Claude model, effort and context controls. Both are integrated.
 
-[Issue #134](https://github.com/mblauberg/provenant/issues/134) is the current
-implementation lane. It makes Codex and Claude model, effort and context
-controls explicit, including when to compact, rotate to fresh context, or
-release an ephemeral worker. It adds no new lifecycle operation or automatic
-token controller.
+The [#136 startup fix](https://github.com/mblauberg/provenant/issues/136) in
+[PR #138](https://github.com/mblauberg/provenant/pull/138) is human-accepted and
+rebased on current main. Its hosted checks are running; it is not yet merged.
 
 ## Deferred residue
 
@@ -41,13 +41,15 @@ These Backlog items do not block the minimum functional closeout:
 - [#128](https://github.com/mblauberg/provenant/issues/128): retained receipt
   history and subject hardening;
 - [#131](https://github.com/mblauberg/provenant/issues/131): a reusable
-  generation-loss terminal-owner seam; and
+  generation-loss terminal-owner seam;
 - [#132](https://github.com/mblauberg/provenant/issues/132): replace
-  repository-local wrapper hash manifests with Git provenance.
+  repository-local wrapper hash manifests with Git provenance; and
+- [#139](https://github.com/mblauberg/provenant/issues/139): add a supported
+  fresh Agent Fabric launch/bootstrap path.
 
 ## Completion
 
-After #133 and #134 are accepted and integrated, #23 owns one current-head
-programme verification pass and explicit human acceptance. Passing checks or a
-merged pull request does not itself grant provider calls, destructive actions,
-release, deployment or other external effects.
+After #138 is integrated, #23 owns one current-head programme verification pass
+and explicit human acceptance. Passing checks or a merged pull request does not
+itself grant provider calls, destructive actions, release, deployment or other
+external effects.
