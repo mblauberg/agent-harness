@@ -1,16 +1,19 @@
 import { createHash } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
 
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createLifecycleFixture as createLifecycleFixtureBase,
+  reopenLifecycleFabric,
   writeLifecycleCheckpoint,
   type LifecycleFixture,
 } from "../../support/lifecycle-testkit.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
+const SECOND_ADVANCE_COMMAND_ID = "compaction:repeat:g1:r2";
 
 async function createLifecycleFixture(
   options: Parameters<typeof createLifecycleFixtureBase>[0] = {},
@@ -43,6 +46,73 @@ function activeGenerationLoss(fixture: LifecycleFixture): Record<string, unknown
          AND head.generation_loss_id=loss.generation_loss_id
        WHERE loss.run_id=? AND loss.agent_id='leader'
     `).get(fixture.runId) as Record<string, unknown>;
+  } finally {
+    database.close();
+  }
+}
+
+function generationLossDurableState(fixture: LifecycleFixture): Record<string, unknown> {
+  const database = new Database(fixture.databasePath, { readonly: true });
+  try {
+    return {
+      agent: database.prepare(`
+        SELECT agent_id,lifecycle,provider_session_ref
+          FROM agents WHERE run_id=? AND agent_id='leader'
+      `).get(fixture.runId),
+      providerState: database.prepare(`
+        SELECT provider_session_generation,context_revision,reconciled_checkpoint_sha256
+          FROM provider_state WHERE run_id=? AND agent_id='leader'
+      `).get(fixture.runId),
+      identityHighWater: database.prepare(`
+        SELECT * FROM agent_lifecycle_identity_high_water
+         WHERE run_id=? AND agent_id='leader'
+      `).get(fixture.runId),
+      contextHighWater: database.prepare(`
+        SELECT * FROM agent_lifecycle_context_high_water
+         WHERE run_id=? AND agent_id='leader' ORDER BY provider_generation
+      `).all(fixture.runId),
+      observations: database.prepare(`
+        SELECT * FROM provider_context_observation_audit
+         WHERE run_id=? AND agent_id='leader' ORDER BY observation_id
+      `).all(fixture.runId),
+      losses: database.prepare(`
+        SELECT * FROM lifecycle_generation_losses
+         WHERE run_id=? AND agent_id='leader' ORDER BY generation_loss_id
+      `).all(fixture.runId),
+      lossRevisions: database.prepare(`
+        SELECT * FROM lifecycle_generation_loss_revisions
+         WHERE run_id=? AND agent_id='leader' ORDER BY generation_loss_id,revision
+      `).all(fixture.runId),
+      lossHeads: database.prepare(`
+        SELECT * FROM lifecycle_generation_loss_heads
+         WHERE run_id=? AND agent_id='leader' ORDER BY generation_loss_id
+      `).all(fixture.runId),
+      freezes: database.prepare(`
+        SELECT * FROM delivery_freezes
+         WHERE run_id=? AND agent_id='leader' ORDER BY reason
+      `).all(fixture.runId),
+      writeLeases: database.prepare(`
+        SELECT * FROM leases
+         WHERE run_id=? AND holder_agent_id='leader' ORDER BY lease_id
+      `).all(fixture.runId),
+      providerTurnLeases: database.prepare(`
+        SELECT * FROM provider_session_turn_leases
+         WHERE run_id=? AND agent_id='leader' ORDER BY turn_lease_generation
+      `).all(fixture.runId),
+      secondCommandRows: database.prepare(`
+        SELECT * FROM commands
+         WHERE run_id=? AND command_id=? ORDER BY actor_agent_id
+      `).all(fixture.runId, SECOND_ADVANCE_COMMAND_ID),
+      providerStateEvents: database.prepare(`
+        SELECT * FROM events
+         WHERE run_id=? AND type='provider-state-reported' ORDER BY event_id
+      `).all(fixture.runId),
+      observerEventSequence: database.prepare(`
+        SELECT sequence,event_id FROM observer_event_sequence
+         WHERE event_id IN (SELECT event_id FROM events WHERE run_id=?)
+         ORDER BY sequence
+      `).all(fixture.runId),
+    };
   } finally {
     database.close();
   }
@@ -131,6 +201,83 @@ describe("AC-009 Stage 3 unannounced provider compaction", () => {
       current_revision: 1,
       terminal: 0,
     });
+  });
+
+  it("rejects a second live advance without changing the open loss, freeze, or quarantine", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    await observeBaseline(fixture, "compaction:repeat");
+    const lease = await fixture.leader.acquireWriteLease({
+      scope: ["leader"],
+      ttlMs: 60_000,
+      commandId: "compaction:repeat:lease",
+    });
+
+    await expect(fixture.chair.reportProviderState({
+      ...providerObservation(fixture, "compaction:repeat:g1:r1", 1),
+      agentId: "leader",
+      providerSessionGeneration: 1,
+      contextRevision: 1,
+      commandId: "compaction:repeat:g1:r1",
+    })).resolves.toMatchObject({ lifecycle: "suspended", contextRevision: 1 });
+    expect(activeGenerationLoss(fixture)).toMatchObject({
+      loss_kind: "context-advance",
+      state: "open",
+      current_revision: 1,
+      terminal: 0,
+    });
+    await expect(fixture.chair.getWriteLease({ leaseId: lease.leaseId })).resolves.toMatchObject({
+      status: "quarantined",
+    });
+    const before = generationLossDurableState(fixture);
+    expect(before.freezes).toEqual([
+      expect.objectContaining({ agent_id: "leader", reason: "context-unreconciled" }),
+    ]);
+
+    await expect(fixture.chair.reportProviderState({
+      ...providerObservation(fixture, "compaction:repeat:g1:r2", 1),
+      agentId: "leader",
+      providerSessionGeneration: 1,
+      contextRevision: 2,
+      commandId: SECOND_ADVANCE_COMMAND_ID,
+    })).rejects.toThrow("agent already has a nonterminal generation loss");
+    expect(generationLossDurableState(fixture)).toEqual(before);
+  });
+
+  it("skips an open-loss agent during consecutive startup reconciliations", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    await observeBaseline(fixture, "compaction:restart-skip");
+    await fixture.chair.reportProviderState({
+      ...providerObservation(fixture, "compaction:restart-skip:g1:r1", 1),
+      agentId: "leader",
+      providerSessionGeneration: 1,
+      contextRevision: 1,
+      commandId: "compaction:restart-skip:g1:r1",
+    });
+    const beforeRestart = generationLossDurableState(fixture);
+    const statusCallsPath = join(fixture.directory, "provider-status-calls.jsonl");
+
+    await fixture.fabric.close();
+    fixture.fabric = await reopenLifecycleFabric(fixture, { providerStatusCallsPath: statusCallsPath });
+    await expect(fixture.fabric.recoverStartupState()).resolves.toMatchObject({ sessionsDegraded: 0 });
+    expect(generationLossDurableState(fixture)).toEqual(beforeRestart);
+
+    await fixture.fabric.close();
+    fixture.fabric = await reopenLifecycleFabric(fixture, { providerStatusCallsPath: statusCallsPath });
+    await expect(fixture.fabric.recoverStartupState()).resolves.toMatchObject({ sessionsDegraded: 0 });
+    expect(generationLossDurableState(fixture)).toEqual(beforeRestart);
+
+    const statusCalls = (await readFile(statusCallsPath, "utf8")).trim().split("\n")
+      .map((line) => JSON.parse(line) as { params: { agentId: string } });
+    expect(statusCalls).toHaveLength(2);
+    expect(statusCalls.every(({ params }) => params.agentId === "child")).toBe(true);
   });
 
   it("records generation loss and does not trust an arbitrary checkpoint digest", async () => {

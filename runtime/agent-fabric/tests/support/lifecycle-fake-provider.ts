@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { createInterface } from "node:readline";
 
@@ -663,6 +663,10 @@ input.on("line", (line) => {
     return;
   }
   if (request.method === "status") {
+    const callsPath = process.env.LIFECYCLE_FAKE_STATUS_CALLS;
+    if (callsPath !== undefined) {
+      appendFileSync(callsPath, `${JSON.stringify({ adapterId, params: request.params })}\n`, { mode: 0o600 });
+    }
     if (process.env.LIFECYCLE_FAKE_STATUS === "missing-evidence") {
       respond(request.id, {});
       return;
