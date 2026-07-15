@@ -76,7 +76,7 @@ body:
     attributes:
       label: Before you file
       options:
-        - label: I have read CONTRIBUTING.md and understand that changes to authority, gates or contracts need an approved spec first.
+        - label: I understand that changes to authority, gates or contracts need an approved spec first.
           required: true
         - label: This is not a security vulnerability. Those go through SECURITY.md.
           required: true
