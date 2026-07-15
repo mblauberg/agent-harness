@@ -237,6 +237,33 @@ describe("Fabric lifecycle receipt startup hydration", () => {
     expect(fixture.authority.appendCalls).toBe(1);
   });
 
+  it("fails closed when a retained non-current pinned checkpoint is deleted from the authority", async () => {
+    const fixture = await startupFixture();
+    // Advance the authority ledger so the admission (initial) checkpoint the
+    // fixture pinned in the local mirror is no longer the current head.
+    const subject = custodySubject(fixture.seed, "custody-advances-the-ledger");
+    const intent = digest("intent", "advances-the-ledger");
+    seedIntent(fixture.database, fixture.seed, subject, intent);
+    await fixture.authority.appendReceipt(intent, subject);
+    // Delete the now non-current, retained checkpoint from the authority store.
+    // A standalone authority can still reopen after this, so composed startup
+    // recovery is the boundary that must fail closed when it re-requests it.
+    fixture.authority.forgetScopeSnapshot(fixture.seed.initial.checkpointDigest);
+    fixture.database.close();
+    const recoveryFaults: string[] = [];
+
+    const runtime = await openFabric({
+      databasePath: fixture.databasePath,
+      workspaceRoots: [fixture.directory],
+      lifecycleReceiptAuthority: fixture.authority,
+      fault: (label) => recoveryFaults.push(label),
+    });
+    runtimes.push(runtime);
+
+    await expect(runtime.recoverStartupState()).rejects.toMatchObject({ code: "SNAPSHOT_INVALID" });
+    expect(recoveryFaults).toEqual([]);
+  });
+
   it.each(["custody", "run", "scope-set"] as const)(
     "rejects local %s deletion before any generic startup recovery",
     async (deletion) => {
