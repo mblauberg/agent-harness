@@ -17,7 +17,7 @@ def test_agy_is_a_fabric_adapter_not_a_parallel_provider_skill():
 
 def test_headless_helpers_cannot_bypass_fabric_for_agy():
     dispatcher = read("skills/orchestrate/scripts/cf_dispatch.sh")
-    assert not (ROOT / "skills/autonomous-lab/scripts/cross-family.sh").exists()
+    assert not (ROOT / "skills/autopilot/scripts/cross-family.sh").exists()
     for forbidden in (
         "CF_DISPATCH_ENABLE_AGY",
         "agy_cmd=(",
@@ -26,8 +26,8 @@ def test_headless_helpers_cannot_bypass_fabric_for_agy():
         assert forbidden not in dispatcher
 
 
-def test_autonomous_lab_routes_bonus_gemini_through_fabric():
-    reference = read("skills/autonomous-lab/references/cross-family-review.md")
+def test_autopilot_routes_bonus_gemini_through_fabric():
+    reference = read("skills/autopilot/references/cross-family-review.md")
     assert "All answer-bearing cross-family work goes through Agent Fabric" in reference
     assert "agy-headless" not in reference
     assert "direct `agy`" not in reference

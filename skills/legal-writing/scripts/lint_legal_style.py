@@ -1,17 +1,48 @@
 #!/usr/bin/env python3
-"""Lightweight style lint for Australian filing-facing legal markdown."""
+"""Lightweight style lint for Australian filing-facing legal markdown.
+
+This checker keeps its own FAIL/WARN severity model and structural checks
+(heading-blank-line, HTML-comment leak tokens, long-sentence detection,
+directory recursion) because they are legal-specific and have no equivalent
+in academic-writing or engineering-writing. It imports the shared word
+vocabulary from the `natural-writing`-owned engine
+(`skills/natural-writing/scripts/style_lint.py`) for the regex content that
+used to be hand-duplicated across all three domain checkers (em dash,
+puffery/inflation vocabulary, wordy fillers, -ly-adverb hyphenation) rather
+than re-typing those word lists a third time.
+"""
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import re
 import sys
 from pathlib import Path
 
+_STYLE_LINT_PATH = Path(__file__).resolve().parents[2] / "natural-writing" / "scripts" / "style_lint.py"
+_spec = importlib.util.spec_from_file_location("style_lint", _STYLE_LINT_PATH)
+assert _spec and _spec.loader
+style_lint = importlib.util.module_from_spec(_spec)
+sys.modules.setdefault("style_lint", style_lint)
+_spec.loader.exec_module(style_lint)
+
+# Legal-only additions to the shared Tier-2 puffery/inflation vocabulary
+# (bare stems this domain warns on that the other two checkers do not use in
+# this exact form): vital, delve, leverage, realm, foster, nuanced, intricate.
+_LEGAL_ONLY_TIER2_WORDS = ("vital", "delve", "leverage", "realm", "foster", "nuanced", "intricate")
+_SHARED_TIER2_WORDS = sorted(
+    {*style_lint.TIER2_PUFFERY_WORDS, *style_lint.TIER2_INFLATION_WORDS, *_LEGAL_ONLY_TIER2_WORDS}
+    - {"seamlessly", "in the realm of", "delves into", "cutting-edge"}
+)
+_INFLATED_WORD_PATTERN = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in _SHARED_TIER2_WORDS) + r")\b", re.I
+)
+
 
 FAIL_PATTERNS = [
-    ("em dash (banned in all output)", re.compile("\u2014")),
+    ("em dash (banned in all output)", style_lint.EM_DASH_PATTERN),
     ("US legalese: COMES NOW", re.compile(r"\bCOMES NOW\b", re.I)),
     ("US legalese: wherefore", re.compile(r"\bwherefore\b", re.I)),
     ("US legalese: herein", re.compile(r"\bherein\b", re.I)),
@@ -46,7 +77,7 @@ FAIL_PATTERNS = [
 
 WARN_PATTERNS = [
     ("en dash (allowed; use sparingly, e.g. number/date/page ranges)", re.compile("–")),
-    ("AI tell / inflated word", re.compile(r"\b(crucial|vital|pivotal|robust|seamless|delve|leverage|tapestry|realm|multifaceted|foster|holistic|nuanced|intricate|meticulous|myriad|plethora)\b", re.I)),
+    ("AI tell / inflated word", _INFLATED_WORD_PATTERN),
     ("AI tell / prestige verb", re.compile(r"\b(showcases?|underscores?|highlights?|facilitates?|enhances?|drives?|leverages?)\b", re.I)),
     ("AI tell / empty transition", re.compile(r"\b(it is worth noting that|in light of the foregoing|having regard to the above|as outlined above)\b", re.I)),
     ("AI tell / notability opener", re.compile(r"\b(importantly|notably|interestingly),", re.I)),
@@ -55,7 +86,10 @@ WARN_PATTERNS = [
     ("AI tell / copula avoidance", re.compile(r"\b(serves as|serves to|stands as|plays a role in|is indicative of|represents)\b", re.I)),
     ("AI tell / negative parallelism padding", re.compile(r"\b(not only|not just|not merely|is not merely|isn't merely)\b", re.I)),
     ("AI tell / empty ing-tail", re.compile(r",\s+(ensuring|enhancing|highlighting|showcasing|driving|facilitating)\s+(fairness|reliability|concerns|evidence|impact|performance|compliance|clarity|efficiency|outcomes?)\b", re.I)),
-    ("hyphenation / -ly adverb compound", re.compile(r"\b(clearly|fully|properly|randomly|newly|closely|carefully|previously|highly|strongly|legally|procedurally|factually)-[A-Za-z]+\b", re.I)),
+    (
+        "hyphenation / -ly adverb compound",
+        re.compile(rf"\b(?:{style_lint.LY_ADVERBS}|legally|procedurally|factually)-[A-Za-z]+\b", re.I),
+    ),
     ("AI tell / stock document opener", re.compile(r"\b(this (?:application|submission|affidavit|letter|section|document) (?:explores|delves|sets out to|highlights|underscores|showcases|demonstrates))\b", re.I)),
     ("internal process language in filing text", re.compile(r"\b(agent summary|review set|render check|manifest proves|router status|gate fired|source pack|audit found)\b", re.I)),
     ("weak abstraction (name the act, source, order or consequence)", re.compile(r"\b(concerns regarding|issues surrounding|matters pertaining to|in relation to|with respect to|with regard to|in respect of)\b", re.I)),

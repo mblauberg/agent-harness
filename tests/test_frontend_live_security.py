@@ -13,7 +13,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "skills" / "frontend-design" / "scripts"
+SCRIPTS = ROOT / "skills" / "ui-ux-design" / "scripts"
 INJECT = SCRIPTS / "live-inject.mjs"
 SERVER = SCRIPTS / "live-server.mjs"
 TOKEN = "11111111-1111-4111-8111-111111111111"

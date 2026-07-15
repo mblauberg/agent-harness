@@ -17,13 +17,13 @@ The current pre-release tree includes:
   orchestrators with one session chair, the scope-to-retrospect lifecycle, the
   human gates, and the rule that no two agents write the same source surface at
   once.
-- 33 Agent Skills under `skills/`, covering delivery (`scope`, `deliver`,
+- 31 Agent Skills under `skills/`, covering delivery (`scope`, `deliver`,
   `implement`, `tdd`, `refactor`, `diagnose`, `code-review`, `evaluate`,
   `release`, `retrospect`, `session`, `work-map`), orchestration, writing,
   design and diagrams, web engineering, and harness development.
 - `scripts/install-harness`, which installs the skills and the instruction
   bootstrap into Claude Code and Codex, preserves unmanaged content, and leaves
-  portable `skill-authoring` canonical over Codex's bundled `skill-creator`.
+  portable `skill-craft` canonical over Codex's bundled `skill-creator`.
 - `scripts/manage_installation.py`, giving `plan` and `reconcile` against a
   managed manifest plus a public rename registry
   (`config/skill-renames.json`), so a renamed skill migrates without a user
@@ -56,6 +56,18 @@ The current pre-release tree includes:
   `THIRD_PARTY_NOTICES.md`, under the MIT licence.
 - Community files: this changelog and the bug, feature and skill-proposal issue
   forms.
+
+### Changed
+
+- Applied the `writing-great-skills` doctrine across the catalogue (epic #124):
+  merged `skill-audit` + `skill-authoring` into the branched `skill-craft`,
+  merged `frontend-design` + `frontend-review` into the branched `ui-ux-design`,
+  gutted and renamed `autonomous-lab` to `autopilot` (run state now lives under
+  `.agent-run/<mission-id>/`), made `natural-writing` the single-owner writing
+  hub the domain writing skills link to, and added an autonomous
+  ready-issue-implementation mode to `orchestrate` that stops at the human PR
+  gate. The catalogue is now 31 skills; managed renames are recorded in
+  `config/skill-renames.json`.
 
 ### Notes
 

@@ -9,4 +9,4 @@ cases:
   - {id: q096, relation: negative, prompt: "Find why this benchmark command suddenly runs twice as slowly.", tags: [adjacent], expected: {primary_skill: diagnose, companion_skills: []}}
   - {id: q097, relation: boundary, prompt: "Compare caveman against baseline on current models for fidelity, total tokens, and reread burden.", tags: [composition], expected: {primary_skill: evaluate, companion_skills: [caveman]}}
   - {id: q098, relation: boundary, prompt: "Deliver the approved agent benchmark through independent review and a human acceptance gate.", tags: [composition], expected: {primary_skill: deliver, companion_skills: [evaluate]}}
-  - {id: q099, relation: boundary, prompt: "Evaluate frontend visual quality with a blinded rubric and evidence-bearing UI reviewers.", tags: [composition], expected: {primary_skill: evaluate, companion_skills: [frontend-review]}}
+  - {id: q099, relation: boundary, prompt: "Evaluate frontend visual quality with a blinded rubric and evidence-bearing UI reviewers.", tags: [composition], expected: {primary_skill: evaluate, companion_skills: [ui-ux-design]}}

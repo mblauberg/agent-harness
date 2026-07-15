@@ -1,0 +1,5 @@
+# Modified from Impeccable for this harness; see ../NOTICE.md.
+interface:
+  display_name: UI/UX Design
+  short_description: Read-only UI/UX review by default; authorised design on request
+  default_prompt: Use $ui-ux-design to review this interface read-only by default and report tested/untested coverage; add explicit write authority (e.g. via $implement) to design, redesign, polish, or run live iteration.

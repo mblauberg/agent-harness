@@ -1,6 +1,6 @@
 ---
 name: playwright
-description: "Use for terminal-driven browser navigation, interaction, snapshots, screenshots, extraction, or UI-flow debugging. Not for authoring Playwright test suites or frontend design; use tdd or frontend-design."
+description: "Use for terminal-driven browser navigation, interaction, snapshots, screenshots, extraction, or UI-flow debugging. Not for authoring Playwright test suites or frontend design; use tdd or ui-ux-design."
 ---
 
 

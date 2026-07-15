@@ -6,20 +6,21 @@ licence notices remain with their respective components.
 
 ## Impeccable
 
-`skills/frontend-design/` is a renamed and modified distribution of
+`skills/ui-ux-design/` (formerly `frontend-design`, now merged with
+`frontend-review`) is a renamed and modified distribution of
 [Impeccable](https://github.com/pbakaus/impeccable), copyright 2025 Paul
 Bakaus, under Apache License 2.0. Its licence and component notice are in
-`skills/frontend-design/LICENSE` and `skills/frontend-design/NOTICE.md`.
+`skills/ui-ux-design/LICENSE` and `skills/ui-ux-design/NOTICE.md`.
 
-The bundled `skills/frontend-design/scripts/modern-screenshot.umd.js` is
+The bundled `skills/ui-ux-design/scripts/modern-screenshot.umd.js` is
 modern-screenshot 4.7.0, copyright 2021-present wxm, under the MIT License.
-Its terms are in `skills/frontend-design/MODERN_SCREENSHOT_LICENSE`.
+Its terms are in `skills/ui-ux-design/MODERN_SCREENSHOT_LICENSE`.
 
-The files `skills/frontend-design/references/ui-styles.csv`,
+The files `skills/ui-ux-design/data/ui-styles.csv`,
 `font-pairings.csv`, `color-palettes.csv` and `chart-types.csv` contain data
 derived from [UI UX Pro Max v2.0.0](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill/tree/v2.0.0/.claude/skills/ui-ux-pro-max/data),
 copyright 2024 Next Level Builder, under the MIT License. Its terms are in
-`skills/frontend-design/UI_UX_PRO_MAX_LICENSE`.
+`skills/ui-ux-design/UI_UX_PRO_MAX_LICENSE`.
 
 ## Vercel React best practices
 
@@ -37,10 +38,10 @@ Pocock, under the MIT License. The terms are in `skills/grill-me/LICENSE`.
 
 ## Skill Optimizer
 
-`skills/skill-audit/` is adapted from
+`skills/skill-craft/` (the audit branch) is adapted from
 [Skill Optimizer](https://github.com/hqhq1025/skill-optimizer/tree/f10e5d85371f72841459493ed750f45ed9afa99d/skills/skill-optimizer),
 copyright 2026 hqhq1025, under the MIT License. The terms are in
-`skills/skill-audit/LICENSE`.
+`skills/skill-craft/LICENSE`.
 
 ## Playwright
 

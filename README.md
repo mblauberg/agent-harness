@@ -4,7 +4,7 @@
 
 **A gated delivery lifecycle for coding agents. Scope, verify, review, accept.**
 
-Coding agents improvise. This agent harness is <!--skills-->33<!--/skills--> Agent Skills that make Claude
+Coding agents improvise. This agent harness is <!--skills-->31<!--/skills--> Agent Skills that make Claude
 Code and Codex follow one lifecycle instead: agree the spec, build it, verify it,
 have the other model review anything substantial, then stop for you.
 
@@ -21,7 +21,7 @@ vulnerabilities privately through [`SECURITY.md`](SECURITY.md).
 ## What this is
 
 An Agent Skill is a folder with a `SKILL.md`. Only its one-line description sits
-in permanent context (the whole <!--skills-->33<!--/skills-->-skill catalogue is budgeted under 8,000
+in permanent context (the whole <!--skills-->31<!--/skills-->-skill catalogue is budgeted under 8,000
 characters); the body loads when the task matches. An operating system for agent
 work, not a prompt collection: one constitution ([`HARNESS.md`](HARNESS.md))
 governing both Claude Code and Codex.
@@ -65,7 +65,7 @@ keeps the file, exits 3 and prints one bootstrap line to paste in. Skills still
 link; exit 3 is expected.
 
 The Codex installer also appends one block to `~/.codex/config.toml` disabling
-Codex's bundled `skill-creator`, leaving `skill-authoring` canonical; the rest of
+Codex's bundled `skill-creator`, leaving `skill-craft` canonical; the rest of
 that file is preserved. `"$AGENTS_HOME/scripts/manage_installation.py"
 uninstall-managed --target <skills-dir>` reclaims the harness-owned skill links
 and nothing else: the bootstrap line and that Codex block stay until you delete
@@ -144,16 +144,16 @@ lifecycle: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 <!-- skill-catalogue:start -->
 <details>
-<summary>All 33 skills</summary>
+<summary>All 31 skills</summary>
 
 | Area | Skills |
 |---|---|
 | Delivery | [`session`](skills/session/SKILL.md), [`scope`](skills/scope/SKILL.md), [`deliver`](skills/deliver/SKILL.md), [`implement`](skills/implement/SKILL.md), [`tdd`](skills/tdd/SKILL.md), [`refactor`](skills/refactor/SKILL.md), [`diagnose`](skills/diagnose/SKILL.md), [`code-review`](skills/code-review/SKILL.md), [`evaluate`](skills/evaluate/SKILL.md), [`release`](skills/release/SKILL.md), [`retrospect`](skills/retrospect/SKILL.md), [`work-map`](skills/work-map/SKILL.md) |
-| Orchestration | [`orchestrate`](skills/orchestrate/SKILL.md), [`autonomous-lab`](skills/autonomous-lab/SKILL.md) |
+| Orchestration | [`orchestrate`](skills/orchestrate/SKILL.md), [`autopilot`](skills/autopilot/SKILL.md) |
 | Writing and documentation | [`engineering-docs`](skills/engineering-docs/SKILL.md), [`engineering-writing`](skills/engineering-writing/SKILL.md), [`academic-writing`](skills/academic-writing/SKILL.md), [`legal-writing`](skills/legal-writing/SKILL.md), [`natural-writing`](skills/natural-writing/SKILL.md) |
-| Design and diagrams | [`frontend-design`](skills/frontend-design/SKILL.md), [`frontend-review`](skills/frontend-review/SKILL.md), [`prototype`](skills/prototype/SKILL.md), [`d2-diagrams`](skills/d2-diagrams/SKILL.md), [`uml-diagrams`](skills/uml-diagrams/SKILL.md) |
+| Design and diagrams | [`ui-ux-design`](skills/ui-ux-design/SKILL.md), [`prototype`](skills/prototype/SKILL.md), [`d2-diagrams`](skills/d2-diagrams/SKILL.md), [`uml-diagrams`](skills/uml-diagrams/SKILL.md) |
 | Web engineering | [`playwright`](skills/playwright/SKILL.md), [`react-performance`](skills/react-performance/SKILL.md), [`tanstack-query`](skills/tanstack-query/SKILL.md), [`typescript-clean-code`](skills/typescript-clean-code/SKILL.md), [`web-stack-conventions`](skills/web-stack-conventions/SKILL.md) |
-| Harness development | [`grill-me`](skills/grill-me/SKILL.md), [`skill-audit`](skills/skill-audit/SKILL.md), [`skill-authoring`](skills/skill-authoring/SKILL.md) |
+| Harness development | [`grill-me`](skills/grill-me/SKILL.md), [`skill-craft`](skills/skill-craft/SKILL.md) |
 | Presentation | [`caveman`](skills/caveman/SKILL.md) |
 
 </details>

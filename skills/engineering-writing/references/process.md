@@ -1,6 +1,6 @@
 # Writing Process
 
-Use this reference for the order of work: analyse the audience, choose the document type, structure before prose, then revise in passes. Most weak engineering documents fail here, not at the sentence level. A well-structured plain draft beats a beautifully worded one aimed at the wrong reader. This file also owns the condense pass, the condense integrity check, and wrong-home repair.
+Use this reference for the order of work: analyse the audience, choose the document type, structure before prose, then revise in passes. Most weak engineering documents fail here, not at the sentence level. A well-structured plain draft beats a beautifully worded one aimed at the wrong reader. This file also owns wrong-home repair and the engineering-specific application of the hub's condense pass (see `${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/condense-pass.md`).
 
 ## 1. Audience and purpose first
 
@@ -45,8 +45,8 @@ Do not edit for everything at once. Separate passes catch more and drift less:
 1. **Structure pass**: is the order right, is the point first, does each section earn its place, is anything in the wrong document? Fix this before touching wording.
 2. **Accuracy pass**: are numbers, identifiers, versions, commands, and claims correct and supported? Is uncertainty marked? Are observations separated from interpretations?
 3. **Clarity and concision pass**: is each sentence carrying its weight? Cut needless words without dropping conditions, caveats, exact values, or obligations. Keep related words together.
-4. **Anti-AI / voice pass**: sweep the tells and confirm the positive habits. See `engineer-voice.md`.
-5. **Australian English pass**: spelling, dates, terminology, punctuation. See `australian-english.md`.
+4. **Anti-AI / voice pass**: sweep the tells and confirm the positive habits. See `engineer-voice.md` and the hub taxonomy.
+5. **Australian English pass**: spelling, dates, terminology, punctuation. See the hub default `au-english.md`.
 
 For a light task, passes 3 to 5 may be enough; for a deliverable, run all five.
 
@@ -60,26 +60,17 @@ For each paragraph (each sentence in short-form text), name its one job in a phr
 
 ## 7. Condense pass
 
-Use when prose is AI-authored or over-long and the job is to shorten it while keeping the meaning. A first-draft or machine-drafted document often loses 20 to 50 per cent; there is no percentage target, and a tight document may already be done.
+Load the hub procedure:
+`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/condense-pass.md`,
+for the measure/lock/reverse-outline/de-duplicate/cut/narrow steps, the
+stop rule, condense integrity, and the report-the-delta requirement. A
+first-draft or machine-drafted engineering document often loses 20 to 50 per
+cent; there is no percentage target, and a tight document may already be
+done. Engineering-specific invariants to lock in step 2: identifiers,
+commands, flags, error text, versions, and obligations. Engineering-specific
+fluff to cut in step 5: the Tier lists in `engineer-voice.md` and the hub
+taxonomy.
 
-1. **Measure.** Record the word count so you can report the cut (the checker script prints it with `--wordcount`).
-2. **Lock invariants.** Facts, numbers, units, identifiers, commands, flags, error text, versions, dates, conditions, caveats, and obligations.
-3. **Reverse-outline.** One phrase per paragraph stating its single job (the function test). A paragraph that resists a one-line summary, or repeats another line, is the cut or merge target.
-4. **De-duplicate to one home.** State each fact, definition, decision, and number once, in the document or section that owns it; cross-reference elsewhere. Relocate detail to an appendix, table, or linked doc rather than delete it: moved is not lost.
-5. **Cut fluff.** Throat-clearing, decorative tails, restated headings, obvious consequences, and recap endings (the Tier lists in engineer-voice.md).
-6. **Narrow, do not soften.** Replace a sweeping claim with the precise claim the evidence supports; it is shorter and safer. Never soften an honest negative.
-7. **Stop rule.** Stop the moment a further cut would remove a fact, number, unit, condition, caveat, exact term, obligation, or working cross-reference, or would force awkward phrasing. When unsure whether something is load-bearing, keep it. Forced cuts that read strangely are a failure, not a win.
-8. **Report the delta**: words before and after, the percentage, and that the invariants survived.
-
-## 8. Condense integrity
-
-A substantial condense, rewrite, or relocation is only safe if what survives is verified; a drafting model's own report that nothing was dropped is untrustworthy, and lossy passes have silently cut qualifiers, numbers, and cross-references while reporting a clean pass.
-
-- Gate the pass with a deterministic token check: set-diff the numbers, identifiers, commands, flags, versions, error strings, dates, and defined terms between the before and after texts. Zero unexplained loss is the pass condition.
-- The token check sees tokens, not meaning. Follow it with an independent qualitative pass: is any condition, caveat, obligation, or honest negative now weaker, unowned, or unfindable?
-- Relocation can weaken as well as preserve: a constraint moved too far from the decision that depends on it can stop doing its job. After relocating, re-read the passage that relied on the moved material and confirm it still lands, with a pointer to the new home.
-- Never patch a gap the checks expose by re-deriving content from memory; restore it from the before-text.
-
-## 9. Wrong-home repair
+## 8. Wrong-home repair
 
 When a passage is doing the wrong job, move it before rewriting it; wrong-home material usually gets worse when polished in place. Common moves: design rationale buried in a README goes to an ADR or design doc; requirements detail in a business case goes to the SRS; implementation narrative in a PR description goes to code comments or the design doc; status and roadmap material in a README goes to the roadmap or changelog; argument for a decision goes to the ADR, and the ADR is then linked, not restated.

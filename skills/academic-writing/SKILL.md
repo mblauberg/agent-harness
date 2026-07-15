@@ -23,17 +23,15 @@ bibliography or replace citations without explicit authority.
    `section-polish`, `match-voice`, `citation-safe` or `final-scrub`.
 2. Lock claims, numbers, units, citations, quotations, LaTeX commands, equations,
    labels, cross-references, result macros, paths and technical names.
-3. For prose, load [academic style](references/academic-style-au.md) and the
-   matching [workflow mode](references/editing-workflows.md). Add
-   [anti-AI patterns](references/anti-ai-thesis-patterns.md) only for voice
-   diagnosis/final scrub, and [concision](references/concision-and-structure.md)
-   only for rewrite, condense or structural polish. Select the needed overlay:
-   [chapter patterns](references/chapter-patterns.md),
-   [claim discipline](references/claim-discipline-and-evidence.md),
-   [engineering voice](references/engineering-thesis-voice.md), or
-   [citation/LaTeX safety](references/citation-and-latex-safety.md). A project
-   adapter or keep-list takes precedence. For LaTeX-only work, start with the
-   safety reference and load prose guidance only if prose changes.
+3. This skill is a specialization of the `natural-writing` hub: it owns
+   thesis register, LaTeX/citation-key preservation and the empirical-research
+   overlays, and links to the hub for the shared doctrine. Load the hub
+   default [Australian English](../natural-writing/references/au-english.md)
+   and, for prose, [academic register](references/academic-style-au.md) plus
+   the matching [workflow mode](references/editing-workflows.md); see that
+   file's reference map for which remaining hub/overlay pair (anti-AI, condense,
+   claim discipline, chapter, engineering voice or citation/LaTeX safety) a
+   mode needs. A project adapter or keep-list takes precedence.
 4. Preserve meaning and evidence altitude. Separate observation, interpretation,
    limitation and future work. Flag unsupported claims; never strengthen them.
 5. Follow the target language style (otherwise Australian English). Use concrete

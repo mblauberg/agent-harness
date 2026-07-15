@@ -1,14 +1,14 @@
 ---
 name: code-review
-description: "Use for source-read-only review of a PR, diff, commit, migration, refactor, or implementation through its dependency cone. Not for root-cause diagnosis or authorised fixes; use diagnose or implement."
+description: "Use for source-read-only review of a PR, diff, commit, migration, refactor, or implementation through its dependency cone. Not for root-cause diagnosis, authorised fixes, or browser/UX review; use diagnose, implement, or ui-ux-design."
 ---
 
 # Code review
 
 Review is source-read-only unless the user separately authorises fixes. A
-reviewer may write compressed findings and traces only to an explicitly assigned
+reviewer may write compressed findings and traces only to an assigned
 artifact directory. The diff is the entry point, not the boundary. Judge the
-resulting system, rather than the changed lines alone.
+resulting system, not just the changed lines.
 
 ## Review
 
@@ -16,10 +16,10 @@ resulting system, rather than the changed lines alone.
    contract.
 2. Establish the change intent from the spec, issue, tests, commit message, or
    user request. Mark unclear intent instead of inventing it.
-3. Trace the affected dependency cone: full touched files, live callers and
+3. Trace the affected dependency cone: full touched files, live callers/
    consumers, exports, canonical owners, tests, configuration, migrations,
    persistence boundaries, dependency/lock changes, and generated artefacts.
-   Record inspected and excluded surfaces; unavailable context stays `unknown`.
+   Record inspected/excluded surfaces; unavailable context stays `unknown`.
 4. Select review lenses from the task/risk profile. Correctness/spec alignment
    is mandatory; add security/privacy, data/concurrency,
    performance/reliability, tests, architecture, readability, UX/accessibility
@@ -30,15 +30,15 @@ resulting system, rather than the changed lines alone.
    Never rank prose or majority-vote findings.
 6. Review the design delta. Look for duplicated ownership, scattered flags,
    nullable modes, casts hiding invariants, thin wrappers, parallel flows, and
-   abstractions that add concepts without reducing complexity.
+   abstractions adding concepts without reducing complexity.
 7. Ask whether a proven reframe could delete branches, state, layers, or
    duplicated flows. Size is a signal, not a defect. Past 1000 lines a source
    file **is** a finding; tests only warn.
 8. Check tests and verification against the acceptance criteria. Confirm the
-   trajectory: relevant deterministic checks actually ran and their results are
+   trajectory: relevant deterministic checks ran and their results are
    available. Never infer coverage from a green summary alone.
-9. Report only high-confidence, actionable findings. Return `clean` when there
-   is no genuine defect.
+9. Report only high-confidence, actionable findings. Return `clean` when no
+   genuine defect exists.
 
 Load [review-lenses.md](references/review-lenses.md) for the detailed inspection
 questions, [multi-agent-review.md](references/multi-agent-review.md) for lens
@@ -51,14 +51,14 @@ before writing findings.
   defines what each reviewer inspects and the independence/reduction contract.
 - `diagnose` owns reproduction and root cause for known broken behaviour.
 - `implement` owns authorised fixes and bounded re-review; `tdd` or `refactor`
-  may supply the execution method. Do not mutate source during review.
+  may supply the method. Do not mutate source during review.
 - Artifact-only authority permits named outputs under the assigned run
   directory; it does not permit arbitrary repo-root scratch. Use the system
   temporary directory when no run directory exists. Never redirect a command
-  over a wildcard/list that can include its own growing output, and keep
+  over a wildcard/list that can include its own growing output; keep
   captures bounded.
 - Language, framework, UI, security, and project skills add specialised lenses;
   do not repeat their doctrine here.
-- A structural alternative is blocking only when tied to a present defect or
-  material regression with a demonstrably safer design and validation route.
-  Attractive redesign alone is not a finding.
+- A structural alternative blocks only when tied to a present defect or
+  material regression with a safer, validated design. Attractive redesign
+  alone is not a finding.

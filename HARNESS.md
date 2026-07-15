@@ -41,7 +41,7 @@ session -> scope -> human spec/one-way-door gate
         -> diagnose/implement on failure; evidence back to scope
 ```
 
-`autonomous-lab` is the crash-safe run-until-STOP tier, not the default implementation
+`autopilot` is the crash-safe run-until-STOP tier, not the default implementation
 loop. Non-software work uses the same shape: scope, authorised execution,
 evidence, independent review, human acceptance and any external-action gate.
 

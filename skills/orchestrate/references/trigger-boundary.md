@@ -24,7 +24,7 @@ prompt merely sounds serious.
 - tightly coupled debugging where the next action depends on one local result;
 - concurrent shared-state writes that cannot be partitioned;
 - a standing run-until-STOP job with cross-session filesystem state — that is the
-  **autonomous-lab** skill's territory (it consumes this doctrine per iteration; this skill runs one
+  **autopilot** skill's territory (it consumes this doctrine per iteration; this skill runs one
   engagement and finishes).
 
 ## Ambiguous triggers

@@ -1,6 +1,6 @@
 # Skill Catalogue Audit Register — Epic #124, Workstream B
 
-> **Status:** audit recommendations + **owner decisions recorded** (grill-me R1–R5, see next section). All 12 DEFERs resolved into a direction; execution is staged implement work, not done by this document.
+> **Status:** audit recommendations + **owner decisions recorded** (grill-me R1–R5, see next section). All 12 DEFERs resolved into a direction; execution **complete** on branch `issue-124-skill-audit-register` (see **Implementation status** below).
 > **Date:** 2026-07-15 · **Epic:** #124 · **Scope:** 33 skills (+ `_shared`) · **Outcome:** 21 APPROVE-ready · 12 DEFER (now decided) · 0 CUT.
 > **Provenance:** 6 family-batched auditors + 1 licensing/provenance auditor (workhorse tier), flagship synthesis, other-primary cross-family verify (all findings folded). Source-read-only throughout.
 
@@ -11,6 +11,24 @@
 **Outcome: 21 APPROVE-ready · 12 DEFER (owner call) · 0 CUT.** The catalogue is healthier than expected — no length crisis, no tracked sediment, well self-policed boundaries. The real value is concentrated in a few places: the **writing-family reference triplication** (biggest consolidation prize), **frontend-design's bundled-application sprawl** (only true monolith), the **skill-craft merge**, and a handful of **provenance-metadata gaps**.
 
 ---
+
+## Implementation status — epic #124 executed (2026-07-16)
+
+All staged implement work landed on branch `issue-124-skill-audit-register`. Catalogue now **31 skills** (was 33); full suite **749 passed, 8 xfailed, 3 pre-existing infra failures**; `public-release-check` PASS; catalogue description budget under the 7,600 target. Authoring by Sonnet 5 subagents; every merged skill independently reviewed by `gpt-5.6-luna-xhigh` (other-primary) with findings folded.
+
+**Merges & renames** (managed via `config/skill-renames.json`; `manage_installation.py` patched to support many-to-one renames, covered by `tests/test_install_skills.py::test_reconcile_merges_two_sources_into_one_target`):
+- `skill-audit` + `skill-authoring` → **`skill-craft`** — branched audit/author, read-only default, tool-call-trace boundary fixtures forbidding all mutation tools (`Write/Edit/NotebookEdit/ApplyPatch/Delete`) + `tree_unchanged`; local-history authorization block preserved verbatim; Skill Optimizer attribution retained & re-pointed.
+- `frontend-design` + `frontend-review` → **`ui-ux-design`** — branched review-default/design-make; `detector` surfaced from SKILL.md; CSV `references/`→`data/`; `finding-contract` linked not copied; Apache/MIT notices re-pointed; WCAG/Lighthouse regression coverage restored in a separate suite.
+- `autonomous-lab` → **`autopilot`** — thin conductor (−69% words); run state relocated to `.agent-run/<mission-id>/`; `bootstrap-autopilot.sh` path-escape hardened (slug validation, repo-root anchoring, symlink guards); pause validator hardened fail-closed on unrecognized queue status.
+- **`natural-writing` = writing hub** — single owner of shared prose doctrine (anti-AI taxonomy, always-on trimmed AU-English, condense pass, claim discipline); domain writing skills link back; shared `scripts/style_lint.py` the domain linters import.
+- **`orchestrate`** — autonomous ready-issue-implementation mode (stops at the human PR gate, has `implement` create the `delivery-run` per issue, no shadow receipt); substrate-neutral `orchestration-contract.md` with Claude/Codex adapter docs; no-op line removed.
+
+**Frozen routing evidence — SUPERSEDED, deferred to #135 (owner-approved):** the catalogue restructure invalidates the spec05 and skill-portfolio-2026 digests, which bind to real Agent-Fabric routing receipts. These were **not** hand-edited — fabricating evaluation evidence is forbidden — so the 8 affected tests are marked `xfail(strict=False)` with a reason pointing at #135. Honest re-greening requires a live fabric routing run against the new catalogue, tracked in #135, before this reaches main.
+
+**Remaining (not on this branch):**
+- **Workstream E licensing consolidation** (`LICENSES/` + top-level `NOTICE` + `THIRD_PARTY_NOTICES.md` as index): per-skill notices are currently valid and correctly re-pointed to the new skill paths; the reorganisation moves ~15 legally-sensitive files and needs coordinated test-path updates, so it is a focused follow-up rather than a rushed change here.
+- **#135**: spec05 retirement + eval regeneration (now also the owner of re-greening the superseded frozen evidence above).
+- **autopilot hardening**: malformed-queue-row detection and the removed cross-file STATE corroboration (its `.orchestrator/runs.md` source was consolidated into `QUEUE.md` by design) — flagged by review as follow-ups.
 
 ## Owner decisions (grill-me R1–R5)
 

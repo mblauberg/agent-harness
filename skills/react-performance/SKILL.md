@@ -41,7 +41,7 @@ version-sensitive APIs.
 - When edits are authorised, use `implement` and apply `tdd` to behaviour
   changes. Use `tanstack-query` for React Query server state,
   `web-stack-conventions` for Lighthouse/WCAG version deltas, and
-  `frontend-design` when measured performance work affects UX/accessibility.
+  `ui-ux-design` when measured performance work affects UX/accessibility.
 - Re-measure under the same conditions. Reject improvements that merely move
   work, weaken freshness/authentication, or improve synthetic data while field
   behaviour regresses.

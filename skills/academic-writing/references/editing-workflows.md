@@ -2,6 +2,24 @@
 
 Use this reference to choose a repeatable process for a thesis-writing task.
 
+## Reference Map
+
+Beyond the hub default (Australian English) and academic register/workflow
+mode loaded for every task, add overlays only as the mode requires:
+
+- Voice diagnosis or final scrub: the hub anti-AI taxonomy plus its academic
+  overlay, `anti-ai-thesis-patterns.md`.
+- Rewrite, condense, or structural polish: the hub condense pass plus its
+  overlay, `concision-and-structure.md`.
+- Remaining overlays, load the one the task needs: `chapter-patterns.md`; the
+  hub claim-discipline schema plus its overlay
+  `claim-discipline-and-evidence.md`; `engineering-thesis-voice.md`; or
+  `citation-and-latex-safety.md`.
+- LaTeX-only work: start with `citation-and-latex-safety.md` and load prose
+  guidance only if prose also changes.
+
+A project adapter or keep-list takes precedence over any of the above.
+
 ## Diagnose Mode
 
 Use when the user asks what is wrong, whether prose sounds AI-generated, or how to improve a section.

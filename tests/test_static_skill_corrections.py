@@ -58,7 +58,7 @@ def test_release_and_frontend_source_changes_keep_the_current_lifecycle_owner_pr
     assert route("skills/legal-writing/evals/trigger_cases.yaml", "q142") == legal_send_route
     assert route("skills/playwright/evals/trigger_cases.yaml", "q167") == {
         "primary_skill": "implement",
-        "companion_skills": ["frontend-design"],
+        "companion_skills": ["ui-ux-design"],
     }
 
 
@@ -93,33 +93,32 @@ def test_work_map_trail_records_route_transitions_not_every_session():
     assert "validate_work_map.py" in skill
 
 
-def test_autonomous_lab_yields_when_bounded_reenumeration_finds_no_work():
-    skill = compact("skills/autonomous-lab/SKILL.md")
-    reference = compact("skills/autonomous-lab/references/cross-family-review.md")
+def test_autopilot_yields_when_bounded_reenumeration_finds_no_work():
+    skill = compact("skills/autopilot/SKILL.md")
+    reference = compact("skills/autopilot/references/cross-family-review.md")
 
     assert "one bounded re-enumeration pass" in skill
     assert "idle checkpoint" in skill
-    assert "only human STOP closes the lab" in skill
+    assert "only human STOP closes the mission" in skill
     assert "`orchestrate` owns provider routing" in reference
     assert "reviewer roster" not in reference.lower()
 
 
-def test_autonomous_lab_claude_stop_hook_uses_the_same_pause_validator():
-    recovery = read("skills/autonomous-lab/references/recovery-and-cadence.md")
-    template = read("skills/autonomous-lab/templates/README.template.md")
+def test_autopilot_claude_stop_hook_uses_the_same_pause_validator():
+    recovery = read("skills/autopilot/references/recovery-and-cadence.md")
+    template = read("skills/autopilot/templates/README.template.md")
 
     assert "templates/README.template.md" in recovery
     assert "references/codex-operator.md" in recovery
     for source in (recovery, template):
         assert "validate_idle_pause.py" in source
-        assert "--runs" in source
         assert "--queue" in source
         assert "non-zero" in source
 
 
 def test_frontend_live_state_and_playwright_lineage_contracts_are_honest():
-    teach = compact("skills/frontend-design/reference/teach.md")
-    live = compact("skills/frontend-design/reference/live.md")
+    teach = compact("skills/ui-ux-design/reference/teach.md")
+    live = compact("skills/ui-ux-design/reference/live.md")
     playwright = compact("skills/playwright/SKILL.md")
 
     assert "loader already renamed it" not in teach
@@ -129,19 +128,26 @@ def test_frontend_live_state_and_playwright_lineage_contracts_are_honest():
     assert "does not attest its version" in playwright
 
 
-def test_skill_audit_declares_action_owner_primary_for_composed_requests():
-    skill = compact("skills/skill-audit/SKILL.md")
-    description = read("skills/skill-audit/SKILL.md").split("---", 2)[1]
+def test_skill_craft_declares_action_owner_primary_for_composed_requests():
+    skill = compact("skills/skill-craft/SKILL.md")
+    audit = compact("skills/skill-craft/references/audit.md")
 
-    assert "action/lifecycle owner is primary" in description
-    assert "action-owning lifecycle remains primary" in skill
-    for case_id, primary in (("q241", "implement"), ("q242", "evaluate"), ("q243", "release")):
-        expected = route("skills/skill-audit/evals/trigger_cases.yaml", case_id)
+    assert "companion to a primary lifecycle owner" in skill
+    assert "stays the action-owner" in skill
+    assert "action-owning lifecycle remains primary" in audit
+    # These richer branch-tagged composition cases live in
+    # boundary_trace_cases.yaml's routing_reference_cases (not in the
+    # strictly schema-validated evals/trigger_cases.yaml; see
+    # tests/test_skill_eval_fixtures.py for that contract).
+    routing_cases = {
+        case["id"]: case
+        for case in yaml.safe_load(read("skills/skill-craft/evals/boundary_trace_cases.yaml"))[
+            "routing_reference_cases"
+        ]
+    }
+    for case_id, primary in (("sc-007", "implement"), ("sc-008", "evaluate"), ("sc-009", "release")):
+        expected = routing_cases[case_id]["expected"]
         assert expected["primary_skill"] == primary
-        assert "skill-audit" in expected["companion_skills"]
-    q242 = next(
-        case
-        for case in yaml.safe_load(read("skills/skill-audit/evals/trigger_cases.yaml"))["cases"]
-        if case["id"] == "q242"
-    )
-    assert "audit" in q242["prompt"].lower()
+        assert "skill-craft" in expected["companion_skills"]
+    sc_008 = routing_cases["sc-008"]
+    assert "audit" in sc_008["prompt"].lower()

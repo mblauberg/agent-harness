@@ -3,6 +3,16 @@
 Use this reference for any `draft`, `rewrite`, `condense`, `diagnose` or `final-scrub` task involving court
 forms, affidavits, submissions, orders, chronologies, correspondence or annexure notes.
 
+Load the hub first for the doctrine this file does not restate:
+`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/anti-ai-taxonomy.md`
+for the tiered artefact/density/structural sweep, and
+`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/condense-pass.md`
+for the shared condense procedure and integrity check. This file is the
+legal-specific overlay: the Legal Function Test (a distinct classification
+scheme, not the hub's observed/inferred claim schema), legal noun-stack
+examples, and the leave/interlocutory register and persuasive-strength
+material that has no general-prose or engineering/academic equivalent.
+
 ## Principle
 
 Concision in legal drafting means every sentence does legal work. A sentence should state relief, a request, a
@@ -46,37 +56,35 @@ the function, move it rather than rephrasing it in place.
 
 ## Condense Pass
 
-1. Lock invariants: facts, dates, amounts, parties, source anchors, exhibit labels, rule numbers, defined terms,
-   disputed-status wording, redaction limits and human-authority conditions.
-2. Put the operative point first: relief, request, answer, contention or next step.
-3. Reverse-outline the paragraphs by legal function.
-4. De-duplicate to one home. State a fact, rule or qualification once in the document that owns it, then
-   cross-refer if another document needs it.
-5. Cut throat-clearing, background recitals, repeated history, empty transitions, decorative consequence
-   sentences and broad fairness conclusions.
-6. Move detail into chronologies, annexure indexes, affidavits or submissions where that document owns the
-   detail.
-7. Stop when the next cut would remove a source anchor, date, amount, party label, legal status, limitation,
-   redaction qualification, exhibit label, paragraph/page/line reference, forum wording or safety boundary.
-8. If the revised passage is longer than the original, run the function test again. Keep the addition only if
-   the draft was legally incomplete without it.
+Follow the hub condense procedure (measure, lock invariants, reverse-outline,
+de-duplicate to one home, cut fluff, narrow-not-soften, stop rule, report the
+delta). Legal-specific application:
+
+- **Lock invariants**: facts, dates, amounts, parties, source anchors, exhibit labels, rule numbers, defined terms,
+  disputed-status wording, redaction limits and human-authority conditions.
+- **Put the operative point first**: relief, request, answer, contention or next step.
+- **Reverse-outline** the paragraphs by legal function (see the Legal Function Test above), not by the hub's
+  generic paragraph test.
+- **Move detail**, do not delete it, into chronologies, annexure indexes, affidavits or submissions where that
+  document owns it.
+- **Stop rule addition**: stop when the next cut would remove a source anchor, party label, legal status,
+  redaction qualification, exhibit label, paragraph/page/line reference, forum wording or safety boundary.
+- **If the revised passage is longer than the original**, run the Legal Function Test again. Keep the addition
+  only if the draft was legally incomplete without it.
 
 There is no percentage target for court work. A short filing can already be tight. A long AI-drafted passage may
 need heavy cutting, but the stop rule controls the cut.
 
 ## Legal Noun Stacks
 
-Dense noun stacks are a common machine tell in legal drafting because they hide the actor, act and consequence.
-Do not strip legal terminology. Lighten the phrase around it.
-
-Repair method:
-
-1. Keep one defined legal term per phrase.
-2. Move forum, source, safety and timing qualifiers into a clause.
-3. Replace abstract heads such as `context`, `framework`, `posture`, `material`, `position`, `issue` and
-   `risk` with the act, source, order, request, prejudice or consequence.
-4. Release nominalisations where a verb is clearer.
-5. Reuse the same repaired phrase each time the concept recurs.
+See the hub taxonomy's Noun-stacking and nominal compression for the general
+repair method (cap premodifiers, unpack vague heads, prefer a verb, release
+nominalisations, reuse the fix). Dense noun stacks are a common machine tell
+in legal drafting because they hide the actor, act and consequence; do not
+strip legal terminology, lighten the phrase around it. Legal-specific
+abstract heads to replace: `context`, `framework`, `posture`, `material`,
+`position`, `issue` and `risk` become the act, source, order, request,
+prejudice or consequence.
 
 | Weak stack | Better legal phrasing |
 |---|---|
@@ -88,24 +96,12 @@ Repair method:
 
 ## Additive Drafting
 
-Additive drafting is the habit of adding another paragraph because the text feels incomplete, then linking it
-with a neutral connector. It produces repetitive filings and emails.
-
-Before adding a sentence, ask what new legal function it serves. If the answer is only `more background`,
-`additional clarity` or `context`, cut it or move it.
-
-Treat these explanations as failed reasons for adding text:
-
-- `sets the scene`;
-- `sounds more complete`;
-- `makes the tone warmer`;
-- `adds a transition`;
-- `summarises the history`;
-- `explains the obvious consequence`;
-- `makes it more persuasive` without adding a source, rule, contention or relief.
-
-For `rewrite`, `condense` and `final-scrub`, a net addition is a warning sign. Either cut again or state the
-specific legal function that required the extra words.
+See the hub taxonomy's Additive drafting for the general concept. Legal
+application: before adding a sentence, ask what new legal function it serves
+(see the Legal Function Test). If the answer is only `more background`,
+`additional clarity` or `context`, cut it or move it. `makes it more
+persuasive` is also a failed reason unless the addition adds a source, rule,
+contention or relief.
 
 Replace additive openers with the real legal relation:
 
@@ -122,7 +118,9 @@ needed. If they are linked, name the link.
 
 ## Positive Form Without Spin
 
-Use positive form to make the legal position direct. Do not convert an honest absence into reassurance.
+See Positive form is not positive spin in the hub taxonomy for the general
+rule. Use positive form to make the legal position direct. Do not convert an
+honest absence into reassurance.
 
 | Weak or indirect | Better where accurate |
 |---|---|
@@ -139,12 +137,8 @@ and any issue that remains under appeal or disputed.
 
 ## Defensive Over-Qualification
 
-A distinct advocacy tell is the stacked self-qualification: the drafter, worried the tribunal will over-read a
-point, wraps it in pre-emptive disclaimers no one asked for. It reads as anxious and dilutes the point it
-guards. This is the mirror of the positive-form rule: keep the negative that marks a boundary, and cut the
-negatives that only manage the reader's reaction.
-
-Symptoms:
+See the hub taxonomy's Defensive over-qualification for the general
+cut-or-keep test. Legal symptoms:
 
 - a sentence that first states what the party does not say, then what it does say, then how little it puts the
   point (`X does not assert he was 'ordered' or 'forced'; the records are silent as to motive; X asserts none
@@ -155,9 +149,8 @@ Symptoms:
   not in contest`, `this is neither admitted nor answered here`) after the operative sentence already fixed
   the position.
 
-Cut-versus-keep test: would removing the words remove a legal boundary, or only remove anxiety? Keep one
-qualifier that defines a genuine boundary: a source limit, a reserved issue, a non-admission, a redaction
-condition, a disputed status, a human-authority gap. Cut the repetition around it.
+Keep one qualifier that defines a genuine boundary: a source limit, a reserved issue, a non-admission, a
+redaction condition, a disputed status, a human-authority gap. Cut the repetition around it.
 
 | Anxious over-qualification (cut to one clean limit) | Necessary boundary (keep) |
 |---|---|
@@ -227,19 +220,15 @@ cannot decide) or anxiety (re-hedging a point already put), and it hands the oth
 
 ## Condense Integrity
 
-A condense, rewrite or relocation pass is only safe if what survives is verified, because a drafting model's
-own report that nothing was dropped is untrustworthy - lossy passes have silently cut cross-references,
-qualifiers and citations while reporting a clean pass.
-
-- Gate any substantial condense with a deterministic token check: set-diff the figures, dates, amounts,
-  paragraph/page/line pinpoints, exhibit labels, authorities and defined terms between the before and after
-  texts. Zero unexplained loss is the pass condition.
-- The token check sees tokens, not arguments. Follow it with an independent qualitative pass asking: is any
-  ground, particular, qualifier or honest negative now weaker, unowned or unlocatable?
-- Relocation can weaken as well as preserve: a premise moved too far from the contention that uses it, or a
-  numbered particular de-listed into prose, can cost identifiability. After relocating, re-read the argument
-  that relied on the moved material and confirm it still lands with a pinpoint to the new home.
-- Never patch a gap the checks expose by re-deriving content from memory; restore from the before-text.
+Follow the hub's Condense integrity (deterministic token check, then an
+independent qualitative pass; never patch a gap from memory). Legal-specific
+token set: figures, dates, amounts, paragraph/page/line pinpoints, exhibit
+labels, authorities and defined terms. Legal-specific qualitative question:
+is any ground, particular, qualifier or honest negative now weaker, unowned
+or unlocatable? Relocation risk is acute here: a premise moved too far from
+the contention that uses it, or a numbered particular de-listed into prose,
+can cost identifiability. Re-read the argument that relied on the moved
+material and confirm it still lands with a pinpoint to the new home.
 
 ## Wrong-Home Repair
 
@@ -269,16 +258,13 @@ Lock legally functional material before cutting:
 
 ## Sentence Repair
 
-Prefer direct repairs:
+The hub's condense-pass Sentence repair table covers the general wordy
+forms (`in order to`, `the fact that`, `is able to`, and similar). Legal-only
+additions:
 
 | Wordy form | Repair |
 |---|---|
-| `in order to` | `to` |
 | `for the purpose of` | `for` or the specific purpose |
-| `the fact that` | the fact, or a noun phrase |
-| `question as to whether` | `whether` |
-| `is able to` | `can`, unless ability is legally important |
-| `has the ability to` | `can`, unless capacity is the issue |
 | `in circumstances where` | `where`, `when` or the actual condition |
 | `with respect to` | `about`, `for`, `on` or the precise legal relation |
 | `it is submitted that` | state the submission directly, unless the forum style calls for it |

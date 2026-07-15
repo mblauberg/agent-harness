@@ -2267,8 +2267,8 @@ def test_raw_parent_traversal_fails_closed_on_missing_parent_object(tmp_path):
 
 def test_public_tree_retains_ui_ux_pro_max_attribution():
     root = Path(__file__).resolve().parents[1]
-    licence = root / "skills/frontend-design/UI_UX_PRO_MAX_LICENSE"
-    notice = (root / "skills/frontend-design/NOTICE.md").read_text()
+    licence = root / "skills/ui-ux-design/UI_UX_PRO_MAX_LICENSE"
+    notice = (root / "skills/ui-ux-design/NOTICE.md").read_text()
     repository_notice = (root / "THIRD_PARTY_NOTICES.md").read_text()
     assert "Copyright (c) 2024 Next Level Builder" in licence.read_text()
     assert "UI UX Pro Max" in notice
