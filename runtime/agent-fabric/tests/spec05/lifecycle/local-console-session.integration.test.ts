@@ -686,7 +686,7 @@ describe("public local operator Console session", () => {
     }
     await expectSecretsAbsent(
       [paths.stateDirectory, paths.runtimeDirectory],
-      [project.credential.token, ...(selected === undefined ? [] : [selected.credential.token])],
+      [project.credential.token, ...(selected === undefined ? [] : [selected.projectCredential.token, selected.credential.token])],
     );
   });
 
