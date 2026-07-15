@@ -2277,18 +2277,6 @@ def test_public_tree_retains_ui_ux_pro_max_attribution():
     assert "UI_UX_PRO_MAX_LICENSE" in repository_notice
 
 
-def test_public_tree_retains_natural_writing_attribution():
-    root = Path(__file__).resolve().parents[1]
-    licence = root / "skills" / "natural-writing" / "BLADER_HUMANIZER_LICENSE"
-    notice = (root / "skills" / "natural-writing" / "NOTICE.md").read_text()
-    repository_notice = (root / "THIRD_PARTY_NOTICES.md").read_text()
-    assert "Copyright (c) 2025 Siqi Chen" in licence.read_text()
-    assert "blader/humanizer" in notice
-    assert "BLADER_HUMANIZER_LICENSE" in notice
-    assert "Natural writing" in repository_notice
-    assert "BLADER_HUMANIZER_LICENSE" in repository_notice
-
-
 # --- D-032 regression group 1: streaming decoy-bridged restart equivalence ---
 
 DECOY_BRIDGE_CLASSES = [

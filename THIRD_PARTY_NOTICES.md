@@ -42,13 +42,6 @@ Pocock, under the MIT License. The terms are in `skills/grill-me/LICENSE`.
 copyright 2026 hqhq1025, under the MIT License. The terms are in
 `skills/skill-audit/LICENSE`.
 
-## Superpowers
-
-Parts of `skills/tdd/`, `skills/diagnose/` and `skills/skill-authoring/` are
-adapted from [Superpowers skills](https://github.com/obra/superpowers/tree/main/skills),
-copyright 2025 Jesse Vincent, under the MIT License. Each affected component
-contains a copy of the upstream terms in `SUPERPOWERS_LICENSE`.
-
 ## Playwright
 
 `skills/playwright/` is redistributed from
@@ -63,14 +56,6 @@ licence and notice are retained as `skills/playwright/LICENSE.txt` and
 [BMAD Labs' TypeScript Clean Code](https://github.com/bmad-labs/skills/tree/main/skills/typescript-clean-code)
 under the MIT License, copyright 2025 BMAD Labs. Its terms are retained in
 `skills/typescript-clean-code/LICENSE`.
-
-## Natural writing
-
-`skills/natural-writing/` is a renamed and substantially modified distribution
-of [Siqi Chen's `humanizer`](https://github.com/blader/humanizer/tree/1b48564898e999219882660237fde01bf4843a0f),
-copyright 2025 Siqi Chen, under the MIT License. Its terms and modification
-notice are retained in `skills/natural-writing/BLADER_HUMANIZER_LICENSE` and
-`skills/natural-writing/NOTICE.md`.
 
 ## Caveman
 

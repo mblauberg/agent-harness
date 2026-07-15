@@ -138,7 +138,3 @@ to justify degrading clear prose.
   output](https://aclanthology.org/2024.emnlp-main.368/) (2024).
 - Dugan et al., [RAID detector robustness
   benchmark](https://aclanthology.org/2024.acl-long.674/) (2024).
-
-The original workflow and part of the early pattern inventory were adapted from
-[`blader/humanizer`](https://github.com/blader/humanizer), under the MIT
-licence retained beside this skill.

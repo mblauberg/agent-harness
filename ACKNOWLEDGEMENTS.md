@@ -16,8 +16,7 @@ record.
 - [Skill Optimizer](https://github.com/hqhq1025/skill-optimizer/tree/f10e5d85371f72841459493ed750f45ed9afa99d/skills/skill-optimizer) by hqhq1025 is
   the basis of `skill-audit` (MIT).
 - [Superpowers](https://github.com/obra/superpowers) by Jesse Vincent informed
-  and supplied adapted material in `tdd`, `diagnose` and `skill-authoring`
-  (MIT).
+  the approach in `tdd`, `diagnose` and `skill-authoring`.
 - [Microsoft Playwright CLI](https://github.com/microsoft/playwright-cli/tree/main/skills/playwright-cli) is
   the source of adapted material in `playwright` (Apache-2.0).
 - [Vercel agent-skills](https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices)
@@ -25,9 +24,6 @@ record.
   upstream).
 - [BMAD Labs](https://github.com/bmad-labs/skills/tree/main/skills/typescript-clean-code)
   supplied the redistributed `typescript-clean-code` material (MIT).
-- [Siqi Chen's `humanizer`](https://github.com/blader/humanizer/tree/1b48564898e999219882660237fde01bf4843a0f)
-  supplied the original workflow and early pattern inventory now substantially
-  rewritten as `natural-writing` (MIT).
 
 ## Independently implemented influences
 
