@@ -1,7 +1,7 @@
 # ADR 0002 — Capability-compiled execution authority (write profiles)
 
-**Status:** Accepted 2026-07-13 (human; authority contract and containment gate
-approved)
+**Status:** Architecture accepted 2026-07-13 (human). This decision grants no
+W010-A implementation or W010-B live-execution authority.
 
 ## Context
 
@@ -22,7 +22,7 @@ provider-native settings in four stages:
 1. **Authority contract:** protocol-owned, versioned `AuthorityEnvelopeV2`
    carrying the full human-approved envelope (approval binding with evidence
    digest; secrets, deployment, irreversible-action and network dimensions —
-   all currently missing from Fabric's `AuthorityInput`), plus exact
+   all missing from Fabric's former `AuthorityInput`), plus exact
    characterisation goldens of today's read-only projection. Update the
    authority and provider-action specifications with the profile contract in
    the same change. Risk tier: crucial.
@@ -54,7 +54,11 @@ pre-release state is reset — no dual parser is retained.
   effects via the existing `ExternalEffectService` model).
 - The first write pilot provider is chosen by containment evidence, not
   preference; the other stays read-only until it independently passes.
-- [Issue #22](https://github.com/mblauberg/provenant/issues/22) owns the W010
-  containment boundary, evidence and human gate. The linked standalone
-  specifications own normative behaviour; Git history preserves retired work
-  packages and implementation plans.
+- The standalone authority, workspace-containment and provider-action
+  specifications own the architecture and mechanisms, not the fixed
+  containment matrix. [Issue
+  #22](https://github.com/mblauberg/provenant/issues/22) owns live W010
+  delivery, evidence and human gates. Under [issue
+  #85](https://github.com/mblauberg/provenant/issues/85), the matrix awaits
+  migration to a trimmed standalone semantic owner and human ratification
+  before the historical implementation pack retires.

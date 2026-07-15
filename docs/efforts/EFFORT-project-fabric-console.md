@@ -2,25 +2,27 @@
 
 Updated: 15 July 2026
 
-Status: active under the [W012/W013 reducer, issue
-#23](https://github.com/mblauberg/provenant/issues/23). GitHub issues own live
-implementation and acceptance state; this file is only the compact route.
+Status: Console W012 implementation is complete under the [W012/W013 reducer,
+issue #23](https://github.com/mblauberg/provenant/issues/23). GitHub issues own
+live implementation and acceptance state; this file is only the compact route.
 
 ## Current W012 route
 
-- The child-bridge, expired-principal, pagination and partial first-frame timing
-  repairs are complete in [issues
+- The child-bridge, expired-principal and partial first-frame timing repairs are
+  complete in [issues
   #64](https://github.com/mblauberg/provenant/issues/64),
   [#71](https://github.com/mblauberg/provenant/issues/71),
-  [#72](https://github.com/mblauberg/provenant/issues/72),
   [#74](https://github.com/mblauberg/provenant/issues/74) and
   [#76](https://github.com/mblauberg/provenant/issues/76).
-- [Issue #75](https://github.com/mblauberg/provenant/issues/75) is active. Its
-  diagnosis identifies a test-oracle race between final detach and concurrent
-  reopen, with a bounded test-only repair.
-- [Issue #82](https://github.com/mblauberg/provenant/issues/82) is queued after
-  #75 because both repairs share Console test/support ownership. Its diagnosis
-  identifies competing automatic and explicit daemon-stop owners.
+- The final bounded Console repairs are complete: pagination in [issue
+  #72](https://github.com/mblauberg/provenant/issues/72) and [PR
+  #90](https://github.com/mblauberg/provenant/pull/90); existing-session reopen
+  in [issue #75](https://github.com/mblauberg/provenant/issues/75), [PR
+  #91](https://github.com/mblauberg/provenant/pull/91) and [PR
+  #92](https://github.com/mblauberg/provenant/pull/92); and daemon-stop custody
+  in [issue #82](https://github.com/mblauberg/provenant/issues/82) and [PR
+  #94](https://github.com/mblauberg/provenant/pull/94). No active Console
+  implementation lane remains.
 
 The linked issues own their acceptance criteria and evidence. Merged pull
 requests and historical lane detail remain in Git and are not repeated here.
