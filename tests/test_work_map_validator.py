@@ -164,6 +164,19 @@ def test_route_rejects_live_state_smuggled_in_link_labels(tmp_path):
     )
 
 
+def test_route_rejects_merged_and_parenthetical_label_smuggles(tmp_path):
+    module = load_module()
+    for label in ("PR #2 — merged", "Issue #1 (DONE)"):
+        path = tmp_path / "EFFORT-example.md"
+        path.write_text(
+            map_text(f"- [{label}](https://github.com/example/project/pull/2)")
+        )
+
+        assert "route link labels must not smuggle live state" in "\n".join(
+            module.validate(path)
+        ), label
+
+
 def test_route_rejects_prose_around_an_otherwise_valid_link(tmp_path):
     path = tmp_path / "EFFORT-example.md"
     path.write_text(

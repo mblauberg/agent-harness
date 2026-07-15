@@ -19,13 +19,14 @@ LIVE_NARRATION_RE = re.compile(
 )
 ROUTE_NARRATION_RE = re.compile(
     r"\b(active|blocked|complete(?:d)?|current|done|in progress|integrated|"
-    r"owner|owns|pending|remaining|waiting)\b|\bdepends\s*:",
+    r"merged|owner|owns|pending|remaining|waiting)\b|\bdepends\s*:",
     re.IGNORECASE,
 )
 HANDOFF_RE = re.compile(r"\bhandoffs?\b", re.IGNORECASE)
 LABEL_SMUGGLE_RE = re.compile(
-    r"(?:[—–-]\s*[^\]]*\b(?:done|in progress|blocked|complete(?:d)?|integrated|"
-    r"pending|waiting|owner)\b)|\bowner\s+\S+|\b\d{4}-\d{2}-\d{2}\b",
+    r"(?:[—–(-]\s*[^\])]*\b(?:done|in progress|blocked|complete(?:d)?|"
+    r"integrated|merged|pending|waiting|owner)\b)"
+    r"|\bowner\s+\S+|\b\d{4}-\d{2}-\d{2}\b",
     re.IGNORECASE,
 )
 LINK_LABEL_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
