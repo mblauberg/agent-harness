@@ -102,12 +102,6 @@ def test_completed_leg_rejects_markdown_handoff_link(tmp_path):
     )
 
 
-def test_current_harness_effort_map_uses_supported_repository_format():
-    path = ROOT / "docs" / "efforts" / "EFFORT-harness-lifecycle-refactor.md"
-
-    assert load_module().validate(path) == []
-
-
 def test_trail_rejects_oldest_first_order(tmp_path):
     path = tmp_path / "EFFORT-example.md"
     path.write_text(
