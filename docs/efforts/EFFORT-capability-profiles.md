@@ -2,8 +2,8 @@
 
 Updated: 15 July 2026
 
-Status: active. The direct `AuthorityEnvelopeV2` cutover and pure
-`AuthorityCompiler` extraction are complete in
+Status: active. The direct `AuthorityEnvelopeV2` cutover and single narrow,
+stateless, write-free `AuthorityCompiler` extraction are complete in
 [issue #21](https://github.com/mblauberg/provenant/issues/21). Provider write
 authority remains unavailable; [issue
 #22](https://github.com/mblauberg/provenant/issues/22) owns the containment
@@ -13,8 +13,8 @@ evidence and first-provider decision.
 
 [ADR 0002](../adr/0002-capability-compiled-execution-authority.md) remains the
 provider-authority decision. The runtime now has one V2 authority contract and
-one pure compiler, without a legacy decoder, compatibility bridge or duplicate
-runtime schema.
+one narrow, stateless, write-free compiler, without a legacy decoder,
+compatibility bridge or duplicate runtime schema.
 
 Four standalone semantic specifications own distinct surfaces under [ADR
 0009](../adr/0009-standalone-semantic-specifications.md):
@@ -29,9 +29,10 @@ integrity.
 
 [Issue #22](https://github.com/mblauberg/provenant/issues/22) owns live W010
 delivery, evidence and human gates. The historical implementation pack is
-non-authoritative provenance pending its retirement decision under [issue
-#23/W013](https://github.com/mblauberg/provenant/issues/23), not an active
-dependency.
+non-authoritative provenance pending its retirement under [issue
+#102](https://github.com/mblauberg/provenant/issues/102), not an active
+dependency. [Issue #23](https://github.com/mblauberg/provenant/issues/23)
+continues to own W012 reduction and the later W013 gates.
 
 ## Remaining route
 
