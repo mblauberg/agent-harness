@@ -76,9 +76,9 @@ const bridgeContract = {
 };
 
 let retainedProtocol: Awaited<ReturnType<typeof NdjsonRpcTransport.connect>> | undefined;
-let retainedBridgeLive = true;
-let lossRequested = false;
 let lossControlSocket: Socket | undefined;
+let lossPhase: "idle" | "armed" | "audit-ready" | "requested" = "idle";
+let heldHealthRequest: Readonly<{ id: string; kind: "child" }> | undefined;
 let retainedBinding: Readonly<{
   actionId: string;
   agentId: string;
@@ -99,19 +99,43 @@ if (
   lossServer = createServer((socket) => {
     lossSockets.add(socket);
     socket.setEncoding("utf8");
-    let command = "";
+    let commands = "";
     socket.on("data", (chunk: string) => {
-      command += chunk;
-      if (!command.includes("\n")) return;
-      if (command !== "lose-child-bridge\n" || lossRequested) {
+      commands += chunk;
+      while (commands.includes("\n")) {
+        const newline = commands.indexOf("\n");
+        const command = commands.slice(0, newline);
+        commands = commands.slice(newline + 1);
+        if (command === "ARM" && lossPhase === "idle") {
+          lossPhase = "armed";
+          lossControlSocket = socket;
+          continue;
+        }
+        if (
+          command === "LOSS_REQUEST" && lossPhase === "audit-ready" &&
+          socket === lossControlSocket && heldHealthRequest !== undefined
+        ) {
+          lossPhase = "requested";
+          const request = heldHealthRequest;
+          heldHealthRequest = undefined;
+          respond(request.id, { schemaVersion: 1, kind: request.kind, live: false });
+          continue;
+        }
         socket.destroy();
         return;
       }
-      lossRequested = true;
-      retainedBridgeLive = false;
-      lossControlSocket = socket;
     });
-    socket.once("close", () => lossSockets.delete(socket));
+    socket.once("close", () => {
+      lossSockets.delete(socket);
+      if (socket !== lossControlSocket || lossPhase === "requested") return;
+      if (heldHealthRequest !== undefined) {
+        const request = heldHealthRequest;
+        respond(request.id, { schemaVersion: 1, kind: request.kind, live: true });
+        heldHealthRequest = undefined;
+      }
+      lossControlSocket = undefined;
+      lossPhase = "idle";
+    });
   });
   const server = lossServer;
   await new Promise<void>((resolve, reject) => {
@@ -245,13 +269,19 @@ input.on("line", (line) => {
     }
     if (request.method === "retained_bridge_health") {
       const binding = retainedBinding;
-      const live = retainedBridgeLive && binding !== undefined && retainedProtocol !== undefined &&
+      const live = binding !== undefined && retainedProtocol !== undefined &&
         request.params.kind === "child" && request.params.actionId === binding.actionId &&
         request.params.agentId === binding.agentId && request.params.projectSessionId === binding.projectSessionId &&
         request.params.runId === binding.runId && request.params.principalGeneration === binding.principalGeneration &&
         request.params.providerSessionRef === binding.providerSessionRef &&
         request.params.providerSessionGeneration === binding.providerSessionGeneration &&
         request.params.bridgeGeneration === binding.bridgeGeneration;
+      if (live && lossPhase === "armed" && lossControlSocket !== undefined) {
+        heldHealthRequest = { id: request.id, kind: "child" };
+        lossPhase = "audit-ready";
+        lossControlSocket.write("AUDIT_READY\n");
+        return;
+      }
       respond(request.id, { schemaVersion: 1, kind: request.params.kind, live });
       return;
     }
@@ -272,11 +302,11 @@ input.on("line", (line) => {
 
 input.on("close", () => {
   lossServer?.close();
-  if (lossRequested && lossObservedPath !== undefined) {
+  if (lossPhase === "requested" && lossObservedPath !== undefined) {
     writeFileSync(lossObservedPath, "child-bridge-loss-observed\n", { mode: 0o600 });
   }
   for (const socket of lossSockets) {
-    if (lossRequested && socket === lossControlSocket) socket.end("child-bridge-loss-observed\n");
+    if (lossPhase === "requested" && socket === lossControlSocket) socket.end("LOSS_OBSERVED\n");
     else socket.destroy();
   }
   void retainedProtocol?.close();
