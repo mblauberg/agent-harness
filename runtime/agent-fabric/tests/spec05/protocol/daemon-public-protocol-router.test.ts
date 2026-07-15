@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createConnection, createServer, type Server, type Socket } from "node:net";
+import { createConnection, createServer, Socket, type Server } from "node:net";
 import { createInterface } from "node:readline";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +21,7 @@ afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }));
   await Promise.allSettled(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+  vi.useRealTimers();
 });
 
 async function startRouter(options: {
@@ -95,15 +96,29 @@ describe("daemon first-frame routing bounds", () => {
     expect(onRoute).not.toHaveBeenCalled();
   });
 
-  it("measures idle time from the latest partial first-frame bytes", async () => {
-    const { socket, onRoute, routed } = await startRouter({ idleTimeoutMs: 30 });
-    socket.write('{"id":"partial",');
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    socket.write('"operation"');
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    socket.write(':"initialize","input":{}}\n');
+  it("measures idle time from the latest partial first-frame bytes", () => {
+    vi.useFakeTimers();
+    const socket = new Socket();
+    sockets.push(socket);
+    const onRoute = vi.fn((_protocol: DaemonConnectionProtocol, routedSocket: Socket) => {
+      routedSocket.destroy();
+    });
+    routeDaemonConnection(socket, {
+      maximumFirstFrameBytes: 1_024,
+      idleTimeoutMs: 30,
+      onRoute,
+    });
 
-    await expect(routed).resolves.toBe("public-v1");
+    vi.advanceTimersByTime(29);
+    socket.emit("data", Buffer.from('{"id":"partial",'));
+    vi.advanceTimersByTime(29);
+    expect(socket.destroyed).toBe(false);
+
+    socket.emit("data", Buffer.from('"operation"'));
+    vi.advanceTimersByTime(29);
+    expect(socket.destroyed).toBe(false);
+
+    socket.emit("data", Buffer.from(':"initialize","input":{}}\n'));
     expect(onRoute).toHaveBeenCalledWith("public-v1", expect.anything());
   });
 
