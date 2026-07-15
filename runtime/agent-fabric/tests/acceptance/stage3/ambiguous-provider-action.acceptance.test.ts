@@ -1691,6 +1691,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       spawnBarrier: true,
     });
     cleanup.push(async () => {
+      await fixture.providerSpawnBarrier?.release();
       await fixture.fabric.close();
       await rm(fixture.directory, { recursive: true, force: true });
     });
