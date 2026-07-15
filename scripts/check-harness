@@ -21,22 +21,11 @@ cd "$ROOT"
 "$PYTHON" scripts/check_harness.py
 "$PYTHON" scripts/check_specs.py
 "$PYTHON" skills/orchestrate/evals/check_skill_triggers.py
-# The Spec 05 routing evaluation binds its frozen inputs and real Agent-Fabric
-# provider answers together by digest. A catalogue restructure invalidates the
-# whole bundle, and honest re-greening needs a live provider run, not a hand
-# edit (fabricating evaluation evidence is forbidden). While a SUPERSEDED marker
-# is present the direct gates are waived and the re-run is tracked in the issue
-# the marker names; on main the marker is absent and the gates enforce fully.
-SPEC05_EVIDENCE="docs/evals/spec05-skill-routing-2026"
-if [[ -f "$SPEC05_EVIDENCE/SUPERSEDED" ]]; then
-  echo "SKIP: Spec 05 routing gates waived — evidence superseded:"
-  sed 's/^/  /' "$SPEC05_EVIDENCE/SUPERSEDED"
-else
-  "$PYTHON" skills/orchestrate/evals/spec05_skill_evaluation.py validate-inputs
-  "$PYTHON" skills/orchestrate/evals/spec05_skill_evaluation.py probe
-  "$PYTHON" skills/orchestrate/evals/spec05_skill_evaluation.py validate-routing \
-    --result "$SPEC05_EVIDENCE/routing-result.json"
-fi
+# Lifecycle-skill alignment is a deterministic current-tree gate. Historical
+# provider routing evidence stays immutable under docs/archive and is not
+# rewritten or treated as a live-catalogue result.
+"$PYTHON" skills/orchestrate/evals/lifecycle_skill_evaluation.py validate-inputs
+"$PYTHON" skills/orchestrate/evals/lifecycle_skill_evaluation.py probe
 
 while IFS= read -r -d '' script; do
   case "$script" in

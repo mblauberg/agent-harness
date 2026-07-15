@@ -217,7 +217,7 @@ function richDataset(
       row("activity", "event-1", {
         kind: "activity",
         activityKind: "decision",
-        summary: "Spec 05 approved",
+        summary: "Certifying review approved",
         occurredAt: timestamp,
       }),
     ],
@@ -412,7 +412,7 @@ function controllableRunDataset(snapshotRevision = 11): FabricConsoleDataset {
 function closedProjectionDataset(): FabricConsoleDataset {
   return {
     ...richDataset(),
-    spec05: {
+    review: {
       reviewRuns: [{
         projectSessionId: sessionId,
         coordinationRunId: "AFAB-004",
@@ -800,7 +800,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
 
   it("binds review evidence detail to the exact run and evidence ID pair", () => {
     const current = closedProjectionDataset();
-    const exact = current.spec05?.reviewRuns[0];
+    const exact = current.review?.reviewRuns[0];
     if (exact === undefined || exact.evidence.state !== "current") {
       throw new Error("closed review fixture unavailable");
     }
@@ -834,8 +834,8 @@ describe("structured presenter and responsive Fabric renderer", () => {
         },
         result: { coordinationRunId: "AFAB-004" },
       },
-      spec05: {
-        ...current.spec05,
+      review: {
+        ...current.review,
         reviewRuns: [crossed, exact],
       },
     } as unknown as FabricConsoleDataset;
@@ -883,15 +883,15 @@ describe("structured presenter and responsive Fabric renderer", () => {
 
   it("renders an actual-route mismatch ahead of a contradictory non-null digest", () => {
     const current = closedProjectionDataset();
-    const run = current.spec05?.reviewRuns[0];
+    const run = current.review?.reviewRuns[0];
     if (run === undefined || run.evidence.state !== "current") {
       throw new Error("closed review fixture unavailable");
     }
     const runEvidence = run.evidence.value as unknown as readonly ReviewEvidenceReadV1[];
     const dataset = {
       ...current,
-      spec05: {
-        ...current.spec05,
+      review: {
+        ...current.review,
         reviewRuns: [{
           ...run,
           evidence: {

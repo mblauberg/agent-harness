@@ -1,13 +1,12 @@
 {
   "catalogue": {
     "characters": 7409,
-    "sha256": "sha256:9346760fbab26c585e87822f88c54f54b47a2ea0231935b2befc72798ba886cf"
+    "path": "skills"
   },
   "contract": "skill-routing-regression",
   "dataset": {
     "cases": 18,
-    "path": "routing-holdout.yaml",
-    "sha256": "sha256:565b5c87e20fedca94a33ea473656204fdb9d5bab186288090e40714d5b90366"
+    "path": "routing-holdout.yaml"
   },
   "evaluation_id": "skill-portfolio-routing-20260714-fabric-v5",
   "generated_at": "2026-07-14T01:44:31.369947+00:00",
@@ -44,8 +43,7 @@
     }
   },
   "plan": {
-    "path": "routing-protocol.json",
-    "sha256": "sha256:d36390ede2531d585341f37bc93488f07f01f2805eb233744cfcbb2acbf1a089"
+    "path": "routing-protocol.json"
   },
   "raw_receipt": {
     "attempts": 6,
@@ -64,6 +62,10 @@
     ],
     "repetitions": 3
   },
-  "schema_version": 1,
+  "repository": {
+    "commit": "1ddfe24858b362decb1c507b87a466df26d205eb",
+    "path": "docs/evals/skill-portfolio-2026"
+  },
+  "schema_version": 2,
   "status": "pass"
 }

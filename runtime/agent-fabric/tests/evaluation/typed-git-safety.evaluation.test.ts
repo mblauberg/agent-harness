@@ -4,7 +4,7 @@ import { GIT_OPERATION_VARIANTS, type GitOperationVariant, type OperatorGitInten
 
 import { FixedGitMutationPort } from "../../src/operator/fixed-git-mutation-port.ts";
 
-describe("Spec 05 typed Git fail-closed evaluation", () => {
+describe("Agent Fabric typed Git fail-closed evaluation", () => {
   it("admits only variants with a verified native first-mutation fence", () => {
     const port = new FixedGitMutationPort({ privateStateRoot: "/tmp/agent-fabric-evaluation" });
     const supported: GitOperationVariant[] = [];

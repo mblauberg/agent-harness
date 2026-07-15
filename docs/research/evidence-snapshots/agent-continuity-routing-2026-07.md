@@ -63,9 +63,9 @@ IDs were research, not accepted current protocol.
 | Evidence method, volatile papers, model signals and original hashes | This snapshot |
 | Context observations, checkpointing, rotation, acknowledgement and child independence | [Agent continuity and checkpointing](../agent-continuity-and-checkpointing.md) and Specs 01/04 |
 | Deployed-route identity, task-local evaluation, expiry, baseline and promotion | [Evidence-based provider routing](../evidence-based-provider-routing.md) and Specs 01/02/04 |
-| One chair, topology waves, native modes, discovery surfaces and OSS orchestration patterns | [Native orchestration and discovery surfaces](../native-orchestration-and-discovery-surfaces.md) and Spec 05 |
+| One chair, topology waves, native modes, discovery surfaces and OSS orchestration patterns | [Native orchestration and discovery surfaces](../native-orchestration-and-discovery-surfaces.md) and the current Agent Fabric specifications |
 | Adapter capability/effective configuration, OpenCode boundary, telemetry and runtime stack | [Provider adapter and runtime boundaries](../provider-adapter-and-runtime-boundaries.md) and Specs 01/03/04 |
-| Terminal framework/language comparison, interaction references and resize contract | [Project Fabric Console terminal runtime](../project-fabric-console-terminal-runtime.md) and Spec 05 |
+| Terminal framework/language comparison, interaction references and resize contract | [Project Fabric Console terminal runtime](../project-fabric-console-terminal-runtime.md) and the current Console specifications |
 | General delivery lifecycle and skill portfolio evidence | Existing `agentic-sdlc-harness-2026.md` and `skill-portfolio-practices-2026.md`; not merged here |
 | Skill-trigger lifecycle routing baseline | Existing `lifecycle-routing-baseline-2026-07-10.md`; not provider routing |
 
@@ -87,7 +87,7 @@ Exact source-section coverage:
 | Proposal §5 | Native-orchestration and provider-boundary ownership references |
 | Proposal §§6.1–6.4 | Agent continuity/checkpointing and Specs 01/04; open controller policy retained here |
 | Proposal §6.5 | Evidence-based routing and Specs 01/02/04 |
-| Proposal §6.6 | Existing Spec 05 authority precedence; no second portable authority schema |
+| Proposal §6.6 | Existing Agent Fabric authority precedence; no second portable authority schema |
 | Proposal §6.7 | Native-orchestration boundary; versioned/cross-primary deep mode remains open |
 | Proposal §6.8 | Native discovery-surface reference; total ceiling remains open |
 | Proposal §6.9 | Provider adapter/runtime OpenCode boundary; activation remains a human gate |

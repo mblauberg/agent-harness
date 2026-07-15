@@ -1,26 +1,25 @@
 {
   "catalogue": {
     "characters": 7409,
-    "sha256": "sha256:9346760fbab26c585e87822f88c54f54b47a2ea0231935b2befc72798ba886cf"
+    "path": "skills"
   },
   "classifier": {
-    "instruction": "You are a blind skill-routing classifier. For each prompt, choose one primary skill and zero or more companion skills from the complete catalogue. The primary is the most distinctive skill matching the requested task; companions apply only when the prompt genuinely composes another lifecycle, domain, tool, or presentation skill. Use null and no companions when no skill is warranted. Copy names exactly, classify each prompt once, and return only the schema output. Do not use tools or infer from case IDs.",
-    "instruction_sha256": "sha256:8ff0f0d50114cbf542b86f0abcbdd67e6824e7e3eafb3b6b9e62107dfafb2318",
-    "output_schema_sha256": "sha256:6e99918a78aafd25c42d61e59d3bd0cb6bd269c7516b2747cbbc54f58bac6fb0",
-    "packet_sha256": "sha256:b5c73ea4e421a2ce864ea36ef9ee482a156ab79ea2f8fd68dcee80c2ed8cfaa7",
-    "provider_prompt_sha256": "sha256:5774d3732e42f4f1d546b1b8046297cb7033383cd0b70bec22de19f84e0798c7"
+    "instruction": "You are a blind skill-routing classifier. For each prompt, choose one primary skill and zero or more companion skills from the complete catalogue. The primary is the most distinctive skill matching the requested task; companions apply only when the prompt genuinely composes another lifecycle, domain, tool, or presentation skill. Use null and no companions when no skill is warranted. Copy names exactly, classify each prompt once, and return only the schema output. Do not use tools or infer from case IDs."
   },
   "contract": "skill-routing-regression-plan",
   "dataset": {
     "cases": 18,
     "path": "routing-holdout.yaml",
-    "sha256": "sha256:565b5c87e20fedca94a33ea473656204fdb9d5bab186288090e40714d5b90366",
     "split": "fresh-holdout"
   },
   "evaluation_id": "skill-portfolio-routing-20260714-fabric-v5",
   "frozen_at": "2026-07-14T01:40:53.206625Z",
   "retention": "retain every terminal action, exact provider answer, and failed attempt",
   "route": "generated MCP -> daemon -> task-bound ephemeral provider action",
+  "repository": {
+    "commit": "1ddfe24858b362decb1c507b87a466df26d205eb",
+    "path": "docs/evals/skill-portfolio-2026"
+  },
   "rubric": {
     "companion_threshold": 0.9,
     "companions": "all required companions present and no undeclared companion",
@@ -38,5 +37,5 @@
     "repetitions": 3,
     "retry_policy": "none"
   },
-  "schema_version": 1
+  "schema_version": 2
 }

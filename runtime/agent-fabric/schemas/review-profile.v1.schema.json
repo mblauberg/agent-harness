@@ -4,7 +4,7 @@
   "type":"object","additionalProperties":false,
   "required":["schemaVersion","profileId","chairProfiles"],
   "properties":{
-    "schemaVersion":{"const":1},"profileId":{"const":"spec05-four-slot-v1"},
+    "schemaVersion":{"const":1},"profileId":{"const":"certifying-review-four-slot-v1"},
     "chairProfiles":{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{"$ref":"#/$defs/openaiProfile"},{"$ref":"#/$defs/anthropicProfile"}],"items":false}
   },
   "$defs":{

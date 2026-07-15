@@ -7,7 +7,7 @@ export type ResolvedEffort = { kind: "applied"; value: string } | { kind: "inapp
 
 export interface ReviewProfileCatalogue {
   schemaVersion: 1;
-  profileId: "spec05-four-slot-v1";
+  profileId: "certifying-review-four-slot-v1";
   chairProfiles: readonly {
     targetChairFamily: "openai" | "anthropic";
     slots: readonly {
@@ -34,7 +34,7 @@ export interface ReviewProfileCatalogue {
 
 export interface SlotAvailabilityIdentity {
   projectSessionId: string;
-  profileId: "spec05-four-slot-v1";
+  profileId: "certifying-review-four-slot-v1";
   profileSchemaDigest: Sha256Digest;
   targetChairFamily: "openai" | "anthropic";
   slot: ReviewSlot;
@@ -79,7 +79,7 @@ export interface ResolvedReviewProfileSlot {
 
 export interface ResolvedReviewProfile {
   schemaVersion: 1;
-  profileId: "spec05-four-slot-v1";
+  profileId: "certifying-review-four-slot-v1";
   profileSchemaDigest: Sha256Digest;
   targetChairFamily: "openai" | "anthropic";
   slots: readonly ResolvedReviewProfileSlot[];
@@ -94,7 +94,7 @@ export function resolveReviewProfile(_input: Readonly<{
   availability: readonly SlotAvailabilityIdentity[];
 }>): ResolvedReviewProfile {
   const input = _input;
-  if (input.catalogue.schemaVersion !== 1 || input.catalogue.profileId !== "spec05-four-slot-v1") {
+  if (input.catalogue.schemaVersion !== 1 || input.catalogue.profileId !== "certifying-review-four-slot-v1") {
     throw new TypeError("review profile catalogue identity is invalid");
   }
   const profiles = input.catalogue.chairProfiles.filter((value) => value.targetChairFamily === input.targetChairFamily);
@@ -163,7 +163,7 @@ export function resolveReviewProfile(_input: Readonly<{
   });
   const withoutDigest = {
     schemaVersion: 1 as const,
-    profileId: "spec05-four-slot-v1" as const,
+    profileId: "certifying-review-four-slot-v1" as const,
     profileSchemaDigest: input.profileSchemaDigest,
     targetChairFamily: input.targetChairFamily,
     slots: resolvedSlots,

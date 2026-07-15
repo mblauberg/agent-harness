@@ -166,7 +166,7 @@ custody owns none. Zero, multiple, absent or crossed joins insert unproved with 
 can make it proved. Update/delete triggers make all lineage content immutable.
 
 Only an active project-file or strict-descendant run-file registration of explicit evidence kind
-implementation-delivery-manifest.v1, published by an agent with proved lineage, is target-eligible. spec05-four-slot-v1
+implementation-delivery-manifest.v1, published by an agent with proved lineage, is target-eligible. certifying-review-four-slot-v1
 additionally requires an equality join to implementation_delivery_manifests and the one current delivery_review_bases
 row produced by fabric-seal, and that publisher family equal target-chair family. A generic artifact registration
 carrying the same kind/content cannot satisfy that join. git-private-diff, operator-, Fabric- and project-published rows
@@ -186,7 +186,7 @@ revisions and Git HEAD/index/worktree tokens. The request's expected HEAD is onl
 selects base or closure content.
 
 Before manifest seal, `fabric.v1.delivery-requirement-map.seal` derives the one current closed map from accepted scope
-and the checked-in spec05-delivery-requirements.v1 catalogue. Only the authenticated current chair may call it. Its
+and the checked-in console-acceptance-delivery-requirements.v1 catalogue. Only the authenticated current chair may call it. Its
 closed request contains command/project-session/run/delivery- run IDs, expected current map generation (zero iff none),
 expected current accepted-scope revision and expected checked-in catalogue digest. A wrong zero/ positive/current
 sentinel conflicts before work. It equality-CASes catalogue/ scope/source/evidence revisions, requires every binding ID

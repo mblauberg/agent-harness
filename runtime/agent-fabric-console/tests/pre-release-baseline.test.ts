@@ -45,7 +45,7 @@ describe("pre-release Console baseline", () => {
   });
 
   it("does not package vintage daemon fixtures", async () => {
-    const fixtures = new URL("../../agent-fabric/tests/spec05/fixtures/vintage-daemons", import.meta.url);
+    const fixtures = new URL("../../agent-fabric/tests/system/fixtures/vintage-daemons", import.meta.url);
     await expect(stat(fixtures)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

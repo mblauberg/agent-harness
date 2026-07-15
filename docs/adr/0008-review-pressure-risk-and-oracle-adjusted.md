@@ -2,14 +2,16 @@
 
 **Status:** Accepted 2026-07-13 (human, scoping round 7); unimplemented
 review-policy follow-ups superseded 2026-07-15 (human, [issue
-#97](https://github.com/mblauberg/provenant/issues/97)).
+#97](https://github.com/mblauberg/provenant/issues/97)); implementation
+identifiers amended to descriptive owners 2026-07-16 ([issue
+#135](https://github.com/mblauberg/provenant/issues/135)).
 
 ## Context
 
 `HARNESS.md` currently requires fresh native and other-primary review for
 substantial work, then additional bonus-family attempts for crucial and
-terminal work. Stable `spec05-*` protocol and test IDs remain implementation
-identifiers, not documentation cross-references.
+terminal work. Earlier implementation identifiers inherited a milestone
+codename and obscured their durable owners.
 
 ## Decision
 
@@ -26,10 +28,16 @@ Style policy: terse output stays default for inter-agent/mechanical/status
 traffic; human-facing explanatory output is domain-appropriate. The `caveman`
 overlay loads only on explicit request, avoiding a duplicate skill load.
 
+Current implementation identifiers name their owners directly: certifying
+review owns the four-slot profile, Console acceptance owns the requirement and
+evidence catalogues, Agent Fabric owns its system tests, and lifecycle-skill
+alignment owns its focused fixtures and deterministic portability evaluation.
+The cutover is direct; no old-name aliases or compatibility path exists.
+
 ## Consequences
 
 - The current `HARNESS.md` risk-based, cross-family routing remains governing.
   Deterministic oracles remain primary.
-- No `architecture-review` skill, compatibility alias or replacement framework
-  is created. Stable `spec05-*` identifiers remain unchanged.
+- No `architecture-review` skill or replacement framework is created. The
+  milestone-derived identifiers are retired without compatibility aliases.
 - Reviewer yield/cost tracking informs later calibration.

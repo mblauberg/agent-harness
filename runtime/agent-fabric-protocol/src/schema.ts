@@ -125,7 +125,7 @@ export const CORE_CONTRACT_SCHEMAS = Object.freeze({
   "authority-envelope.v2": AUTHORITY_ENVELOPE_V2_CODEC.schema,
 });
 
-export const SPEC05_CONTRACT_SCHEMAS = Object.freeze({
+export const FABRIC_CONTRACT_SCHEMAS = Object.freeze({
   "adapter-capability-snapshot.v1": ADAPTER_CAPABILITY_SNAPSHOT_V1_CODEC.schema,
   "capability-snapshot-ref.v1": CAPABILITY_SNAPSHOT_REF_V1_CODEC.schema,
   "capability-snapshot-summary.v1": CAPABILITY_SNAPSHOT_SUMMARY_V1_CODEC.schema,
@@ -180,7 +180,7 @@ export const SPEC05_CONTRACT_SCHEMAS = Object.freeze({
   "lifecycle-accepted-suspended.v1": LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC.schema,
   "lifecycle-current-state.v1": LIFECYCLE_CURRENT_STATE_V1_CODEC.schema,
   "agent-lifecycle-recovery-intent.v1": AGENT_LIFECYCLE_RECOVERY_INTENT_V1_CODEC.schema,
-  "spec05-four-slot-v1": RESOLVED_REVIEW_PROFILE_V1_CODEC.schema,
+  "certifying-review-four-slot-v1": RESOLVED_REVIEW_PROFILE_V1_CODEC.schema,
 });
 
 const principalSchemas = {
@@ -466,7 +466,7 @@ export const PROTOCOL_SCHEMA = {
     launchAdapterOutcomeV1: LAUNCH_ADAPTER_OUTCOME_V1_CODEC.schema,
     providerActionRefV1: PROVIDER_ACTION_REF_V1_CODEC.schema,
     launchProviderActionJournalRefV1: LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC.schema,
-    ...SPEC05_CONTRACT_SCHEMAS,
+    ...FABRIC_CONTRACT_SCHEMAS,
     fabricOperation: { type: "string", enum: operations },
     activeFabricOperation: { type: "string", enum: activeOperations },
     operatorPrincipal: principalSchemas.operator,

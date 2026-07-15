@@ -454,7 +454,7 @@ function reviewRunDetailLines(
   dataset: FabricConsoleDataset,
 ): readonly DetailLine[] {
   if (row.view !== "runs") return [];
-  const projection = dataset.spec05?.reviewRuns.find(
+  const projection = dataset.review?.reviewRuns.find(
     ({ coordinationRunId }) => coordinationRunId === row.stableId,
   );
   if (projection === undefined) return [];
@@ -585,7 +585,7 @@ function topologyDetailLines(
   dataset: FabricConsoleDataset,
 ): readonly DetailLine[] {
   if (row.view !== "work") return [];
-  const projection = dataset.spec05?.topology.find(
+  const projection = dataset.review?.topology.find(
     ({ taskId }) => taskId === row.stableId,
   );
   if (projection === undefined) return [];
@@ -682,7 +682,7 @@ function contextPressureDetailLines(
   dataset: FabricConsoleDataset,
 ): readonly DetailLine[] {
   if (row.view !== "agents") return [];
-  const projection = dataset.spec05?.contextPressure.find(
+  const projection = dataset.review?.contextPressure.find(
     ({ agentId }) => agentId === row.stableId,
   );
   if (projection === undefined) return [];
@@ -730,7 +730,7 @@ function evidenceReviewDetailLines(
   dataset: FabricConsoleDataset,
 ): readonly DetailLine[] {
   if (row.view !== "evidence") return [];
-  const reviewRuns = dataset.spec05?.reviewRuns ?? [];
+  const reviewRuns = dataset.review?.reviewRuns ?? [];
   const matchingRuns = reviewRuns.flatMap((run) =>
     run.evidence.state !== "current"
       ? []

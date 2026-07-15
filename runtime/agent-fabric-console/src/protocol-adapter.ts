@@ -455,7 +455,7 @@ export type ConsoleContextPressureProjection = Readonly<{
   read: ConsoleClosedProjectionRead<ProviderContextPressureReadV1>;
 }>;
 
-export type ConsoleSpec05Projections = Readonly<{
+export type ConsoleReviewProjections = Readonly<{
   reviewRuns: readonly ConsoleReviewRunProjection[];
   topology: readonly ConsoleTopologyProjection[];
   contextPressure: readonly ConsoleContextPressureProjection[];
@@ -476,7 +476,7 @@ export type FabricConsoleDataset = Readonly<{
   workflowCapabilities?: ConsoleWorkflowCapabilities;
   productionActionPlanning?: true;
   inspection?: ConsoleReadInspection;
-  spec05?: ConsoleSpec05Projections;
+  review?: ConsoleReviewProjections;
 }>;
 
 export type ConsoleProtocolAdapterOptions = Readonly<{
@@ -707,7 +707,7 @@ export class ConsoleProtocolAdapter {
       ) {
         return this.#loadWithFallback();
       }
-      const spec05 = await this.#loadSpec05Projections(this.#lastGood.pages);
+      const review = await this.#loadReviewProjections(this.#lastGood.pages);
       const current: FabricConsoleDataset = {
         ...this.#lastGood,
         cursor: result.nextCursor,
@@ -715,7 +715,7 @@ export class ConsoleProtocolAdapter {
           state: "live",
           compatibility: this.#binding.compatibility,
         },
-        spec05,
+        review,
         loadedAtMs: this.#now(),
         canMutate: !this.#binding.readOnly && this.#binding.actions !== null,
       };
@@ -1121,7 +1121,7 @@ export class ConsoleProtocolAdapter {
       const snapshotRevision = revisionFromProtocol(snapshot.snapshotRevision);
       try {
         const pages = await this.#loadPages(snapshot.snapshotRevision);
-        const spec05 = await this.#loadSpec05Projections(pages);
+        const review = await this.#loadReviewProjections(pages);
         return {
           connection: {
             state: "live",
@@ -1131,7 +1131,7 @@ export class ConsoleProtocolAdapter {
           snapshotRevision,
           cursor: snapshot.cursor,
           pages,
-          spec05,
+          review,
           loadedAtMs: this.#now(),
           canMutate:
             !this.#binding.readOnly && this.#binding.actions !== null,
@@ -1146,9 +1146,9 @@ export class ConsoleProtocolAdapter {
     throw new ProjectionInvalidError("resnapshot attempts exhausted");
   }
 
-  async #loadSpec05Projections(
+  async #loadReviewProjections(
     pages: ConsoleViewPages,
-  ): Promise<ConsoleSpec05Projections> {
+  ): Promise<ConsoleReviewProjections> {
     if (!this.#binding.ok) {
       return { reviewRuns: [], topology: [], contextPressure: [] };
     }
