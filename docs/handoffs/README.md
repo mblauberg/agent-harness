@@ -9,6 +9,11 @@ Dated handoffs through 15 July 2026 were consumed during
 remain available in Git history. A new handoff is only for live session or run
 continuity: it must name its current issue or run and be removed when consumed.
 
-The simplification implementation pack remains temporarily available while
-[W010](https://github.com/mblauberg/provenant/issues/22) uses its containment
-checklist. It is not a current-status owner.
+Historical handoffs and implementation packs remain available in Git history,
+but are not live dependencies. [Issue
+#22](https://github.com/mblauberg/provenant/issues/22), [ADR
+0002](../adr/0002-capability-compiled-execution-authority.md) and the standalone
+[authority](../specs/agent-fabric/authority.md) and
+[provider-write containment
+evidence](../specs/agent-fabric/provider-write-containment.md) specifications
+own the current W010 route and contract.
