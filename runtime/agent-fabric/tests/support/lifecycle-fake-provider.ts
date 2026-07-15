@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
+import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 
 import {
@@ -15,7 +16,12 @@ if (journalPath === undefined) {
 }
 const requiredJournalPath: string = journalPath;
 const spawnDelayMs = Number(process.env.LIFECYCLE_FAKE_SPAWN_DELAY_MS ?? "0");
+const spawnBarrierEnteredPath = process.env.LIFECYCLE_FAKE_SPAWN_BARRIER_ENTERED;
+const spawnBarrierReleasePath = process.env.LIFECYCLE_FAKE_SPAWN_BARRIER_RELEASE;
 const adapterId = process.env.LIFECYCLE_FAKE_ADAPTER_ID ?? "fake-lifecycle";
+if ((spawnBarrierEnteredPath === undefined) !== (spawnBarrierReleasePath === undefined)) {
+  throw new Error("lifecycle fake spawn barrier requires entered and release paths");
+}
 
 type Action = {
   actionId: string;
@@ -91,6 +97,27 @@ function respond(id: string, result: unknown): void {
 
 function fail(id: string, code: string, message: string): void {
   process.stdout.write(`${JSON.stringify({ id, error: { code, message } })}\n`);
+}
+
+function afterSpawnBarrier(complete: () => void): void {
+  if (spawnBarrierEnteredPath === undefined || spawnBarrierReleasePath === undefined) {
+    complete();
+    return;
+  }
+  writeFileSync(spawnBarrierEnteredPath, "entered\n", { mode: 0o600 });
+  if (existsSync(spawnBarrierReleasePath)) {
+    complete();
+    return;
+  }
+  const watcher = watch(dirname(spawnBarrierReleasePath), () => {
+    if (!existsSync(spawnBarrierReleasePath)) return;
+    watcher.close();
+    complete();
+  });
+  if (existsSync(spawnBarrierReleasePath)) {
+    watcher.close();
+    complete();
+  }
 }
 
 function actionFor(request: Request, journal: Journal): Action | undefined {
@@ -470,8 +497,10 @@ input.on("line", (line) => {
       return;
     }
     const complete = (): void => respond(request.id, result);
-    if (Number.isSafeInteger(spawnDelayMs) && spawnDelayMs > 0) setTimeout(complete, spawnDelayMs);
-    else complete();
+    afterSpawnBarrier(() => {
+      if (Number.isSafeInteger(spawnDelayMs) && spawnDelayMs > 0) setTimeout(complete, spawnDelayMs);
+      else complete();
+    });
     return;
   }
   if (request.method === "release") {
