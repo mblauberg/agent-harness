@@ -209,6 +209,7 @@ export async function createLifecycleFixture(
       databasePath,
       providerJournalPath,
       secondaryProviderJournalPath,
+      ...(providerSpawnBarrier === undefined ? {} : { providerSpawnBarrier }),
       providerSessionMarker: "fake-session:leader:g1",
       clock,
       options,
@@ -446,6 +447,7 @@ async function createRetainedLifecycleFixture(input: {
   databasePath: string;
   providerJournalPath: string;
   secondaryProviderJournalPath: string;
+  providerSpawnBarrier?: { entered: string; release: string };
   providerSessionMarker: string;
   clock: ManualClock;
   options: {
@@ -460,6 +462,7 @@ async function createRetainedLifecycleFixture(input: {
     fault?: (label: string) => void;
   };
 }): Promise<LifecycleFixture> {
+  const providerSpawnBarrier = input.providerSpawnBarrier;
   await mkdir(join(input.directory, "leader", "child"), { recursive: true });
   const stateDirectory = join(input.directory, "state");
   const runtimeDirectory = join(input.directory, "runtime");
@@ -473,6 +476,12 @@ async function createRetainedLifecycleFixture(input: {
     ...(input.options.spawnDelayMs === undefined
       ? {}
       : { LIFECYCLE_FAKE_SPAWN_DELAY_MS: String(input.options.spawnDelayMs) }),
+    ...(providerSpawnBarrier === undefined
+      ? {}
+      : {
+          LIFECYCLE_FAKE_SPAWN_BARRIER_ENTERED: providerSpawnBarrier.entered,
+          LIFECYCLE_FAKE_SPAWN_BARRIER_RELEASE: providerSpawnBarrier.release,
+        }),
     LIFECYCLE_FAKE_MANDATORY_USAGE: input.options.mandatoryUsageUnits === true ? "1" : "0",
     LIFECYCLE_FAKE_PAYLOAD_MAX_TURNS: input.options.payloadMaxTurns === true ? "1" : "0",
     LIFECYCLE_FAKE_SPAWN_RESULT_LOST: input.options.spawnResultLost === true ? "1" : "0",
@@ -689,6 +698,14 @@ async function createRetainedLifecycleFixture(input: {
       databasePath: input.databasePath,
       providerJournalPath: input.providerJournalPath,
       secondaryProviderJournalPath: input.secondaryProviderJournalPath,
+      ...(providerSpawnBarrier === undefined
+        ? {}
+        : {
+            providerSpawnBarrier: {
+              waitUntilEntered: async () => await waitUntilFileExists(providerSpawnBarrier.entered),
+              release: async () => await writeFile(providerSpawnBarrier.release, "released\n"),
+            },
+          }),
       providerSessionMarker: input.providerSessionMarker,
       clock: input.clock,
       fabric: { close } as unknown as Fabric,
