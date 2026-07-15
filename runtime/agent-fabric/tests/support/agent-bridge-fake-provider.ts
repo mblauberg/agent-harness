@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
-import { createConnection } from "node:net";
-import { dirname } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { createInterface } from "node:readline";
 
 import {
@@ -13,10 +12,10 @@ const journalPath = process.env.AGENT_BRIDGE_FAKE_JOURNAL;
 if (journalPath === undefined) throw new Error("AGENT_BRIDGE_FAKE_JOURNAL is required");
 const requiredJournalPath: string = journalPath;
 const bridgeSupported = process.env.AGENT_BRIDGE_FAKE_NO_BRIDGE !== "1";
-const lossRequestPath = process.env.AGENT_BRIDGE_FAKE_LOSS_REQUEST;
+const lossControlSocketPath = process.env.AGENT_BRIDGE_FAKE_LOSS_CONTROL_SOCKET;
 const lossObservedPath = process.env.AGENT_BRIDGE_FAKE_LOSS_OBSERVED;
-if ((lossRequestPath === undefined) !== (lossObservedPath === undefined)) {
-  throw new Error("agent bridge fake loss signal requires request and observed paths");
+if ((lossControlSocketPath === undefined) !== (lossObservedPath === undefined)) {
+  throw new Error("agent bridge fake loss signal requires control socket and observed paths");
 }
 
 type Action = {
@@ -79,6 +78,7 @@ const bridgeContract = {
 let retainedProtocol: Awaited<ReturnType<typeof NdjsonRpcTransport.connect>> | undefined;
 let retainedBridgeLive = true;
 let lossRequested = false;
+let lossControlSocket: Socket | undefined;
 let retainedBinding: Readonly<{
   actionId: string;
   agentId: string;
@@ -90,17 +90,39 @@ let retainedBinding: Readonly<{
   bridgeGeneration: number;
 }> | undefined;
 
-function requestBridgeLoss(): void {
-  if (lossRequestPath === undefined || !existsSync(lossRequestPath) || lossRequested) return;
-  rmSync(lossRequestPath, { force: true });
-  lossRequested = true;
-  retainedBridgeLive = false;
+let lossServer: Server | undefined;
+const lossSockets = new Set<Socket>();
+if (
+  process.env.AGENT_FABRIC_HANDOFF_KIND === "agent" &&
+  lossControlSocketPath !== undefined && lossObservedPath !== undefined && !existsSync(lossObservedPath)
+) {
+  lossServer = createServer((socket) => {
+    lossSockets.add(socket);
+    socket.setEncoding("utf8");
+    let command = "";
+    socket.on("data", (chunk: string) => {
+      command += chunk;
+      if (!command.includes("\n")) return;
+      if (command !== "lose-child-bridge\n" || lossRequested) {
+        socket.destroy();
+        return;
+      }
+      lossRequested = true;
+      retainedBridgeLive = false;
+      lossControlSocket = socket;
+    });
+    socket.once("close", () => lossSockets.delete(socket));
+  });
+  const server = lossServer;
+  await new Promise<void>((resolve, reject) => {
+    const fail = (error: Error): void => reject(error);
+    server.once("error", fail);
+    server.listen(lossControlSocketPath, () => {
+      server.off("error", fail);
+      resolve();
+    });
+  });
 }
-
-const lossWatcher = lossRequestPath === undefined
-  ? undefined
-  : watch(dirname(lossRequestPath), requestBridgeLoss);
-requestBridgeLoss();
 
 async function provision(params: Record<string, unknown>): Promise<Record<string, unknown>> {
   const capability = process.env.AGENT_FABRIC_CAPABILITY;
@@ -249,9 +271,13 @@ input.on("line", (line) => {
 });
 
 input.on("close", () => {
-  lossWatcher?.close();
+  lossServer?.close();
   if (lossRequested && lossObservedPath !== undefined) {
     writeFileSync(lossObservedPath, "child-bridge-loss-observed\n", { mode: 0o600 });
+  }
+  for (const socket of lossSockets) {
+    if (lossRequested && socket === lossControlSocket) socket.end("child-bridge-loss-observed\n");
+    else socket.destroy();
   }
   void retainedProtocol?.close();
 });

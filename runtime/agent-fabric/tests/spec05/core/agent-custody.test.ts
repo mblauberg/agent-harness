@@ -1,8 +1,8 @@
 import Database from "better-sqlite3";
-import { existsSync, watch } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -25,39 +25,31 @@ const authority = {
   budget: { turns: 100, descendants: 10 },
 };
 
-async function triggerChildBridgeLoss(requestPath: string, observedPath: string): Promise<void> {
-  const observed = existsSync(observedPath)
-    ? Promise.resolve()
-    : new Promise<void>((resolve, reject) => {
-        const watcher = watch(dirname(observedPath));
-        let settled = false;
-        const timeout = setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          watcher.close();
-          reject(new Error("fake provider did not observe child bridge loss"));
-        }, 5_000);
-        const finish = (): void => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timeout);
-          watcher.close();
-          resolve();
-        };
-        watcher.on("change", () => {
-          if (existsSync(observedPath)) finish();
-        });
-        watcher.once("error", (error) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timeout);
-          watcher.close();
-          reject(error);
-        });
-        if (existsSync(observedPath)) finish();
-      });
-  await writeFile(requestPath, "lose-child-bridge\n", { mode: 0o600 });
-  await observed;
+async function triggerChildBridgeLoss(controlSocketPath: string): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    const socket = createConnection(controlSocketPath);
+    let response = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      reject(new Error("fake provider did not observe child bridge loss"));
+    }, 5_000);
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.destroy();
+      if (error === undefined) resolve(response);
+      else reject(error);
+    };
+    socket.setEncoding("utf8");
+    socket.once("connect", () => socket.write("lose-child-bridge\n"));
+    socket.on("data", (chunk: string) => { response += chunk; });
+    socket.once("end", () => finish());
+    socket.once("error", (error) => finish(error));
+  });
 }
 
 describe("Spec 05 provider child custody", () => {
@@ -216,7 +208,7 @@ describe("Spec 05 provider child custody", () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-child-loss-"));
     const databasePath = join(directory, "fabric.sqlite3");
     const socketPath = join(directory, "runtime", "fabric.sock");
-    const lossRequestPath = join(directory, "child-bridge-loss-requested");
+    const lossControlSocketPath = join(directory, "child-bridge-loss.sock");
     const lossObservedPath = join(directory, "child-bridge-loss-observed");
     const daemon = await startFabricDaemon({
       databasePath,
@@ -229,7 +221,7 @@ describe("Spec 05 provider child custody", () => {
           command: [process.execPath, "--import", "tsx", fakeAdapter],
           environment: {
             AGENT_BRIDGE_FAKE_JOURNAL: join(directory, "adapter-journal.json"),
-            AGENT_BRIDGE_FAKE_LOSS_REQUEST: lossRequestPath,
+            AGENT_BRIDGE_FAKE_LOSS_CONTROL_SOCKET: lossControlSocketPath,
             AGENT_BRIDGE_FAKE_LOSS_OBSERVED: lossObservedPath,
           },
         },
@@ -256,7 +248,7 @@ describe("Spec 05 provider child custody", () => {
       expect(spawned.isError, spawned.text).toBe(false);
       expect(spawned.structured).toMatchObject({ bridgeState: "active", bridgeGeneration: 1 });
 
-      await triggerChildBridgeLoss(lossRequestPath, lossObservedPath);
+      expect(await triggerChildBridgeLoss(lossControlSocketPath)).toBe("child-bridge-loss-observed\n");
       expect(await readFile(lossObservedPath, "utf8")).toBe("child-bridge-loss-observed\n");
       const listed = await callTool(chairProxy.client, "fabric_agent_list", { runId: run.runId });
       expect((listed.structured.agents as Array<Record<string, unknown>>).find(({ agentId }) => agentId === "lost-child"))
