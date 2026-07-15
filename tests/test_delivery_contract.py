@@ -84,6 +84,31 @@ def test_delivery_authority_v2_maps_to_the_cross_language_golden():
     assert canonical(actual) == canonical(expected)
 
 
+def test_delivery_authority_timestamp_validation_matches_protocol_vectors():
+    module = load(AUTHORITY_MAPPER_PATH, "authority_mapping_timestamp_vectors")
+    delivery = json.loads((AUTHORITY_FIXTURE_ROOT / "delivery-authority.json").read_text())
+    vectors = json.loads((AUTHORITY_FIXTURE_ROOT / "timestamp-vectors.json").read_text())
+    valid_operations = {*delivery["allowed_fabric_operations"], *delivery["denied_fabric_operations"]}
+
+    for timestamp in vectors["accepted"]:
+        delivery["expires_at"] = timestamp
+        mapped = module.map_delivery_authority(
+            delivery,
+            valid_operations=valid_operations,
+            valid_cost_pattern=COST_PATTERN,
+        )
+        assert mapped["expiresAt"] == timestamp
+
+    for timestamp in vectors["rejected"]:
+        delivery["expires_at"] = timestamp
+        with pytest.raises(module.AuthorityMappingError, match="strict RFC3339 timestamp"):
+            module.map_delivery_authority(
+                delivery,
+                valid_operations=valid_operations,
+                valid_cost_pattern=COST_PATTERN,
+            )
+
+
 def test_delivery_authority_v2_is_closed_and_rejects_unknown_operations():
     module = load(AUTHORITY_MAPPER_PATH, "authority_mapping_closed")
     delivery = json.loads((AUTHORITY_FIXTURE_ROOT / "delivery-authority.json").read_text())

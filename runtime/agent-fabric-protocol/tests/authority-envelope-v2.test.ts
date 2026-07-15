@@ -8,6 +8,7 @@ import {
   AUTHORITY_ENVELOPE_V2_CODEC,
   FABRIC_OPERATIONS,
   authorityEnvelopeV2Contained,
+  parseTimestamp,
   type AuthorityEnvelopeV2,
 } from "../src/index.ts";
 
@@ -40,6 +41,24 @@ function authority(overrides: Partial<AuthorityEnvelopeV2> = {}): AuthorityEnvel
 }
 
 describe("AuthorityEnvelopeV2", () => {
+  it("shares strict timestamp acceptance vectors with the Delivery mapper", async () => {
+    const path = fileURLToPath(new URL(
+      "../../../tests/fixtures/authority-envelope-v2/timestamp-vectors.json",
+      import.meta.url,
+    ));
+    const vectors = JSON.parse(await readFile(path, "utf8")) as {
+      accepted: string[];
+      rejected: string[];
+    };
+
+    for (const timestamp of vectors.accepted) {
+      expect(() => parseTimestamp(timestamp, "timestamp")).not.toThrow();
+    }
+    for (const timestamp of vectors.rejected) {
+      expect(() => parseTimestamp(timestamp, "timestamp")).toThrow(/RFC3339/u);
+    }
+  });
+
   it("decodes the canonical cross-language Delivery mapping fixture", async () => {
     const path = fileURLToPath(new URL(
       "../../../tests/fixtures/authority-envelope-v2/fabric-authority.json",

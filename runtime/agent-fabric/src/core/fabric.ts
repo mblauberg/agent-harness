@@ -6474,7 +6474,6 @@ export class Fabric {
         relativePath: input.relativePath,
         digest: input.sha256,
         verifyBytes: false,
-        enforcePathAuthority: false,
       });
       const result: ArtifactResult = {
         artifactId: registered.evidenceId,

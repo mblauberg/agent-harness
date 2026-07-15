@@ -17,7 +17,7 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _HOST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$")
 _RFC3339 = re.compile(
-    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$"
+    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|([+-])(\d{2}):(\d{2}))$"
 )
 _PROVIDER_TOKEN_BUDGET = re.compile(
     r"^(?:input_tokens|output_tokens):[a-z0-9]+(?:[.-][a-z0-9]+)*$"
@@ -132,11 +132,19 @@ def _timestamp_value(value: str) -> datetime:
 
 
 def _timestamp(value: Any, field: str) -> str:
+    match = _RFC3339.fullmatch(value) if isinstance(value, str) else None
+    _fail(match is None, f"{field} must be a strict RFC3339 timestamp")
+    assert match is not None
+    year, month, day, hour, minute, second = (int(part) for part in match.groups()[:6])
+    offset_hour = int(match.group(8)) if match.group(8) is not None else 0
+    offset_minute = int(match.group(9)) if match.group(9) is not None else 0
     _fail(
-        not isinstance(value, str) or _RFC3339.fullmatch(value) is None,
+        year < 1 or hour > 23 or minute > 59 or second > 59
+        or offset_hour > 23 or offset_minute > 59,
         f"{field} must be a strict RFC3339 timestamp",
     )
     try:
+        datetime(year, month, day, hour, minute, second)
         _timestamp_value(value)
     except ValueError as exc:
         raise AuthorityMappingError(f"{field} must be a strict RFC3339 timestamp") from exc

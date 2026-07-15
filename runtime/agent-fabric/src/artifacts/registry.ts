@@ -3,12 +3,13 @@ import {
   closeSync,
   constants,
   fstatSync,
+  lstatSync,
   openSync,
   readFileSync,
   realpathSync,
   statSync,
 } from "node:fs";
-import { resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 
 import type Database from "better-sqlite3";
 
@@ -158,6 +159,34 @@ function verifyFile(path: string, digest: string): void {
   }
 }
 
+function canonicalPublicationPath(path: string): string {
+  let cursor = resolve(path);
+  const suffix: string[] = [];
+  while (true) {
+    try {
+      if (lstatSync(cursor).isSymbolicLink()) {
+        throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "artifact source resolves through a symlinked path");
+      }
+      const canonical = realpathSync.native(cursor);
+      if (canonical !== cursor) {
+        throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "artifact source resolves through a symlinked path");
+      }
+      return resolve(canonical, ...suffix);
+    } catch (error: unknown) {
+      if (error instanceof FabricError) throw error;
+      if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "ENOENT") {
+        throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "artifact source has no canonical path", { cause: error });
+      }
+      const parent = dirname(cursor);
+      if (parent === cursor) {
+        throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "artifact source has no canonical path", { cause: error });
+      }
+      suffix.unshift(basename(cursor));
+      cursor = parent;
+    }
+  }
+}
+
 export class ArtifactRegistry {
   readonly #database: Database.Database;
   readonly #clock: () => number;
@@ -249,7 +278,6 @@ export class ArtifactRegistry {
     relativePath: string;
     digest: string;
     verifyBytes?: boolean;
-    enforcePathAuthority?: boolean;
   }): ArtifactRegistration {
     const root = resolveRunArtifactRoot(this.#database, input.runId);
     const digest = normalizeDigest(input.digest);
@@ -262,9 +290,7 @@ export class ArtifactRegistry {
     const sourceRoot = effectiveSourceKind === "run-file" ? root.artifactRoot : root.projectRoot;
     const source = resolve(sourceRoot, input.relativePath);
     if (!pathWithin(sourceRoot, source)) throw new FabricError("ARTIFACT_PATH_FORBIDDEN", "artifact path escapes its source owner");
-    if (input.enforcePathAuthority !== false || effectiveSourceKind === "project-file") {
-      this.#assertAgentPathAuthority(input.runId, input.agentId, source);
-    }
+    this.#assertAgentPublicationPath(input.runId, input.agentId, source);
     if (input.verifyBytes !== false) verifyFile(source, digest);
     return this.register({
       projectId: root.projectId,
@@ -315,7 +341,8 @@ export class ArtifactRegistry {
     });
   }
 
-  #assertAgentPathAuthority(runId: string, agentId: string, source: string): void {
+  #assertAgentPublicationPath(runId: string, agentId: string, source: string): void {
+    const canonicalSource = canonicalPublicationPath(source);
     const row = this.#database.prepare(`
       SELECT authority.authority_json, authority.authority_hash, run.workspace_root
         FROM agents agent JOIN authorities authority ON authority.authority_id=agent.authority_id
@@ -325,15 +352,18 @@ export class ArtifactRegistry {
     if (row === undefined || typeof row.workspace_root !== "string") {
       throw new FabricError("CAPABILITY_FORBIDDEN", "agent artifact authority is unavailable");
     }
-    let paths: readonly string[];
+    let authority: ReturnType<typeof readStoredAuthority>;
     try {
-      paths = readStoredAuthority(row, "agent artifact authority").artifactPaths;
+      authority = readStoredAuthority(row, "agent artifact authority");
     } catch (error: unknown) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "agent artifact authority is invalid", { cause: error });
     }
     const workspaceRoot = row.workspace_root;
-    if (!paths.some((path) => pathWithin(resolve(workspaceRoot, path), source))) {
+    if (!authority.artifactPaths.some((path) => pathWithin(resolve(workspaceRoot, path), canonicalSource))) {
       throw new FabricError("CAPABILITY_FORBIDDEN", "artifact source is outside the agent path authority");
+    }
+    if (authority.deniedPaths.some((path) => pathWithin(resolve(workspaceRoot, path), canonicalSource))) {
+      throw new FabricError("CAPABILITY_FORBIDDEN", "artifact source is inside a denied path");
     }
   }
 }
