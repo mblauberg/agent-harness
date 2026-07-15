@@ -30,7 +30,7 @@ Load the named reference whenever a command is invoked.
 - `scope` owns the approved task brief and consequential design decisions;
   `shape` supplies the frontend discovery method.
 - `implement` owns every source-changing command, deterministic verification,
-  independent review and human-acceptance handoff.
+  independent review and user-acceptance handoff.
 - `engineering-docs` owns PRODUCT/DESIGN artifact placement, indexing and
   archival; `teach` and `document` supply domain extraction and interview steps.
 - This skill's own [review branch](review.md) owns read-only UX,

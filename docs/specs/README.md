@@ -32,7 +32,7 @@ final verification remain pending where their owning issues say so.
 
 ## Project Fabric Console
 
-The Console contract is under final implementation verification and human
+The Console contract is under final implementation verification and user
 acceptance.
 
 - [Scope and projections](console/scope-and-projections.md)

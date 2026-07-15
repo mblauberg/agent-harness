@@ -108,7 +108,7 @@ delivery `available`, `unavailable` or `stale`.
 V1 notifications are non-authoritative and need not be actionable. A click may
 focus an exact revision only when the discovered terminal/Herdr integration has
 a contract-tested link/action capability. Otherwise the notification merely
-directs the human to the Console Attention view. A notification never
+directs the user to the Console Attention view. A notification never
 acknowledges, approves or consumes its item.
 
 Markdown and JSON are generated snapshots from the operator projection. They

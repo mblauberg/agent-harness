@@ -6,16 +6,16 @@ topology, not a separate skill.
 
 ## Trigger
 
-Use it when the human asks for a Claude/Codex pair, or when the chair determines
+Use it when the user asks for a Claude/Codex pair, or when the chair determines
 that substantial, multi-stage, low-oracle work benefits from continuous
 cross-family challenge within the approved project/session authority envelope.
-Human policy may pin or prohibit pairing.
+User policy may pin or prohibit pairing.
 Skip it for routine edits, tightly coupled debugging, latency-sensitive work,
 uncleared data, or work whose only shared write surface cannot be serialised.
 
 ## Roles
 
-- **Session chair:** the harness the human started. It alone talks to the human,
+- **Session chair:** the harness the user started. It alone talks to the user,
   allocates authority, updates the run receipt, owns gates and sends the final
   response. Chair ownership is accountability, not epistemic superiority.
 - **Stage owner:** one primary with sole authority for the current stage and its
@@ -70,7 +70,7 @@ needs durable peer exchange. Only the chair mutates shared pair state.
   the losing case.
 - Author/reviewer dispute: one falsification round, then one fresh-context or
   bonus-family pressure pass.
-- One-way-door, scope-changing or still-deadlocked decision: human gate.
+- One-way-door, scope-changing or still-deadlocked decision: user gate.
 - Peer unavailable before start: solo mode plus `PAIR-NOT-RUN: <reason>`.
 - Peer lost mid-stage: preserve partials, mark `PAIR-DEGRADED`, and reassign only
   if authority and review independence remain valid.
@@ -99,4 +99,4 @@ other primary owns bounded stages, workflows or audits, never a competing loop.
 | Verification | non-author where practical | trajectory evidence supplier |
 | Repair | implementation owner | original non-author re-verifies |
 | Final synthesis | chair | fresh-context final challenge |
-| Acceptance | human | neither primary substitutes |
+| Acceptance | user | neither primary substitutes |

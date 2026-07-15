@@ -1,11 +1,11 @@
 ---
 name: release
-description: "Use for human-authorised promotion of an accepted artifact: deploy, publish, send, roll out, or observe. Not for implementation or drafting; use implement or the domain owner."
+description: "Use for user-authorised promotion of an accepted artifact: deploy, publish, send, roll out, or observe. Not for implementation or drafting; use implement or the domain owner."
 ---
 
 # Release
 
-Promote one pinned, human-accepted artifact to an authorised target. This skill
+Promote one pinned, user-accepted artifact to an authorised target. This skill
 owns the authority gate and evidence; runbooks and tools own mechanics.
 
 ## Entry gate
@@ -56,9 +56,9 @@ promotion.
 
 ## Promote and verify
 
-1. Obtain explicit human approval for artifact, target and plan.
+1. Obtain explicit user approval for artifact, target and plan.
 2. Use one serial operator; reviewers cannot issue external actions.
-3. Execute only authorised command, connector or named human operation. Record
+3. Execute only authorised command, connector or named user operation. Record
    operation, actor, UTC interval, result/evidence; never expose secrets.
 4. Prove the target-visible outcome against predeclared requirements.
 5. On a stop condition, contain exposure and run the approved reversal or
@@ -70,9 +70,9 @@ Validate terminal evidence with `--gate complete`. `complete` means the outcome
 was proved, rather than that an operation merely succeeded. `reversed` and `failed`
 remain explicit outcomes with evidence and follow-up owners.
 
-## Human gates
+## User gates
 
-Humans own production promotion, external sending, public publication,
+Users own production promotion, external sending, public publication,
 irreversible disclosure or data changes, and acceptance of degraded safeguards.
 Agent may prepare and verify; it may execute only within explicit authority.
 
@@ -82,4 +82,4 @@ Console, Herdr and GitHub are optional. Use canonical project artifacts and
 emit the skill-owned artifact kind in
 [portable-workflow.v1.json](portable-workflow.v1.json). That filesystem
 artifact records workflow evidence; it cannot release or deploy and never
-substitutes for target-bound human authority.
+substitutes for target-bound user authority.

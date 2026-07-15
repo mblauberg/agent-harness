@@ -82,13 +82,13 @@ the same graph available at lower efforts:
 Use a driver script only when repeatability, resume state, or a large slice list justifies the extra
 surface. Otherwise, native subagents plus run-dir files are the Codex-native path.
 
-**Human gate mechanics.** Neither native subagent collaboration nor an explicit-wave script can pause a
-live Codex run mid-collaboration and block on human approval. Realise the contract's human gate by
-ending the run at the gate-adjacent stage and recording `awaiting-human` in the run-dir manifest/receipt;
-a human-approved follow-up invocation continues the graph — it is a new run reading the prior run-dir
+**User gate mechanics.** Neither native subagent collaboration nor an explicit-wave script can pause a
+live Codex run mid-collaboration and block on user approval. Realise the contract's user gate by
+ending the run at the gate-adjacent stage and recording `awaiting-user` in the run-dir manifest/receipt;
+a user-approved follow-up invocation continues the graph — it is a new run reading the prior run-dir
 state, not an in-process resume of a suspended session.
 
 GPT-5.6 Programmatic Tool Calling is a separate Responses API substrate for
 bounded, tool-heavy stages with predictable data flow. It can run generated
 JavaScript in OpenAI's hosted runtime, but it is not Claude workflow JavaScript
-and should not absorb semantic review, approval-sensitive writes or human gates.
+and should not absorb semantic review, approval-sensitive writes or user gates.

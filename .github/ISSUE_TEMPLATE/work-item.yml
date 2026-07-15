@@ -1,11 +1,11 @@
 name: Work item
-description: Propose a bounded change or decision for human or agent triage.
+description: Propose a bounded change or decision for user or agent triage.
 title: "[work]: "
 body:
   - type: markdown
     attributes:
       value: >-
-        Humans and agents use the same evidence and authority gates. Do not put
+        Users and agents use the same evidence and authority gates. Do not put
         secrets, personal data or private project material in this issue.
 
   - type: textarea
@@ -51,10 +51,10 @@ body:
   - type: textarea
     id: risk-authority-gates
     attributes:
-      label: Risk, authority and human gates
+      label: Risk, authority and user gates
       description: >-
         State the likely risk tier, authorised write/external scope, prohibited
-        actions, and any decision, acceptance or release that still needs a human.
+        actions, and any decision, acceptance or release that still needs a user.
     validations:
       required: true
 

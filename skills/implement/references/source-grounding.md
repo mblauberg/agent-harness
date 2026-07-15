@@ -18,7 +18,7 @@ It is not a demand to cite every ordinary code line.
 4. Record the interface, version or commit, source, retrieval date and exact
    assumption that the implementation relies on. If the source or version
    cannot be established, label the claim `unverified` and add a focused test,
-   spike or human decision; do not convert uncertainty into confidence.
+   spike or user decision; do not convert uncertainty into confidence.
 5. Turn volatile facts into executable contract tests where proportionate.
    Keep citations in the delivery evidence or owned engineering docs rather
    than scattering research commentary through production code.

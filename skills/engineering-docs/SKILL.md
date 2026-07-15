@@ -21,7 +21,7 @@ advisory mode, propose paths without creating them.
 | Architecture map | `docs/ARCHITECTURE.md` | current state; links to ADRs |
 | Diagrams | `docs/diagrams/` | Mermaid, `NN-slug.md`, indexed |
 | Runbooks | `docs/runbooks/` | numbered steps and verification |
-| Open-decision register | `docs/OPEN_DECISIONS.md` | one row per human/owner gate; never auto-answered |
+| Open-decision register | `docs/OPEN_DECISIONS.md` | one row per user/owner gate; never auto-answered |
 | Threat models | `docs/threat-models/` | STRIDE/LINDDUN structure |
 | Rolling state | `docs/STATE.md` | rules embedded in the file (`session` skill) |
 | Archive | `docs/archive/` | indexed by its README |

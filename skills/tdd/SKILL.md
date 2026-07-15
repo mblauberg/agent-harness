@@ -61,4 +61,4 @@ no dirty output; and resilience to internal refactoring.
 For a bug, first reproduce the exact failure as the regression test, watch it
 fail, then repair and watch it pass. If no correct seam reaches the bug, route
 to `diagnose`; do not bless a shallow test. `implement` owns independent review,
-repair loops, documentation and human acceptance.
+repair loops, documentation and user acceptance.

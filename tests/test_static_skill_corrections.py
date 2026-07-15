@@ -99,7 +99,7 @@ def test_autopilot_yields_when_bounded_reenumeration_finds_no_work():
 
     assert "one bounded re-enumeration pass" in skill
     assert "idle checkpoint" in skill
-    assert "only human STOP closes the mission" in skill
+    assert "only user STOP closes the mission" in skill
     assert "`orchestrate` owns provider routing" in reference
     assert "reviewer roster" not in reference.lower()
 

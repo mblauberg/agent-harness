@@ -13,7 +13,7 @@ different workers, tools, and intermediate steps. Evaluate outcomes, safety gate
    unresolved disagreements, and whether final claims trace to artifacts.
 4. **Outcome checks.** Tests pass, citations exist and support claims, arithmetic reconciles, files changed
    only where authorised, final state matches the request.
-5. **Human review.** Required for high-stakes, irreversible, or low-oracle domains.
+5. **User review.** Required for high-stakes, irreversible, or low-oracle domains.
 
 ## Trace fields to record
 
@@ -30,7 +30,7 @@ cross_family_checks
 failovers
 disagreements
 final_decision
-human_authority_gate
+user_authority_gate
 ```
 
 ## Behaviour test cases

@@ -96,7 +96,7 @@ index at the old routing surface and make the canonical owner explicit.
 
 Merge files when they duplicate the same truth, are always changed together,
 or force an agent through several tiny hops without adding an authority
-boundary. Preserve redirects/tombstones for live links. A human should reach
+boundary. Preserve redirects/tombstones for live links. A user should reach
 current claim -> owner -> evidence in at most three hops.
 
 ## Cleanup and retention

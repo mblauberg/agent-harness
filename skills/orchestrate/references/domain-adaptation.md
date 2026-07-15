@@ -29,7 +29,7 @@ compiler:
 ## Action-authority gates (high-stakes / irreversible)
 
 Some actions can't be undone: filing, serving, sending, publishing, signing, disclosing, committing,
-deploying. The orchestrator and its agents **prepare and verify**; a human authorises the irreversible
+deploying. The orchestrator and its agents **prepare and verify**; a user authorises the irreversible
 step. Respect the **host project's** authority rules — do not perform a gated action without the exact
 authority that project grants for that artifact. Encode any "must NOT do" as a `prohibited-action` flag
 in the handoff record (`layering-and-context.md`).
@@ -46,6 +46,6 @@ universal default.
 ## Tuning the loop by domain
 
 - **High-stakes, low-oracle (legal, medical, finance):** more cross-family verification, strict
-  source-anchoring, human action-gates, conservative confidence.
+  source-anchoring, user action-gates, conservative confidence.
 - **Exploratory research:** breadth-first parallel scouts → synthesis → one verification pass.
 - **Code:** tests as oracle first; agents for breadth and design critique.

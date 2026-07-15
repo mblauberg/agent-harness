@@ -76,7 +76,7 @@ explicitly (`dynamic-workflows.md`).
 Express chains by **role → tier/family**, resolving names at runtime:
 
 ```
-verify      → safest different-family read-only adapter → objective checks → human if needed
+verify      → safest different-family read-only adapter → objective checks → user if needed
 adversary   → strong different-family critic → source/test-backed fix list
 long-ctx    → long-context scout → file-backed synthesis → flagship decision
 bulk/scout  → cheap diverse scout → strict schema → sampled verification

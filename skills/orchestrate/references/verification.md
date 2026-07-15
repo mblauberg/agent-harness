@@ -44,7 +44,7 @@ effect as "may reduce", not "removes".)
    Don't simple-majority-vote — weigh by competence and by whether a flag is objectively checkable.
 5. **Beware debate convergence:** multi-round debate can settle on a confident *falsehood* if the
    models share a blind spot or the judge rewards confidence. Keep an objective anchor in the loop.
-6. Fold corrections; record unresolved disagreements in the scratchpad for a human decision.
+6. Fold corrections; record unresolved disagreements in the scratchpad for a user decision.
 
 For debate, panel, and sparse-communication patterns, see `debate-and-panels.md`.
 
