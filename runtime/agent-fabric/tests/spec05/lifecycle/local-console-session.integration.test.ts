@@ -499,8 +499,7 @@ describe("public local operator Console session", () => {
 
     const originalProvision = FabricDaemonClient.prototype.openLocalOperatorConsoleCapability;
     let entered = 0;
-    let release!: () => void;
-    const bothEntered = new Promise<void>((resolvePromise) => { release = resolvePromise; });
+    const bothEntered = Promise.withResolvers<void>();
     const provisionedGenerations: number[] = [];
     const provisionFailures: unknown[] = [];
     const provision = vi.spyOn(
@@ -508,8 +507,8 @@ describe("public local operator Console session", () => {
       "openLocalOperatorConsoleCapability",
     ).mockImplementation(async function (this: FabricDaemonClient, input) {
       entered += 1;
-      if (entered === 2) release();
-      await bothEntered;
+      if (entered === 2) bothEntered.resolve();
+      await bothEntered.promise;
       try {
         const issued = await originalProvision.call(this, input);
         provisionedGenerations.push(issued.principalGeneration);
@@ -520,38 +519,28 @@ describe("public local operator Console session", () => {
       }
     });
 
-    let opened;
-    try {
-      opened = await Promise.allSettled([
-        openLocalOperatorConsoleSession({
-          projectRoot: projectA,
-          surface: "standalone",
-          paths,
-          daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
-          clientId: "console_rotated_01",
-        }),
-        openLocalOperatorConsoleSession({
-          projectRoot: projectA,
-          surface: "herdr",
-          paths,
-          daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
-          clientId: "console_rotated_02",
-        }),
-      ]);
-    } finally {
-      provision.mockRestore();
-    }
+    const opened = await Promise.allSettled([
+      openLocalOperatorConsoleSession({
+        projectRoot: projectA,
+        surface: "standalone",
+        paths,
+        daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
+        clientId: "console_rotated_01",
+      }),
+      openLocalOperatorConsoleSession({
+        projectRoot: projectA,
+        surface: "herdr",
+        paths,
+        daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
+        clientId: "console_rotated_02",
+      }),
+    ]).finally(() => provision.mockRestore());
     expect(entered).toBe(2);
     expect(provisionFailures).toEqual([]);
     expect(provisionedGenerations).toEqual([2, 2]);
     expect(opened.map(({ status }) => status)).toEqual(["fulfilled", "fulfilled"]);
-    if (opened[0].status !== "fulfilled" || opened[1].status !== "fulfilled") {
-      throw new AggregateError(
-        opened.filter((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected")
-          .map(({ reason }) => reason),
-        "concurrent Console reopen failed after project capability rotation",
-      );
-    }
+    if (opened[0].status === "rejected") throw opened[0].reason;
+    if (opened[1].status === "rejected") throw opened[1].reason;
     const [first, second] = [opened[0].value, opened[1].value];
     try {
       expect(first.projectId).toBe(expired.projectId);
