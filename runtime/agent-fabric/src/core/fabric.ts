@@ -3388,7 +3388,13 @@ export class Fabric {
       authorityId: input.authorityId,
       adapterId: input.adapterId,
     });
-    const providerPayload = this.#admitProviderPayload(runId, input.authorityId, input.payload);
+    const providerPayload = this.#admitProviderPayload(
+      runId,
+      input.authorityId,
+      input.payload,
+      true,
+      { actorAgentId, taskId: typeof input.payload.taskId === "string" ? input.payload.taskId : undefined },
+    );
     this.#assertAdapterModel(input.adapterId, providerPayload);
     const bridgeContract = await this.#inspectAgentBridgeContract(input.adapterId, "spawn");
     if (this.#launchCustody === undefined) {
@@ -5324,6 +5330,7 @@ export class Fabric {
         stringField(targetAgent, "authority_id"),
         taskBoundPayload,
         existingPayload === undefined,
+        input.operation === "send_turn" ? { actorAgentId, taskId } : undefined,
       );
     } else {
       this.#adapter(input.adapterId);
@@ -5357,6 +5364,7 @@ export class Fabric {
         providerAuthorityId,
         taskBoundPayload,
         existingPayload === undefined,
+        input.operation === "spawn" || input.operation === "send_turn" ? { actorAgentId, taskId } : undefined,
       );
     }
     if (
@@ -5512,7 +5520,13 @@ export class Fabric {
             assertScopedTaskReadinessAllowed(this.#database, runId, taskId);
             assertRunAcceptingWork(this.#database, runId);
             this.#assertEphemeralProviderAuthority(runId, actorAgentId, ephemeralProviderAuthorityId as string);
-            this.#admitProviderPayload(runId, ephemeralProviderAuthorityId as string, taskBoundPayload);
+            this.#admitProviderPayload(
+              runId,
+              ephemeralProviderAuthorityId as string,
+              taskBoundPayload,
+              true,
+              { actorAgentId, taskId },
+            );
           },
         });
         } catch (error: unknown) {
@@ -6946,20 +6960,68 @@ export class Fabric {
     authorityId: string,
     payload: Record<string, unknown>,
     validateCurrent = true,
+    projectionContext?: { actorAgentId: string; taskId: string | undefined },
   ): Record<string, unknown> {
     const row = rowOrNotFound(
       this.#database.prepare("SELECT authority_json, authority_hash FROM authorities WHERE run_id = ? AND authority_id = ?").get(runId, authorityId),
       "provider authority",
     );
     const authority = parseAuthority(row);
+    const trustedProjection = projectionContext === undefined
+      ? undefined
+      : this.#workspaceWriteOfflineProjection(
+          runId,
+          projectionContext.actorAgentId,
+          projectionContext.taskId,
+          authority,
+          payload,
+        );
+    const admittedPayload = trustedProjection === undefined
+      ? payload
+      : { ...payload, cwd: trustedProjection.workspacePath };
     return compileProviderPayload({
       authority,
       workspaceRoot: () => this.#workspaceRootForRun(runId),
-      payload,
+      payload: admittedPayload,
+      ...(trustedProjection === undefined ? {} : { trustedProjection }),
       ...(validateCurrent
         ? { now: this.#clock(), validateCurrent: true }
         : { now: null, validateCurrent: false }),
     });
+  }
+
+  #workspaceWriteOfflineProjection(
+    runId: string,
+    actorAgentId: string,
+    taskId: string | undefined,
+    authority: AuthorityInput,
+    payload: Record<string, unknown>,
+  ): { kind: "workspace-write-offline"; workspacePath: string } | undefined {
+    if (taskId === undefined) return undefined;
+    if (payload.cwd !== undefined && typeof payload.cwd !== "string") return undefined;
+    const requestedCwd = payload.cwd ?? authority.sourcePaths[0] ?? ".";
+    let workspacePath: string;
+    try {
+      workspacePath = canonicalAuthorityPath(this.#workspaceRootForRun(runId), requestedCwd);
+    } catch {
+      return undefined;
+    }
+    const leaseRows = this.#database.prepare(`
+      SELECT scope.canonical_path
+        FROM leases lease
+        JOIN write_scope_entries scope ON scope.lease_id=lease.lease_id
+        JOIN task_obligation_bindings binding
+          ON binding.coordination_run_id=lease.run_id
+         AND binding.obligation_kind='write-lease'
+         AND binding.obligation_id=lease.lease_id
+       WHERE lease.run_id=? AND lease.kind='write' AND lease.holder_agent_id=?
+         AND lease.status='active' AND lease.expires_at>?
+         AND binding.task_id=? AND binding.state='active'
+    `).all(runId, actorAgentId, this.#clock(), taskId);
+    if (!leaseRows.some((value) => isRow(value) && pathContains(stringField(value, "canonical_path"), workspacePath))) {
+      return undefined;
+    }
+    return { kind: "workspace-write-offline", workspacePath };
   }
 
   #assertProviderPrincipalActive(runId: string, agentId: string): void {
