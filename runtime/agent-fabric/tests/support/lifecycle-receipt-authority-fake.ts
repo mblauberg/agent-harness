@@ -375,6 +375,18 @@ export class TestLifecycleReceiptAuthority implements LifecycleIntegrityReceiptA
     return structuredClone(this.#requiredScope(projectSessionId, runId).records);
   }
 
+  /**
+   * Models deletion of a retained (non-current) authenticated scope checkpoint
+   * from the authority's own store, leaving current heads intact. Later reads of
+   * the forgotten digest fail exactly as {@link readScopeCheckpointAt} does for an
+   * unknown pinned checkpoint.
+   */
+  forgetScopeSnapshot(checkpointDigest: LifecycleDigest): void {
+    if (!this.#scopeSnapshots.delete(checkpointDigest)) {
+      throw new Error("cannot forget an unknown pinned scope checkpoint");
+    }
+  }
+
   #appendStored(
     intentDigest: LifecycleDigest,
     subject: Readonly<Record<string, unknown>>,
