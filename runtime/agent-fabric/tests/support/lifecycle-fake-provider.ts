@@ -381,8 +381,11 @@ input.on("line", (line) => {
             respond(request.id, result);
           }
         };
-        if (lifecycleSpawn && Number.isSafeInteger(spawnDelayMs) && spawnDelayMs > 0) {
-          setTimeout(complete, spawnDelayMs);
+        if (lifecycleSpawn) {
+          afterSpawnBarrier(() => {
+            if (Number.isSafeInteger(spawnDelayMs) && spawnDelayMs > 0) setTimeout(complete, spawnDelayMs);
+            else complete();
+          });
         } else {
           complete();
         }

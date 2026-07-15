@@ -3,7 +3,7 @@ import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   createLifecycleFixture as createLifecycleFixtureBase,
@@ -113,6 +113,21 @@ function generationLossDurableState(fixture: LifecycleFixture): Record<string, u
          ORDER BY sequence
       `).all(fixture.runId),
     };
+  } finally {
+    database.close();
+  }
+}
+
+function activeRotationCustody(fixture: LifecycleFixture): Record<string, unknown> {
+  const database = new Database(fixture.databasePath, { readonly: true });
+  try {
+    return database.prepare(`
+      SELECT agent.lifecycle,head.state,head.disposition_code,head.terminal
+        FROM agents agent
+        JOIN lifecycle_rotation_custody_heads head
+          ON head.run_id=agent.run_id AND head.agent_id=agent.agent_id
+       WHERE agent.run_id=? AND agent.agent_id='leader'
+    `).get(fixture.runId) as Record<string, unknown>;
   } finally {
     database.close();
   }
@@ -399,8 +414,9 @@ describe("AC-009 Stage 3 unannounced provider compaction", () => {
   });
 
   it("publishes accepted-suspended rotation custody, not synchronous ready", async () => {
-    const fixture = await createLifecycleFixture({ spawnDelayMs: 100 });
+    const fixture = await createLifecycleFixture({ spawnBarrier: true });
     cleanup.push(async () => {
+      await fixture.providerSpawnBarrier?.release();
       await fixture.fabric.close();
       await rm(fixture.directory, { recursive: true, force: true });
     });
@@ -427,24 +443,23 @@ describe("AC-009 Stage 3 unannounced provider compaction", () => {
       targetProviderGeneration: 2,
     });
 
-    await vi.waitFor(() => {
-      const database = new Database(fixture.databasePath, { readonly: true });
-      try {
-        expect(database.prepare(`
-          SELECT agent.lifecycle,head.state,head.disposition_code,head.terminal
-            FROM agents agent
-            JOIN lifecycle_rotation_custody_heads head
-              ON head.run_id=agent.run_id AND head.agent_id=agent.agent_id
-           WHERE agent.run_id=? AND agent.agent_id='leader'
-        `).get(fixture.runId)).toMatchObject({
-          lifecycle: "suspended",
-          state: "committing",
-          disposition_code: "none",
-          terminal: 0,
-        });
-      } finally {
-        database.close();
-      }
+    const spawnBarrier = fixture.providerSpawnBarrier;
+    if (spawnBarrier === undefined) throw new Error("provider spawn barrier is required");
+    await spawnBarrier.waitUntilEntered();
+    expect(activeRotationCustody(fixture)).toMatchObject({
+      lifecycle: "suspended",
+      state: "dispatched",
+      disposition_code: "none",
+      terminal: 0,
+    });
+
+    await spawnBarrier.release();
+    await fixture.fabric.close();
+    expect(activeRotationCustody(fixture)).toMatchObject({
+      lifecycle: "suspended",
+      state: "committing",
+      disposition_code: "none",
+      terminal: 0,
     });
   });
 });
