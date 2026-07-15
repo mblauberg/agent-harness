@@ -21,9 +21,9 @@ Judgement-bearing choices (whether ambiguity warrants scoping, context
 staleness, human acceptance) stay with the chair and skills. Skills reference
 the kernel instead of restating gates.
 
-Retention remains governed by project and risk policy plus bounded
-run-artifact rules. It is not a required field in the executable delivery
-kernel.
+Each delivery artifact keeps its existing `retention` policy field, constrained
+by project and risk profile policy. A universal retention-class vocabulary is
+not a required executable minimum.
 
 ## Consequences
 
