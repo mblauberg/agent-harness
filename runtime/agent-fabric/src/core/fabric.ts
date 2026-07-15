@@ -5330,7 +5330,11 @@ export class Fabric {
         stringField(targetAgent, "authority_id"),
         taskBoundPayload,
         existingPayload === undefined,
-        input.operation === "send_turn" ? { actorAgentId, taskId } : undefined,
+        input.operation === "send_turn"
+          ? existingPayload?.executionProfile === "workspace-write-offline" && typeof existingPayload.cwd === "string"
+            ? { workspacePath: existingPayload.cwd }
+            : existingPayload === undefined ? { actorAgentId, taskId } : undefined
+          : undefined,
       );
     } else {
       this.#adapter(input.adapterId);
@@ -5364,7 +5368,11 @@ export class Fabric {
         providerAuthorityId,
         taskBoundPayload,
         existingPayload === undefined,
-        input.operation === "spawn" || input.operation === "send_turn" ? { actorAgentId, taskId } : undefined,
+        input.operation === "spawn" || input.operation === "send_turn"
+          ? existingPayload?.executionProfile === "workspace-write-offline" && typeof existingPayload.cwd === "string"
+            ? { workspacePath: existingPayload.cwd }
+            : existingPayload === undefined ? { actorAgentId, taskId } : undefined
+          : undefined,
       );
     }
     if (
@@ -6960,7 +6968,9 @@ export class Fabric {
     authorityId: string,
     payload: Record<string, unknown>,
     validateCurrent = true,
-    projectionContext?: { actorAgentId: string; taskId: string | undefined },
+    projectionContext?:
+      | { actorAgentId: string; taskId: string | undefined }
+      | { workspacePath: string },
   ): Record<string, unknown> {
     const row = rowOrNotFound(
       this.#database.prepare("SELECT authority_json, authority_hash FROM authorities WHERE run_id = ? AND authority_id = ?").get(runId, authorityId),
@@ -6969,7 +6979,9 @@ export class Fabric {
     const authority = parseAuthority(row);
     const trustedProjection = projectionContext === undefined
       ? undefined
-      : this.#workspaceWriteOfflineProjection(
+      : "workspacePath" in projectionContext
+        ? this.#replayWorkspaceWriteOfflineProjection(runId, authority, payload, projectionContext.workspacePath)
+        : this.#workspaceWriteOfflineProjection(
           runId,
           projectionContext.actorAgentId,
           projectionContext.taskId,
@@ -6988,6 +7000,33 @@ export class Fabric {
         ? { now: this.#clock(), validateCurrent: true }
         : { now: null, validateCurrent: false }),
     });
+  }
+
+  #replayWorkspaceWriteOfflineProjection(
+    runId: string,
+    authority: AuthorityInput,
+    payload: Record<string, unknown>,
+    workspacePath: string,
+  ): { kind: "workspace-write-offline"; workspacePath: string } | undefined {
+    if (payload.cwd !== undefined && typeof payload.cwd !== "string") return undefined;
+    try {
+      const workspaceRoot = this.#workspaceRootForRun(runId);
+      const relativeWorkspacePath = relative(workspaceRoot, workspacePath);
+      if (
+        relativeWorkspacePath === ".." || relativeWorkspacePath.startsWith(`..${sep}`) ||
+        isAbsolute(relativeWorkspacePath)
+      ) return undefined;
+      const replayPath = relativeWorkspacePath === ""
+        ? "."
+        : normalize(relativeWorkspacePath).replaceAll(sep, "/");
+      const requestedPath = canonicalAuthorityPath(
+        workspaceRoot,
+        payload.cwd ?? authority.sourcePaths[0] ?? ".",
+      );
+      return requestedPath === replayPath ? { kind: "workspace-write-offline", workspacePath: replayPath } : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   #workspaceWriteOfflineProjection(

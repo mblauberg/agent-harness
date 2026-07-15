@@ -168,6 +168,15 @@ describe("provider workspace-write projection", () => {
         writeRoot: join(value.directory, "src"),
         networkAccess: "none",
       });
+
+      value.clock.advance(10_001);
+      await expect(value.chair.dispatchProviderAction({
+        adapterId: "lifecycle",
+        actionId: "write-resume",
+        operation: "send_turn",
+        payload: { agentId: "worker", taskId: value.task.taskId, cwd: "src", prompt: "resume" },
+        commandId: "write-resume:reconcile",
+      })).resolves.toMatchObject({ status: "terminal" });
     } finally {
       await closeFixture(value);
     }
