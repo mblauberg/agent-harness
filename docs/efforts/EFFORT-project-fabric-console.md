@@ -8,13 +8,12 @@ implementation and acceptance state; this file is only the compact route.
 
 ## Current W012 route
 
-- The child-loss cleanup, expired-principal timing repair and partial
-  first-frame timing repair are complete in [issues
+- The child-bridge, expired-principal and partial first-frame timing repairs
+  are complete in [issues
   #64](https://github.com/mblauberg/provenant/issues/64),
-  [#71](https://github.com/mblauberg/provenant/issues/71) and
+  [#71](https://github.com/mblauberg/provenant/issues/71),
+  [#74](https://github.com/mblauberg/provenant/issues/74) and
   [#76](https://github.com/mblauberg/provenant/issues/76).
-- [Issue #74](https://github.com/mblauberg/provenant/issues/74) owns the
-  remaining deterministic child-bridge test barrier.
 - [Issues #72](https://github.com/mblauberg/provenant/issues/72) and
   [#75](https://github.com/mblauberg/provenant/issues/75) own two distinct
   Console full-suite failures whose public error currently hides the failing
