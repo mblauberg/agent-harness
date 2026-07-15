@@ -424,7 +424,7 @@ describe("public protocol adapter", () => {
 
     const result = await adapter.open();
 
-    expect(result.spec05?.reviewRuns[0]).toMatchObject({
+    expect(result.review?.reviewRuns[0]).toMatchObject({
       projectSessionId: "session-1",
       coordinationRunId: "run-1",
       preparation: {
@@ -438,12 +438,12 @@ describe("public protocol adapter", () => {
         reason: "operator-route-projection-unavailable",
       },
     });
-    expect(result.spec05?.topology[0]).toMatchObject({
+    expect(result.review?.topology[0]).toMatchObject({
       taskId: "task-1",
       coordinationRunId: "run-1",
       read: { state: "current", value: { currency: "unavailable" } },
     });
-    expect(result.spec05?.contextPressure[0]).toMatchObject({
+    expect(result.review?.contextPressure[0]).toMatchObject({
       agentId: "agent-1",
       coordinationRunId: "run-1",
       read: { state: "current", value: { currency: "unavailable" } },

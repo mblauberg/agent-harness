@@ -11,7 +11,7 @@ describe("public operation vocabulary", () => {
     });
   });
 
-  it("publishes the Spec 05 extensions alongside the baseline without unsafe aliases", () => {
+  it("publishes the Agent Fabric extensions alongside the baseline without unsafe aliases", () => {
     const operations: unknown = Reflect.get(protocol, "FABRIC_OPERATIONS");
 
     expect(operations).toMatchObject({

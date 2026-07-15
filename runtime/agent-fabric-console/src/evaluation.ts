@@ -936,7 +936,7 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
         },
       },
     })),
-  } as unknown as NonNullable<FabricConsoleDataset["spec05"]>;
+  } as unknown as NonNullable<FabricConsoleDataset["review"]>;
   const pages = createEmptyViewPages();
   const attentionFacts: AttentionItem[] = fixture.attention.map((item) => ({
     itemId: item.id,
@@ -1080,7 +1080,7 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
       },
       promotion: { state: "available" },
     },
-    spec05: spec17,
+    review: spec17,
     ...(evidenceReview === null ? {} : {
       inspection: {
         kind: "artifact" as const,

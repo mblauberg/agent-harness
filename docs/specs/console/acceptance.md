@@ -10,7 +10,7 @@ not a chair assertion. It is true only when:
    publication lineage, sealed delivery review basis, clean
    base/head source-state and review-diff.v1 digest, complete review bundle/
    coverage digest, one unbroken active target-chair binding and one resolved
-   `spec05-four-slot-v1` snapshot;
+   `certifying-review-four-slot-v1` snapshot;
 - its four linear slot heads each name one current terminal safe certifying
    CLEAN evidence record and an empty complete open-finding set;
 - every head/action-pair/evidence record binds that target, active chair-

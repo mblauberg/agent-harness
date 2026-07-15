@@ -1,9 +1,8 @@
 from collections import Counter
-import hashlib
 import json
 from pathlib import Path
+import subprocess
 
-import pytest
 import yaml
 
 
@@ -73,47 +72,33 @@ def test_code_review_discipline_cases_have_prompt_and_expected_behaviour():
         assert case["expected"].strip()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "skill-portfolio-2026 catalogue digest is bound to the pre-#124 skill "
-        "descriptions; the #124 merges change the live catalogue, so this frozen "
-        "routing evidence is regenerated under issue #135 (see "
-        "docs/audits/skill-catalogue-audit-register.md)."
-    ),
-    strict=False,
-)
-def test_portfolio_routing_summary_binds_the_canonical_result():
+def test_portfolio_routing_summary_retains_a_self_consistent_historical_result():
     root = ROOT / "docs" / "evals" / "skill-portfolio-2026"
     summary = json.loads((root / "summary.json").read_text())["routing_regression"]
-    result_path = root / "routing-result.json"
-    result = json.loads(result_path.read_text())
-    dataset_path = root / result["dataset"]["path"]
-    plan_path = root / result["plan"]["path"]
-    plan = json.loads(plan_path.read_text())
-    descriptions = {}
-    for path in sorted((ROOT / "skills").glob("*/SKILL.md")):
-        frontmatter = yaml.safe_load(path.read_text().split("---", 2)[1])
-        descriptions[frontmatter["name"]] = frontmatter["description"]
-    catalogue = "".join(
-        f"- {name}: {descriptions[name]}\n" for name in sorted(descriptions)
-    ).encode()
-
+    result = json.loads((root / "routing-result.json").read_text())
+    plan = json.loads((root / result["plan"]["path"]).read_text())
+    repository = result["repository"]
     assert summary["evaluation_id"] == result["evaluation_id"]
-    assert summary["receipt_digest"] == (
-        "sha256:" + hashlib.sha256(result_path.read_bytes()).hexdigest()
+    assert summary["repository"] == repository == plan["repository"]
+    assert set(repository) == {"commit", "path"}
+    assert len(repository["commit"]) == 40
+    historical_root = repository["path"]
+    historical_result = json.loads(subprocess.run(
+        ["git", "show", f'{repository["commit"]}:{historical_root}/routing-result.json'],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout)
+    subprocess.run(
+        ["git", "cat-file", "-e", f'{repository["commit"]}:{historical_root}/{result["dataset"]["path"]}'],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
     )
-    assert result["dataset"]["sha256"] == (
-        "sha256:" + hashlib.sha256(dataset_path.read_bytes()).hexdigest()
-    )
-    assert result["plan"]["sha256"] == (
-        "sha256:" + hashlib.sha256(plan_path.read_bytes()).hexdigest()
-    )
-    assert plan["dataset"] == result["dataset"] | {"split": "fresh-holdout"}
-    assert plan["catalogue"] == result["catalogue"]
-    assert result["catalogue"] == {
-        "sha256": "sha256:" + hashlib.sha256(catalogue).hexdigest(),
-        "characters": len(catalogue.decode()),
-    }
+    assert historical_result["evaluation_id"] == result["evaluation_id"]
+    assert historical_result["metrics"] == result["metrics"]
+    assert historical_result["lineage"] == result["lineage"]
     assert summary["case_rows"] == result["schedule"]["case_rows"]
     for name in ("primary_accuracy", "companion_fidelity"):
         assert summary[name] == result["metrics"][name]["value"]

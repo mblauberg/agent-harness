@@ -2,7 +2,7 @@ import { readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CORE_CONTRACT_SCHEMAS, PROTOCOL_SCHEMA, SPEC05_CONTRACT_SCHEMAS } from "../dist/schema.js";
+import { CORE_CONTRACT_SCHEMAS, PROTOCOL_SCHEMA, FABRIC_CONTRACT_SCHEMAS } from "../dist/schema.js";
 import {
   MCP_PROJECTION_LIMITS,
   MCP_PROJECTION_REGISTRY,
@@ -15,7 +15,7 @@ const schemasDirectory = join(root, "schemas");
 const generated = new Map([
   ["protocol.schema.json", `${JSON.stringify(PROTOCOL_SCHEMA)}\n`],
 ]);
-for (const [name, schema] of Object.entries({ ...CORE_CONTRACT_SCHEMAS, ...SPEC05_CONTRACT_SCHEMAS })) {
+for (const [name, schema] of Object.entries({ ...CORE_CONTRACT_SCHEMAS, ...FABRIC_CONTRACT_SCHEMAS })) {
   const definitions = {
     boundedJsonValue: PROTOCOL_SCHEMA.$defs.boundedJsonValue,
     jsonValueNode: PROTOCOL_SCHEMA.$defs.jsonValueNode,

@@ -196,7 +196,7 @@ const reservationRequest = {
   },
   writerAdmission: {
     repositoryRoot,
-    worktreePath: join(repositoryRoot, ".worktrees", "spec05-protocol"),
+    worktreePath: join(repositoryRoot, ".worktrees", "agent-fabric-protocol"),
     sourcePrefixes: ["runtime/agent-fabric-protocol"],
     writerGeneration: 1,
   },

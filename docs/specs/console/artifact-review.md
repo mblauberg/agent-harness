@@ -199,7 +199,7 @@ is capped at 16 calls/1 MiB aggregate.
 The target owns an immutable review subject plus one append-only active chair-
 binding chain. Generation one snapshots the exact chair agent/principal/lease/
 provider-session/bridge generation, adapter/contract/family/model and the
-resolved checked-in `spec05-four-slot-v1` profile. Its slots are `native`,
+resolved checked-in `certifying-review-four-slot-v1` profile. Its slots are `native`,
 `other-primary`, `cursor-grok` and `agy-gemini`; for an OpenAI chair they
 resolve respectively to the native Codex route, Claude/Anthropic,
 cursor-agent/`cursor-grok-4.5-high`/xAI and

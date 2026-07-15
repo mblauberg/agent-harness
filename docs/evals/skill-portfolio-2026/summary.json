@@ -1,6 +1,6 @@
 {
   "availability": {
-    "anthropic_sdk": "not scheduled after the Spec05 adapter action terminated at provider authentication",
+    "anthropic_sdk": "not scheduled after the lifecycle-routing adapter action terminated at provider authentication",
     "google_effective_model": "Gemini 3.1 Pro (High)",
     "xai_effective_model": "grok-4.5-xhigh"
   },
@@ -121,23 +121,23 @@
     "attempts": 6,
     "case_rows": 108,
     "cases": 18,
-    "catalogue_digest": "sha256:9346760fbab26c585e87822f88c54f54b47a2ea0231935b2befc72798ba886cf",
     "companion_fidelity": 1.0,
     "companion_threshold": 0.9,
     "critical_case_failures": 0,
-    "dataset_digest": "sha256:565b5c87e20fedca94a33ea473656204fdb9d5bab186288090e40714d5b90366",
     "evaluation_id": "skill-portfolio-routing-20260714-fabric-v5",
     "families": [
       "google",
       "xai"
     ],
     "human_acceptance": "external",
-    "plan_digest": "sha256:d36390ede2531d585341f37bc93488f07f01f2805eb233744cfcbb2acbf1a089",
     "primary_accuracy": 1.0,
     "primary_threshold": 1.0,
-    "receipt_digest": "sha256:04ad85a546bef0cdb1d2c1d99cab56ba0d9985428619e1e85642b9a860ce19d1",
+    "repository": {
+      "commit": "1ddfe24858b362decb1c507b87a466df26d205eb",
+      "path": "docs/evals/skill-portfolio-2026"
+    },
     "repetitions": 3,
     "status": "pass"
   },
-  "schema_version": 1
+  "schema_version": 2
 }

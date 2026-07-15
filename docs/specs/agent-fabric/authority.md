@@ -280,7 +280,7 @@ Acceptance additionally requires:
 
 #### Owned four-slot profile
 
-The protocol package owns schemas/spec05-four-slot-v1.schema.json and the checked-in profile document config/review-profiles/spec05-four-slot-v1.json. Both are closed and digest-bound. The profile has exactly these rules:
+The protocol package owns schemas/certifying-review-four-slot-v1.schema.json and the checked-in profile document config/review-profiles/certifying-review-four-slot-v1.json. Both are closed and digest-bound. The profile has exactly these rules:
 
 ~~~yaml
 resolvedReviewProfileSlotV1:
@@ -311,7 +311,7 @@ resolvedReviewProfileSlotV1:
 
 resolvedReviewProfileV1:
   schemaVersion: 1
-  profileId: spec05-four-slot-v1
+  profileId: certifying-review-four-slot-v1
   profileSchemaDigest: sha256-prefixed-digest
   targetChairFamily: openai-or-anthropic
   slots: exactly-four-resolvedReviewProfileSlotV1-in-profile-order

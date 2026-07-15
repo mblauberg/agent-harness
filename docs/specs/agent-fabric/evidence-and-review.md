@@ -337,12 +337,12 @@ deliveryRequirementMapSealRequestV1:
   expectedCatalogueDigest: sha256-prefixed-current-checked-in-digest
 ~~~
 
-`expectedMapGeneration` is zero iff none exists and otherwise equals the one current generation; every wrong zero/positive/current combination conflicts before derivation. From the active accepted scope and checked-in `spec05-delivery-requirements.v1` catalogue, the daemon produces:
+`expectedMapGeneration` is zero iff none exists and otherwise equals the one current generation; every wrong zero/positive/current combination conflicts before derivation. From the active accepted scope and checked-in `console-acceptance-delivery-requirements.v1` catalogue, the daemon produces:
 
 ~~~yaml
-spec05DeliveryRequirementsV1:
+consoleAcceptanceDeliveryRequirementsV1:
   schemaVersion: 1
-  catalogueId: spec05-delivery-requirements-v1
+  catalogueId: console-acceptance-delivery-requirements-v1
   entries:
     - requirementId: exact-stable-binding-id
       sourceRole: spec-or-adr-or-decision
@@ -403,7 +403,7 @@ implementationDeliveryManifestV1:
   deliveryRunId: exact-delivery-run
   sealGeneration: positive-generation
   profile:
-    profileId: spec05-four-slot-v1
+    profileId: certifying-review-four-slot-v1
     profileSchemaDigest: sha256-prefixed-digest
     riskTier: exact-current-risk-tier
   acceptedScope:
@@ -887,7 +887,7 @@ reviewTargetV1:
   initialChairBindingGeneration: 1
   initialChairBindingDigest: sha256-prefixed-reviewTargetChairBindingV1-digest
   completionProfile:
-    profileId: spec05-four-slot-v1
+    profileId: certifying-review-four-slot-v1
     profileSchemaDigest: sha256-prefixed-checked-in-schema
     resolvedProfileDigest: sha256-prefixed-target-snapshot
     slots: exact-four-resolved-slots

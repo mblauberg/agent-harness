@@ -45,7 +45,7 @@ export const RESOLVED_REVIEW_PROFILE_SLOT_V1_CODEC = objectCodec({
 
 const resolvedReviewProfileBaseCodec = objectCodec({
   schemaVersion: literal(1),
-  profileId: literal("spec05-four-slot-v1"),
+  profileId: literal("certifying-review-four-slot-v1"),
   profileSchemaDigest: sha256,
   targetChairFamily: enumeration(["openai", "anthropic"]),
   slots: arrayOf(RESOLVED_REVIEW_PROFILE_SLOT_V1_CODEC, { minimum: 4, maximum: 4 }),
