@@ -51,7 +51,7 @@ T30 = "2026-07-14T00:00:30.000Z"
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC_04 = read_specs(AGENT_FABRIC_HARDENING)
+HARDENING_SPECS = read_specs(AGENT_FABRIC_HARDENING)
 
 
 def ddl_block(text: str, table: str) -> str:
@@ -132,12 +132,12 @@ SCHEMA_SQL = "\n\n".join(
         FIXTURE_SCHEMA_SQL.split(
             "CREATE TABLE lifecycle_fresh_recovery_handoffs", maxsplit=1
         )[0],
-        f"CREATE TABLE {ddl_block(SPEC_04, 'agent_lifecycle_recovery_source_heads')};",
+        f"CREATE TABLE {ddl_block(HARDENING_SPECS, 'agent_lifecycle_recovery_source_heads')};",
         "CREATE TABLE lifecycle_fresh_recovery_handoffs"
         + FIXTURE_SCHEMA_SQL.split(
             "CREATE TABLE lifecycle_fresh_recovery_handoffs", maxsplit=1
         )[1],
-        *(trigger_sql(SPEC_04, name) for name in LEAD8_TRIGGERS),
+        *(trigger_sql(HARDENING_SPECS, name) for name in LEAD8_TRIGGERS),
     )
 )
 

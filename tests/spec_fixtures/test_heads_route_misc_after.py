@@ -24,13 +24,13 @@ from spec_sources import AGENT_FABRIC_HARDENING, read_specs
 
 CASES_RUN = 0
 ROOT = Path(__file__).resolve().parents[2]
-SPEC_04 = read_specs(AGENT_FABRIC_HARDENING)
+HARDENING_SPECS = read_specs(AGENT_FABRIC_HARDENING)
 
 
 def normative_table_sql(table: str) -> str:
-    start = SPEC_04.index(f"\n{table}(") + 1
-    end = SPEC_04.index("\n)\n", start) + 2
-    return f"CREATE TABLE {SPEC_04[start:end]};"
+    start = HARDENING_SPECS.index(f"\n{table}(") + 1
+    end = HARDENING_SPECS.index("\n)\n", start) + 2
+    return f"CREATE TABLE {HARDENING_SPECS[start:end]};"
 
 
 SCHEMA = r"""

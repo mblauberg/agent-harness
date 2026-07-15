@@ -15,10 +15,10 @@ from spec_sources import (
 ROOT = Path(__file__).resolve().parents[2]
 
 
-SPEC_01 = read_specs(AGENT_FABRIC_BEHAVIOUR)
-SPEC_04 = read_specs(AGENT_FABRIC_HARDENING)
-SPEC_01_ROUTE = read_spec("agent-fabric/provider-actions-and-adapters.md")
-SPEC_01_READ = read_spec("agent-fabric/messaging-and-public-protocol.md")
+BEHAVIOUR_SPECS = read_specs(AGENT_FABRIC_BEHAVIOUR)
+HARDENING_SPECS = read_specs(AGENT_FABRIC_HARDENING)
+PROVIDER_ACTIONS_SPEC = read_spec("agent-fabric/provider-actions-and-adapters.md")
+MESSAGING_PROTOCOL_SPEC = read_spec("agent-fabric/messaging-and-public-protocol.md")
 
 
 def ddl_block(text: str, table: str) -> str:
@@ -135,21 +135,21 @@ def trigger_database() -> sqlite3.Connection:
         "lifecycle_fresh_origin_effect_set_closed",
         "lifecycle_apply_post_state_complete",
     ):
-        db.executescript(trigger_sql(SPEC_04, name))
+        db.executescript(trigger_sql(HARDENING_SPECS, name))
     return db
 
 
 class SpecRepairTests(unittest.TestCase):
     def test_fresh_origin_subject_batch_and_apply_are_receipt_backed(self) -> None:
-        batch = ddl_block(SPEC_04, "lifecycle_receipt_batches")
+        batch = ddl_block(HARDENING_SPECS, "lifecycle_receipt_batches")
         effect = ddl_block(
-            SPEC_04, "lifecycle_receipt_fresh_origin_effects"
+            HARDENING_SPECS, "lifecycle_receipt_fresh_origin_effects"
         )
-        intent = ddl_block(SPEC_04, "lifecycle_receipt_intents")
+        intent = ddl_block(HARDENING_SPECS, "lifecycle_receipt_intents")
         completion = ddl_block(
-            SPEC_04, "lifecycle_receipt_batch_completions"
+            HARDENING_SPECS, "lifecycle_receipt_batch_completions"
         )
-        apply = ddl_block(SPEC_04, "lifecycle_transition_applies")
+        apply = ddl_block(HARDENING_SPECS, "lifecycle_transition_applies")
 
         self.assertIn("'custody-recovery-retirement','fresh-origin'", batch)
         self.assertIn(
@@ -185,21 +185,21 @@ class SpecRepairTests(unittest.TestCase):
         ):
             self.assertIn(receipt_field, fresh_arm)
 
-        normalized = " ".join(SPEC_01.split())
+        normalized = " ".join(BEHAVIOUR_SPECS.split())
         self.assertIn(
             "Every fresh-created custody is authenticated by exactly one "
             "`fresh-origin` subject before its apply.",
             normalized,
         )
-        self.assertNotIn("the fresh arm has no receipt-derived values", SPEC_01)
+        self.assertNotIn("the fresh arm has no receipt-derived values", BEHAVIOUR_SPECS)
 
     def test_scope_discovery_hydrates_authenticated_zero_receipt_members(self) -> None:
-        outbox = ddl_block(SPEC_04, "lifecycle_scope_admission_outbox")
+        outbox = ddl_block(HARDENING_SPECS, "lifecycle_scope_admission_outbox")
         resolution = ddl_block(
-            SPEC_04, "lifecycle_scope_admission_resolutions"
+            HARDENING_SPECS, "lifecycle_scope_admission_resolutions"
         )
         member = ddl_block(
-            SPEC_04, "lifecycle_receipt_namespace_members"
+            HARDENING_SPECS, "lifecycle_receipt_namespace_members"
         )
 
         self.assertIn("scope_digest UNIQUE", outbox)
@@ -215,11 +215,11 @@ class SpecRepairTests(unittest.TestCase):
         )
         self.assertIn(
             "CREATE TRIGGER lifecycle_scope_admission_outbox_no_update",
-            SPEC_04,
+            HARDENING_SPECS,
         )
         self.assertIn(
             "CREATE TRIGGER lifecycle_scope_admission_outbox_no_delete",
-            SPEC_04,
+            HARDENING_SPECS,
         )
         for trigger in (
             "lifecycle_scope_admission_resolution_requires_initial_head",
@@ -231,8 +231,8 @@ class SpecRepairTests(unittest.TestCase):
             "lifecycle_receipt_namespace_member_no_update",
             "lifecycle_receipt_namespace_member_no_delete",
         ):
-            self.assertIn(f"CREATE TRIGGER {trigger}", SPEC_04)
-        normalized = " ".join(SPEC_01.split())
+            self.assertIn(f"CREATE TRIGGER {trigger}", HARDENING_SPECS)
+        normalized = " ".join(BEHAVIOUR_SPECS.split())
         self.assertIn(
             "The namespace checkpoint covers every externally admitted "
             "authority scope in the project, including a scope with zero "
@@ -249,7 +249,7 @@ class SpecRepairTests(unittest.TestCase):
     def test_fresh_origin_effect_ddl_accepts_exact_and_rejects_crossed_arm(self) -> None:
         self.assertIn(
             "CREATE TRIGGER lifecycle_fresh_origin_effect_requires_exact_handoff",
-            SPEC_04,
+            HARDENING_SPECS,
         )
         db = sqlite3.connect(":memory:", isolation_level=None)
         db.execute("PRAGMA foreign_keys=ON")
@@ -322,11 +322,11 @@ class SpecRepairTests(unittest.TestCase):
         )
         db.execute(
             "CREATE TABLE "
-            + ddl_block(SPEC_04, "lifecycle_receipt_fresh_origin_effects")
+            + ddl_block(HARDENING_SPECS, "lifecycle_receipt_fresh_origin_effects")
         )
         db.executescript(
             trigger_sql(
-                SPEC_04, "lifecycle_fresh_origin_effect_requires_exact_handoff"
+                HARDENING_SPECS, "lifecycle_fresh_origin_effect_requires_exact_handoff"
             )
         )
         db.execute(
@@ -378,7 +378,7 @@ class SpecRepairTests(unittest.TestCase):
         )
         db.execute(statement, values)
         db.execute(
-            "CREATE TABLE " + ddl_block(SPEC_04, "lifecycle_receipt_intents")
+            "CREATE TABLE " + ddl_block(HARDENING_SPECS, "lifecycle_receipt_intents")
         )
         db.execute(
             "INSERT INTO lifecycle_receipt_intents("
@@ -566,7 +566,7 @@ class SpecRepairTests(unittest.TestCase):
 
     def test_scope_admission_ddl_accepts_zero_member_and_rejects_near_valid(self) -> None:
         resolution_ddl = ddl_block(
-            SPEC_04, "lifecycle_scope_admission_resolutions"
+            HARDENING_SPECS, "lifecycle_scope_admission_resolutions"
         )
         self.assertEqual(resolution_ddl.count("initial_head_receipt_digest"), 2)
         self.assertNotIn(
@@ -590,7 +590,7 @@ class SpecRepairTests(unittest.TestCase):
             "lifecycle_scope_admission_resolutions",
             "lifecycle_receipt_scope_heads",
         ):
-            db.execute("CREATE TABLE " + ddl_block(SPEC_04, table))
+            db.execute("CREATE TABLE " + ddl_block(HARDENING_SPECS, table))
         for trigger in (
             "lifecycle_scope_admission_resolution_requires_complete_namespace",
             "lifecycle_scope_admission_outbox_no_update",
@@ -603,7 +603,7 @@ class SpecRepairTests(unittest.TestCase):
             "lifecycle_receipt_namespace_member_no_update",
             "lifecycle_receipt_namespace_member_no_delete",
         ):
-            db.executescript(trigger_sql(SPEC_04, trigger))
+            db.executescript(trigger_sql(HARDENING_SPECS, trigger))
 
         db.execute(
             "INSERT INTO lifecycle_scope_admission_outbox("
@@ -843,10 +843,10 @@ class SpecRepairTests(unittest.TestCase):
         db.rollback()
 
     def test_transition_apply_copies_batch_arm_with_nonnull_sentinels(self) -> None:
-        batch = ddl_block(SPEC_04, "lifecycle_receipt_batches")
-        apply = ddl_block(SPEC_04, "lifecycle_transition_applies")
-        handoff = ddl_block(SPEC_04, "lifecycle_fresh_recovery_handoffs")
-        commit = ddl_block(SPEC_04, "lifecycle_fresh_rotation_commits")
+        batch = ddl_block(HARDENING_SPECS, "lifecycle_receipt_batches")
+        apply = ddl_block(HARDENING_SPECS, "lifecycle_transition_applies")
+        handoff = ddl_block(HARDENING_SPECS, "lifecycle_fresh_recovery_handoffs")
+        commit = ddl_block(HARDENING_SPECS, "lifecycle_fresh_rotation_commits")
 
         self.assertIn("planned_apply_kind NOT NULL", batch)
         self.assertIn("fresh_handoff_key NOT NULL", batch)
@@ -949,8 +949,8 @@ class SpecRepairTests(unittest.TestCase):
             );
             """
         )
-        db.execute("CREATE TABLE " + ddl_block(SPEC_04, "lifecycle_receipt_batches"))
-        db.execute("CREATE TABLE " + ddl_block(SPEC_04, "lifecycle_transition_applies"))
+        db.execute("CREATE TABLE " + ddl_block(HARDENING_SPECS, "lifecycle_receipt_batches"))
+        db.execute("CREATE TABLE " + ddl_block(HARDENING_SPECS, "lifecycle_transition_applies"))
 
         handoff_columns = (
             "handoff_id,handoff_digest,planned_apply_id,project_session_id,run_id,"
@@ -1107,12 +1107,12 @@ class SpecRepairTests(unittest.TestCase):
         self.assertEqual([], db.execute("PRAGMA foreign_key_check").fetchall())
 
     def test_intents_bind_exact_typed_effect_and_completion_closes_set(self) -> None:
-        custody = ddl_block(SPEC_04, "lifecycle_receipt_custody_effects")
-        loss = ddl_block(SPEC_04, "lifecycle_receipt_generation_loss_effects")
+        custody = ddl_block(HARDENING_SPECS, "lifecycle_receipt_custody_effects")
+        loss = ddl_block(HARDENING_SPECS, "lifecycle_receipt_generation_loss_effects")
         retirement = ddl_block(
-            SPEC_04, "lifecycle_receipt_recovery_retirement_effects"
+            HARDENING_SPECS, "lifecycle_receipt_recovery_retirement_effects"
         )
-        intents = ddl_block(SPEC_04, "lifecycle_receipt_intents")
+        intents = ddl_block(HARDENING_SPECS, "lifecycle_receipt_intents")
 
         self.assertIn("UNIQUE(batch_id,effect_digest,project_session_id", custody)
         self.assertIn(
@@ -1128,7 +1128,7 @@ class SpecRepairTests(unittest.TestCase):
         self.assertIn("subject_owner_kind='generation-loss'", intents)
         self.assertIn("subject_owner_kind='recovery-retirement'", intents)
         completion = trigger_sql(
-            SPEC_04, "lifecycle_completion_effect_set_exact"
+            HARDENING_SPECS, "lifecycle_completion_effect_set_exact"
         )
         self.assertIn("lifecycle-effect-set-incomplete", completion)
         for name in (
@@ -1136,7 +1136,7 @@ class SpecRepairTests(unittest.TestCase):
             "lifecycle_loss_effect_set_closed",
             "lifecycle_retirement_effect_set_closed",
         ):
-            self.assertIn("lifecycle-effect-set-closed", trigger_sql(SPEC_04, name))
+            self.assertIn("lifecycle-effect-set-closed", trigger_sql(HARDENING_SPECS, name))
 
     def test_completion_triggers_accept_each_exact_effect_family(self) -> None:
         accepted = (
@@ -1612,7 +1612,7 @@ class SpecRepairTests(unittest.TestCase):
 
     def test_apply_marker_requires_complete_arm_specific_post_state(self) -> None:
         apply_trigger = trigger_sql(
-            SPEC_04, "lifecycle_apply_post_state_complete"
+            HARDENING_SPECS, "lifecycle_apply_post_state_complete"
         )
         self.assertIn("lifecycle-apply-post-state-incomplete", apply_trigger)
         self.assertIn("NEW.batch_transition_kind='custody-terminal'", apply_trigger)
@@ -1670,10 +1670,10 @@ class SpecRepairTests(unittest.TestCase):
 
     def test_review_reservation_binds_same_prepare_effect_then_apply(self) -> None:
         reservation = ddl_block(
-            SPEC_04, "lifecycle_review_adoption_reservations"
+            HARDENING_SPECS, "lifecycle_review_adoption_reservations"
         )
-        batch = ddl_block(SPEC_04, "lifecycle_receipt_batches")
-        binding = ddl_block(SPEC_04, "lifecycle_review_authority_bindings")
+        batch = ddl_block(HARDENING_SPECS, "lifecycle_receipt_batches")
+        binding = ddl_block(HARDENING_SPECS, "lifecycle_review_authority_bindings")
 
         self.assertIn("decision_loss_effect_key NOT NULL", reservation)
         self.assertNotIn(
@@ -1702,7 +1702,7 @@ class SpecRepairTests(unittest.TestCase):
         )
 
     def test_capability_snapshot_source_is_closed_in_persistence(self) -> None:
-        block = ddl_block(SPEC_04, "adapter_capability_snapshots")
+        block = ddl_block(HARDENING_SPECS, "adapter_capability_snapshots")
         self.assertIn("source TEXT NOT NULL CHECK(source IN", block)
         self.assertIn(
             "('runtime-discovery','version-pinned-conformance','unavailable'))",
@@ -1721,14 +1721,14 @@ class SpecRepairTests(unittest.TestCase):
         )
 
     def test_route_children_bind_the_exact_admission(self) -> None:
-        configuration = ddl_block(SPEC_04, "adapter_effective_configurations")
-        route = ddl_block(SPEC_04, "provider_action_routes")
-        dispatch = ddl_block(SPEC_04, "provider_action_route_dispatches")
-        observation = ddl_block(SPEC_04, "provider_action_route_observations")
+        configuration = ddl_block(HARDENING_SPECS, "adapter_effective_configurations")
+        route = ddl_block(HARDENING_SPECS, "provider_action_routes")
+        dispatch = ddl_block(HARDENING_SPECS, "provider_action_route_dispatches")
+        observation = ddl_block(HARDENING_SPECS, "provider_action_route_observations")
         attached_guard = trigger_sql(
-            SPEC_04, "provider_action_route_reservation_attached_guard"
+            HARDENING_SPECS, "provider_action_route_reservation_attached_guard"
         )
-        self.assertEqual(SPEC_04.count("\nprovider_action_routes("), 1)
+        self.assertEqual(HARDENING_SPECS.count("\nprovider_action_routes("), 1)
         self.assertIn("...remaining route/admission columns...", route)
         self.assertNotIn("...existing columns...", route)
         self.assertIn(
@@ -1774,9 +1774,9 @@ class SpecRepairTests(unittest.TestCase):
         )
 
     def test_route_admission_inserts_parents_before_route(self) -> None:
-        section_start = SPEC_04.index("Admission and dispatch use this order:")
-        section_end = SPEC_04.index("Topology waves use one append-only store", section_start)
-        section = SPEC_04[section_start:section_end]
+        section_start = HARDENING_SPECS.index("Admission and dispatch use this order:")
+        section_end = HARDENING_SPECS.index("Topology waves use one append-only store", section_start)
+        section = HARDENING_SPECS[section_start:section_end]
         normalized = " ".join(section.split())
         self.assertIn(
             "attach the existing finding-capacity reservation by assigning its "
@@ -1793,7 +1793,7 @@ class SpecRepairTests(unittest.TestCase):
         self.assertNotIn("admitted compilation receipt", normalized)
 
     def test_rotation_clears_current_pressure_before_binding_change(self) -> None:
-        section = " ".join(SPEC_04.split())
+        section = " ".join(HARDENING_SPECS.split())
         self.assertIn("`BEGIN IMMEDIATE` adoption transaction", section)
         self.assertIn(
             "provider generation, context revision, evidence digest and "
@@ -1807,10 +1807,10 @@ class SpecRepairTests(unittest.TestCase):
             section,
         )
         update_guard = trigger_sql(
-            SPEC_04, "binding_update_requires_pressure_clear"
+            HARDENING_SPECS, "binding_update_requires_pressure_clear"
         )
         delete_guard = trigger_sql(
-            SPEC_04, "binding_delete_requires_pressure_clear"
+            HARDENING_SPECS, "binding_delete_requires_pressure_clear"
         )
         self.assertIn(
             "BEFORE UPDATE OF adapter_id ON agent_adapter_bindings",
@@ -1833,7 +1833,7 @@ class SpecRepairTests(unittest.TestCase):
         )
 
     def test_effective_configuration_parent_is_same_adapter_activation(self) -> None:
-        block = ddl_block(SPEC_04, "adapter_effective_configurations")
+        block = ddl_block(HARDENING_SPECS, "adapter_effective_configurations")
         self.assertIn("activation_configuration_subject_kind TEXT", block)
         self.assertIn(
             "UNIQUE(adapter_id,subject_kind,configuration_id,\n"
@@ -1856,7 +1856,7 @@ class SpecRepairTests(unittest.TestCase):
         self.assertNotIn("native_settings_schema_digest", block)
 
     def test_lifecycle_heads_use_nonnullable_canonical_parent_keys(self) -> None:
-        scope = ddl_block(SPEC_04, "lifecycle_receipt_scope_heads")
+        scope = ddl_block(HARDENING_SPECS, "lifecycle_receipt_scope_heads")
         self.assertNotIn("receipt_count", scope)
         self.assertNotIn("head_receipt_digest", scope)
         self.assertIn("checkpoint_digest NOT NULL", scope)
@@ -1866,9 +1866,9 @@ class SpecRepairTests(unittest.TestCase):
         )
 
         loss_revision = ddl_block(
-            SPEC_04, "lifecycle_generation_loss_revisions"
+            HARDENING_SPECS, "lifecycle_generation_loss_revisions"
         )
-        loss_head = ddl_block(SPEC_04, "lifecycle_generation_loss_heads")
+        loss_head = ddl_block(HARDENING_SPECS, "lifecycle_generation_loss_heads")
         for required_key in (
             "project_session_id NOT NULL",
             "run_id NOT NULL",
@@ -1892,7 +1892,7 @@ class SpecRepairTests(unittest.TestCase):
         )
         self.assertIn("head_revision NOT NULL CHECK(head_revision >= 1)", loss_head)
 
-        custody = ddl_block(SPEC_04, "lifecycle_rotation_custody_heads")
+        custody = ddl_block(HARDENING_SPECS, "lifecycle_rotation_custody_heads")
         for required_key in (
             "project_session_id NOT NULL",
             "run_id NOT NULL",
@@ -1931,7 +1931,7 @@ class SpecRepairTests(unittest.TestCase):
             "lifecycle_rotation_custody_heads",
             "lifecycle_generation_loss_heads",
         ):
-            db.execute("CREATE TABLE " + ddl_block(SPEC_04, table))
+            db.execute("CREATE TABLE " + ddl_block(HARDENING_SPECS, table))
         db.execute(
             "INSERT INTO lifecycle_rotation_custody_revisions "
             "VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -1996,14 +1996,14 @@ class SpecRepairTests(unittest.TestCase):
 
     def test_review_evidence_and_slot_head_are_relationally_closed(self) -> None:
         actual = ddl_block(
-            SPEC_04, "provider_action_actual_route_identities"
+            HARDENING_SPECS, "provider_action_actual_route_identities"
         )
-        evidence = ddl_block(SPEC_04, "provider_review_evidence")
-        head = ddl_block(SPEC_04, "review_slot_heads")
-        result = ddl_block(SPEC_04, "provider_review_results")
-        journal = ddl_block(SPEC_04, "provider_review_terminal_journal")
+        evidence = ddl_block(HARDENING_SPECS, "provider_review_evidence")
+        head = ddl_block(HARDENING_SPECS, "review_slot_heads")
+        result = ddl_block(HARDENING_SPECS, "provider_review_results")
+        journal = ddl_block(HARDENING_SPECS, "provider_review_terminal_journal")
         observation = ddl_block(
-            SPEC_04, "provider_action_route_observations"
+            HARDENING_SPECS, "provider_action_route_observations"
         )
 
         self.assertIn(
@@ -2019,7 +2019,7 @@ class SpecRepairTests(unittest.TestCase):
             "adapter_id,action_id,route_receipt_digest,"
             "deployed_route_admission_digest",
             create_index_sql(
-                SPEC_04, "provider_action_route_review_evidence_parent"
+                HARDENING_SPECS, "provider_action_route_review_evidence_parent"
             ),
         )
         for baseline_result_field in (
@@ -2162,11 +2162,11 @@ class SpecRepairTests(unittest.TestCase):
               finding_set_digest PRIMARY KEY);
         """)
         db.execute(create_index_sql(
-            SPEC_04, "provider_action_route_review_evidence_parent"
+            HARDENING_SPECS, "provider_action_route_review_evidence_parent"
         ))
         db.execute(
             "CREATE TABLE "
-            + ddl_block(SPEC_04, "provider_action_route_observations")
+            + ddl_block(HARDENING_SPECS, "provider_action_route_observations")
         )
         for table in (
             "provider_action_actual_route_identities",
@@ -2175,7 +2175,7 @@ class SpecRepairTests(unittest.TestCase):
             "provider_review_evidence",
             "review_slot_heads",
         ):
-            db.execute("CREATE TABLE " + ddl_block(SPEC_04, table))
+            db.execute("CREATE TABLE " + ddl_block(HARDENING_SPECS, table))
         db.execute("INSERT INTO provider_actions VALUES('adapter','action')")
         db.execute(
             "INSERT INTO provider_action_routes VALUES(?,?,?,?,?,?,?,?)",
@@ -2377,7 +2377,7 @@ class SpecRepairTests(unittest.TestCase):
                     sqlite3.OperationalError, "foreign key mismatch"
                 ):
                     db.execute(child_insert, values)
-                db.execute(create_index_sql(SPEC_04, index_name))
+                db.execute(create_index_sql(HARDENING_SPECS, index_name))
                 db.execute(
                     f"INSERT INTO {parent} VALUES(?,?,?,?)",
                     values,
@@ -2389,9 +2389,9 @@ class SpecRepairTests(unittest.TestCase):
 
     def test_recovery_issue_source_head_closes_both_race_orders(self) -> None:
         source_head = ddl_block(
-            SPEC_04, "agent_lifecycle_recovery_source_heads"
+            HARDENING_SPECS, "agent_lifecycle_recovery_source_heads"
         )
-        handoff = ddl_block(SPEC_04, "lifecycle_fresh_recovery_handoffs")
+        handoff = ddl_block(HARDENING_SPECS, "lifecycle_fresh_recovery_handoffs")
         self.assertNotIn("issued_at", source_head)
         self.assertNotIn("expires_at", source_head)
         self.assertIn(
@@ -2439,7 +2439,7 @@ class SpecRepairTests(unittest.TestCase):
             "lifecycle_recovery_revocation_update_denied",
             "lifecycle_recovery_revocation_delete_denied",
         )
-        triggers = {name: trigger_sql(SPEC_04, name) for name in trigger_names}
+        triggers = {name: trigger_sql(HARDENING_SPECS, name) for name in trigger_names}
         self.assertIn(
             "head_revision=agent_lifecycle_recovery_source_heads."
             "head_revision+1",
@@ -2471,38 +2471,38 @@ class SpecRepairTests(unittest.TestCase):
         )
         for name in trigger_names:
             with self.subTest(trigger=name):
-                self.assertEqual(SPEC_04.count(f"CREATE TRIGGER {name}\n"), 1)
-        self.assertIn("LIFECYCLE_RECOVERY_SOURCE_BUSY", SPEC_04)
-        self.assertIn("LIFECYCLE_RECOVERY_ISSUE_REVOKED", SPEC_04)
-        self.assertIn("LIFECYCLE_RECOVERY_ISSUE_COMMIT_PENDING", SPEC_04)
+                self.assertEqual(HARDENING_SPECS.count(f"CREATE TRIGGER {name}\n"), 1)
+        self.assertIn("LIFECYCLE_RECOVERY_SOURCE_BUSY", HARDENING_SPECS)
+        self.assertIn("LIFECYCLE_RECOVERY_ISSUE_REVOKED", HARDENING_SPECS)
+        self.assertIn("LIFECYCLE_RECOVERY_ISSUE_COMMIT_PENDING", HARDENING_SPECS)
         self.assertIn(
             "Every issue, handoff and revocation writer uses "
             "`BEGIN IMMEDIATE`",
-            " ".join(SPEC_04.split()),
+            " ".join(HARDENING_SPECS.split()),
         )
         self.assertIn(
             "Issue claim uses a plain insert-if-absent followed by the guarded "
             "monotonic `UPDATE`; it never uses UPSERT or `INSERT OR REPLACE`",
-            " ".join(SPEC_04.split()),
+            " ".join(HARDENING_SPECS.split()),
         )
         self.assertIn(
             "Existing source heads, handoffs and revocations reject every "
             "colliding insert before SQLite can apply replacement semantics",
-            " ".join(SPEC_04.split()),
+            " ".join(HARDENING_SPECS.split()),
         )
         self.assertIn(
             "new issue's canonical `(issued_at,issue_id)` tuple must be "
             "strictly greater",
-            " ".join(SPEC_04.split()),
+            " ".join(HARDENING_SPECS.split()),
         )
 
     def test_retirement_evidence_tuple_is_carried_end_to_end(self) -> None:
-        custody = ddl_block(SPEC_04, "lifecycle_rotation_custody_revisions")
-        plan = ddl_block(SPEC_04, "lifecycle_recovery_retirement_plans")
+        custody = ddl_block(HARDENING_SPECS, "lifecycle_rotation_custody_revisions")
+        plan = ddl_block(HARDENING_SPECS, "lifecycle_recovery_retirement_plans")
         effect = ddl_block(
-            SPEC_04, "lifecycle_receipt_recovery_retirement_effects"
+            HARDENING_SPECS, "lifecycle_receipt_recovery_retirement_effects"
         )
-        result = ddl_block(SPEC_04, "agent_lifecycle_recovery_retirements")
+        result = ddl_block(HARDENING_SPECS, "agent_lifecycle_recovery_retirements")
         plan_key = (
             "retirement_id",
             "planned_apply_id",
@@ -2635,24 +2635,24 @@ class SpecRepairTests(unittest.TestCase):
             "      retirement_plan_digest)",
             result,
         )
-        retirement_subject = SPEC_01[
-            SPEC_01.index("lifecycleCustodyRecoveryRetirementReceiptSubjectV1:") :
-            SPEC_01.index("lifecycleReviewDecisionReceiptSubjectV1:")
+        retirement_subject = BEHAVIOUR_SPECS[
+            BEHAVIOUR_SPECS.index("lifecycleCustodyRecoveryRetirementReceiptSubjectV1:") :
+            BEHAVIOUR_SPECS.index("lifecycleReviewDecisionReceiptSubjectV1:")
         ]
-        retirement_plan = SPEC_01[
-            SPEC_01.index("lifecycleRecoveryRetirementPlanV1:") :
-            SPEC_01.index("lifecycleIntegrityReceiptBatchV1:")
+        retirement_plan = BEHAVIOUR_SPECS[
+            BEHAVIOUR_SPECS.index("lifecycleRecoveryRetirementPlanV1:") :
+            BEHAVIOUR_SPECS.index("lifecycleIntegrityReceiptBatchV1:")
         ]
         self.assertIn(
             "finalizedTerminalEvidenceDigest: exact-digest", retirement_plan
         )
         self.assertIn("transitionProofDigest: exact-digest", retirement_subject)
         self.assertIn("mutationPlanDigest: exact-digest", retirement_subject)
-        retirement_effect_start = SPEC_01.index(
+        retirement_effect_start = BEHAVIOUR_SPECS.index(
             "lifecycleRecoveryRetirementEffectV1:"
         )
-        retirement_effect_end = SPEC_01.index("~~~", retirement_effect_start)
-        retirement_effect = SPEC_01[
+        retirement_effect_end = BEHAVIOUR_SPECS.index("~~~", retirement_effect_start)
+        retirement_effect = BEHAVIOUR_SPECS[
             retirement_effect_start:retirement_effect_end
         ]
         self.assertIn("effectKind: recovery-retirement", retirement_effect)
@@ -2671,18 +2671,18 @@ class SpecRepairTests(unittest.TestCase):
             "`finalizedTerminalEvidenceDigest`, `admissionDigest`, "
             "`transitionProofDigest`, `mutationPlanDigest` and "
             "`retirementEvidenceDigest` tuple",
-            " ".join(SPEC_01.split()),
+            " ".join(BEHAVIOUR_SPECS.split()),
         )
         self.assertIn(
             '`effectDigest=LD("lifecycle-effect",body)` over every displayed '
             "effect member except `effectDigest`; crossing any of the five "
             "evidence digests is invalid",
-            " ".join(SPEC_01.split()),
+            " ".join(BEHAVIOUR_SPECS.split()),
         )
 
     def test_generic_route_integrity_has_a_separate_named_owner(self) -> None:
-        start = SPEC_01.index("### Exact Console read identity completion")
-        section = SPEC_01[start:]
+        start = BEHAVIOUR_SPECS.index("### Exact Console read identity completion")
+        section = BEHAVIOUR_SPECS[start:]
         self.assertIn(
             "`GenericProviderRouteRecoveryService` is the sole owner for an "
             "otherwise-generic task-bound answer-bearing action whose route is "
@@ -2696,19 +2696,19 @@ class SpecRepairTests(unittest.TestCase):
         )
 
     def test_new_route_sections_have_unique_requirement_anchors(self) -> None:
-        section_21_start = SPEC_01_ROUTE.index(
+        section_21_start = PROVIDER_ACTIONS_SPEC.index(
             "### Capability-backed deployed routes and operational telemetry"
         )
-        section_22_start = SPEC_01_READ.index(
+        section_22_start = MESSAGING_PROTOCOL_SPEC.index(
             "### Exact Console read identity completion"
         )
         sections = {
-            SPEC_01_ROUTE[section_21_start:]: [
+            PROVIDER_ACTIONS_SPEC[section_21_start:]: [
                 *(f"FR-{number:03d}" for number in range(77, 89)),
                 *(f"NFR-{number:03d}" for number in range(34, 39)),
                 *(f"AC-{number:03d}" for number in range(56, 64)),
             ],
-            SPEC_01_READ[section_22_start:]: [
+            MESSAGING_PROTOCOL_SPEC[section_22_start:]: [
                 *(f"FR-{number:03d}" for number in range(89, 96)),
                 *(f"NFR-{number:03d}" for number in range(39, 43)),
                 *(f"AC-{number:03d}" for number in range(64, 71)),
@@ -2727,12 +2727,12 @@ class SpecRepairTests(unittest.TestCase):
         ]
         for requirement_id in all_expected:
             with self.subTest(requirement_id=requirement_id):
-                self.assertEqual(SPEC_01.count(f"**{requirement_id}:**"), 1)
+                self.assertEqual(BEHAVIOUR_SPECS.count(f"**{requirement_id}:**"), 1)
 
     def test_lifecycle_mutation_plan_binds_provider_action_update(self) -> None:
-        start = SPEC_01.index("`lifecycleMutationPlanV1`")
-        end = SPEC_01.index("An owner-transition receipt effect", start)
-        section = " ".join(SPEC_01[start:end].split())
+        start = BEHAVIOUR_SPECS.index("`lifecycleMutationPlanV1`")
+        end = BEHAVIOUR_SPECS.index("An owner-transition receipt effect", start)
+        section = " ".join(BEHAVIOUR_SPECS[start:end].split())
         enum_start = section.index("The closed relation enum is:")
         enum_end = section.index("`writeSetDigest=", enum_start)
         relation_enum = section[enum_start:enum_end]

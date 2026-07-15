@@ -33,7 +33,7 @@ EVIDENCE_FIELDS = (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC_04 = read_specs(AGENT_FABRIC_HARDENING)
+HARDENING_SPECS = read_specs(AGENT_FABRIC_HARDENING)
 
 
 def ddl_block(text: str, table: str) -> str:
@@ -43,7 +43,7 @@ def ddl_block(text: str, table: str) -> str:
 
 
 def create_from_spec(table: str) -> str:
-    return f"CREATE TABLE {ddl_block(SPEC_04, table)};"
+    return f"CREATE TABLE {ddl_block(HARDENING_SPECS, table)};"
 
 
 SCHEMA = r"""
