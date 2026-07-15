@@ -14,8 +14,8 @@ MAX_BYTES = 100 * 1024
 HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
 LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 DEFINITION_RE = re.compile(
-    r"(?m)^(?:\s*[-*]\s+\*\*(?P<bullet>[A-Z][A-Z0-9]*-[0-9]+[A-Z]?)"
-    r"(?:[^*]*):\*\*|\s*#{1,6}\s+(?P<heading>[A-Z][A-Z0-9]*-[0-9]+[A-Z]?)"
+    r"(?m)^(?:\s*[-*]\s+(?:\*\*)?(?P<bullet>[A-Z][A-Z0-9]*-[0-9]+[A-Z]?)"
+    r"(?=\s|:|\*|\(|$)|\s*#{1,6}\s+(?P<heading>[A-Z][A-Z0-9]*-[0-9]+[A-Z]?)"
     r"(?:\s|:|\(|$))"
 )
 POSITIONAL_RE = re.compile(r"^(?:[0-9]+[-_]|.*-continued-[0-9]+(?:-|\.|$))")

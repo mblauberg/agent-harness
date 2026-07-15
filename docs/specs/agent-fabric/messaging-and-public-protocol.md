@@ -527,8 +527,6 @@ Acceptance additionally requires:
 
 Acceptance adds:
 
-- AC-014 additionally requires project lifecycle, membership, coordinated/independent topology
-  and one-chair invariants survive races and restart;
 - **AC-015:** the full operator-capability negative matrix and exact takeover
   bindings fail closed, including independent `drain` and `stop` authority;
 - **AC-016:** each scoped-gate enforcement point blocks only its affected

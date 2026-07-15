@@ -60,6 +60,19 @@ def test_rejects_duplicate_normative_id(tmp_path: Path) -> None:
     assert_code(tmp_path, "duplicate-id")
 
 
+def test_rejects_plain_bullet_duplicate_normative_id(tmp_path: Path) -> None:
+    write_repo(tmp_path)
+    other = tmp_path / "docs" / "specs" / "console" / "attention.md"
+    other.parent.mkdir()
+    other.write_text("# Attention\n\n- FR-001 additionally requires this behavior.\n")
+    (tmp_path / "docs" / "specs" / "README.md").write_text(
+        "# Specifications\n\n"
+        "[Authority](agent-fabric/authority.md)\n"
+        "[Attention](console/attention.md)\n"
+    )
+    assert_code(tmp_path, "duplicate-id")
+
+
 @pytest.mark.parametrize("name", ["01-authority.md", "authority-continued-2.md"])
 def test_rejects_positional_or_continued_name(tmp_path: Path, name: str) -> None:
     path = write_repo(tmp_path)
