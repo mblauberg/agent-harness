@@ -74,6 +74,7 @@ async function fixture(options: { broaderRoot?: boolean } = {}): Promise<Fixture
       socketPath,
       pid: daemon.pid,
       bootstrapCapability: daemon.bootstrapCapability,
+      lifecycleReceiptAuthorityId: null,
     })}\n`,
     { mode: 0o600 },
   );

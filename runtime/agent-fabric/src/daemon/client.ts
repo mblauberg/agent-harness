@@ -284,6 +284,7 @@ export type DaemonStartOptions = {
   stateDirectory: string;
   runtimeDirectory: string;
   socketPath: string;
+  lifecycleReceiptAuthorityId?: string;
   adapters?: NonNullable<FabricOpenOptions["adapters"]>;
   executionProfile?: string;
   maximumConcurrentProviderTurns?: number;
@@ -378,6 +379,9 @@ function childEnvironment(
     AGENT_FABRIC_MAXIMUM_CONCURRENT_PROVIDER_TURNS: String(options.maximumConcurrentProviderTurns ?? 8),
     AGENT_FABRIC_WORKSPACE_ROOTS_JSON: JSON.stringify(options.workspaceRoots ?? []),
     AGENT_FABRIC_ADAPTERS_JSON: JSON.stringify(options.adapters ?? {}),
+    ...(options.lifecycleReceiptAuthorityId === undefined
+      ? {}
+      : { AGENT_FABRIC_LIFECYCLE_RECEIPT_AUTHORITY_ID: options.lifecycleReceiptAuthorityId }),
     AGENT_FABRIC_GITHUB_HOSTED_CHECKS_JSON: JSON.stringify(options.githubHostedChecks ?? { enabled: false }),
     AGENT_FABRIC_TRUSTED_GIT_JSON: JSON.stringify(options.trustedGitConfiguration ?? {}),
     AGENT_FABRIC_HERDR_JSON: JSON.stringify(options.herdr ?? { enabled: false }),
@@ -569,6 +573,12 @@ function normalizedStartOptions(options: DaemonStartOptions): DaemonStartOptions
 }
 
 async function prepareDaemonStart(options: DaemonStartOptions): Promise<PreparedDaemonStart> {
+  if (
+    options.lifecycleReceiptAuthorityId !== undefined &&
+    options.lifecycleReceiptAuthorityId.trim().length === 0
+  ) {
+    throw new TypeError("lifecycle receipt authority ID must not be empty");
+  }
   const databasePath = safeDatabasePath(options.databasePath);
   let adapters = options.adapters ?? {};
   let executionProfile = options.executionProfile ?? "headless";
@@ -757,6 +767,7 @@ async function privateDaemonHandshake(
   election: BootstrapElection,
   socketPath: string,
   provisional: PrivateDiscoveryIdentity | undefined,
+  expectedLifecycleReceiptAuthorityId: string | undefined,
 ): Promise<DaemonHandshakeResult<PrivateDaemonAttachment>> {
   const discovery = await readPrivateDiscovery(paths, socketPath);
   if (discovery.status === "absent") {
@@ -790,6 +801,16 @@ async function privateDaemonHandshake(
       reason: "unreachable",
       message: discovery.message,
       reconciliationRequired: true,
+    };
+  }
+  if (
+    discovery.receipt.lifecycleReceiptAuthorityId !==
+      (expectedLifecycleReceiptAuthorityId ?? null)
+  ) {
+    return {
+      status: "incompatible",
+      responsive: true,
+      message: "daemon lifecycle receipt authority configuration mismatch",
     };
   }
 
@@ -904,6 +925,7 @@ async function spawnProductionDaemon(input: {
       socketPath: prepared.socketPath,
       pid: child.pid,
       bootstrapCapability: child.bootstrapCapability,
+      lifecycleReceiptAuthorityId: prepared.lifecycleReceiptAuthorityId ?? null,
     });
   })();
   const publishedIdentity = identity.then(
@@ -1030,7 +1052,13 @@ export async function startFabricDaemon(options: DaemonStartOptions): Promise<Fa
             message: "private daemon discovery is absent",
           };
         }
-        return await privateDaemonHandshake(paths, election, normalized.socketPath, provisional);
+        return await privateDaemonHandshake(
+          paths,
+          election,
+          normalized.socketPath,
+          provisional,
+          normalized.lifecycleReceiptAuthorityId,
+        );
       },
       preBootstrap: async () => {
         inspectFabricDatabase(normalized.databasePath);
@@ -1049,6 +1077,7 @@ export async function startFabricDaemon(options: DaemonStartOptions): Promise<Fa
           election,
           normalized.socketPath,
           provisional,
+          normalized.lifecycleReceiptAuthorityId,
         );
       },
       spawn: async (bootstrap) => {

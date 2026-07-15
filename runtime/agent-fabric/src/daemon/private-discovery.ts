@@ -13,6 +13,7 @@ export type PrivateDiscoveryCapabilityReceipt = {
   socketPath: string;
   pid: number;
   bootstrapCapability: string;
+  lifecycleReceiptAuthorityId: string | null;
 };
 
 export type PrivateDiscoveryOwner = {
@@ -91,7 +92,9 @@ function positiveInteger(value: unknown, label: string): number {
 
 function parseCapabilityReceipt(value: unknown, socketPath: string): PrivateDiscoveryCapabilityReceipt {
   const receipt = record(value, "daemon discovery receipt");
-  exactKeys(receipt, ["schemaVersion", "socketPath", "pid", "bootstrapCapability"], "daemon discovery receipt");
+  exactKeys(receipt, [
+    "schemaVersion", "socketPath", "pid", "bootstrapCapability", "lifecycleReceiptAuthorityId",
+  ], "daemon discovery receipt");
   if (receipt.schemaVersion !== 1 || receipt.socketPath !== socketPath) {
     throw new PrivateDiscoveryError("DAEMON_DISCOVERY_INVALID", "daemon discovery receipt does not match the trusted socket");
   }
@@ -104,6 +107,9 @@ function parseCapabilityReceipt(value: unknown, socketPath: string): PrivateDisc
     socketPath,
     pid: positiveInteger(receipt.pid, "daemon discovery pid"),
     bootstrapCapability,
+    lifecycleReceiptAuthorityId: receipt.lifecycleReceiptAuthorityId === null
+      ? null
+      : nonEmptyString(receipt.lifecycleReceiptAuthorityId, "lifecycle receipt authority ID"),
   };
 }
 
@@ -339,6 +345,7 @@ export async function publishPrivateDiscovery(input: {
   socketPath: string;
   pid: number;
   bootstrapCapability: string;
+  lifecycleReceiptAuthorityId: string | null;
 }): Promise<PrivateDiscoveryIdentity> {
   await ensurePrivateDirectory(input.paths.runtimeDirectory);
   const current = await readPrivateDiscovery(input.paths, input.socketPath);
@@ -369,6 +376,7 @@ export async function publishPrivateDiscovery(input: {
     socketPath: input.socketPath,
     pid: input.pid,
     bootstrapCapability: input.bootstrapCapability,
+    lifecycleReceiptAuthorityId: input.lifecycleReceiptAuthorityId,
   };
   await atomicPrivateJson(input.paths.ownerPath, owner);
   await atomicPrivateJson(input.paths.receiptPath, receipt);

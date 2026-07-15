@@ -18,6 +18,10 @@ import {
 
 import { openFabric } from "../index.js";
 import {
+  openLocalLifecycleReceiptAuthority,
+  type LocalLifecycleReceiptAuthority,
+} from "../lifecycle/local-receipt-authority.js";
+import {
   bindCurrentMcpSeatsInput,
   FABRIC_DAEMON_VERSION,
   daemonInitializeParams,
@@ -131,6 +135,7 @@ const daemonLockPaths = Array.isArray(daemonLockPathsValue) && daemonLockPathsVa
   : undefined;
 const capabilityKey = process.env.AGENT_FABRIC_CAPABILITY_KEY;
 const executionProfile = process.env.AGENT_FABRIC_EXECUTION_PROFILE;
+const lifecycleReceiptAuthorityId = process.env.AGENT_FABRIC_LIFECYCLE_RECEIPT_AUTHORITY_ID;
 const maximumConcurrentProviderTurnsValue = process.env.AGENT_FABRIC_MAXIMUM_CONCURRENT_PROVIDER_TURNS ?? "8";
 const maximumConcurrentProviderTurns = Number(maximumConcurrentProviderTurnsValue);
 const workspaceRootsValue: unknown = JSON.parse(process.env.AGENT_FABRIC_WORKSPACE_ROOTS_JSON ?? "[]");
@@ -274,9 +279,16 @@ type PendingDaemonStop = Readonly<{
 const pendingDaemonStops = new Map<string, PendingDaemonStop>();
 let scheduleIdleStop: () => void = () => undefined;
 let closeBackgroundWorkers: () => void = () => undefined;
+let lifecycleReceiptAuthority: LocalLifecycleReceiptAuthority | undefined;
 const fabric = await (async () => {
   let opened: Awaited<ReturnType<typeof openFabric>> | undefined;
   try {
+    lifecycleReceiptAuthority = lifecycleReceiptAuthorityId === undefined
+      ? undefined
+      : openLocalLifecycleReceiptAuthority({
+          stateDirectory,
+          expectedAuthorityId: lifecycleReceiptAuthorityId,
+        });
     opened = await openFabric({
       databasePath,
       fabricSocketPath: socketPath,
@@ -288,6 +300,7 @@ const fabric = await (async () => {
       ...(gitHostedChecks === undefined ? {} : { gitHostedChecks }),
       trustedGitConfiguration,
       herdr: herdrIntegration,
+      ...(lifecycleReceiptAuthority === undefined ? {} : { lifecycleReceiptAuthority }),
       daemonStopPort: {
         request: async (request) => {
           const existing = pendingDaemonStops.get(request.custodyId);
@@ -316,6 +329,8 @@ const fabric = await (async () => {
     return opened;
   } catch (error: unknown) {
     await opened?.close().catch(() => undefined);
+    lifecycleReceiptAuthority?.close();
+    lifecycleReceiptAuthority = undefined;
     await releaseDaemonLocks(daemonLocks).catch(() => undefined);
     removeOwnedEmptyDirectory(runtimeDirectory, runtimeDirectoryExistedBeforeBootstrap);
     removeOwnedEmptyDirectory(stateDirectory, stateDirectoryExistedBeforeBootstrap);
@@ -665,7 +680,14 @@ const finishProcess = async (input: {
   return await finalizeDaemonShutdown({
     requestedState: input.state,
     requestedExitCode: input.exitCode,
-    closeFabric: async () => await fabric.close(),
+    closeFabric: async () => {
+      try {
+        await fabric.close();
+      } finally {
+        lifecycleReceiptAuthority?.close();
+        lifecycleReceiptAuthority = undefined;
+      }
+    },
     removeSocket: async () => { rmSync(socketPath, { force: true }); },
     releaseLocks: async () => await releaseDaemonLocks(daemonLocks),
     markTerminal: async ({ state, exitCode }) => {

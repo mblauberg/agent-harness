@@ -22,6 +22,7 @@ export type DiscoveryReceipt = {
   socketPath: string;
   pid: number;
   bootstrapCapability: string;
+  lifecycleReceiptAuthorityId: string | null;
 };
 
 export type McpProvisionOutput = {
@@ -151,14 +152,18 @@ export async function readDiscoveryReceipt(paths: FabricPaths): Promise<Discover
   }
   if (
     !record(value) ||
-    Object.keys(value).sort().join(",") !== "bootstrapCapability,pid,schemaVersion,socketPath" ||
+    Object.keys(value).sort().join(",") !==
+      "bootstrapCapability,lifecycleReceiptAuthorityId,pid,schemaVersion,socketPath" ||
     value.schemaVersion !== 1 ||
     value.socketPath !== paths.socketPath ||
     typeof value.pid !== "number" ||
     !Number.isSafeInteger(value.pid) ||
     value.pid <= 0 ||
     typeof value.bootstrapCapability !== "string" ||
-    !/^afb_[A-Za-z0-9_-]{43}$/u.test(value.bootstrapCapability)
+    !/^afb_[A-Za-z0-9_-]{43}$/u.test(value.bootstrapCapability) ||
+    (value.lifecycleReceiptAuthorityId !== null &&
+      (typeof value.lifecycleReceiptAuthorityId !== "string" ||
+        value.lifecycleReceiptAuthorityId.trim().length === 0))
   ) {
     throw new Error(`fabric discovery receipt is invalid or does not match the configured socket: ${discoveryPath}`);
   }

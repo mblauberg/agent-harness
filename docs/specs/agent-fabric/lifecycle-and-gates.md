@@ -4,6 +4,8 @@
 
 Lifecycle snapshot integrity does not rely on a digest that the same snapshot can reseal. Every externally admitted project/run lifecycle scope, including a generation-loss-only scope with no custody, receives a mandatory `LifecycleIntegrityReceiptAuthorityPort` whose storage, authentication material and append head live outside `LifecycleDomainSnapshotV1`. It exposes exactly:
 
+The production local adapter opens, but never creates or repairs, `lifecycle-receipts.sqlite3` and a separate raw 32-byte `lifecycle-receipts.hmac.key` in the configured Fabric state directory. The directory must be owned by the daemon user with mode `0700`; both regular, non-symlink files must be owned by that user with mode `0600`. Its fixed initial DDL is `runtime/agent-fabric/schemas/lifecycle-receipt-authority-v1.sql`. Provisioning must insert the configured immutable authority ID into the single `authority_metadata` row before startup. Startup rejects missing or crossed identity, ownership, mode, file type, key length, schema, database integrity, HMAC, receipt chain and authenticated-membership state. It performs no migration, identity generation or key rotation.
+
 ~~~text
 admitScope(exactScopeAdmissionRequest) -> authenticatedScopeAdmissionResolution
 readScopeAdmission(projectId, projectSessionId, runId, authorityId)
