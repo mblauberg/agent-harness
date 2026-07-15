@@ -33,9 +33,7 @@ describe("daemon trusted adapter composition", () => {
           : {}),
       });
       expect(Object.keys(adapters).sort()).toEqual(
-        fixture === undefined
-          ? ["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent", "kiro-acp"]
-          : ["claude-agent-sdk", "codex-app-server"],
+        ["claude-agent-sdk", "codex-app-server"],
       );
     } finally {
       if (fixture !== undefined) await rm(fixture.directory, { recursive: true, force: true });

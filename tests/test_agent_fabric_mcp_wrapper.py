@@ -26,8 +26,9 @@ def test_source_wrapper_preserves_caller_cwd_for_project_seat_resolution(tmp_pat
         check=False,
     )
 
-    assert result.returncode == 2
+    assert result.returncode == 0
     assert f"not provisioned for {tmp_path}" in result.stderr
+    assert "Fabric tools are unavailable until seats are provisioned" in result.stderr
     assert "runtime/agent-fabric or an ancestor project" not in result.stderr
 
 
@@ -48,7 +49,7 @@ def test_wrapper_resolves_symlinked_install_and_rejects_relative_agents_home(tmp
     symlinked = subprocess.run(
         [str(wrapper)], cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=10, check=False,
     )
-    assert symlinked.returncode == 2
+    assert symlinked.returncode == 0
     assert f"not provisioned for {tmp_path}" in symlinked.stderr
     relative = subprocess.run(
         [str(ROOT / "scripts" / "agent-fabric-mcp")],

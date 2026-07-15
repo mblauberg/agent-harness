@@ -55,25 +55,25 @@ adapters:
     implementation:
       kind: native-cli
       command: codex
-      installed_version: "0.144.1"
-      source_build: "rust-v0.144.1"
-      executable: "/opt/homebrew/Caskroom/codex/0.144.1/codex-aarch64-apple-darwin"
-      executable_sha256: "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a"
+      installed_version: "0.144.4"
+      source_build: "rust-v0.144.4"
+      executable: "/opt/homebrew/Caskroom/codex/0.144.4/codex-aarch64-apple-darwin"
+      executable_sha256: "3302acbda5f53de1a71ebdb0c0f2aae0d47f9324aa9fb6b4e78a47014fd51c7d"
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/codex-app-server.js"
-      wrapper_entrypoint_sha256: "af2bb57b70b2eda67f9ce3512a7359969ea1633103f98d1f559af6d2d00d83b5"
+      wrapper_entrypoint_sha256: "b05c6977fb9ccb8f919a6fbdf0446d2481d1cae4d3cb9c7616c8904cadefac06"
       wrapper_manifest: "config/adapter-manifests/codex-app-server.json"
-      wrapper_manifest_sha256: "d807bd7e484ec456a470ab3d7a13d577a51d92b0d0eeeadf1b2ac58edd7cf962"
+      wrapper_manifest_sha256: "122cdf3a9068dc6a62957a414db858cd1dd713a7479a6d5412962aa2ebeb64d1"
     contract:
       adapter_version: 1
       protocol: codex-app-server
-      protocol_version: "cli-0.144.1"
+      protocol_version: "cli-0.144.4"
       schema_generator: "codex app-server generate-json-schema --experimental --out <directory>"
       schema_bundle: "runtime/agent-fabric/schemas/upstream/codex-app-server-0.144.1.bundle.json"
       schema_sha256: "cb82fd306ef371fcc787ec39032c5ec097e9c096a2c6fdeef3c39469dcadf48c"
       capability_fixture_version: 1
     runtime_range:
       supported_cli_versions:
-        - "0.144.1"
+        - "0.144.4"
       platforms:
         - darwin-arm64
     model_family_constraints:
@@ -169,7 +169,7 @@ adapters:
       - "No trusted open-weight Pi provider/model is currently available in the installed account; activation would route to an unavailable provider."
 
   agy:
-    enabled: true
+    enabled: false
     delivery_stage: 4
     implementation:
       kind: native-cli
@@ -205,7 +205,7 @@ adapters:
     unresolved_pins: []
 
   cursor-agent:
-    enabled: true
+    enabled: false
     delivery_stage: 4
     implementation:
       kind: bundled-cli
@@ -244,7 +244,7 @@ adapters:
     unresolved_pins: []
 
   kiro-acp:
-    enabled: true
+    enabled: false
     delivery_stage: 4
     implementation:
       kind: native-application-cli
