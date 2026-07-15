@@ -14,6 +14,7 @@ REFERENCE_RUNS_PATH = ROOT / "skills" / "deliver" / "scripts" / "reference_runs.
 REFERENCE_EVALUATION_PATH = ROOT / "skills" / "deliver" / "scripts" / "reference_evaluation.py"
 RUN_TEMPLATE_PATH = ROOT / "skills" / "deliver" / "templates" / "RUN.template.json"
 AUTHORITY_MAPPER_PATH = ROOT / "skills" / "deliver" / "scripts" / "authority_mapping.py"
+POLICY_VALIDATOR_PATH = ROOT / "skills" / "deliver" / "scripts" / "delivery_policy_validation.py"
 AUTHORITY_FIXTURE_ROOT = ROOT / "tests" / "fixtures" / "authority-envelope-v2"
 COST_PATTERN = re.compile(r"^cost:(?:AUD|USD)$")
 
@@ -1012,7 +1013,7 @@ def test_prompt_agent_product_cannot_self_declare_stochastic_evaluation_unnecess
 def test_profile_registry_rejects_malformed_stochastic_artifact_classification(
     tmp_path, classified_types,
 ):
-    module = load_validator()
+    module = load(POLICY_VALIDATOR_PATH, "delivery_policy_validation")
     registry = json.loads((ROOT / "config" / "delivery-profiles.json").read_text())
     registry["profiles"]["agent-product"]["stochastic_policy"][
         "required_for_artifact_types"
@@ -1021,8 +1022,8 @@ def test_profile_registry_rejects_malformed_stochastic_artifact_classification(
     config.mkdir()
     (config / "delivery-profiles.json").write_text(json.dumps(registry))
 
-    with pytest.raises(module.Invalid, match="required_for_artifact_types"):
-        module._load_profiles(tmp_path)
+    with pytest.raises(ValueError, match="required_for_artifact_types"):
+        module.load_profiles(tmp_path, invalid_type=ValueError)
 
 
 def test_stochastic_binding_anchors_plan_before_execution_then_completes(tmp_path):
