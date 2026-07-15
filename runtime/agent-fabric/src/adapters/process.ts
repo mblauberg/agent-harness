@@ -106,6 +106,12 @@ export class AdapterProcessTransport {
       maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
       maximumPendingWrites: FABRIC_PROTOCOL_LIMITS.maximumAdapterInFlight,
     });
+    this.#child.stdin.on("error", (cause: Error) => {
+      this.#failTransport(
+        new AdapterTransportError("ADAPTER_STDIN_FAILED", "adapter stdin write failed", { cause }),
+        true,
+      );
+    });
     this.#reader = new BoundedNdjsonReader(this.#child.stdout, {
       maximumFrameBytes: FABRIC_PROTOCOL_LIMITS.maximumFrameBytes,
       onFrame: (line) => this.#receive(line),
@@ -247,7 +253,7 @@ export class AdapterProcessTransport {
         { cause: error },
       );
       this.#failTransport(transportError, true);
-      throw transportError;
+      return await result;
     }
     return await result;
   }
