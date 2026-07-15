@@ -71,3 +71,12 @@ of [Siqi Chen's `humanizer`](https://github.com/blader/humanizer/tree/1b48564898
 copyright 2025 Siqi Chen, under the MIT License. Its terms and modification
 notice are retained in `skills/natural-writing/BLADER_HUMANIZER_LICENSE` and
 `skills/natural-writing/NOTICE.md`.
+
+## Caveman
+
+`skills/caveman/` is an original harness-specific rewrite informed by the
+behavioural idea in
+[JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman), copyright
+2026 Julius Brussee, under the MIT License. No upstream expression is
+redistributed; the courtesy provenance notice is retained in
+`skills/caveman/NOTICE.md`.

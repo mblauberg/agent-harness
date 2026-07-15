@@ -39,19 +39,20 @@ critical paths and complex logic.
 
 Test what callers observe, not private methods, internal call order or data
 shape. A valid test survives an internal refactor. Verify outcomes through the
-public interface rather than querying side channels. See [tests.md](tests.md).
+public interface rather than querying side channels. See
+[tests.md](references/tests.md).
 
 Mock only system boundaries: external APIs, time/randomness and, when needed,
 filesystem/database. Never mock owned internal collaborators to make a test
-pass; inject a narrow boundary instead. See [mocking.md](mocking.md) and
-[interface-design.md](interface-design.md).
+pass; inject a narrow boundary instead. See [mocking.md](references/mocking.md)
+and [interface-design.md](references/interface-design.md).
 
 Hard-to-test code is design evidence: accept dependencies, return results
 instead of hiding effects, and prefer deep modules with small interfaces. On
-green, use [deep-modules.md](deep-modules.md) and
-[refactoring.md](refactoring.md); do not smuggle redesign into green.
+green, use [deep-modules.md](references/deep-modules.md) and
+[refactoring.md](references/refactoring.md); do not smuggle redesign into green.
 
-## Cycle gate
+## Advance gate
 
 Before the next behaviour confirm: public observable contract; witnessed
 right-reason failure; minimal passing code; focused and broader checks green;
