@@ -20,8 +20,9 @@ Bakaus, under Apache License 2.0. Its licence text is
 top-level `NOTICE`.
 
 The bundled `skills/ui-ux-design/scripts/modern-screenshot.umd.js` is
-modern-screenshot 4.7.0, copyright 2021-present wxm, under the MIT License.
-Its terms are in `LICENSES/modern-screenshot-MIT.txt`.
+modern-screenshot 4.7.0 (<https://github.com/qq15725/modern-screenshot>),
+copyright 2021-present wxm, under the MIT License. Its terms are in
+`LICENSES/modern-screenshot-MIT.txt`.
 
 The files `skills/ui-ux-design/data/ui-styles.csv`,
 `font-pairings.csv`, `color-palettes.csv` and `chart-types.csv` contain data
