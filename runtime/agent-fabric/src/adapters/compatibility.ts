@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
+import { promisify } from "node:util";
 
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { parse } from "yaml";
@@ -40,200 +42,70 @@ async function verifyHash(path: string, expected: string): Promise<void> {
   }
 }
 
-type WrapperManifest = {
-  schemaVersion: 1;
-  entrypoint: string;
-  files: Array<{ path: string; sha256: string }>;
+const execFileAsync = promisify(execFile);
+
+export type WrapperProvenance = {
+  adapterId: string;
+  repositoryCommit: string;
+  wrapperPath: string;
 };
 
-function parseWrapperManifest(value: unknown, adapterId: string): WrapperManifest {
-  if (!isRecord(value) || value.schema_version !== 1 || typeof value.entrypoint !== "string" || !Array.isArray(value.files)) {
-    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest is invalid: ${adapterId}`);
-  }
-  const files: Array<{ path: string; sha256: string }> = [];
-  for (const member of value.files) {
-    if (
-      !isRecord(member) ||
-      typeof member.path !== "string" ||
-      member.path.length === 0 ||
-      typeof member.sha256 !== "string" ||
-      !/^[0-9a-f]{64}$/u.test(member.sha256)
-    ) {
-      throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest member is invalid: ${adapterId}`);
-    }
-    files.push({ path: member.path, sha256: member.sha256 });
-  }
-  if (files.length === 0) {
-    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest has no members: ${adapterId}`);
-  }
-  return { schemaVersion: 1, entrypoint: value.entrypoint, files };
+async function gitOutput(directory: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("git", ["-C", directory, ...args]);
+  return stdout.trim();
 }
 
-const MODULE_IMPORT = /(?:\b(?:import|export)\s+(?:[^"']*?\s+from\s+)?|\bimport\s*\(\s*)["']([^"']+)["']/gu;
-
-function exportTarget(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
-  if (!isRecord(value)) return undefined;
-  for (const [condition, candidate] of Object.entries(value)) {
-    if (condition !== "import" && condition !== "node" && condition !== "default") continue;
-    const target = exportTarget(candidate);
-    if (target !== undefined) return target;
-  }
-  return undefined;
-}
-
-function workspacePackageName(specifier: string): string | undefined {
-  return /^(@local\/[^/]+)(?:\/.*)?$/u.exec(specifier)?.[1];
-}
-
-async function resolveWorkspaceImport(specifier: string, sourcePath: string): Promise<string[]> {
-  const packageName = workspacePackageName(specifier);
-  if (packageName === undefined) return [];
-  let searchDirectory = dirname(sourcePath);
-  let packageJsonPath: string | undefined;
-  while (packageJsonPath === undefined) {
-    try {
-      packageJsonPath = await realpath(resolve(searchDirectory, "node_modules", packageName, "package.json"));
-    } catch {
-      const parent = dirname(searchDirectory);
-      if (parent === searchDirectory) {
-        throw new FabricError("ADAPTER_ARTIFACT_MISSING", `local workspace package is unavailable: ${specifier}`);
-      }
-      searchDirectory = parent;
-    }
-  }
-  let packageDocument: unknown;
-  try {
-    packageDocument = JSON.parse(await readFile(packageJsonPath, "utf8"));
-  } catch (error: unknown) {
-    throw new FabricError(
-      "ADAPTER_COMPATIBILITY_INVALID",
-      `local workspace package manifest is invalid: ${specifier}`,
-      { cause: error },
-    );
-  }
-  if (!isRecord(packageDocument)) {
-    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `local workspace package manifest is invalid: ${specifier}`);
-  }
-  const subpath = specifier.slice(packageName.length);
-  const exportKey = subpath.length === 0 ? "." : `.${subpath}`;
-  const exportsValue = packageDocument.exports;
-  const selectedExport = isRecord(exportsValue) && Object.hasOwn(exportsValue, exportKey)
-    ? exportsValue[exportKey]
-    : exportKey === "."
-      ? exportsValue
-      : undefined;
-  const target = exportTarget(selectedExport) ?? (
-    exportKey === "." && typeof packageDocument.module === "string"
-      ? packageDocument.module
-      : exportKey === "." && typeof packageDocument.main === "string"
-        ? packageDocument.main
-        : undefined
-  );
-  if (target === undefined || !target.startsWith("./")) {
-    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `local workspace package export is invalid: ${specifier}`);
-  }
-  let entrypoint: string;
-  try {
-    entrypoint = await realpath(resolve(dirname(packageJsonPath), target));
-  } catch (error: unknown) {
-    throw new FabricError("ADAPTER_ARTIFACT_MISSING", `local workspace package export is unavailable: ${specifier}`, {
-      cause: error,
-    });
-  }
-  const packageRelativePath = relative(dirname(packageJsonPath), entrypoint);
-  if (packageRelativePath.startsWith("..") || isAbsolute(packageRelativePath)) {
-    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `local workspace package export escapes its package: ${specifier}`);
-  }
-  return [packageJsonPath, entrypoint];
-}
-
-async function localImports(source: string, sourcePath: string): Promise<string[]> {
-  const dependencies: string[] = [];
-  for (const match of source.matchAll(MODULE_IMPORT)) {
-    const specifier = match[1] ?? "";
-    if (specifier.startsWith("./") || specifier.startsWith("../")) {
-      dependencies.push(resolve(dirname(sourcePath), specifier));
-    } else {
-      dependencies.push(...await resolveWorkspaceImport(specifier, sourcePath));
-    }
-  }
-  return dependencies;
-}
-
-async function discoverWrapperClosure(entrypoint: string): Promise<string[]> {
-  const pending = [entrypoint];
-  const discovered = new Set<string>();
-  while (pending.length > 0) {
-    const path = pending.pop();
-    if (path === undefined || discovered.has(path)) continue;
-    discovered.add(path);
-    let source: string;
-    try {
-      source = await readFile(path, "utf8");
-    } catch (error: unknown) {
-      throw new FabricError("ADAPTER_ARTIFACT_MISSING", `wrapper closure member is unavailable: ${path}`, {
-        cause: error,
-      });
-    }
-    for (const dependency of await localImports(source, path)) {
-      if (!discovered.has(dependency)) pending.push(dependency);
-    }
-  }
-  return [...discovered].sort((left, right) => left.localeCompare(right));
-}
-
-async function verifyWrapperClosure(input: {
+/**
+ * Derives provenance for repository-owned wrapper code from Git: the commit
+ * of the repository that owns the wrapper entrypoint plus the wrapper path
+ * relative to that repository's root. Git supplies the content identity, so
+ * no repository-local hash pin exists for wrapper code.
+ */
+async function deriveWrapperProvenance(input: {
   adapterId: string;
-  compatibilityPath: string;
   wrapperEntrypoint: string;
-  manifestPath: string;
-}): Promise<number> {
-  let manifestValue: unknown;
+}): Promise<WrapperProvenance> {
+  let wrapperPath: string;
   try {
-    manifestValue = JSON.parse(await readFile(input.manifestPath, "utf8"));
-  } catch (error: unknown) {
-    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest cannot be read: ${input.adapterId}`, {
-      cause: error,
-    });
-  }
-  const manifest = parseWrapperManifest(manifestValue, input.adapterId);
-  let entrypoint: string;
-  let wrapperEntrypoint: string;
-  try {
-    [entrypoint, wrapperEntrypoint] = await Promise.all([
-      realpath(resolveCompatibilityArtifact(input.compatibilityPath, manifest.entrypoint)),
-      realpath(input.wrapperEntrypoint),
-    ]);
+    wrapperPath = await realpath(input.wrapperEntrypoint);
   } catch (error: unknown) {
     throw new FabricError("ADAPTER_ARTIFACT_MISSING", `wrapper entrypoint is unavailable: ${input.adapterId}`, {
       cause: error,
     });
   }
-  if (entrypoint !== wrapperEntrypoint) {
-    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest entrypoint differs: ${input.adapterId}`);
+  const wrapperDirectory = dirname(wrapperPath);
+  let repositoryRoot: string;
+  let repositoryCommit: string;
+  try {
+    [repositoryRoot, repositoryCommit] = await Promise.all([
+      gitOutput(wrapperDirectory, ["rev-parse", "--show-toplevel"]),
+      gitOutput(wrapperDirectory, ["rev-parse", "HEAD"]),
+    ]);
+  } catch (error: unknown) {
+    throw new FabricError(
+      "ADAPTER_COMPATIBILITY_INVALID",
+      `wrapper entrypoint has no Git repository provenance: ${input.adapterId}`,
+      { cause: error },
+    );
   }
-  const members = await Promise.all(manifest.files.map(async (member) => {
-    const unresolved = resolveCompatibilityArtifact(input.compatibilityPath, member.path);
-    try {
-      return { path: await realpath(unresolved), sha256: member.sha256 };
-    } catch (error: unknown) {
-      throw new FabricError("ADAPTER_ARTIFACT_MISSING", `wrapper closure member is unavailable: ${unresolved}`, {
-        cause: error,
-      });
-    }
-  }));
-  const uniqueMembers = new Set(members.map((member) => member.path));
-  if (uniqueMembers.size !== members.length) {
-    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest contains duplicate members: ${input.adapterId}`);
+  if (!/^[0-9a-f]{40,64}$/u.test(repositoryCommit)) {
+    throw new FabricError(
+      "ADAPTER_COMPATIBILITY_INVALID",
+      `wrapper repository commit is invalid: ${input.adapterId}`,
+    );
   }
-  const closure = await discoverWrapperClosure(entrypoint);
-  const declared = [...uniqueMembers].sort((left, right) => left.localeCompare(right));
-  if (JSON.stringify(closure) !== JSON.stringify(declared)) {
-    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `wrapper manifest does not match import closure: ${input.adapterId}`);
+  const repositoryRelativePath = relative(await realpath(repositoryRoot), wrapperPath);
+  if (repositoryRelativePath.length === 0 || repositoryRelativePath.startsWith("..") || isAbsolute(repositoryRelativePath)) {
+    throw new FabricError(
+      "ADAPTER_COMPATIBILITY_INVALID",
+      `wrapper entrypoint escapes its Git repository: ${input.adapterId}`,
+    );
   }
-  for (const member of members) await verifyHash(member.path, member.sha256);
-  return members.length;
+  return {
+    adapterId: input.adapterId,
+    repositoryCommit,
+    wrapperPath: repositoryRelativePath.split(sep).join("/"),
+  };
 }
 
 export async function verifyAdapterCompatibility(input: {
@@ -241,7 +113,7 @@ export async function verifyAdapterCompatibility(input: {
   schemaPath: string;
   adapterIds: string[];
   requireEnabled: boolean;
-}): Promise<{ valid: true; adapterIds: string[]; verifiedArtifactCount: number }> {
+}): Promise<{ valid: true; adapterIds: string[]; verifiedArtifactCount: number; wrapperProvenance: WrapperProvenance[] }> {
   const document: unknown = parse(await readFile(input.compatibilityPath, "utf8"));
   const schema: unknown = JSON.parse(await readFile(input.schemaPath, "utf8"));
   if (!isRecord(schema)) {
@@ -256,6 +128,7 @@ export async function verifyAdapterCompatibility(input: {
   }
 
   let verifiedArtifactCount = 0;
+  const wrapperProvenance: WrapperProvenance[] = [];
   for (const adapterId of input.adapterIds) {
     const adapter = document.adapters[adapterId];
     if (!isRecord(adapter)) {
@@ -270,13 +143,7 @@ export async function verifyAdapterCompatibility(input: {
     if (!isRecord(adapter.implementation) || !isRecord(adapter.contract)) {
       throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `adapter entry is incomplete: ${adapterId}`);
     }
-    if (
-      input.requireEnabled &&
-      (typeof adapter.implementation.wrapper_entrypoint !== "string" ||
-        typeof adapter.implementation.wrapper_entrypoint_sha256 !== "string" ||
-        typeof adapter.implementation.wrapper_manifest !== "string" ||
-        typeof adapter.implementation.wrapper_manifest_sha256 !== "string")
-    ) {
+    if (input.requireEnabled && typeof adapter.implementation.wrapper_entrypoint !== "string") {
       throw new FabricError(
         "ADAPTER_COMPATIBILITY_INVALID",
         `enabled adapter has no pinned fabric wrapper: ${adapterId}`,
@@ -296,10 +163,7 @@ export async function verifyAdapterCompatibility(input: {
         );
       }
       const upstreamArtifactPins = Object.keys(adapter.implementation).filter(
-        (field) =>
-          field.endsWith("_sha256") &&
-          field !== "wrapper_entrypoint_sha256" &&
-          field !== "wrapper_manifest_sha256",
+        (field) => field.endsWith("_sha256"),
       );
       if (upstreamArtifactPins.length === 0) {
         throw new FabricError(
@@ -318,17 +182,11 @@ export async function verifyAdapterCompatibility(input: {
       verifiedArtifactCount += 1;
     }
     const wrapperEntrypoint = adapter.implementation.wrapper_entrypoint;
-    const wrapperManifest = adapter.implementation.wrapper_manifest;
-    if (typeof wrapperEntrypoint === "string" || typeof wrapperManifest === "string") {
-      if (typeof wrapperEntrypoint !== "string" || typeof wrapperManifest !== "string") {
-        throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `adapter wrapper closure pin is incomplete: ${adapterId}`);
-      }
-      verifiedArtifactCount += await verifyWrapperClosure({
+    if (typeof wrapperEntrypoint === "string") {
+      wrapperProvenance.push(await deriveWrapperProvenance({
         adapterId,
-        compatibilityPath: input.compatibilityPath,
         wrapperEntrypoint: resolveCompatibilityArtifact(input.compatibilityPath, wrapperEntrypoint),
-        manifestPath: resolveCompatibilityArtifact(input.compatibilityPath, wrapperManifest),
-      });
+      }));
     }
     if (typeof adapter.contract.schema_sha256 === "string") {
       const source = adapter.contract.schema_source ?? adapter.contract.schema_bundle;
@@ -339,5 +197,5 @@ export async function verifyAdapterCompatibility(input: {
       verifiedArtifactCount += 1;
     }
   }
-  return { valid: true, adapterIds: [...input.adapterIds], verifiedArtifactCount };
+  return { valid: true, adapterIds: [...input.adapterIds], verifiedArtifactCount, wrapperProvenance };
 }

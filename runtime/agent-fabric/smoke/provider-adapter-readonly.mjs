@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { parse } from "yaml";
+
+const execFileAsync = promisify(execFile);
 
 import { AdapterProcessTransport } from "../dist/adapters/process.js";
 
@@ -52,11 +56,13 @@ const digest = async (path) => createHash("sha256").update(await readFile(path))
 const executableSha256 = await digest(pinnedExecutable);
 if (executableSha256 !== implementation.executable_sha256) throw new Error("provider executable digest does not match the compatibility pin");
 const wrapperPath = resolve(new URL("../dist", import.meta.url).pathname, wrapper);
-const wrapperSha256 = await digest(wrapperPath);
-if (wrapperSha256 !== implementation.wrapper_entrypoint_sha256) throw new Error("wrapper digest does not match the compatibility pin");
-const manifestPath = join(agentsRoot, implementation.wrapper_manifest);
-const wrapperManifestSha256 = await digest(manifestPath);
-if (wrapperManifestSha256 !== implementation.wrapper_manifest_sha256) throw new Error("wrapper manifest digest does not match the compatibility pin");
+if (await realpath(wrapperPath) !== await realpath(join(agentsRoot, implementation.wrapper_entrypoint))) {
+  throw new Error("wrapper entrypoint does not match the compatibility path");
+}
+// Repository-owned wrapper code carries Git provenance: the repository commit
+// plus the wrapper path. Only external artifacts keep hash pins.
+const wrapperRepositoryCommit = (await execFileAsync("git", ["-C", agentsRoot, "rev-parse", "HEAD"])).stdout.trim();
+if (!/^[0-9a-f]{40,64}$/u.test(wrapperRepositoryCommit)) throw new Error("wrapper repository commit is unavailable");
 
 const directory = await mkdtemp(join(tmpdir(), `agent-fabric-${adapterId}-smoke-`));
 const workspace = join(directory, "workspace");
@@ -149,8 +155,7 @@ try {
     requestedModel: model,
     modelFamily,
     executable: { path: pinnedExecutable, sha256: executableSha256 },
-    wrapper: { path: implementation.wrapper_entrypoint, sha256: wrapperSha256 },
-    wrapperManifest: { path: implementation.wrapper_manifest, sha256: wrapperManifestSha256 },
+    wrapper: { path: implementation.wrapper_entrypoint, repositoryCommit: wrapperRepositoryCommit },
     output: "exact-sentinel",
     workspace: "unchanged",
     session: "spawn-turn-release",

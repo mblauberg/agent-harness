@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +7,7 @@ import { parse, stringify } from "yaml";
 
 import { composeDaemonAdapters, composeDaemonConfiguration } from "../../src/daemon/composition.ts";
 import { runWorkspaceTrust } from "../../src/cli/workspace-trust.ts";
+import { commitFixtureRepository } from "../support/fixture-repository.ts";
 import {
   createPortableActivatedPrimaryFixture,
   createPrimaryCompatibilityFixture,
@@ -80,16 +80,7 @@ describe("daemon trusted adapter composition", () => {
     if (executable === undefined || executableHash === undefined) throw new TypeError("Codex fixture executable is unpinned");
     codex.enabled = true;
     codex.implementation.wrapper_entrypoint = executable;
-    codex.implementation.wrapper_entrypoint_sha256 = executableHash;
-    const manifestPath = join(fixture.directory, "codex-wrapper-manifest.json");
-    const manifest = `${JSON.stringify({
-      schema_version: 1,
-      entrypoint: executable,
-      files: [{ path: executable, sha256: executableHash }],
-    }, null, 2)}\n`;
-    await writeFile(manifestPath, manifest);
-    codex.implementation.wrapper_manifest = manifestPath;
-    codex.implementation.wrapper_manifest_sha256 = createHash("sha256").update(manifest).digest("hex");
+    await commitFixtureRepository(fixture.directory);
     codex.model_family_constraints = {
       allowed: ["openai"],
       requires_explicit_model: true,

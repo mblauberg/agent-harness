@@ -10,6 +10,7 @@ import * as publicApi from "../../src/index.ts";
 import { openFabric } from "../../src/index.ts";
 
 import { ROOT_AUTHORITY } from "./stage1-fixture.ts";
+import { commitFixtureRepository } from "./fixture-repository.ts";
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
 
 export type PublicFunction = (...args: unknown[]) => unknown;
@@ -129,15 +130,9 @@ export async function createPortableActivatedPrimaryFixture(): Promise<{
 }> {
   const fixture = await createPrimaryCompatibilityFixture();
   const wrapperPath = join(fixture.directory, "fixture-wrapper.js");
-  const wrapperManifestPath = join(fixture.directory, "fixture-wrapper-manifest.json");
   const wrapperBytes = "export const portableFixtureWrapper = true;\n";
-  const wrapperManifest = `${JSON.stringify({
-    schema_version: 1,
-    entrypoint: wrapperPath,
-    files: [{ path: wrapperPath, sha256: sha256(wrapperBytes) }],
-  }, null, 2)}\n`;
   await writeFile(wrapperPath, wrapperBytes, { mode: 0o600 });
-  await writeFile(wrapperManifestPath, wrapperManifest, { mode: 0o600 });
+  await commitFixtureRepository(fixture.directory);
 
   const value: unknown = parse(await readFile(fixture.compatibilityPath, "utf8"));
   if (!isRecord(value) || !isRecord(value.adapters)) {
@@ -150,9 +145,6 @@ export async function createPortableActivatedPrimaryFixture(): Promise<{
     }
     adapter.enabled = true;
     adapter.implementation.wrapper_entrypoint = wrapperPath;
-    adapter.implementation.wrapper_entrypoint_sha256 = sha256(wrapperBytes);
-    adapter.implementation.wrapper_manifest = wrapperManifestPath;
-    adapter.implementation.wrapper_manifest_sha256 = sha256(wrapperManifest);
   }
   await writeFile(fixture.compatibilityPath, stringify(value));
 
@@ -172,7 +164,7 @@ export async function createPortableActivatedPrimaryFixture(): Promise<{
   return {
     ...fixture,
     configPath,
-    artifactPaths: [...fixture.artifactPaths, wrapperPath, wrapperManifestPath],
+    artifactPaths: [...fixture.artifactPaths, wrapperPath],
   };
 }
 
