@@ -198,6 +198,7 @@
           "fabric.v1.review-completion.read",
           "fabric.v1.provider-route-integrity-recovery.read",
           "fabric.v1.provider-context-pressure.read",
+          "fabric.v1.herdr-steer.dispatch",
           "fabric.v1.topology-wave.append",
           "fabric.v1.topology-wave.current.read",
           "fabric.v1.topology-wave.list"
@@ -312,6 +313,7 @@
           "fabric.v1.review-completion.read",
           "fabric.v1.provider-route-integrity-recovery.read",
           "fabric.v1.provider-context-pressure.read",
+          "fabric.v1.herdr-steer.dispatch",
           "fabric.v1.topology-wave.append",
           "fabric.v1.topology-wave.current.read",
           "fabric.v1.topology-wave.list"

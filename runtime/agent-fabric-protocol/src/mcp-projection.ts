@@ -218,6 +218,11 @@ export const MCP_PROJECTION_REGISTRY = Object.freeze({
   [FABRIC_OPERATIONS.reviewCompletionRead]: tool(FABRIC_OPERATIONS.reviewCompletionRead),
   [FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead]: tool(FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead),
   [FABRIC_OPERATIONS.providerContextPressureRead]: tool(FABRIC_OPERATIONS.providerContextPressureRead),
+  [FABRIC_OPERATIONS.herdrSteerDispatch]: tool(
+    FABRIC_OPERATIONS.herdrSteerDispatch,
+    undefined,
+    "Dispatch one validated fire-and-forget Herdr steering effect; this cannot return an answer or close a barrier.",
+  ),
   [FABRIC_OPERATIONS.topologyWaveAppend]: tool(FABRIC_OPERATIONS.topologyWaveAppend),
   [FABRIC_OPERATIONS.topologyWaveCurrentRead]: tool(FABRIC_OPERATIONS.topologyWaveCurrentRead),
   [FABRIC_OPERATIONS.topologyWaveList]: tool(FABRIC_OPERATIONS.topologyWaveList),

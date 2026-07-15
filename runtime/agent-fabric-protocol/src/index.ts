@@ -6,6 +6,7 @@ export * from "./client.js";
 export * from "./contract-fixtures.js";
 export * from "./features.js";
 export * from "./gates.js";
+export * from "./herdr-control.js";
 export * from "./git-actions.js";
 export * from "./intake.js";
 export * from "./launch.js";

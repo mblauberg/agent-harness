@@ -109,20 +109,18 @@ Fabric prepares the stable action before injection. A successful pane write is
 reported only as `dispatched-unconfirmed`; it is never a delivery
 acknowledgement and cannot complete expected work or close a barrier.
 
-The installed `agent-fabric-herdr` executable also provides:
+The installed `agent-fabric-herdr` executable provides only boundary
+diagnostics:
 
 ```sh
 agent-fabric-herdr doctor --config /absolute/trusted/herdr.json
-agent-fabric-herdr steer --config /absolute/trusted/herdr.json \
-  --pane w5:p7 --fire-and-forget --task-ref task-01 --prompt 'Pause after this check.'
 ```
 
-`doctor` validates the pinned local boundary. The standalone `steer` command is
-the documented degraded compatibility path: it requires the explicit flag and
-reference, reports `referenceValidation: unverified`, and remains unable to
-satisfy a result or barrier. Fabric-backed callers use `DirectSteerService`
-instead. The CLI accepts no arbitrary command, argument vector, environment or
-shell surface.
+`doctor` validates the pinned local boundary. Steering is available only
+through the authenticated public Fabric operation
+`fabric.v1.herdr-steer.dispatch`, which uses `DirectSteerService` to validate
+the exact reference and stable action before pane I/O. The CLI accepts no
+arbitrary command, argument vector, environment or shell surface.
 
 ## Degraded artifact collection
 

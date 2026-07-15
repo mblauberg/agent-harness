@@ -20,9 +20,7 @@ export type HerdrCliIo = Readonly<{
   stderr: NodeJS.WritableStream;
 }>;
 
-const USAGE = "usage: agent-fabric-herdr doctor --config PATH\n" +
-  "       agent-fabric-herdr steer --config PATH --pane ID --fire-and-forget (--task-ref ID | --message-ref ID) [--prompt TEXT]\n";
-const CREDENTIAL_PATTERN = /\b(?:afb|afc|afop)_[A-Za-z0-9_-]{8,}|\bghp_[A-Za-z0-9_]{8,}|\bgithub_pat_[A-Za-z0-9_]{8,}/u;
+const USAGE = "usage: agent-fabric-herdr doctor --config PATH\n";
 
 type HerdrCliConfig = Omit<ProductionHerdrIntegrationOptions, "fabricJournal" | "fabricDirectSteer" | "clock"> & {
   schemaVersion: 1;
@@ -34,7 +32,7 @@ export async function runHerdrCli(arguments_: readonly string[], io: HerdrCliIo)
     return 0;
   }
   const command = arguments_[0];
-  if (command !== "doctor" && command !== "steer") {
+  if (command !== "doctor") {
     io.stderr.write(USAGE);
     return 2;
   }
@@ -45,25 +43,6 @@ export async function runHerdrCli(arguments_: readonly string[], io: HerdrCliIo)
     io.stderr.write(`${error instanceof Error ? error.message : "invalid arguments"}\n`);
     return 2;
   }
-  if (command === "steer" && !parsed.fireAndForget) {
-    io.stderr.write("degraded Herdr steering requires explicit --fire-and-forget and cannot carry an expected answer\n");
-    return 2;
-  }
-  if (
-    command === "steer" &&
-    (
-      (parsed.taskRef === undefined) === (parsed.messageRef === undefined) ||
-      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(parsed.taskRef ?? parsed.messageRef ?? "") ||
-      CREDENTIAL_PATTERN.test(parsed.taskRef ?? parsed.messageRef ?? "")
-    )
-  ) {
-    io.stderr.write("degraded Herdr steering requires exactly one bounded --task-ref or --message-ref; the reference remains unverified\n");
-    return 2;
-  }
-  if (command === "steer" && (parsed.pane === undefined || !/^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/u.test(parsed.pane))) {
-    io.stderr.write("degraded Herdr steering requires a bounded --pane\n");
-    return 2;
-  }
   try {
     const config = await readConfig(parsed.config);
     const integration = await createProductionHerdrIntegration({
@@ -71,23 +50,15 @@ export async function runHerdrCli(arguments_: readonly string[], io: HerdrCliIo)
       fabricJournal: inactiveJournal(),
       fabricDirectSteer: inactiveDirectSteer(),
     });
-    if (command === "doctor") {
-      io.stdout.write(`${JSON.stringify({
-        status: "available",
-        version: config.expectedVersion,
-        protocol: config.expectedProtocol,
-        projectId: config.projectId,
-        projectSessionId: config.projectSessionId,
-        authority: "fabric",
-        paneTruth: false,
-      })}\n`);
-      return 0;
-    }
-    const prompt = parsed.prompt ?? await readBoundedStdin(io.stdin, 4_096);
-    const result = await integration.boundary.dispatchUnverifiedFireAndForget(parsed.pane as string, prompt);
+    void integration;
     io.stdout.write(`${JSON.stringify({
-      ...result,
-      ...(parsed.taskRef === undefined ? { messageRef: parsed.messageRef } : { taskRef: parsed.taskRef }),
+      status: "available",
+      version: config.expectedVersion,
+      protocol: config.expectedProtocol,
+      projectId: config.projectId,
+      projectSessionId: config.projectSessionId,
+      authority: "fabric",
+      paneTruth: false,
     })}\n`);
     return 0;
   } catch {
@@ -96,56 +67,16 @@ export async function runHerdrCli(arguments_: readonly string[], io: HerdrCliIo)
   }
 }
 
-type ParsedArguments = {
-  config: string;
-  fireAndForget: boolean;
-  pane?: string;
-  taskRef?: string;
-  messageRef?: string;
-  prompt?: string;
-};
+type ParsedArguments = { config: string };
 
 function parseArguments(arguments_: readonly string[]): ParsedArguments {
-  let config: string | undefined;
-  let fireAndForget = false;
-  let pane: string | undefined;
-  let taskRef: string | undefined;
-  let messageRef: string | undefined;
-  let prompt: string | undefined;
-  const seen = new Set<string>();
-  for (let index = 0; index < arguments_.length; index += 1) {
-    const name = arguments_[index];
-    if (name === "--fire-and-forget") {
-      if (seen.has(name)) throw new TypeError("duplicate --fire-and-forget");
-      seen.add(name);
-      fireAndForget = true;
-      continue;
-    }
-    if (name !== "--config" && name !== "--pane" && name !== "--task-ref" && name !== "--message-ref" && name !== "--prompt") {
-      throw new TypeError("unknown argument");
-    }
-    if (seen.has(name)) throw new TypeError(`duplicate ${name}`);
-    seen.add(name);
-    const value = arguments_[index + 1];
-    if (value === undefined) throw new TypeError(`${name} requires a value`);
-    index += 1;
-    if (name === "--config") config = value;
-    else if (name === "--pane") pane = value;
-    else if (name === "--task-ref") taskRef = value;
-    else if (name === "--message-ref") messageRef = value;
-    else prompt = value;
-  }
+  const config = arguments_.length === 2 && arguments_[0] === "--config"
+    ? arguments_[1]
+    : undefined;
   if (config === undefined || !isAbsolute(config) || config.includes("\0")) {
     throw new TypeError("--config must name an absolute file");
   }
-  return {
-    config,
-    fireAndForget,
-    ...(pane === undefined ? {} : { pane }),
-    ...(taskRef === undefined ? {} : { taskRef }),
-    ...(messageRef === undefined ? {} : { messageRef }),
-    ...(prompt === undefined ? {} : { prompt }),
-  };
+  return { config };
 }
 
 async function readConfig(path: string): Promise<HerdrCliConfig> {
@@ -189,31 +120,19 @@ async function readConfig(path: string): Promise<HerdrCliConfig> {
   }
 }
 
-async function readBoundedStdin(stream: NodeJS.ReadableStream, maximumBytes: number): Promise<string> {
-  const chunks: Buffer[] = [];
-  let total = 0;
-  for await (const chunk of stream) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
-    total += bytes.length;
-    if (total > maximumBytes) throw new TypeError("Herdr steering prompt exceeds its byte bound");
-    chunks.push(bytes);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
 function inactiveJournal(): FabricActionJournalPort {
   return {
     readAction: async () => null,
-    markDispatched: async () => { throw new TypeError("standalone degraded steering has no Fabric journal mutation"); },
-    completeAction: async () => { throw new TypeError("standalone degraded steering has no Fabric journal mutation"); },
-    markAmbiguous: async () => { throw new TypeError("standalone degraded steering has no Fabric journal mutation"); },
+    markDispatched: async () => { throw new TypeError("diagnostic CLI has no Fabric journal mutation"); },
+    completeAction: async () => { throw new TypeError("diagnostic CLI has no Fabric journal mutation"); },
+    markAmbiguous: async () => { throw new TypeError("diagnostic CLI has no Fabric journal mutation"); },
   };
 }
 
 function inactiveDirectSteer(): FabricDirectSteerPort {
   return {
-    validateSteerReference: async () => ({ status: "rejected", code: "unknown-reference", reason: "standalone reference is unverified" }),
-    prepareDirectSteerAction: async () => { throw new TypeError("standalone degraded steering cannot prepare a Fabric action"); },
+    validateSteerReference: async () => ({ status: "rejected", code: "unknown-reference", reason: "diagnostic CLI has no Fabric steering authority" }),
+    prepareDirectSteerAction: async () => { throw new TypeError("diagnostic CLI cannot prepare a Fabric action"); },
   };
 }
 

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
 
 import Database from "better-sqlite3";
@@ -8,6 +9,7 @@ import type {
   ProjectSessionId,
   ProviderActionId,
 } from "@local/agent-fabric-protocol";
+import { FABRIC_OPERATIONS } from "@local/agent-fabric-protocol";
 import { describe, expect, it } from "vitest";
 
 import { openFabric } from "../../src/index.ts";
@@ -876,7 +878,7 @@ describe("daemon-owned Herdr production composition", () => {
     }
   });
 
-  it("validates a fire-and-forget task reference before composing direct steering", async () => {
+  it("dispatches validated direct steering through the public agent operation with exact replay", async () => {
     const fixture = await createStage1Fixture();
     const ready = await fixture.chair.createTask({
       taskId: "herdr-direct-steer-task",
@@ -938,22 +940,49 @@ describe("daemon-owned Herdr production composition", () => {
         paneRef: "w10:p10",
         reference: {
           kind: "task",
-          projectId: identity.projectId,
-          projectSessionId: identity.projectSessionId,
-          coordinationRunId: "run-stage1",
           taskId: active.taskId,
           expectedRevision: active.revision,
         },
         prompt: "Pause after the current bounded check.",
       };
-      await expect((fabric as any).executeHerdrDirectSteer(request)).resolves.toMatchObject({
+      const context = {
+        principal: {
+          kind: "agent" as const,
+          agentId: "chair" as AgentId,
+          projectSessionId: identity.projectSessionId,
+          runId: "run-stage1",
+          principalGeneration: 1,
+        },
+        allowedOperations: new Set([FABRIC_OPERATIONS.herdrSteerDispatch]),
+        features: ["herdr-control.v1" as const],
+        connectionNonce: "herdr_public_dispatch_nonce",
+        credentialHash: createHash("sha256").update(fixture.run.chairCapability).digest("hex"),
+        daemonInstanceGeneration: 1,
+      };
+      const dispatch = (input: typeof request) => (fabric as any).dispatchPublicProtocol(
+        context,
+        FABRIC_OPERATIONS.herdrSteerDispatch,
+        input,
+      );
+      await expect(dispatch(request)).resolves.toMatchObject({
         status: "terminal",
+        receipt: {
+          referenceValidation: "verified",
+          deliveryEvidence: "none",
+          canSatisfyExpectedResult: false,
+          canCloseBarrier: false,
+        },
       });
-      await expect((fabric as any).executeHerdrDirectSteer({
+      await expect(dispatch(request)).resolves.toMatchObject({ status: "terminal" });
+      await expect(dispatch({
+        ...request,
+        prompt: "Changed payload under the same action identity.",
+      })).rejects.toThrow("reused with changed run, principal or input");
+      await expect(dispatch({
         ...request,
         actionId: "herdr-direct-steer-unknown-01",
         reference: { ...request.reference, taskId: "unknown-task" },
-      })).rejects.toThrow("does not exist");
+      })).resolves.toEqual({ status: "rejected", reason: "unknown-reference" });
       expect(effects).toEqual([request.actionId]);
     } finally {
       await fabric.close();
