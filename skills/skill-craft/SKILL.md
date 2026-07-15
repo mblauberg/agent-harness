@@ -5,7 +5,7 @@ description: "Use for creating, revising, or read-only auditing an Agent Skill: 
 
 # Skill craft
 
-A skill is a reusable, triggerable procedure — not a solved-task narrative
+A skill is a reusable, triggerable procedure, not a solved-task narrative
 and not a place to park static reference. Every skill earns its slot on four
 pillars: **Trigger** (fires on the right requests, stays silent on adjacent
 ones), **Structure** (frontmatter contract, progressive disclosure, soft
@@ -30,18 +30,18 @@ Both branches follow this without restating it in two voices:
   or composed, where audit is a companion to a primary lifecycle owner (for
   example `implement`) that stays the action-owner.
 - **Budgets:** soft ~500-word body per branch file; the standing
-  catalogue-description lever is governed in `MAINTAINING.md` — link it,
+  catalogue-description lever is governed in `MAINTAINING.md`; link it,
   don't restate the number here.
 - **Token model, three-tier:** always-loaded frontmatter, triggered branch
   body, one-hop `references/` depth. Never nest a second reference level.
 - **Trigger fixtures:** positive, negative, boundary and composition cases.
   A keyword match is a candidate, not ground truth. Changes to routing text
   re-run the held-out set.
-- **Failure taxonomy** — name the failure, don't just gesture at quality:
+- **Failure taxonomy:** name the failure, don't just gesture at quality:
   premature-completion, duplication, sediment, sprawl, no-op, negation-only.
 - **Description contract:** front-load the first 250 characters with trigger
   words and the nearest exclusion; keep boundary-routing negation explicit
-  (name the skill to use instead) — never drop it for brevity.
+  (name the skill to use instead); never drop it for brevity.
 - **Provenance:** any adaptation from a third-party source records source
   URL, version/commit, retrieval date and licence in the repository
   `THIRD_PARTY_NOTICES.md` index, with the full licence text under `LICENSES/`.

@@ -8,7 +8,7 @@ description: "Use for frontend UI/UX: read-only review (default — visual, acce
 # UI/UX design
 
 Review or design production-grade frontend interfaces. Two branches share one
-entry point; the model picks the branch from what the request authorises —
+entry point; the model picks the branch from what the request authorises,
 never a slash command.
 
 ## Branches

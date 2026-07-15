@@ -40,7 +40,7 @@ Split a skill when its triggers, artifacts or completion gates differ
 meaningfully and a single-entrypoint branch selector cannot keep them
 behaviourally separate at runtime. A branched skill may unify procedures of
 differing authority under one frontmatter when each branch enforces its own
-authority gate — for example an audit branch that can never write without an
+authority gate: for example an audit branch that can never write without an
 explicit envelope naming the acting lifecycle owner. The runtime authority
 boundary, not the file boundary, is what must hold. Merge skills when they
 compete for the same request and lack a stable boundary. Retain only rules that

@@ -7,14 +7,14 @@ description: "Use for a large, open-ended mission that must survive sessions/cra
 
 A thin autonomous **conductor** for large missions: autonomous scoping,
 self-drive, durable cross-session state/recovery, and a hard human `STOP`
-gate. It owns no lifecycle machinery itself — it delegates every bounded wave
+gate. It owns no lifecycle machinery itself; it delegates every bounded wave
 to `orchestrate` and every decision/software change to `implement`/`deliver`,
 then records the durable pointers. See Entry gate below for when to use this
 tier instead of `orchestrate`, `implement` or `diagnose`.
 
 It is **higher-authority** than `orchestrate`'s pre-scoped
-autonomous-implementation mode, which stops at a human PR gate — autopilot
-keeps going, human-out-of-loop, until a human writes `STATUS: STOP`.
+autonomous-implementation mode, which stops at a human PR gate; autopilot
+keeps going until a human writes `STATUS: STOP`.
 
 Claude Code and Codex are equal operators; Codex operators read
 [codex-operator.md](references/codex-operator.md) first.
@@ -31,7 +31,7 @@ clean exit; otherwise use a lighter-weight skill.
    then rerun to substitute/validate. See
    [state-contract.md](references/state-contract.md) for the file set and
    `.agent-run/<mission-id>/` location.
-2. Use `orchestrate` for every bounded wave — it owns topology, provider
+2. Use `orchestrate` for every bounded wave: it owns topology, provider
    routing, Agent Fabric transport, the review ladder and degradation.
    Delegate decisions/software change to `implement`/`deliver` and record
    the returned route/result in `QUEUE.md`.
@@ -43,9 +43,10 @@ clean exit; otherwise use a lighter-weight skill.
    missions record `HERDR-NOT-USED: external driver; filesystem state is
    authoritative` in `STATE.md`.
 
-Bootstrap authorises only mission-declared isolation, never source-repo
-branches/worktrees; those need separate human authority plus
-`${AGENTS_HOME:-$HOME/.agents}/scripts/worktree`.
+Bootstrap authorises only mission-declared isolation. The constitution
+pre-authorises source-repo implementation branches and worktrees, created via
+`${AGENTS_HOME:-$HOME/.agents}/scripts/worktree`; deletion, integration and
+shared-branch pushes still need separate human authority.
 
 ## Operating loop
 
@@ -61,13 +62,13 @@ only human STOP closes the mission. See
 ## Evidence and closure
 
 `STATE.md` holds current recovery truth; `QUEUE.md` is the durable work queue
-and item-lease ledger. Durable decisions are delegated, not forked here — see
+and item-lease ledger. Durable decisions are delegated, not forked here; see
 [state-contract.md](references/state-contract.md).
 
 Cleanup must classify first: never delete unknown files; prune only
 mission-owned, manifest-classified ephemeral payload with no live reference.
-STOP requires `GOAL`/`STATE`/`HANDOFF` agreement and reconciled, closed work
-— see [recovery-and-cadence.md](references/recovery-and-cadence.md) for the
+STOP requires `GOAL`/`STATE`/`HANDOFF` agreement and reconciled, closed work;
+see [recovery-and-cadence.md](references/recovery-and-cadence.md) for the
 closure protocol.
 
 ## References

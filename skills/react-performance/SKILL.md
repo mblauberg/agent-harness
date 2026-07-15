@@ -50,5 +50,5 @@ version-sensitive APIs.
 
 The detailed rules are adapted material; provenance and licence terms are in
 the repository [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) and
-[LICENSES/vercel-react-best-practices-MIT.txt](../../LICENSES/vercel-react-best-practices-MIT.txt).
+the [Vercel React best-practices licence](../../LICENSES/vercel-react-best-practices-MIT.txt).
 Current primary sources are indexed in [sources.md](references/sources.md).

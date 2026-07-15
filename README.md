@@ -1,5 +1,3 @@
-<div align="center">
-
 # Provenant
 
 **A personal harness for Claude Code and Codex that turns agent work into a
@@ -7,8 +5,6 @@ scoped, verified and independently reviewed delivery workflow.**
 
 [![CI](https://github.com/mblauberg/provenant/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mblauberg/provenant/actions/workflows/ci.yml)
 [![Licence: MIT](https://img.shields.io/github/license/mblauberg/provenant)](LICENSE)
-
-</div>
 
 Provenant is a personal harness, used daily by its author. Interfaces change
 without notice and support is best effort. Propose changes through
@@ -19,7 +15,7 @@ vulnerabilities privately through [`SECURITY.md`](SECURITY.md).
 
 Over a bare agent, Provenant:
 
-- scopes and approves work before implementation starts;
+- scopes work and requires human approval before implementation starts;
 - runs deterministic checks before results surface for review;
 - adds review by the *other* model family once the work is substantial; and
 - keeps acceptance and release as separate human decisions.

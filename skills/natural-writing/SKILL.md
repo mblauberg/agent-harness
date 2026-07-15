@@ -11,7 +11,7 @@ rhythm and chatbot residue.
 
 ## Hub role
 
-This skill is the writing family's hub: it owns the shared prose doctrine —
+This skill is the writing family's hub: it owns the shared prose doctrine,
 the anti-AI taxonomy, condense pass, claim-discipline/evidence schema, voice
 matching, and the always-on Australian English default. `academic-writing`,
 `engineering-writing` and `legal-writing` link here instead of cloning it,

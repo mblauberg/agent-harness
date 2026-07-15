@@ -12,7 +12,7 @@ before any decision about orchestration, model choice, delegation, or memory.
   (state file / specs / ADRs / context digests), never only in
   harness-private memory. Private memory = cross-project user prefs only.
 - **Git:** creating feature branches and worktrees for implementation is
-  pre-authorised by the project constitution (`HARNESS.md`) — no per-instance
+  pre-authorised by the project constitution (`HARNESS.md`): no per-instance
   ask needed, including for parallel implementation. Linked worktrees live only
   at the owning repository's `.worktrees/<task-agent>` path, one writer each;
   see `docs/worktrees.md`. Branch deletion, force-removal, history rewrites and

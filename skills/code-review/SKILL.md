@@ -8,7 +8,7 @@ description: "Use for source-read-only review of a PR, diff, commit, migration, 
 Review is source-read-only unless the user separately authorises fixes. A
 reviewer may write compressed findings and traces only to an assigned
 artifact directory. The diff is the entry point, not the boundary. Judge the
-resulting system, not just the changed lines.
+resulting system, not the changed lines alone.
 
 ## Review
 

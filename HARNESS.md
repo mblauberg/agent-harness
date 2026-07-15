@@ -52,8 +52,8 @@ approver. Delegation only narrows authority. Host access, credentials and
 subscriptions never grant permission.
 
 This constitution is a standing human-approved envelope for routine version
-control: branches and linked worktrees for implementation — including parallel
-— need no per-instance approval. Worktrees use `.worktrees/<task-agent>`, one
+control: branches and linked worktrees for implementation, including parallel,
+need no per-instance approval. Worktrees use `.worktrees/<task-agent>`, one
 writer each; see `docs/worktrees.md`. Deletion, force-removal, history rewrites
 and integration or pushes to shared branches stay gated on the approvals above.
 
