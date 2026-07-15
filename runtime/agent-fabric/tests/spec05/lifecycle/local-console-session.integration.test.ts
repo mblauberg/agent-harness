@@ -299,7 +299,7 @@ describe("public local operator Console session", () => {
       seed.close();
     }
 
-    const [first, replay] = await Promise.all([
+    const opened = await Promise.allSettled([
       openLocalOperatorConsoleSession({
         projectRoot: projectA,
         surface: "standalone",
@@ -315,8 +315,17 @@ describe("public local operator Console session", () => {
         clientId: "console_session_02",
       }),
     ]);
+    const retained = opened.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : []);
 
+    let first: Awaited<ReturnType<typeof openLocalOperatorConsoleSession>> | undefined;
+    let replay: Awaited<ReturnType<typeof openLocalOperatorConsoleSession>> | undefined;
     try {
+      const [firstResult, replayResult] = opened;
+      if (firstResult.status === "rejected") throw firstResult.reason;
+      if (replayResult.status === "rejected") throw replayResult.reason;
+      first = firstResult.value;
+      replay = replayResult.value;
       expect(first.projectSessionId).toBe("session_console_existing_01");
       expect(replay.projectSessionId).toBe(first.projectSessionId);
       expect(first.credential.capabilityId).not.toBe(replay.credential.capabilityId);
@@ -373,9 +382,12 @@ describe("public local operator Console session", () => {
         await optionalTransport.close();
       }
     } finally {
-      const closes = await Promise.allSettled([project.close(), first.close(), replay.close()]);
-      expect(closes.map(({ status }) => status)).toEqual(["fulfilled", "fulfilled", "fulfilled"]);
+      const closes = await Promise.allSettled(
+        [project, ...retained].map(async (session) => await session.close()),
+      );
+      expect(closes.every(({ status }) => status === "fulfilled")).toBe(true);
     }
+    if (first === undefined || replay === undefined) throw new Error("concurrent Console sessions did not open");
     await expectSecretsAbsent(
       [paths.stateDirectory, paths.runtimeDirectory],
       [
