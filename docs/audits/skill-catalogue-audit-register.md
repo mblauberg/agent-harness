@@ -1,7 +1,7 @@
 # Skill Catalogue Audit Register — Epic #124, Workstream B
 
-> **Status:** proposed — recommendations only, approve per item. Nothing in the skill catalogue is edited by this document.
-> **Date:** 2026-07-15 · **Epic:** #124 · **Scope:** 33 skills (+ `_shared`) · **Outcome:** 21 APPROVE-ready · 12 DEFER · 0 CUT.
+> **Status:** audit recommendations + **owner decisions recorded** (grill-me R1–R5, see next section). All 12 DEFERs resolved into a direction; execution is staged implement work, not done by this document.
+> **Date:** 2026-07-15 · **Epic:** #124 · **Scope:** 33 skills (+ `_shared`) · **Outcome:** 21 APPROVE-ready · 12 DEFER (now decided) · 0 CUT.
 > **Provenance:** 6 family-batched auditors + 1 licensing/provenance auditor (workhorse tier), flagship synthesis, other-primary cross-family verify (all findings folded). Source-read-only throughout.
 
 **Mode:** source-read-only; artifact-only write authority to this register.
@@ -9,6 +9,31 @@
 **Method:** 6 family-batched Sonnet auditors + 1 licensing/provenance auditor (model-route workhorse tier), flagship synthesis (Opus), other-primary cross-family verify (gpt-5.6-sol-low, all 7 findings folded). Every row carries evidence + an approve/defer line. **Recommendations only — approve per item.**
 
 **Outcome: 21 APPROVE-ready · 12 DEFER (owner call) · 0 CUT.** The catalogue is healthier than expected — no length crisis, no tracked sediment, well self-policed boundaries. The real value is concentrated in a few places: the **writing-family reference triplication** (biggest consolidation prize), **frontend-design's bundled-application sprawl** (only true monolith), the **skill-craft merge**, and a handful of **provenance-metadata gaps**.
+
+---
+
+## Owner decisions (grill-me R1–R5)
+
+**Governing principle (owner steer):** prefer small, global, self-contained skills that *reference each other* over inert `_shared/` content files. Exactly one skill *owns* each shared concern; others *link* to it (bidirectional navigation, single-source ownership). This supersedes the register's earlier `_shared/`-extraction recommendations wherever they conflict.
+
+| DEFER item | Decision |
+|---|---|
+| Writing triplication (academic/engineering/legal) | **`natural-writing` = writing hub**, single owner of shared prose doctrine (anti-AI, concision, claim-discipline, voice). The 4 specific writing skills keep only their specialization and **link to the hub**; it links back out. No `_shared/`. |
+| AU-English mechanics | **Folds into `natural-writing` as an always-on default**, **trimmed** to the non-obvious house-style rules (drop -ise/-our/licence-noun-vs-verb basics models already know). US-English = a future `locale` branch, **default AU, not built now**. |
+| Writing lint scripts (3× overlapping) | Consolidate into one `natural-writing`-owned checker the others call. |
+| Model-routing dup (orchestrate ↔ autonomous-lab) | **Routing stays in `orchestrate`** (public interface). No standalone `model-router` skill — the thin lab *delegates* to orchestrate, so orchestrate is the single consumer. `autonomous-lab/model-effort-policy.md` dropped/trimmed to lab-only deltas. *(Rule: a router earns its own description only at ≥2 independent consumers.)* |
+| `finding-contract` (frontend-review) | The `ui-ux-design` review branch **links `code-review`'s `finding-contract.md`** (code-review owns it as a declared public interface). No copy. |
+| `skill-craft` shared doctrine | **No `_shared/skill-doctrine.md`.** The merged skill owns its doctrine internally (root `SKILL.md` + `references/{author,audit}.md` link up). Merge blueprint (description, branch structure, boundary fixtures) otherwise as specified in Workstream A. |
+| `autonomous-lab` (Wk-C split) | **Gut to a thin autonomous *conductor*** for large missions: autonomous scoping + self-drive + durable cross-session state/recovery + hard STOP gate, **human-out-of-loop**. Delegates lifecycle execution to existing skills; sheds ~17K words (routing, decision-lifecycle, filesystem-memory, anti-placebo, workflow-patterns) — drop or move to owners. |
+| **NEW — `orchestrate` autonomous-implementation mode** | Add a mode: pull **accepted/ready** issues → run `implement` (+ review/evaluate) autonomously → **STOP at the human PR-review/merge gate**. No scoping (pre-scoped), no skipping human review. Lower authority than the lab. |
+| `frontend-design` (Wk-C split) + `frontend-review` (sibling-vs-sublane) | **Merge both → one branched `ui-ux-design` skill.** Read-only **review** branch is default (engine: `detector` + browser/build evidence); **design/make** branches (incl. `live`) require write authority; boundary fixtures prove a review request can't silently edit (skill-craft safety pattern). **Model-chosen branches**, not slash commands. Keep `live` + `detector`. Rename CSV `references/`→`data/`. Managed rename via `config/skill-renames.json`. Description **must advertise the review branch**. |
+| `orchestrate` externally-consumed references | Owns orchestration doctrine as a **public interface**; `codebase-polish`/`cross-verify` reference the skill, not its private files. Portability fix (substrate-neutral stage/gate/recovery contract, Claude/Codex as adapters) is a build note — do NOT merely relocate the Claude-only `dynamic-workflows.md`. |
+| Licensing (Wk-E, 8 human-calls) | **Retain-all + consolidate location** to `LICENSES/` + top-level `NOTICE` + `THIRD_PARTY_NOTICES.md` index — **except DROP** the **Superpowers** (diagnose/tdd/skill-authoring) and **Skill Optimizer** (skill-audit) attributions, **gated by an upstream-diff verification** at implement time (flag back if substantial *expression* still copied). Dedupe 3 byte-identical Superpowers copies (moot if dropped). Fix `caveman` `THIRD_PARTY_NOTICES` gap; reconcile Blader wording. Retain grill-me/Pocock, BMAD, Blader, caveman. |
+| `tdd` loose files | Move the 5 root `.md` under `references/` + fix inline links; rename weak header "Cycle gate". |
+| `uml-diagrams` `README.md` | Mark as package metadata (or fold the one paragraph into SKILL.md and delete). |
+| `grill-me` `spec05_cases.yaml` | Fold into `trigger_cases.yaml` **unless** it's a frozen regression snapshot (keep if so). |
+
+**Execution tiers:** *quick preliminary* (mechanical, low-risk, done on this branch now) = tdd file moves, uml README, grill-me eval, caveman notice gap, Blader wording. *Staged implement* (larger, separate work) = skill-craft merge, ui-ux-design merge + generalization, natural-writing hub + AU fold, autonomous-lab gutting, orchestrate autonomous mode, licensing consolidation (with the drop-verification gate).
 
 ---
 
