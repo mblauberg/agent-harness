@@ -43,7 +43,7 @@ and [operational observation](../specs/agent-fabric/observability.md).
 | TUA-Bench and Claw-SWE-Bench | Effort and harness can materially change outcomes for the same model family/backbone. | Different datasets are not one leaderboard. |
 | Agent-as-a-Router | Execution feedback and verification can improve routing in a reported coding setting. | Learned/step-level routing is not yet justified locally. |
 | Local route audit | Separately uploaded receipts and inferred actual identity leave an admission-to-observation gap. | Snapshot described dated source state; live implementation must be rechecked. |
-| Specs 01/04 review routing | Immutable pair identity, pure bounded resolver, structural codec and route recovery already provide the correct custody seam. | General route evidence still requires implementation/evaluation gates. |
+| Review routing and custody audit | Immutable pair identity, pure bounded resolver, structural codec and route recovery already provide the correct custody seam. | General route evidence still requires implementation/evaluation gates. |
 
 The snapshot preserves all benchmark/model URLs and the warning that ranks,
 prices, quotas, windows and settings are volatile.

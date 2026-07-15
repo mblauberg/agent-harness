@@ -1,21 +1,15 @@
 # Changelog
 
 Notable changes to Provenant are recorded here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-[`MAINTAINING.md`](MAINTAINING.md) requires eval runs to record the harness
-version they ran against, so every entry below needs a matching Git tag.
+Changes remain under `Unreleased` until a tag and release are separately
+authorised. [`MAINTAINING.md`](MAINTAINING.md) requires evaluation runs to
+record the harness revision they ran against.
 
 ## [Unreleased]
 
-Nothing yet.
-
-## [0.1.0] - 2026-07-13
-
-First public cut. This entry describes the harness as it stands at its first
-tag, not a history of earlier releases: before this tag the repository had no
-tags and no releases.
+The current pre-release tree includes:
 
 ### Added
 
@@ -74,6 +68,5 @@ existing installations: the installation manifest owner in
 global instructions point at by name. `AGENTS_HOME` and `$HOME/.agents` are
 unchanged, so no existing installation moves.
 
-Version links are deliberately absent: no release is tagged yet, and a link to a
-tag that does not exist is exactly the kind of unverified claim this release
-closes. Add them with the first `v0.1.0` tag.
+No release or tag is claimed here. Move these notes under a version only after
+that tag and release are separately authorised.

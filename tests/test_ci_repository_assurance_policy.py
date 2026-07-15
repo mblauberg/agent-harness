@@ -245,8 +245,28 @@ def test_repository_policy_covers_sensitive_fabric_surfaces() -> None:
     assert any(item.get("package-ecosystem") == "github-actions" and item.get("directory") == "/" for item in updates)
 
     template = (ROOT / ".github" / "pull_request_template.md").read_text(encoding="utf-8").lower()
-    for evidence in ("risk", "test evidence", "migration", "security", "rollback", "independent review"):
-        assert evidence in template
+    for heading in (
+        "## risk and authority",
+        "## test evidence",
+        "## security and operational evidence",
+        "## documentation and rollback",
+        "## independent review",
+    ):
+        assert heading in template
+
+    current_contract = template.split("## current contract and cutover", 1)[1].split(
+        "\n## ", 1
+    )[0]
+    for evidence in (
+        "direct cutover",
+        "no legacy reader",
+        "compatibility bridge",
+        "migration preflight",
+        "rollback or forward-repair",
+        "trigger or query-plan evidence",
+    ):
+        assert evidence in current_contract
+    assert "historical formats remain readable" not in current_contract
 
 
 def test_live_workspace_guides_use_only_the_root_install_and_build_graph() -> None:

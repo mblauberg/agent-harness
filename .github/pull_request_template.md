@@ -19,11 +19,12 @@ Describe the outcome and link the approved spec, issue or decision record.
 
 List exact commands, results and any unavailable or intentionally skipped gate.
 
-## Migration, schema and compatibility evidence
+## Current contract and cutover
 
-- [ ] Migration preflight, rollback/restore path and query-plan evidence attached
-- [ ] Generated schema drift and compatibility pins checked
-- [ ] Historical formats remain readable or have an approved migration
+- [ ] Current schema, protocol and configuration owners checked
+- [ ] Any pre-release direct cutover, regeneration or reset path is recorded
+- [ ] No legacy reader, compatibility bridge or historical-format promise was added
+- [ ] Persistence or schema changes include migration preflight, rollback or forward-repair, and trigger or query-plan evidence as applicable
 - [ ] Not applicable
 
 ## Security and operational evidence
