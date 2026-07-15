@@ -1,12 +1,17 @@
 # Project Fabric Console terminal runtime
 
-Status: Selected terminal-runtime decision; integrated implementation requires contract repair
+Status: Historical terminal-runtime decision; implementation evidence cut off
+on 13 July 2026
 
 Decision date: 11 July 2026
 
 Implementation evidence cut-off: 13 July 2026
 
 Evidence snapshot: [July 2026 continuity and routing evidence](evidence-snapshots/agent-continuity-routing-2026-07.md)
+
+Current final verification and human programme acceptance are owned by the
+[W012/W013 reducer, issue #23](https://github.com/mblauberg/provenant/issues/23).
+This research note does not own current implementation status.
 
 Normative owners: [Console operator views](../specs/console/operator-interaction.md)
 and [acceptance and usability](../specs/console/acceptance.md)
