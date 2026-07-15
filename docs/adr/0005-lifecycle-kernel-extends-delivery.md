@@ -1,6 +1,6 @@
 # ADR 0005 — Lifecycle kernel extends the delivery kernel
 
-**Status:** Accepted 2026-07-13 (human ratification of chair + codex-pair calls)
+**Status:** Accepted 2026-07-13; amended 2026-07-15
 
 ## Context
 
@@ -16,10 +16,14 @@ gates, authority containment).
 Extend the existing delivery kernel rather than build a second policy model.
 Make only objectively decidable minima executable: risk floor, authority
 containment, profile admission, required evidence/gates, review independence,
-repair ceiling, effect/release gates, retention class. Project kernel
-decisions into Fabric. Judgement-bearing choices (whether ambiguity warrants
-scoping, context staleness, human acceptance) stay with the chair and skills.
-Skills reference the kernel instead of restating gates.
+repair ceiling and effect/release gates. Project kernel decisions into Fabric.
+Judgement-bearing choices (whether ambiguity warrants scoping, context
+staleness, human acceptance) stay with the chair and skills. Skills reference
+the kernel instead of restating gates.
+
+Retention remains governed by project and risk policy plus bounded
+run-artifact rules. It is not a required field in the executable delivery
+kernel.
 
 ## Consequences
 
