@@ -1,6 +1,7 @@
 export * from "./baseline-contracts.js";
 export * from "./authentication.js";
 export * from "./artifacts.js";
+export * from "./authority.js";
 export * from "./client.js";
 export * from "./contract-fixtures.js";
 export * from "./features.js";

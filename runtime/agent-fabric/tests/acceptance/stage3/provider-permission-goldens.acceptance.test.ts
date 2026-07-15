@@ -27,6 +27,7 @@ vi.mock("../../../src/project-session/launch-custody.ts", () => ({
 }));
 
 import { AUTHORITY_ACTION_VOCABULARY, openFabric } from "../../../src/index.ts";
+import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
 import { createCurrentSessionRun } from "../../support/current-session-testkit.ts";
 
 const captureAdapter = fileURLToPath(
@@ -35,6 +36,7 @@ const captureAdapter = fileURLToPath(
 
 function authority() {
   return {
+    ...TEST_AUTHORITY_V2_FIELDS,
     workspaceRoots: ["."],
     sourcePaths: ["src"],
     artifactPaths: [".agent-run"],

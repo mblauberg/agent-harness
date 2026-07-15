@@ -18,7 +18,6 @@ export const repositoryRoot = fileURLToPath(new URL("../../../../", import.meta.
 export const requiredSchemaFiles = [
   "config.schema.json",
   "adapter-compatibility.schema.json",
-  "authority.schema.json",
   "budget.schema.json",
   "adapter.schema.json",
   "command.schema.json",
@@ -43,6 +42,10 @@ export function schemaPath(file: string): string {
   return fileURLToPath(new URL(`../../schemas/${file}`, import.meta.url));
 }
 
+export function protocolSchemaPath(file: string): string {
+  return fileURLToPath(new URL(`../../../agent-fabric-protocol/schemas/${file}`, import.meta.url));
+}
+
 export function repositoryConfigPath(file: string): string {
   return fileURLToPath(new URL(`../../../../config/${file}`, import.meta.url));
 }
@@ -51,12 +54,18 @@ export async function readSchema(file: string): Promise<JsonObject> {
   return readObject(schemaPath(file), (text) => JSON.parse(text));
 }
 
+export async function readProtocolSchema(file: string): Promise<JsonObject> {
+  return readObject(protocolSchemaPath(file), (text) => JSON.parse(text));
+}
+
 export async function readYamlObject(file: string): Promise<JsonObject> {
   return readObject(repositoryConfigPath(file), (text) => parse(text));
 }
 
 export function validateWithSchema(schema: JsonObject, value: unknown): SchemaValidation {
   const ajv = new Ajv2020({ allErrors: true, strict: true, validateFormats: false });
+  ajv.addKeyword("x-minUtf8Bytes");
+  ajv.addKeyword("x-maxUtf8Bytes");
   const validate = ajv.compile(schema);
   const valid = validate(value);
   return {

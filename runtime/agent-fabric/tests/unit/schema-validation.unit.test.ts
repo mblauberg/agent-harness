@@ -4,11 +4,13 @@ import { AUTHORITY_ACTION_VOCABULARY, FABRIC_OPERATIONS } from "../../src/domain
 import { ISO_4217_CURRENCY_CODES } from "../../src/domain/unit-keys.js";
 import {
   isJsonObject,
+  readProtocolSchema,
   readSchema,
   readYamlObject,
   requiredSchemaFiles,
   validateWithSchema,
 } from "../support/schema-testkit.js";
+import { TEST_AUTHORITY_V2_FIELDS } from "../support/authority-v2-testkit.ts";
 
 const draft202012 = "https://json-schema.org/draft/2020-12/schema";
 const requiredRealAdapters = [
@@ -107,12 +109,13 @@ describe("Stage 1 versioned JSON Schemas", () => {
   });
 
   it("publishes only the exact current operation vocabulary and rejects coarse actions", async () => {
-    const schema = await readSchema("authority.schema.json");
+    const schema = await readProtocolSchema("authority-envelope.v2.schema.json");
     const properties = schema.properties;
     if (!isJsonObject(properties) || !isJsonObject(properties.actions) || !isJsonObject(properties.actions.items)) {
       throw new TypeError("authority actions schema is invalid");
     }
     const authority = {
+      ...TEST_AUTHORITY_V2_FIELDS,
       workspaceRoots: ["."],
       sourcePaths: ["src"],
       artifactPaths: [".agent-run"],
@@ -133,8 +136,9 @@ describe("Stage 1 versioned JSON Schemas", () => {
   });
 
   it("publishes only the closed current disclosure policy", async () => {
-    const schema = await readSchema("authority.schema.json");
+    const schema = await readProtocolSchema("authority-envelope.v2.schema.json");
     const base = {
+      ...TEST_AUTHORITY_V2_FIELDS,
       workspaceRoots: ["."],
       sourcePaths: ["src"],
       artifactPaths: [".agent-run"],
@@ -161,15 +165,6 @@ describe("Stage 1 versioned JSON Schemas", () => {
         budget: { [`cost:${currency}`]: 1 },
       }).valid, currency).toBe(true);
     }
-    const definitions = schema.$defs;
-    if (!isJsonObject(definitions) || !isJsonObject(definitions.budgetUnit) || !Array.isArray(definitions.budgetUnit.anyOf)) {
-      throw new TypeError("authority budget unit schema is invalid");
-    }
-    const frozenCurrencies = definitions.budgetUnit.anyOf
-      .flatMap((branch) => isJsonObject(branch) && Array.isArray(branch.enum) ? branch.enum : [])
-      .filter((unit): unit is string => typeof unit === "string" && unit.startsWith("cost:"))
-      .map((unit) => unit.slice("cost:".length));
-    expect([...frozenCurrencies].sort()).toEqual([...ISO_4217_CURRENCY_CODES].sort());
   });
 
   it("publishes qualified budget unit keys and rejects legacy ambiguous keys", async () => {

@@ -35,16 +35,27 @@
     }
   },
   "authority": {
+    "schema_version": 2,
     "approved_by": "",
     "evidence": "",
+    "evidence_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "workspace_roots": ["."],
     "expires_at": "2026-07-11T00:00:00Z",
     "allowed_source_paths": ["."],
     "allowed_artifact_paths": [".agent-run/DEL-001"],
+    "allowed_fabric_operations": [],
+    "denied_paths": [],
+    "denied_fabric_operations": [],
     "prohibited_actions": ["external-publish", "deployment", "irreversible-action"],
     "disclosure": "local-only",
     "secrets_access": "none",
+    "secret_refs": [],
     "deployment": false,
+    "deployment_targets": [],
     "irreversible_actions": false,
+    "irreversible_action_ids": [],
+    "network": {"tool_egress": "none", "allowed_hosts": []},
+    "budget": {},
     "delegations": []
   },
   "artifacts": [{

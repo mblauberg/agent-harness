@@ -1,21 +1,11 @@
-export type DisclosureTarget = "local" | "approved-provider" | "external";
+import type {
+  AuthorityEnvelopeV2,
+  DisclosurePolicy,
+  DisclosureTarget,
+} from "@local/agent-fabric-protocol";
 
-export type DisclosurePolicy =
-  | { level: "allowed" }
-  | { level: "scoped"; scopes: readonly DisclosureTarget[] }
-  | { level: "forbidden" };
-
-export type AuthorityInput = {
-  workspaceRoots: string[];
-  sourcePaths: string[];
-  artifactPaths: string[];
-  actions: string[];
-  deniedPaths?: string[];
-  deniedActions?: string[];
-  disclosure: DisclosurePolicy;
-  expiresAt: string;
-  budget: Record<string, number>;
-};
+export type AuthorityInput = AuthorityEnvelopeV2;
+export type { DisclosurePolicy, DisclosureTarget };
 
 export type Clock = () => number | Date;
 

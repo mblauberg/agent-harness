@@ -946,21 +946,54 @@
         ],
         "properties": {
           "parentAuthorityId": {
-            "$ref": "#/$defs/generated_5"
+            "$ref": "#/$defs/generated_7"
           },
           "authority": {
             "type": "object",
             "additionalProperties": false,
             "required": [
+              "schemaVersion",
+              "approval",
               "workspaceRoots",
               "sourcePaths",
               "artifactPaths",
               "actions",
+              "deniedPaths",
+              "deniedActions",
+              "prohibitedActions",
               "disclosure",
+              "secrets",
+              "deployment",
+              "irreversibleActions",
+              "network",
               "expiresAt",
               "budget"
             ],
             "properties": {
+              "schemaVersion": {
+                "const": 2
+              },
+              "approval": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "approvedBy",
+                  "evidenceId",
+                  "evidenceDigest"
+                ],
+                "properties": {
+                  "approvedBy": {
+                    "$ref": "#/$defs/generated_8"
+                  },
+                  "evidenceId": {
+                    "$ref": "#/$defs/generated_8"
+                  },
+                  "evidenceDigest": {
+                    "type": "string",
+                    "pattern": "^sha256:[a-f0-9]{64}$"
+                  }
+                }
+              },
               "workspaceRoots": {
                 "type": "array",
                 "items": {
@@ -979,6 +1012,21 @@
               "actions": {
                 "$ref": "#/$defs/generated_3"
               },
+              "deniedPaths": {
+                "$ref": "#/$defs/generated_2"
+              },
+              "deniedActions": {
+                "$ref": "#/$defs/generated_3"
+              },
+              "prohibitedActions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/generated_8"
+                },
+                "minItems": 0,
+                "maxItems": 256,
+                "uniqueItems": true
+              },
               "disclosure": {
                 "oneOf": [
                   {
@@ -990,18 +1038,6 @@
                     "properties": {
                       "level": {
                         "const": "allowed"
-                      }
-                    }
-                  },
-                  {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "level"
-                    ],
-                    "properties": {
-                      "level": {
-                        "const": "forbidden"
                       }
                     }
                   },
@@ -1027,7 +1063,140 @@
                           ]
                         },
                         "minItems": 1,
-                        "maxItems": 3,
+                        "maxItems": 2,
+                        "uniqueItems": true
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "level"
+                    ],
+                    "properties": {
+                      "level": {
+                        "const": "forbidden"
+                      }
+                    }
+                  }
+                ]
+              },
+              "secrets": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "access"
+                    ],
+                    "properties": {
+                      "access": {
+                        "const": "none"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "access",
+                      "references"
+                    ],
+                    "properties": {
+                      "access": {
+                        "const": "use-without-disclosure"
+                      },
+                      "references": {
+                        "$ref": "#/$defs/generated_4"
+                      }
+                    }
+                  }
+                ]
+              },
+              "deployment": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/generated_5"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "allowed",
+                      "targets"
+                    ],
+                    "properties": {
+                      "allowed": {
+                        "const": true
+                      },
+                      "targets": {
+                        "$ref": "#/$defs/generated_4"
+                      }
+                    }
+                  }
+                ]
+              },
+              "irreversibleActions": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/generated_5"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "allowed",
+                      "actionIds"
+                    ],
+                    "properties": {
+                      "allowed": {
+                        "const": true
+                      },
+                      "actionIds": {
+                        "$ref": "#/$defs/generated_4"
+                      }
+                    }
+                  }
+                ]
+              },
+              "network": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "toolEgress"
+                    ],
+                    "properties": {
+                      "toolEgress": {
+                        "const": "none"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "toolEgress",
+                      "allowedHosts"
+                    ],
+                    "properties": {
+                      "toolEgress": {
+                        "const": "allowlist"
+                      },
+                      "allowedHosts": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 253,
+                          "x-minUtf8Bytes": 1,
+                          "x-maxUtf8Bytes": 253,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$"
+                        },
+                        "minItems": 1,
+                        "maxItems": 256,
                         "uniqueItems": true
                       }
                     }
@@ -1068,19 +1237,14 @@
                 },
                 "additionalProperties": {
                   "type": "integer",
-                  "minimum": 0
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 }
-              },
-              "deniedPaths": {
-                "$ref": "#/$defs/generated_2"
-              },
-              "deniedActions": {
-                "$ref": "#/$defs/generated_3"
               }
             }
           },
           "commandId": {
-            "$ref": "#/$defs/generated_5"
+            "$ref": "#/$defs/generated_7"
           }
         },
         "$defs": {
@@ -1090,7 +1254,7 @@
                 "const": "."
               },
               {
-                "$ref": "#/$defs/generated_6"
+                "$ref": "#/$defs/generated_9"
               }
             ]
           },
@@ -1106,103 +1270,123 @@
           "generated_3": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_4"
+              "$ref": "#/$defs/generated_6"
             },
             "minItems": 0,
             "maxItems": 256,
             "uniqueItems": true
           },
           "generated_4": {
-            "type": "string",
-            "enum": [
-              "fabric.v1.agent.attach",
-              "fabric.v1.agent.list",
-              "fabric.v1.agent.register",
-              "fabric.v1.agent.spawn",
-              "fabric.v1.artifact.publish",
-              "fabric.v1.authority.delegate",
-              "fabric.v1.barrier.close",
-              "fabric.v1.budget.read",
-              "fabric.v1.budget.release",
-              "fabric.v1.budget.reserve",
-              "fabric.v1.budget.usage.reconcile",
-              "fabric.v1.budget.usage.record",
-              "fabric.v1.capability.revoke",
-              "fabric.v1.capability.rotate",
-              "fabric.v1.delivery.abandon",
-              "fabric.v1.delivery.acknowledge",
-              "fabric.v1.discussion-group.create",
-              "fabric.v1.events.observe",
-              "fabric.v1.evidence.publish",
-              "fabric.v1.intake.revise",
-              "fabric.v1.launch.attest",
-              "fabric.v1.lease.revocation-proof.record",
-              "fabric.v1.lifecycle.read",
-              "fabric.v1.lifecycle.request",
-              "fabric.v1.mailbox.read",
-              "fabric.v1.message.receive",
-              "fabric.v1.message.send",
-              "fabric.v1.operator-intervention.record",
-              "fabric.v1.project-session.membership.bind",
-              "fabric.v1.provider-action.dispatch",
-              "fabric.v1.provider-action.read",
-              "fabric.v1.provider-action.reconcile",
-              "fabric.v1.provider-context-pressure.read",
-              "fabric.v1.provider-route-integrity-recovery.read",
-              "fabric.v1.provider-state.report",
-              "fabric.v1.receipt.export",
-              "fabric.v1.receipt.list",
-              "fabric.v1.resource.reconcile",
-              "fabric.v1.resource.release",
-              "fabric.v1.resource.reserve",
-              "fabric.v1.result-delivery.abandon",
-              "fabric.v1.result-delivery.claim",
-              "fabric.v1.result-delivery.consume",
-              "fabric.v1.result-delivery.reassign",
-              "fabric.v1.result-delivery.retry",
-              "fabric.v1.review-completion.read",
-              "fabric.v1.review-evidence-annotation.current.read",
-              "fabric.v1.review-evidence.annotate",
-              "fabric.v1.review-evidence.list",
-              "fabric.v1.review-evidence.read",
-              "fabric.v1.review-finding-page.read",
-              "fabric.v1.review-target-preparation.read",
-              "fabric.v1.review-target.prepare",
-              "fabric.v1.review-target.rebind",
-              "fabric.v1.run-status.read",
-              "fabric.v1.scoped-gate.check",
-              "fabric.v1.scoped-gate.create",
-              "fabric.v1.subtree-barrier.close",
-              "fabric.v1.subtree.adopt",
-              "fabric.v1.subtree.freeze",
-              "fabric.v1.task.claim",
-              "fabric.v1.task.complete-with-reply",
-              "fabric.v1.task.create",
-              "fabric.v1.task.handoff.acknowledge",
-              "fabric.v1.task.list",
-              "fabric.v1.task.objective-check.record",
-              "fabric.v1.task.owner-recovery-proof.record",
-              "fabric.v1.task.owner.recover",
-              "fabric.v1.task.read",
-              "fabric.v1.task.readiness.refresh",
-              "fabric.v1.task.request",
-              "fabric.v1.task.update",
-              "fabric.v1.team.create",
-              "fabric.v1.team.read",
-              "fabric.v1.topology-wave.append",
-              "fabric.v1.topology-wave.current.read",
-              "fabric.v1.topology-wave.list",
-              "fabric.v1.visibility-failure.record",
-              "fabric.v1.workstream.create",
-              "fabric.v1.workstream.settle",
-              "fabric.v1.write-lease.acquire",
-              "fabric.v1.write-lease.read",
-              "fabric.v1.write-lease.recover",
-              "fabric.v1.write-lease.release",
-              "fabric.v1.write-lease.renew"
-            ]
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_8"
+            },
+            "minItems": 1,
+            "maxItems": 256,
+            "uniqueItems": true
           },
           "generated_5": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "allowed"
+            ],
+            "properties": {
+              "allowed": {
+                "const": false
+              }
+            }
+          },
+          "generated_6": {
+            "type": "string",
+            "enum": [
+              "fabric.v1.authority.delegate",
+              "fabric.v1.agent.register",
+              "fabric.v1.agent.spawn",
+              "fabric.v1.agent.attach",
+              "fabric.v1.message.send",
+              "fabric.v1.discussion-group.create",
+              "fabric.v1.message.receive",
+              "fabric.v1.delivery.acknowledge",
+              "fabric.v1.delivery.abandon",
+              "fabric.v1.mailbox.read",
+              "fabric.v1.task.create",
+              "fabric.v1.task.claim",
+              "fabric.v1.task.readiness.refresh",
+              "fabric.v1.task.objective-check.record",
+              "fabric.v1.task.handoff.acknowledge",
+              "fabric.v1.task.read",
+              "fabric.v1.task.update",
+              "fabric.v1.task.owner-recovery-proof.record",
+              "fabric.v1.task.owner.recover",
+              "fabric.v1.lease.revocation-proof.record",
+              "fabric.v1.capability.revoke",
+              "fabric.v1.capability.rotate",
+              "fabric.v1.write-lease.acquire",
+              "fabric.v1.write-lease.recover",
+              "fabric.v1.write-lease.renew",
+              "fabric.v1.write-lease.read",
+              "fabric.v1.write-lease.release",
+              "fabric.v1.lifecycle.request",
+              "fabric.v1.lifecycle.read",
+              "fabric.v1.provider-state.report",
+              "fabric.v1.provider-action.dispatch",
+              "fabric.v1.provider-action.reconcile",
+              "fabric.v1.provider-action.read",
+              "fabric.v1.operator-intervention.record",
+              "fabric.v1.visibility-failure.record",
+              "fabric.v1.team.create",
+              "fabric.v1.team.read",
+              "fabric.v1.subtree.freeze",
+              "fabric.v1.subtree.adopt",
+              "fabric.v1.subtree-barrier.close",
+              "fabric.v1.budget.reserve",
+              "fabric.v1.budget.usage.record",
+              "fabric.v1.budget.usage.reconcile",
+              "fabric.v1.budget.release",
+              "fabric.v1.budget.read",
+              "fabric.v1.artifact.publish",
+              "fabric.v1.barrier.close",
+              "fabric.v1.run-status.read",
+              "fabric.v1.events.observe",
+              "fabric.v1.task.list",
+              "fabric.v1.agent.list",
+              "fabric.v1.receipt.list",
+              "fabric.v1.receipt.export",
+              "fabric.v1.project-session.membership.bind",
+              "fabric.v1.intake.revise",
+              "fabric.v1.scoped-gate.create",
+              "fabric.v1.scoped-gate.check",
+              "fabric.v1.resource.reserve",
+              "fabric.v1.resource.release",
+              "fabric.v1.resource.reconcile",
+              "fabric.v1.task.request",
+              "fabric.v1.task.complete-with-reply",
+              "fabric.v1.result-delivery.claim",
+              "fabric.v1.result-delivery.consume",
+              "fabric.v1.result-delivery.retry",
+              "fabric.v1.result-delivery.reassign",
+              "fabric.v1.result-delivery.abandon",
+              "fabric.v1.workstream.create",
+              "fabric.v1.workstream.settle",
+              "fabric.v1.evidence.publish",
+              "fabric.v1.review-target.prepare",
+              "fabric.v1.review-target-preparation.read",
+              "fabric.v1.review-target.rebind",
+              "fabric.v1.review-evidence.read",
+              "fabric.v1.review-evidence.list",
+              "fabric.v1.review-evidence.annotate",
+              "fabric.v1.review-evidence-annotation.current.read",
+              "fabric.v1.review-finding-page.read",
+              "fabric.v1.review-completion.read",
+              "fabric.v1.provider-route-integrity-recovery.read",
+              "fabric.v1.provider-context-pressure.read",
+              "fabric.v1.topology-wave.append",
+              "fabric.v1.topology-wave.current.read",
+              "fabric.v1.topology-wave.list"
+            ]
+          },
+          "generated_7": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
@@ -1210,7 +1394,15 @@
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           },
-          "generated_6": {
+          "generated_8": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 256,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "generated_9": {
             "type": "string",
             "minLength": 1,
             "maxLength": 4096,
@@ -1235,7 +1427,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:dd3c026d6ac63710614b4f6f14742e6d9c4eb8a1766099bee043230a80f3f5e0",
+      "inputCodecDigest": "sha256:a23d76af0207d77e4cc0db517383045c4e4711dfe06809986679452ac703c00a",
       "outputCodecDigest": "sha256:ec3940ecbfa767c13e69c430da0e31ef5ba2f3ad21d731b5d0e1af01e2a7e063"
     },
     {
@@ -27413,10 +27605,10 @@
         ],
         "properties": {
           "teamId": {
-            "$ref": "#/$defs/generated_16"
+            "$ref": "#/$defs/generated_31"
           },
           "leader": {
-            "$ref": "#/$defs/generated_8"
+            "$ref": "#/$defs/generated_17"
           },
           "rootTask": {
             "type": "object",
@@ -27428,7 +27620,7 @@
             ],
             "properties": {
               "taskId": {
-                "$ref": "#/$defs/generated_16"
+                "$ref": "#/$defs/generated_31"
               },
               "objective": {
                 "type": "string",
@@ -27449,7 +27641,7 @@
           "initialMembers": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_8"
+              "$ref": "#/$defs/generated_17"
             },
             "minItems": 0,
             "maxItems": 5
@@ -27465,12 +27657,12 @@
               ],
               "properties": {
                 "groupId": {
-                  "$ref": "#/$defs/generated_16"
+                  "$ref": "#/$defs/generated_31"
                 },
                 "memberAgentIds": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/generated_16"
+                    "$ref": "#/$defs/generated_31"
                   },
                   "minItems": 2,
                   "maxItems": 64,
@@ -27486,7 +27678,7 @@
             "minProperties": 1,
             "maxProperties": 128,
             "propertyNames": {
-              "$ref": "#/$defs/generated_3"
+              "$ref": "#/$defs/generated_7"
             },
             "additionalProperties": {
               "type": "integer",
@@ -27494,10 +27686,10 @@
             }
           },
           "commandId": {
-            "$ref": "#/$defs/generated_16"
+            "$ref": "#/$defs/generated_31"
           },
           "parentTeamId": {
-            "$ref": "#/$defs/generated_16"
+            "$ref": "#/$defs/generated_31"
           }
         },
         "$defs": {
@@ -27507,30 +27699,70 @@
                 "const": "."
               },
               {
-                "$ref": "#/$defs/generated_17"
+                "$ref": "#/$defs/generated_34"
               }
             ]
           },
           "generated_2": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_10"
+                "$ref": "#/$defs/generated_16"
               },
               {
-                "$ref": "#/$defs/generated_11"
-              },
-              {
-                "$ref": "#/$defs/generated_9"
+                "$ref": "#/$defs/generated_15"
               }
             ]
           },
           "generated_3": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_15"
+                "$ref": "#/$defs/generated_20"
               },
               {
                 "$ref": "#/$defs/generated_18"
+              }
+            ]
+          },
+          "generated_4": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_20"
+              },
+              {
+                "$ref": "#/$defs/generated_19"
+              }
+            ]
+          },
+          "generated_5": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_23"
+              },
+              {
+                "$ref": "#/$defs/generated_22"
+              },
+              {
+                "$ref": "#/$defs/generated_24"
+              }
+            ]
+          },
+          "generated_6": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_27"
+              },
+              {
+                "$ref": "#/$defs/generated_26"
+              }
+            ]
+          },
+          "generated_7": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_30"
+              },
+              {
+                "$ref": "#/$defs/generated_35"
               },
               {
                 "type": "string",
@@ -27538,7 +27770,7 @@
               }
             ]
           },
-          "generated_4": {
+          "generated_8": {
             "type": "array",
             "items": {
               "$ref": "#/$defs/generated_1"
@@ -27547,7 +27779,7 @@
             "maxItems": 256,
             "uniqueItems": true
           },
-          "generated_5": {
+          "generated_9": {
             "type": "array",
             "items": {
               "$ref": "#/$defs/generated_1"
@@ -27556,16 +27788,16 @@
             "maxItems": 64,
             "uniqueItems": true
           },
-          "generated_6": {
+          "generated_10": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_14"
+              "$ref": "#/$defs/generated_29"
             },
             "minItems": 0,
             "maxItems": 256,
             "uniqueItems": true
           },
-          "generated_7": {
+          "generated_11": {
             "type": "array",
             "items": {
               "type": "string",
@@ -27576,10 +27808,65 @@
               ]
             },
             "minItems": 1,
-            "maxItems": 3,
+            "maxItems": 2,
             "uniqueItems": true
           },
-          "generated_8": {
+          "generated_12": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_32"
+            },
+            "minItems": 1,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "generated_13": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_33"
+            },
+            "minItems": 0,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "generated_14": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_33"
+            },
+            "minItems": 1,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "generated_15": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "access",
+              "references"
+            ],
+            "properties": {
+              "access": {
+                "const": "use-without-disclosure"
+              },
+              "references": {
+                "$ref": "#/$defs/generated_14"
+              }
+            }
+          },
+          "generated_16": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "access"
+            ],
+            "properties": {
+              "access": {
+                "const": "none"
+              }
+            }
+          },
+          "generated_17": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -27588,14 +27875,79 @@
             ],
             "properties": {
               "agentId": {
-                "$ref": "#/$defs/generated_16"
+                "$ref": "#/$defs/generated_31"
               },
               "authority": {
-                "$ref": "#/$defs/generated_12"
+                "$ref": "#/$defs/generated_25"
               }
             }
           },
-          "generated_9": {
+          "generated_18": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "allowed",
+              "actionIds"
+            ],
+            "properties": {
+              "allowed": {
+                "const": true
+              },
+              "actionIds": {
+                "$ref": "#/$defs/generated_14"
+              }
+            }
+          },
+          "generated_19": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "allowed",
+              "targets"
+            ],
+            "properties": {
+              "allowed": {
+                "const": true
+              },
+              "targets": {
+                "$ref": "#/$defs/generated_14"
+              }
+            }
+          },
+          "generated_20": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "allowed"
+            ],
+            "properties": {
+              "allowed": {
+                "const": false
+              }
+            }
+          },
+          "generated_21": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "approvedBy",
+              "evidenceId",
+              "evidenceDigest"
+            ],
+            "properties": {
+              "approvedBy": {
+                "$ref": "#/$defs/generated_33"
+              },
+              "evidenceId": {
+                "$ref": "#/$defs/generated_33"
+              },
+              "evidenceDigest": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              }
+            }
+          },
+          "generated_22": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -27607,11 +27959,11 @@
                 "const": "scoped"
               },
               "scopes": {
-                "$ref": "#/$defs/generated_7"
+                "$ref": "#/$defs/generated_11"
               }
             }
           },
-          "generated_10": {
+          "generated_23": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -27623,7 +27975,7 @@
               }
             }
           },
-          "generated_11": {
+          "generated_24": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -27635,152 +27987,210 @@
               }
             }
           },
-          "generated_12": {
+          "generated_25": {
             "type": "object",
             "additionalProperties": false,
             "required": [
+              "schemaVersion",
+              "approval",
               "workspaceRoots",
               "sourcePaths",
               "artifactPaths",
               "actions",
+              "deniedPaths",
+              "deniedActions",
+              "prohibitedActions",
               "disclosure",
+              "secrets",
+              "deployment",
+              "irreversibleActions",
+              "network",
               "expiresAt",
               "budget"
             ],
             "properties": {
+              "schemaVersion": {
+                "const": 2
+              },
+              "approval": {
+                "$ref": "#/$defs/generated_21"
+              },
               "workspaceRoots": {
-                "$ref": "#/$defs/generated_5"
+                "$ref": "#/$defs/generated_9"
               },
               "sourcePaths": {
-                "$ref": "#/$defs/generated_4"
+                "$ref": "#/$defs/generated_8"
               },
               "artifactPaths": {
-                "$ref": "#/$defs/generated_4"
+                "$ref": "#/$defs/generated_8"
               },
               "actions": {
-                "$ref": "#/$defs/generated_6"
+                "$ref": "#/$defs/generated_10"
+              },
+              "deniedPaths": {
+                "$ref": "#/$defs/generated_8"
+              },
+              "deniedActions": {
+                "$ref": "#/$defs/generated_10"
+              },
+              "prohibitedActions": {
+                "$ref": "#/$defs/generated_13"
               },
               "disclosure": {
+                "$ref": "#/$defs/generated_5"
+              },
+              "secrets": {
                 "$ref": "#/$defs/generated_2"
+              },
+              "deployment": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "irreversibleActions": {
+                "$ref": "#/$defs/generated_3"
+              },
+              "network": {
+                "$ref": "#/$defs/generated_6"
               },
               "expiresAt": {
                 "type": "string",
                 "format": "date-time"
               },
               "budget": {
-                "$ref": "#/$defs/generated_13"
-              },
-              "deniedPaths": {
-                "$ref": "#/$defs/generated_4"
-              },
-              "deniedActions": {
-                "$ref": "#/$defs/generated_6"
+                "$ref": "#/$defs/generated_28"
               }
             }
           },
-          "generated_13": {
+          "generated_26": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "toolEgress",
+              "allowedHosts"
+            ],
+            "properties": {
+              "toolEgress": {
+                "const": "allowlist"
+              },
+              "allowedHosts": {
+                "$ref": "#/$defs/generated_12"
+              }
+            }
+          },
+          "generated_27": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "toolEgress"
+            ],
+            "properties": {
+              "toolEgress": {
+                "const": "none"
+              }
+            }
+          },
+          "generated_28": {
             "type": "object",
             "minProperties": 0,
             "maxProperties": 128,
             "propertyNames": {
-              "$ref": "#/$defs/generated_3"
+              "$ref": "#/$defs/generated_7"
             },
             "additionalProperties": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
-          "generated_14": {
+          "generated_29": {
             "type": "string",
             "enum": [
-              "fabric.v1.agent.attach",
-              "fabric.v1.agent.list",
+              "fabric.v1.authority.delegate",
               "fabric.v1.agent.register",
               "fabric.v1.agent.spawn",
-              "fabric.v1.artifact.publish",
-              "fabric.v1.authority.delegate",
-              "fabric.v1.barrier.close",
-              "fabric.v1.budget.read",
-              "fabric.v1.budget.release",
-              "fabric.v1.budget.reserve",
-              "fabric.v1.budget.usage.reconcile",
-              "fabric.v1.budget.usage.record",
-              "fabric.v1.capability.revoke",
-              "fabric.v1.capability.rotate",
-              "fabric.v1.delivery.abandon",
-              "fabric.v1.delivery.acknowledge",
-              "fabric.v1.discussion-group.create",
-              "fabric.v1.events.observe",
-              "fabric.v1.evidence.publish",
-              "fabric.v1.intake.revise",
-              "fabric.v1.launch.attest",
-              "fabric.v1.lease.revocation-proof.record",
-              "fabric.v1.lifecycle.read",
-              "fabric.v1.lifecycle.request",
-              "fabric.v1.mailbox.read",
-              "fabric.v1.message.receive",
+              "fabric.v1.agent.attach",
               "fabric.v1.message.send",
-              "fabric.v1.operator-intervention.record",
-              "fabric.v1.project-session.membership.bind",
-              "fabric.v1.provider-action.dispatch",
-              "fabric.v1.provider-action.read",
-              "fabric.v1.provider-action.reconcile",
-              "fabric.v1.provider-context-pressure.read",
-              "fabric.v1.provider-route-integrity-recovery.read",
-              "fabric.v1.provider-state.report",
-              "fabric.v1.receipt.export",
-              "fabric.v1.receipt.list",
-              "fabric.v1.resource.reconcile",
-              "fabric.v1.resource.release",
-              "fabric.v1.resource.reserve",
-              "fabric.v1.result-delivery.abandon",
-              "fabric.v1.result-delivery.claim",
-              "fabric.v1.result-delivery.consume",
-              "fabric.v1.result-delivery.reassign",
-              "fabric.v1.result-delivery.retry",
-              "fabric.v1.review-completion.read",
-              "fabric.v1.review-evidence-annotation.current.read",
-              "fabric.v1.review-evidence.annotate",
-              "fabric.v1.review-evidence.list",
-              "fabric.v1.review-evidence.read",
-              "fabric.v1.review-finding-page.read",
-              "fabric.v1.review-target-preparation.read",
-              "fabric.v1.review-target.prepare",
-              "fabric.v1.review-target.rebind",
-              "fabric.v1.run-status.read",
-              "fabric.v1.scoped-gate.check",
-              "fabric.v1.scoped-gate.create",
-              "fabric.v1.subtree-barrier.close",
-              "fabric.v1.subtree.adopt",
-              "fabric.v1.subtree.freeze",
-              "fabric.v1.task.claim",
-              "fabric.v1.task.complete-with-reply",
+              "fabric.v1.discussion-group.create",
+              "fabric.v1.message.receive",
+              "fabric.v1.delivery.acknowledge",
+              "fabric.v1.delivery.abandon",
+              "fabric.v1.mailbox.read",
               "fabric.v1.task.create",
-              "fabric.v1.task.handoff.acknowledge",
-              "fabric.v1.task.list",
+              "fabric.v1.task.claim",
+              "fabric.v1.task.readiness.refresh",
               "fabric.v1.task.objective-check.record",
+              "fabric.v1.task.handoff.acknowledge",
+              "fabric.v1.task.read",
+              "fabric.v1.task.update",
               "fabric.v1.task.owner-recovery-proof.record",
               "fabric.v1.task.owner.recover",
-              "fabric.v1.task.read",
-              "fabric.v1.task.readiness.refresh",
-              "fabric.v1.task.request",
-              "fabric.v1.task.update",
+              "fabric.v1.lease.revocation-proof.record",
+              "fabric.v1.capability.revoke",
+              "fabric.v1.capability.rotate",
+              "fabric.v1.write-lease.acquire",
+              "fabric.v1.write-lease.recover",
+              "fabric.v1.write-lease.renew",
+              "fabric.v1.write-lease.read",
+              "fabric.v1.write-lease.release",
+              "fabric.v1.lifecycle.request",
+              "fabric.v1.lifecycle.read",
+              "fabric.v1.provider-state.report",
+              "fabric.v1.provider-action.dispatch",
+              "fabric.v1.provider-action.reconcile",
+              "fabric.v1.provider-action.read",
+              "fabric.v1.operator-intervention.record",
+              "fabric.v1.visibility-failure.record",
               "fabric.v1.team.create",
               "fabric.v1.team.read",
-              "fabric.v1.topology-wave.append",
-              "fabric.v1.topology-wave.current.read",
-              "fabric.v1.topology-wave.list",
-              "fabric.v1.visibility-failure.record",
+              "fabric.v1.subtree.freeze",
+              "fabric.v1.subtree.adopt",
+              "fabric.v1.subtree-barrier.close",
+              "fabric.v1.budget.reserve",
+              "fabric.v1.budget.usage.record",
+              "fabric.v1.budget.usage.reconcile",
+              "fabric.v1.budget.release",
+              "fabric.v1.budget.read",
+              "fabric.v1.artifact.publish",
+              "fabric.v1.barrier.close",
+              "fabric.v1.run-status.read",
+              "fabric.v1.events.observe",
+              "fabric.v1.task.list",
+              "fabric.v1.agent.list",
+              "fabric.v1.receipt.list",
+              "fabric.v1.receipt.export",
+              "fabric.v1.project-session.membership.bind",
+              "fabric.v1.intake.revise",
+              "fabric.v1.scoped-gate.create",
+              "fabric.v1.scoped-gate.check",
+              "fabric.v1.resource.reserve",
+              "fabric.v1.resource.release",
+              "fabric.v1.resource.reconcile",
+              "fabric.v1.task.request",
+              "fabric.v1.task.complete-with-reply",
+              "fabric.v1.result-delivery.claim",
+              "fabric.v1.result-delivery.consume",
+              "fabric.v1.result-delivery.retry",
+              "fabric.v1.result-delivery.reassign",
+              "fabric.v1.result-delivery.abandon",
               "fabric.v1.workstream.create",
               "fabric.v1.workstream.settle",
-              "fabric.v1.write-lease.acquire",
-              "fabric.v1.write-lease.read",
-              "fabric.v1.write-lease.recover",
-              "fabric.v1.write-lease.release",
-              "fabric.v1.write-lease.renew"
+              "fabric.v1.evidence.publish",
+              "fabric.v1.review-target.prepare",
+              "fabric.v1.review-target-preparation.read",
+              "fabric.v1.review-target.rebind",
+              "fabric.v1.review-evidence.read",
+              "fabric.v1.review-evidence.list",
+              "fabric.v1.review-evidence.annotate",
+              "fabric.v1.review-evidence-annotation.current.read",
+              "fabric.v1.review-finding-page.read",
+              "fabric.v1.review-completion.read",
+              "fabric.v1.provider-route-integrity-recovery.read",
+              "fabric.v1.provider-context-pressure.read",
+              "fabric.v1.topology-wave.append",
+              "fabric.v1.topology-wave.current.read",
+              "fabric.v1.topology-wave.list"
             ]
           },
-          "generated_15": {
+          "generated_30": {
             "type": "string",
             "enum": [
               "turns",
@@ -27792,7 +28202,7 @@
               "wall_clock_milliseconds"
             ]
           },
-          "generated_16": {
+          "generated_31": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
@@ -27800,13 +28210,29 @@
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           },
-          "generated_17": {
+          "generated_32": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 253,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$"
+          },
+          "generated_33": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 256,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "generated_34": {
             "type": "string",
             "minLength": 1,
             "maxLength": 4096,
             "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
           },
-          "generated_18": {
+          "generated_35": {
             "type": "string",
             "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
           }
@@ -28035,7 +28461,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:6fcd9adaa005cce3d1cd30612f575eb6d2613e3fd8afacc28c40556cb92913b7",
+      "inputCodecDigest": "sha256:4f03a7d9292b8057310241d5a7435a70db7fb565191735558a5bb0cb833a7996",
       "outputCodecDigest": "sha256:49d61e0c6cc64daa7f79c3bbec4c8d008953ce85acd83d765cdd121029772674"
     },
     {
@@ -30420,23 +30846,23 @@
             ],
             "properties": {
               "commandId": {
-                "$ref": "#/$defs/generated_16"
+                "$ref": "#/$defs/generated_32"
               },
               "agentId": {
-                "$ref": "#/$defs/generated_16"
+                "$ref": "#/$defs/generated_32"
               },
               "projectSessionId": {
-                "$ref": "#/$defs/generated_16"
+                "$ref": "#/$defs/generated_32"
               },
               "coordinationRunId": {
-                "$ref": "#/$defs/generated_16"
+                "$ref": "#/$defs/generated_32"
               },
               "principalGeneration": {
                 "type": "integer",
                 "minimum": 1
               },
               "chairLeaseId": {
-                "$ref": "#/$defs/generated_16"
+                "$ref": "#/$defs/generated_32"
               },
               "chairLeaseGeneration": {
                 "type": "integer",
@@ -30461,10 +30887,10 @@
             "minimum": 1
           },
           "workstreamId": {
-            "$ref": "#/$defs/generated_16"
+            "$ref": "#/$defs/generated_32"
           },
           "deliveryRunId": {
-            "$ref": "#/$defs/generated_16"
+            "$ref": "#/$defs/generated_32"
           },
           "launchPacketRef": {
             "type": "object",
@@ -30475,7 +30901,7 @@
             ],
             "properties": {
               "path": {
-                "$ref": "#/$defs/generated_17"
+                "$ref": "#/$defs/generated_35"
               },
               "digest": {
                 "type": "string",
@@ -30496,10 +30922,10 @@
             ],
             "properties": {
               "teamId": {
-                "$ref": "#/$defs/generated_16"
+                "$ref": "#/$defs/generated_32"
               },
               "leader": {
-                "$ref": "#/$defs/generated_8"
+                "$ref": "#/$defs/generated_17"
               },
               "rootTask": {
                 "type": "object",
@@ -30511,7 +30937,7 @@
                 ],
                 "properties": {
                   "taskId": {
-                    "$ref": "#/$defs/generated_16"
+                    "$ref": "#/$defs/generated_32"
                   },
                   "objective": {
                     "type": "string",
@@ -30532,7 +30958,7 @@
               "initialMembers": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/$defs/generated_8"
+                  "$ref": "#/$defs/generated_17"
                 },
                 "minItems": 0,
                 "maxItems": 5
@@ -30548,12 +30974,12 @@
                   ],
                   "properties": {
                     "groupId": {
-                      "$ref": "#/$defs/generated_16"
+                      "$ref": "#/$defs/generated_32"
                     },
                     "memberAgentIds": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/$defs/generated_16"
+                        "$ref": "#/$defs/generated_32"
                       },
                       "minItems": 2,
                       "maxItems": 64,
@@ -30565,7 +30991,7 @@
                 "maxItems": 64
               },
               "reservedBudget": {
-                "$ref": "#/$defs/generated_13"
+                "$ref": "#/$defs/generated_29"
               }
             }
           },
@@ -30580,13 +31006,13 @@
             ],
             "properties": {
               "runScopeId": {
-                "$ref": "#/$defs/generated_16"
+                "$ref": "#/$defs/generated_32"
               },
               "teamScopeId": {
-                "$ref": "#/$defs/generated_16"
+                "$ref": "#/$defs/generated_32"
               },
               "teamLimits": {
-                "$ref": "#/$defs/generated_13"
+                "$ref": "#/$defs/generated_29"
               },
               "agentScopes": {
                 "type": "array",
@@ -30600,13 +31026,13 @@
                   ],
                   "properties": {
                     "agentId": {
-                      "$ref": "#/$defs/generated_16"
+                      "$ref": "#/$defs/generated_32"
                     },
                     "scopeId": {
-                      "$ref": "#/$defs/generated_16"
+                      "$ref": "#/$defs/generated_32"
                     },
                     "limits": {
-                      "$ref": "#/$defs/generated_13"
+                      "$ref": "#/$defs/generated_29"
                     }
                   }
                 },
@@ -30623,30 +31049,70 @@
                 "const": "."
               },
               {
-                "$ref": "#/$defs/generated_17"
+                "$ref": "#/$defs/generated_35"
               }
             ]
           },
           "generated_2": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_10"
+                "$ref": "#/$defs/generated_16"
               },
               {
-                "$ref": "#/$defs/generated_11"
-              },
-              {
-                "$ref": "#/$defs/generated_9"
+                "$ref": "#/$defs/generated_15"
               }
             ]
           },
           "generated_3": {
             "oneOf": [
               {
-                "$ref": "#/$defs/generated_15"
+                "$ref": "#/$defs/generated_20"
               },
               {
                 "$ref": "#/$defs/generated_18"
+              }
+            ]
+          },
+          "generated_4": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_20"
+              },
+              {
+                "$ref": "#/$defs/generated_19"
+              }
+            ]
+          },
+          "generated_5": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_23"
+              },
+              {
+                "$ref": "#/$defs/generated_22"
+              },
+              {
+                "$ref": "#/$defs/generated_24"
+              }
+            ]
+          },
+          "generated_6": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_27"
+              },
+              {
+                "$ref": "#/$defs/generated_26"
+              }
+            ]
+          },
+          "generated_7": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/generated_31"
+              },
+              {
+                "$ref": "#/$defs/generated_36"
               },
               {
                 "type": "string",
@@ -30654,7 +31120,7 @@
               }
             ]
           },
-          "generated_4": {
+          "generated_8": {
             "type": "array",
             "items": {
               "$ref": "#/$defs/generated_1"
@@ -30663,7 +31129,7 @@
             "maxItems": 256,
             "uniqueItems": true
           },
-          "generated_5": {
+          "generated_9": {
             "type": "array",
             "items": {
               "$ref": "#/$defs/generated_1"
@@ -30672,16 +31138,16 @@
             "maxItems": 64,
             "uniqueItems": true
           },
-          "generated_6": {
+          "generated_10": {
             "type": "array",
             "items": {
-              "$ref": "#/$defs/generated_14"
+              "$ref": "#/$defs/generated_30"
             },
             "minItems": 0,
             "maxItems": 256,
             "uniqueItems": true
           },
-          "generated_7": {
+          "generated_11": {
             "type": "array",
             "items": {
               "type": "string",
@@ -30692,10 +31158,65 @@
               ]
             },
             "minItems": 1,
-            "maxItems": 3,
+            "maxItems": 2,
             "uniqueItems": true
           },
-          "generated_8": {
+          "generated_12": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_33"
+            },
+            "minItems": 1,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "generated_13": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_34"
+            },
+            "minItems": 0,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "generated_14": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/generated_34"
+            },
+            "minItems": 1,
+            "maxItems": 256,
+            "uniqueItems": true
+          },
+          "generated_15": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "access",
+              "references"
+            ],
+            "properties": {
+              "access": {
+                "const": "use-without-disclosure"
+              },
+              "references": {
+                "$ref": "#/$defs/generated_14"
+              }
+            }
+          },
+          "generated_16": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "access"
+            ],
+            "properties": {
+              "access": {
+                "const": "none"
+              }
+            }
+          },
+          "generated_17": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -30704,14 +31225,79 @@
             ],
             "properties": {
               "agentId": {
-                "$ref": "#/$defs/generated_16"
+                "$ref": "#/$defs/generated_32"
               },
               "authority": {
-                "$ref": "#/$defs/generated_12"
+                "$ref": "#/$defs/generated_25"
               }
             }
           },
-          "generated_9": {
+          "generated_18": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "allowed",
+              "actionIds"
+            ],
+            "properties": {
+              "allowed": {
+                "const": true
+              },
+              "actionIds": {
+                "$ref": "#/$defs/generated_14"
+              }
+            }
+          },
+          "generated_19": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "allowed",
+              "targets"
+            ],
+            "properties": {
+              "allowed": {
+                "const": true
+              },
+              "targets": {
+                "$ref": "#/$defs/generated_14"
+              }
+            }
+          },
+          "generated_20": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "allowed"
+            ],
+            "properties": {
+              "allowed": {
+                "const": false
+              }
+            }
+          },
+          "generated_21": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "approvedBy",
+              "evidenceId",
+              "evidenceDigest"
+            ],
+            "properties": {
+              "approvedBy": {
+                "$ref": "#/$defs/generated_34"
+              },
+              "evidenceId": {
+                "$ref": "#/$defs/generated_34"
+              },
+              "evidenceDigest": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              }
+            }
+          },
+          "generated_22": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -30723,11 +31309,11 @@
                 "const": "scoped"
               },
               "scopes": {
-                "$ref": "#/$defs/generated_7"
+                "$ref": "#/$defs/generated_11"
               }
             }
           },
-          "generated_10": {
+          "generated_23": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -30739,7 +31325,7 @@
               }
             }
           },
-          "generated_11": {
+          "generated_24": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -30751,152 +31337,222 @@
               }
             }
           },
-          "generated_12": {
+          "generated_25": {
             "type": "object",
             "additionalProperties": false,
             "required": [
+              "schemaVersion",
+              "approval",
               "workspaceRoots",
               "sourcePaths",
               "artifactPaths",
               "actions",
+              "deniedPaths",
+              "deniedActions",
+              "prohibitedActions",
               "disclosure",
+              "secrets",
+              "deployment",
+              "irreversibleActions",
+              "network",
               "expiresAt",
               "budget"
             ],
             "properties": {
+              "schemaVersion": {
+                "const": 2
+              },
+              "approval": {
+                "$ref": "#/$defs/generated_21"
+              },
               "workspaceRoots": {
-                "$ref": "#/$defs/generated_5"
+                "$ref": "#/$defs/generated_9"
               },
               "sourcePaths": {
-                "$ref": "#/$defs/generated_4"
+                "$ref": "#/$defs/generated_8"
               },
               "artifactPaths": {
-                "$ref": "#/$defs/generated_4"
+                "$ref": "#/$defs/generated_8"
               },
               "actions": {
-                "$ref": "#/$defs/generated_6"
+                "$ref": "#/$defs/generated_10"
+              },
+              "deniedPaths": {
+                "$ref": "#/$defs/generated_8"
+              },
+              "deniedActions": {
+                "$ref": "#/$defs/generated_10"
+              },
+              "prohibitedActions": {
+                "$ref": "#/$defs/generated_13"
               },
               "disclosure": {
+                "$ref": "#/$defs/generated_5"
+              },
+              "secrets": {
                 "$ref": "#/$defs/generated_2"
+              },
+              "deployment": {
+                "$ref": "#/$defs/generated_4"
+              },
+              "irreversibleActions": {
+                "$ref": "#/$defs/generated_3"
+              },
+              "network": {
+                "$ref": "#/$defs/generated_6"
               },
               "expiresAt": {
                 "type": "string",
                 "format": "date-time"
               },
               "budget": {
-                "$ref": "#/$defs/generated_13"
-              },
-              "deniedPaths": {
-                "$ref": "#/$defs/generated_4"
-              },
-              "deniedActions": {
-                "$ref": "#/$defs/generated_6"
+                "$ref": "#/$defs/generated_28"
               }
             }
           },
-          "generated_13": {
+          "generated_26": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "toolEgress",
+              "allowedHosts"
+            ],
+            "properties": {
+              "toolEgress": {
+                "const": "allowlist"
+              },
+              "allowedHosts": {
+                "$ref": "#/$defs/generated_12"
+              }
+            }
+          },
+          "generated_27": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "toolEgress"
+            ],
+            "properties": {
+              "toolEgress": {
+                "const": "none"
+              }
+            }
+          },
+          "generated_28": {
             "type": "object",
             "minProperties": 0,
             "maxProperties": 128,
             "propertyNames": {
-              "$ref": "#/$defs/generated_3"
+              "$ref": "#/$defs/generated_7"
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "generated_29": {
+            "type": "object",
+            "minProperties": 0,
+            "maxProperties": 128,
+            "propertyNames": {
+              "$ref": "#/$defs/generated_7"
             },
             "additionalProperties": {
               "type": "integer",
               "minimum": 0
             }
           },
-          "generated_14": {
+          "generated_30": {
             "type": "string",
             "enum": [
-              "fabric.v1.agent.attach",
-              "fabric.v1.agent.list",
+              "fabric.v1.authority.delegate",
               "fabric.v1.agent.register",
               "fabric.v1.agent.spawn",
-              "fabric.v1.artifact.publish",
-              "fabric.v1.authority.delegate",
-              "fabric.v1.barrier.close",
-              "fabric.v1.budget.read",
-              "fabric.v1.budget.release",
-              "fabric.v1.budget.reserve",
-              "fabric.v1.budget.usage.reconcile",
-              "fabric.v1.budget.usage.record",
-              "fabric.v1.capability.revoke",
-              "fabric.v1.capability.rotate",
-              "fabric.v1.delivery.abandon",
-              "fabric.v1.delivery.acknowledge",
-              "fabric.v1.discussion-group.create",
-              "fabric.v1.events.observe",
-              "fabric.v1.evidence.publish",
-              "fabric.v1.intake.revise",
-              "fabric.v1.launch.attest",
-              "fabric.v1.lease.revocation-proof.record",
-              "fabric.v1.lifecycle.read",
-              "fabric.v1.lifecycle.request",
-              "fabric.v1.mailbox.read",
-              "fabric.v1.message.receive",
+              "fabric.v1.agent.attach",
               "fabric.v1.message.send",
-              "fabric.v1.operator-intervention.record",
-              "fabric.v1.project-session.membership.bind",
-              "fabric.v1.provider-action.dispatch",
-              "fabric.v1.provider-action.read",
-              "fabric.v1.provider-action.reconcile",
-              "fabric.v1.provider-context-pressure.read",
-              "fabric.v1.provider-route-integrity-recovery.read",
-              "fabric.v1.provider-state.report",
-              "fabric.v1.receipt.export",
-              "fabric.v1.receipt.list",
-              "fabric.v1.resource.reconcile",
-              "fabric.v1.resource.release",
-              "fabric.v1.resource.reserve",
-              "fabric.v1.result-delivery.abandon",
-              "fabric.v1.result-delivery.claim",
-              "fabric.v1.result-delivery.consume",
-              "fabric.v1.result-delivery.reassign",
-              "fabric.v1.result-delivery.retry",
-              "fabric.v1.review-completion.read",
-              "fabric.v1.review-evidence-annotation.current.read",
-              "fabric.v1.review-evidence.annotate",
-              "fabric.v1.review-evidence.list",
-              "fabric.v1.review-evidence.read",
-              "fabric.v1.review-finding-page.read",
-              "fabric.v1.review-target-preparation.read",
-              "fabric.v1.review-target.prepare",
-              "fabric.v1.review-target.rebind",
-              "fabric.v1.run-status.read",
-              "fabric.v1.scoped-gate.check",
-              "fabric.v1.scoped-gate.create",
-              "fabric.v1.subtree-barrier.close",
-              "fabric.v1.subtree.adopt",
-              "fabric.v1.subtree.freeze",
-              "fabric.v1.task.claim",
-              "fabric.v1.task.complete-with-reply",
+              "fabric.v1.discussion-group.create",
+              "fabric.v1.message.receive",
+              "fabric.v1.delivery.acknowledge",
+              "fabric.v1.delivery.abandon",
+              "fabric.v1.mailbox.read",
               "fabric.v1.task.create",
-              "fabric.v1.task.handoff.acknowledge",
-              "fabric.v1.task.list",
+              "fabric.v1.task.claim",
+              "fabric.v1.task.readiness.refresh",
               "fabric.v1.task.objective-check.record",
+              "fabric.v1.task.handoff.acknowledge",
+              "fabric.v1.task.read",
+              "fabric.v1.task.update",
               "fabric.v1.task.owner-recovery-proof.record",
               "fabric.v1.task.owner.recover",
-              "fabric.v1.task.read",
-              "fabric.v1.task.readiness.refresh",
-              "fabric.v1.task.request",
-              "fabric.v1.task.update",
+              "fabric.v1.lease.revocation-proof.record",
+              "fabric.v1.capability.revoke",
+              "fabric.v1.capability.rotate",
+              "fabric.v1.write-lease.acquire",
+              "fabric.v1.write-lease.recover",
+              "fabric.v1.write-lease.renew",
+              "fabric.v1.write-lease.read",
+              "fabric.v1.write-lease.release",
+              "fabric.v1.lifecycle.request",
+              "fabric.v1.lifecycle.read",
+              "fabric.v1.provider-state.report",
+              "fabric.v1.provider-action.dispatch",
+              "fabric.v1.provider-action.reconcile",
+              "fabric.v1.provider-action.read",
+              "fabric.v1.operator-intervention.record",
+              "fabric.v1.visibility-failure.record",
               "fabric.v1.team.create",
               "fabric.v1.team.read",
-              "fabric.v1.topology-wave.append",
-              "fabric.v1.topology-wave.current.read",
-              "fabric.v1.topology-wave.list",
-              "fabric.v1.visibility-failure.record",
+              "fabric.v1.subtree.freeze",
+              "fabric.v1.subtree.adopt",
+              "fabric.v1.subtree-barrier.close",
+              "fabric.v1.budget.reserve",
+              "fabric.v1.budget.usage.record",
+              "fabric.v1.budget.usage.reconcile",
+              "fabric.v1.budget.release",
+              "fabric.v1.budget.read",
+              "fabric.v1.artifact.publish",
+              "fabric.v1.barrier.close",
+              "fabric.v1.run-status.read",
+              "fabric.v1.events.observe",
+              "fabric.v1.task.list",
+              "fabric.v1.agent.list",
+              "fabric.v1.receipt.list",
+              "fabric.v1.receipt.export",
+              "fabric.v1.project-session.membership.bind",
+              "fabric.v1.intake.revise",
+              "fabric.v1.scoped-gate.create",
+              "fabric.v1.scoped-gate.check",
+              "fabric.v1.resource.reserve",
+              "fabric.v1.resource.release",
+              "fabric.v1.resource.reconcile",
+              "fabric.v1.task.request",
+              "fabric.v1.task.complete-with-reply",
+              "fabric.v1.result-delivery.claim",
+              "fabric.v1.result-delivery.consume",
+              "fabric.v1.result-delivery.retry",
+              "fabric.v1.result-delivery.reassign",
+              "fabric.v1.result-delivery.abandon",
               "fabric.v1.workstream.create",
               "fabric.v1.workstream.settle",
-              "fabric.v1.write-lease.acquire",
-              "fabric.v1.write-lease.read",
-              "fabric.v1.write-lease.recover",
-              "fabric.v1.write-lease.release",
-              "fabric.v1.write-lease.renew"
+              "fabric.v1.evidence.publish",
+              "fabric.v1.review-target.prepare",
+              "fabric.v1.review-target-preparation.read",
+              "fabric.v1.review-target.rebind",
+              "fabric.v1.review-evidence.read",
+              "fabric.v1.review-evidence.list",
+              "fabric.v1.review-evidence.annotate",
+              "fabric.v1.review-evidence-annotation.current.read",
+              "fabric.v1.review-finding-page.read",
+              "fabric.v1.review-completion.read",
+              "fabric.v1.provider-route-integrity-recovery.read",
+              "fabric.v1.provider-context-pressure.read",
+              "fabric.v1.topology-wave.append",
+              "fabric.v1.topology-wave.current.read",
+              "fabric.v1.topology-wave.list"
             ]
           },
-          "generated_15": {
+          "generated_31": {
             "type": "string",
             "enum": [
               "turns",
@@ -30908,7 +31564,7 @@
               "wall_clock_milliseconds"
             ]
           },
-          "generated_16": {
+          "generated_32": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
@@ -30916,13 +31572,29 @@
             "x-maxUtf8Bytes": 128,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           },
-          "generated_17": {
+          "generated_33": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 253,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$"
+          },
+          "generated_34": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 256,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "generated_35": {
             "type": "string",
             "minLength": 1,
             "maxLength": 4096,
             "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
           },
-          "generated_18": {
+          "generated_36": {
             "type": "string",
             "pattern": "^cost:(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|CHF|CLP|CNY|COP|CRC|CUC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HRK|HTG|HUF|IDR|ILS|INR|IQD|IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SLL|SOS|SRD|SSP|STN|SVC|SYP|SZL|THB|TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|XAF|XCD|XCG|XDR|XOF|XPF|XSU|YER|ZAR|ZMW|ZWG|ZWL)$"
           }
@@ -31006,7 +31678,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:7a51f51a04f2e7245b48640b08da12ee58f8ba0a67d9fb221cf5c8cfcd6c8cdd",
+      "inputCodecDigest": "sha256:bc58a546d685f81202624e6d60688fae5f476cc45af73eaf255e3dbb2535d73c",
       "outputCodecDigest": "sha256:28ebc4507c2708d941fe3fd28d08acd56e5b50788be87fc484bb9bbfd63ec60a"
     },
     {
