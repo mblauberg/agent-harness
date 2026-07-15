@@ -8,20 +8,20 @@ implementation and acceptance state; this file is only the compact route.
 
 ## Current W012 route
 
-- The child-bridge, expired-principal and partial first-frame timing repairs
-  are complete in [issues
+- The child-bridge, expired-principal, pagination and partial first-frame timing
+  repairs are complete in [issues
   #64](https://github.com/mblauberg/provenant/issues/64),
   [#71](https://github.com/mblauberg/provenant/issues/71),
+  [#72](https://github.com/mblauberg/provenant/issues/72),
   [#74](https://github.com/mblauberg/provenant/issues/74) and
   [#76](https://github.com/mblauberg/provenant/issues/76).
-- [Issues #72](https://github.com/mblauberg/provenant/issues/72) and
-  [#75](https://github.com/mblauberg/provenant/issues/75) own two distinct
-  Console full-suite failures whose public error currently hides the failing
-  internal stage. Each remains diagnose-first and independently reviewable.
-- [Issue #82](https://github.com/mblauberg/provenant/issues/82) owns the
-  daemon-stop custody race. Diagnosis identifies competing automatic and
-  explicit stop owners; the focused test/support-only repair plan requires
-  explicit human approval before implementation.
+- [Issue #75](https://github.com/mblauberg/provenant/issues/75) remains the
+  active Console existing-session concurrent-reopen repair.
+- [Issue #82](https://github.com/mblauberg/provenant/issues/82) is queued after
+  #75 as active W012 work on the daemon-stop custody race. Its focused
+  test/support-only plan still requires the approval recorded in that issue
+  before implementation; this is a bounded plan gate, not W013 programme
+  acceptance.
 
 The linked issues own their acceptance criteria and evidence. Merged pull
 requests and historical lane detail remain in Git and are not repeated here.
@@ -41,8 +41,6 @@ requests and historical lane detail remain in Git and are not repeated here.
 - [Issue #30](https://github.com/mblauberg/provenant/issues/30): ratify the
   narrow risk-tier `crucial` envelope used by merged PR #62 or direct a revert;
   after ratification, explicitly accept the machine-verified result.
-- [Issue #82](https://github.com/mblauberg/provenant/issues/82): approve the
-  focused test/support repair plan before implementation.
 - [Issue #23](https://github.com/mblauberg/provenant/issues/23): explicitly
   accept the programme only after W013 passes on one current head.
 

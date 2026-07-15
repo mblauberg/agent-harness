@@ -1,28 +1,31 @@
 # ADR 0002 — Capability-compiled execution authority (write profiles)
 
-**Status:** Accepted 2026-07-13 (human, scoping rounds 2–3; Step-1 package and
-containment gate approved)
+**Status:** Accepted 2026-07-13 (human, scoping rounds 2–3; authority contract
+and containment gate approved)
 
 ## Context
 
 Fabric-managed headless provider sessions are compiled read-only, enforced
 twice (both provider adapters and `Fabric.#admitProviderPayload`). This is
 correct for certifying review but blocks Fabric from serving as the managed
-implementation plane. Specs 01/05 currently mandate the read-only posture, so
-enabling writes is a spec-level change, not only code.
+implementation plane. The standalone [authority](../specs/agent-fabric/authority.md)
+and [provider-action](../specs/agent-fabric/provider-actions-and-adapters.md)
+specifications own that contract, so enabling writes is a specification change,
+not only code.
 
 ## Decision
 
 Adopt provider-neutral authority profiles compiled by Fabric into
-provider-native settings, in codex-pair's four staged steps:
+provider-native settings in four staged steps:
 
 1. **Authority contract:** protocol-owned, versioned `AuthorityEnvelopeV2`
    carrying the full human-approved envelope (approval binding with evidence
    digest; secrets, deployment, irreversible-action and network dimensions —
    all currently missing from Fabric's `AuthorityInput`), plus exact
    characterisation goldens of today's read-only projection. Includes the
-   required Spec 01/05 amendment introducing profile-based execution
-   authority. Risk tier: crucial.
+   required updates to the standalone authority and provider-action
+   specifications introducing profile-based execution authority. Risk tier:
+   crucial.
 2. **Pure admission extraction** into an `AuthorityCompiler`, behaviour
    unchanged.
 3. **One-provider write pilot** (`workspace-write-offline`: one owned
@@ -41,9 +44,9 @@ version and exact native settings.
 
 **Direct cutover, no legacy bridge** (human directive, overriding codex-pair's
 proposed `LegacyAuthorityInputV1` quarantine): the repo is pre-release with no
-external consumers; migrate all callers, tests and stored state to V2 in
-Step 1. Pre-existing stored authorities are regenerated or the local
-pre-release state is reset — no dual parser is retained.
+external consumers; migrate all callers, tests and stored state to V2 in the
+authority-contract cutover. Pre-existing stored authorities are regenerated or
+the local pre-release state is reset — no dual parser is retained.
 
 ## Consequences
 
@@ -51,6 +54,10 @@ pre-release state is reset — no dual parser is retained.
   effects via the existing `ExternalEffectService` model).
 - The first write pilot provider is chosen by containment evidence, not
   preference; the other stays read-only until it independently passes.
-- Work package details (schema, delivery→Fabric mapping, exact file plan,
-  the 8 acceptance gates and the adversarial containment-spike matrix):
-  `docs/provenant_simplification_implementation_pack_2026-07-14/docs/provenant-simplification/25_AUTHORITY_V2_AND_CONTAINMENT.md`.
+- [Issue #22](https://github.com/mblauberg/provenant/issues/22) owns the current
+  containment evidence, approval sequence and provider rollout. The standalone
+  [authority](../specs/agent-fabric/authority.md),
+  [provider-action](../specs/agent-fabric/provider-actions-and-adapters.md) and
+  [workspace-containment](../specs/agent-fabric/workspace-containment.md)
+  specifications own the current contract; earlier work-package detail remains
+  available in Git history.
