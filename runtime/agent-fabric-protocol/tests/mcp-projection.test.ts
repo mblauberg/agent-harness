@@ -55,6 +55,18 @@ function record(value: unknown, label: string): Record<string, unknown> {
 }
 
 describe("registry-owned current-agent MCP projection", () => {
+  it("teaches retained providers when to compact or rotate", () => {
+    const lifecycle = MCP_PROJECTION_REGISTRY[FABRIC_OPERATIONS.requestLifecycle];
+    expect(lifecycle).toMatchObject({ projection: "tool" });
+    if (lifecycle.projection !== "tool") throw new Error("lifecycle request is not projected");
+    expect(lifecycle.description).toContain("Checkpoint first");
+    expect(lifecycle.description).toContain("compact");
+    expect(lifecycle.description).toContain("rotate/clear");
+    expect(lifecycle.description).toContain("four answer-bearing turns");
+    expect(lifecycle.description).toContain("five minutes");
+    expect(lifecycle.description).toContain("Codex");
+  });
+
   it("owns a launch-scoped one-use attestation descriptor", () => {
     const launchAttestation = FABRIC_OPERATIONS.launchAttest;
 

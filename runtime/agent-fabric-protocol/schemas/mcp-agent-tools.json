@@ -166,7 +166,7 @@
     "fabric.v1.lifecycle.request": {
       "projection": "tool",
       "name": "fabric_lifecycle_request",
-      "description": "Invoke the closed fabric.v1.lifecycle.request operation as the authenticated Agent Fabric principal.",
+      "description": "Checkpoint first. Use compact to continue the same retained task with fresh bounded context. For retained Claude, compact at each stage or work-unit boundary, by four answer-bearing turns, or before an idle pause over five minutes; fresh one-task workers and reviewers release. Use rotate/clear for a new task, independent review, stale, confused, or unreconciled context, or a role or model change. Codex rotates at stage boundaries; native auto-compaction is fallback. Never clear silently.",
       "receiptRenderer": "generic-v1"
     },
     "fabric.v1.lifecycle.read": {
@@ -4865,7 +4865,7 @@
     {
       "operation": "fabric.v1.lifecycle.request",
       "name": "fabric_lifecycle_request",
-      "description": "Invoke the closed fabric.v1.lifecycle.request operation as the authenticated Agent Fabric principal.",
+      "description": "Checkpoint first. Use compact to continue the same retained task with fresh bounded context. For retained Claude, compact at each stage or work-unit boundary, by four answer-bearing turns, or before an idle pause over five minutes; fresh one-task workers and reviewers release. Use rotate/clear for a new task, independent review, stale, confused, or unreconciled context, or a role or model change. Codex rotates at stage boundaries; native auto-compaction is fallback. Never clear silently.",
       "feature": "fabric-core.v1",
       "receiptRenderer": "generic-v1",
       "inputSchema": {
@@ -8427,7 +8427,6 @@
               "operation",
               "taskId",
               "authorityId",
-              "routeRequest",
               "payload",
               "commandId",
               "certifyingReview"
@@ -8463,9 +8462,6 @@
                 "maxLength": 256,
                 "x-minUtf8Bytes": 1,
                 "x-maxUtf8Bytes": 256
-              },
-              "routeRequest": {
-                "$ref": "#/$defs/generated_2"
               },
               "payload": {
                 "$ref": "#/$defs/boundedJsonValue"
@@ -8491,9 +8487,9 @@
               "operation",
               "taskId",
               "authorityId",
-              "routeRequest",
               "payload",
               "commandId",
+              "routeRequest",
               "certifyingReview"
             ],
             "properties": {
@@ -8528,9 +8524,6 @@
                 "x-minUtf8Bytes": 1,
                 "x-maxUtf8Bytes": 256
               },
-              "routeRequest": {
-                "$ref": "#/$defs/generated_2"
-              },
               "payload": {
                 "$ref": "#/$defs/boundedJsonValue"
               },
@@ -8540,6 +8533,62 @@
                 "maxLength": 256,
                 "x-minUtf8Bytes": 1,
                 "x-maxUtf8Bytes": 256
+              },
+              "routeRequest": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "adapterAlias",
+                  "modelAlias",
+                  "explicitModel",
+                  "role",
+                  "leadFamily",
+                  "requireDistinct",
+                  "providerEffort"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "adapterAlias": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "x-minUtf8Bytes": 1,
+                    "x-maxUtf8Bytes": 256
+                  },
+                  "modelAlias": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "x-minUtf8Bytes": 1,
+                    "x-maxUtf8Bytes": 256
+                  },
+                  "explicitModel": {
+                    "$ref": "#/$defs/generated_1"
+                  },
+                  "role": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "x-minUtf8Bytes": 1,
+                    "x-maxUtf8Bytes": 256
+                  },
+                  "leadFamily": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "x-minUtf8Bytes": 1,
+                    "x-maxUtf8Bytes": 256
+                  },
+                  "requireDistinct": {
+                    "type": "boolean"
+                  },
+                  "providerEffort": {
+                    "$ref": "#/$defs/generated_1"
+                  }
+                }
               },
               "certifyingReview": {
                 "type": "object",
@@ -8666,62 +8715,6 @@
                 "type": "null"
               }
             ]
-          },
-          "generated_2": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "schemaVersion",
-              "adapterAlias",
-              "modelAlias",
-              "explicitModel",
-              "role",
-              "leadFamily",
-              "requireDistinct",
-              "providerEffort"
-            ],
-            "properties": {
-              "schemaVersion": {
-                "const": 1
-              },
-              "adapterAlias": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "x-minUtf8Bytes": 1,
-                "x-maxUtf8Bytes": 256
-              },
-              "modelAlias": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "x-minUtf8Bytes": 1,
-                "x-maxUtf8Bytes": 256
-              },
-              "explicitModel": {
-                "$ref": "#/$defs/generated_1"
-              },
-              "role": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "x-minUtf8Bytes": 1,
-                "x-maxUtf8Bytes": 256
-              },
-              "leadFamily": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "x-minUtf8Bytes": 1,
-                "x-maxUtf8Bytes": 256
-              },
-              "requireDistinct": {
-                "type": "boolean"
-              },
-              "providerEffort": {
-                "$ref": "#/$defs/generated_1"
-              }
-            }
           }
         }
       },
@@ -10083,7 +10076,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:2462a3155ed9e6a28d75d0131a170930c35379d54a0c2fd9b8006e6cb4abe35c",
+      "inputCodecDigest": "sha256:7f37498fd0633a6a8a6a0c79dbf402279c8819a0241c4c342a8f6bc867ad4d74",
       "outputCodecDigest": "sha256:f736c71d4cdbffc7510555cae222d7dc2d347fa4d4bca5c7be60e16dc2ade2fc"
     },
     {

@@ -139,7 +139,11 @@ export const MCP_PROJECTION_REGISTRY = Object.freeze({
   [FABRIC_OPERATIONS.renewWriteLease]: tool(FABRIC_OPERATIONS.renewWriteLease),
   [FABRIC_OPERATIONS.getWriteLease]: tool(FABRIC_OPERATIONS.getWriteLease),
   [FABRIC_OPERATIONS.releaseWriteLease]: tool(FABRIC_OPERATIONS.releaseWriteLease),
-  [FABRIC_OPERATIONS.requestLifecycle]: tool(FABRIC_OPERATIONS.requestLifecycle),
+  [FABRIC_OPERATIONS.requestLifecycle]: tool(
+    FABRIC_OPERATIONS.requestLifecycle,
+    undefined,
+    "Checkpoint first. Use compact to continue the same retained task with fresh bounded context. For retained Claude, compact at each stage or work-unit boundary, by four answer-bearing turns, or before an idle pause over five minutes; fresh one-task workers and reviewers release. Use rotate/clear for a new task, independent review, stale, confused, or unreconciled context, or a role or model change. Codex rotates at stage boundaries; native auto-compaction is fallback. Never clear silently.",
+  ),
   [FABRIC_OPERATIONS.getAgentLifecycle]: tool(FABRIC_OPERATIONS.getAgentLifecycle),
   [FABRIC_OPERATIONS.reportProviderState]: tool(FABRIC_OPERATIONS.reportProviderState),
   [FABRIC_OPERATIONS.dispatchProviderAction]: tool(
