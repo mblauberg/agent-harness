@@ -19,7 +19,7 @@ export const MCP_ROOT_AUTHORITY = {
   ...TEST_AUTHORITY_V2_FIELDS,
   workspaceRoots: ["."],
   sourcePaths: ["src"],
-  artifactPaths: [".agent-run"],
+  artifactPaths: [".agent-run", "project-run/findings", "project-run/paired"],
   actions: [...AUTHORITY_ACTION_VOCABULARY],
   disclosure: { level: "scoped", scopes: ["local"] } as const,
   expiresAt: "2099-01-01T00:00:00.000Z",
@@ -186,7 +186,7 @@ export async function createMcpFixture(
     authority: {
       ...MCP_ROOT_AUTHORITY,
       sourcePaths: ["src/peer"],
-      artifactPaths: [".agent-run/peer"],
+      artifactPaths: [".agent-run/peer", "project-run/paired"],
       actions: [...MCP_ROOT_AUTHORITY.actions],
       budget: { turns: 8, "cost:USD": 8 },
     },
