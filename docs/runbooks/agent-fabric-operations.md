@@ -35,7 +35,19 @@ python3 skills/deliver/scripts/validate_delivery.py \
   '<canonical-run>/RUN.json' --workspace-root "$PWD" --verify-hashes
 ```
 
-Then verify the selected compatibility entries against the current executable/schema hashes. Unresolved pins, missing artifacts or disabled entries fail closed.
+Then verify the selected compatibility entries. External executable, package
+and schema artifacts are checked against their pinned hashes.
+Repository-owned wrapper code carries Git provenance instead of a hash pin
+(`runtime/agent-fabric/src/adapters/compatibility.ts`): the wrapper
+entrypoint must resolve inside a Git repository, be tracked at HEAD and
+byte-identical to its committed content, and its first-party source spans
+(the owning workspace package's src tree, local workspace dependency src
+trees and every consulted package manifest) must be diff-clean against HEAD.
+An empty or truncated span discovery is a hard verification failure, never a
+skip. Provenance is re-derived immediately before every adapter process
+spawn and must match the provenance verified at composition. Unresolved
+pins, missing artifacts, disabled entries or any provenance mismatch fail
+closed.
 
 ## Keep the CLI dist warm
 
