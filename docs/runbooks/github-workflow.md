@@ -183,14 +183,23 @@ Afterwards:
 
 1. Confirm the issue closed (`Closes #N`) or close it with its terminal reason
    recorded, and confirm Status is `Done`.
-2. Remove the worktree once `git status` in it is clean and no live agent,
+2. After syncing the main checkout, keep the fabric dist warm so
+   `scripts/agent-fabric` never falls back to the slow tsx loader path
+   (no-op when the dist is fresh; see [Keep the CLI dist
+   warm](agent-fabric-operations.md#keep-the-cli-dist-warm)):
+
+   ```sh
+   scripts/agent-fabric-warm
+   ```
+
+3. Remove the worktree once `git status` in it is clean and no live agent,
    pane or unconsumed handoff remains:
 
    ```sh
    scripts/worktree remove impl-148 --human-authorised
    ```
 
-3. Branch deletion, local or remote, needs separate explicit user authority.
+4. Branch deletion, local or remote, needs separate explicit user authority.
    After an authorised remote deletion, run `git fetch --prune`.
 
 ## Agent-go trigger

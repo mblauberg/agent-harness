@@ -37,6 +37,22 @@ python3 skills/deliver/scripts/validate_delivery.py \
 
 Then verify the selected compatibility entries against the current executable/schema hashes. Unresolved pins, missing artifacts or disabled entries fail closed.
 
+## Keep the CLI dist warm
+
+`scripts/agent-fabric` and `scripts/agent-fabric-mcp` execute the compiled
+dist and fall back to the tsx loader only when the dist is absent or older
+than the TypeScript sources; the fallback adds noticeable per-invocation
+latency. After integrating runtime changes into the main checkout (the
+post-merge sync in [the GitHub workflow
+runbook](github-workflow.md#after-merge)), run:
+
+```sh
+scripts/agent-fabric-warm
+```
+
+It is a no-op when the dist is fresh and runs the workspace build only when
+stale, so normal operation never hits the fallback path.
+
 ## Live discovery and registrations
 
 Read workstation-specific run, roster, expiry, adapter and socket state from
