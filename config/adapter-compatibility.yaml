@@ -20,7 +20,7 @@ adapters:
       entrypoint_sha256: "7f12ca8bcc75fcdb4e32a75653cd1d4b773fc48327179d4beaaf5af37fa44944"
       executable: "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
       executable_sha256: "1b471d62d1117482689d75447f5e050c640da717a5a3c91e6c13792450f8c662"
-      wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js"
+      wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/claude-agent-sdk.ts"
     contract:
       adapter_version: 1
       protocol: claude-agent-sdk+claude-code-cli
@@ -56,7 +56,7 @@ adapters:
       source_build: "rust-v0.144.4"
       executable: "/opt/homebrew/Caskroom/codex/0.144.4/codex-aarch64-apple-darwin"
       executable_sha256: "3302acbda5f53de1a71ebdb0c0f2aae0d47f9324aa9fb6b4e78a47014fd51c7d"
-      wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/codex-app-server.js"
+      wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/codex-app-server.ts"
     contract:
       adapter_version: 1
       protocol: codex-app-server
@@ -125,7 +125,7 @@ adapters:
       executable_sha256: "af302f231437eaf6f37691bce4b34234fcb626bcb5eb3910d4fc3f6519bf78ca"
       rpc_entrypoint: "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js"
       rpc_entrypoint_sha256: "7c3b46714f2d357f8b0d5403164663b60c13e62ef14dfc360ee757bdc16e02a0"
-      wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/optional/pi-rpc.js"
+      wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/optional/pi-rpc.ts"
     contract:
       adapter_version: 1
       protocol: pi-jsonl-rpc
@@ -169,7 +169,7 @@ adapters:
       source_build: null
       executable: "${USER_HOME}/.local/bin/agy"
       executable_sha256: "f3b54437e56d81bb5c47715ed9bfb9a924c584f37524e87790e562399e23d7e0"
-      wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/optional/agy.js"
+      wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/optional/agy.ts"
     contract:
       adapter_version: 1
       protocol: agy-cli
@@ -204,7 +204,7 @@ adapters:
       executable_sha256: "eed61c5224668c9236334c4c68936a16aecc37374b592f59e31eb50433817831"
       bundle_entrypoint: "${USER_HOME}/.local/share/cursor-agent/versions/2026.07.09-a3815c0/index.js"
       bundle_entrypoint_sha256: "0312ba6ca62f6b18890745625e8a42513bd0002cd713beac4fb99e25e6ff7a92"
-      wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/optional/cursor-agent.js"
+      wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/optional/cursor-agent.ts"
     contract:
       adapter_version: 1
       protocol: cursor-agent-stream-json-cli
@@ -240,7 +240,7 @@ adapters:
       executable_sha256: "89995b38d718e79cd723c3e1f91c8bc245c6104d149561c12611a21c07ed8269"
       package_manifest: "/Applications/Kiro CLI.app/Contents/Resources/manifest.json"
       package_manifest_sha256: "4f4097a6dd94b80abad29b60747f298207ae206932b38a437be944872e91a004"
-      wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/optional/kiro-acp.js"
+      wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/optional/kiro-acp.ts"
     contract:
       adapter_version: 1
       protocol: agent-client-protocol

@@ -84,10 +84,10 @@ export async function fabricStatus(arguments_: string[], paths: FabricPaths): Pr
   };
 }
 
-async function check(id: string, operation: () => void | Promise<void>): Promise<Check> {
+async function check(id: string, operation: () => string | undefined | Promise<string | undefined>): Promise<Check> {
   try {
-    await operation();
-    return { id, status: "pass", detail: "ok" };
+    const detail = await operation();
+    return { id, status: "pass", detail: detail === undefined || detail.length === 0 ? "ok" : detail };
   } catch (error: unknown) {
     return { id, status: "fail", detail: errorDetail(error) };
   }
@@ -102,7 +102,10 @@ export async function fabricDoctor(arguments_: string[], paths: FabricPaths): Pr
     adapterIds = config.adapterIds;
   }));
   checks.push(await check("adapter-compatibility", async () => {
-    await verifyAdapterCompatibility({ compatibilityPath: selected.compatibility, schemaPath: selected.compatibilitySchema, adapterIds, requireEnabled: true });
+    const verification = await verifyAdapterCompatibility({ compatibilityPath: selected.compatibility, schemaPath: selected.compatibilitySchema, adapterIds, requireEnabled: true });
+    return verification.wrapperProvenance
+      .map((item) => `${item.adapterId}=${item.repositoryCommit}:${item.wrapperPath}`)
+      .join(" ");
   }));
   for (const [id, path, expectedKind] of [
     ["state-directory", paths.stateDirectory, "directory"],

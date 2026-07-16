@@ -50,8 +50,25 @@ export type WrapperProvenance = {
   wrapperPath: string;
 };
 
+/**
+ * Environment for provenance Git invocations. Every GIT_* variable is
+ * stripped so injected values (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, ...)
+ * cannot redirect repository discovery, and global/system configuration is
+ * disabled so external configuration cannot alter the read-only queries.
+ */
+function gitEnvironment(): Record<string, string> {
+  const environment: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined || key.startsWith("GIT_")) continue;
+    environment[key] = value;
+  }
+  environment.GIT_CONFIG_GLOBAL = "/dev/null";
+  environment.GIT_CONFIG_SYSTEM = "/dev/null";
+  return environment;
+}
+
 async function gitOutput(directory: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", ["-C", directory, ...args]);
+  const { stdout } = await execFileAsync("git", ["-C", directory, ...args], { env: gitEnvironment() });
   return stdout.trim();
 }
 
@@ -59,7 +76,9 @@ async function gitOutput(directory: string, args: string[]): Promise<string> {
  * Derives provenance for repository-owned wrapper code from Git: the commit
  * of the repository that owns the wrapper entrypoint plus the wrapper path
  * relative to that repository's root. Git supplies the content identity, so
- * no repository-local hash pin exists for wrapper code.
+ * the wrapper must be tracked at HEAD and byte-identical to its committed
+ * content; untracked, ignored or locally modified wrappers fail closed. No
+ * repository-local hash pin exists for wrapper code.
  */
 async function deriveWrapperProvenance(input: {
   adapterId: string;
@@ -88,23 +107,43 @@ async function deriveWrapperProvenance(input: {
       { cause: error },
     );
   }
-  if (!/^[0-9a-f]{40,64}$/u.test(repositoryCommit)) {
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(repositoryCommit)) {
     throw new FabricError(
       "ADAPTER_COMPATIBILITY_INVALID",
       `wrapper repository commit is invalid: ${input.adapterId}`,
     );
   }
-  const repositoryRelativePath = relative(await realpath(repositoryRoot), wrapperPath);
+  const resolvedRepositoryRoot = await realpath(repositoryRoot);
+  const repositoryRelativePath = relative(resolvedRepositoryRoot, wrapperPath);
   if (repositoryRelativePath.length === 0 || repositoryRelativePath.startsWith("..") || isAbsolute(repositoryRelativePath)) {
     throw new FabricError(
       "ADAPTER_COMPATIBILITY_INVALID",
       `wrapper entrypoint escapes its Git repository: ${input.adapterId}`,
     );
   }
+  const portablePath = repositoryRelativePath.split(sep).join("/");
+  try {
+    await gitOutput(resolvedRepositoryRoot, ["cat-file", "-e", `HEAD:${portablePath}`]);
+  } catch (error: unknown) {
+    throw new FabricError(
+      "ADAPTER_COMPATIBILITY_INVALID",
+      `wrapper entrypoint is not tracked at the repository HEAD: ${input.adapterId}`,
+      { cause: error },
+    );
+  }
+  try {
+    await gitOutput(resolvedRepositoryRoot, ["diff", "--quiet", "HEAD", "--", portablePath]);
+  } catch (error: unknown) {
+    throw new FabricError(
+      "ADAPTER_COMPATIBILITY_INVALID",
+      `wrapper entrypoint differs from its committed content: ${input.adapterId}`,
+      { cause: error },
+    );
+  }
   return {
     adapterId: input.adapterId,
     repositoryCommit,
-    wrapperPath: repositoryRelativePath.split(sep).join("/"),
+    wrapperPath: portablePath,
   };
 }
 

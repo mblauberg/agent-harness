@@ -2243,17 +2243,17 @@ describe("Codex chair launch contract", () => {
 });
 
 describe("trusted primary adapter configuration", () => {
-  it("routes both primaries through pinned built fabric wrappers after activation", async () => {
+  it("routes both primaries through tracked source fabric wrappers after activation", async () => {
     const root = fileURLToPath(new URL("../../../../", import.meta.url));
     const config: unknown = parse(await readFile(join(root, "config/agent-fabric.yaml"), "utf8"));
     const compatibility: unknown = parse(await readFile(join(root, "config/adapter-compatibility.yaml"), "utf8"));
     expect(config).toMatchObject({
       adapters: {
         "claude-agent-sdk": {
-          command: expect.arrayContaining([expect.stringContaining("dist/adapters/providers/claude-agent-sdk.js")]),
+          command: expect.arrayContaining([expect.stringContaining("src/adapters/providers/claude-agent-sdk.ts")]),
         },
         "codex-app-server": {
-          command: expect.arrayContaining([expect.stringContaining("dist/adapters/providers/codex-app-server.js")]),
+          command: expect.arrayContaining([expect.stringContaining("src/adapters/providers/codex-app-server.ts")]),
         },
       },
     });

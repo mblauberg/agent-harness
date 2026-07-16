@@ -26,12 +26,12 @@ const effort = option("--effort", false);
 const providerExecutable = option("--provider-executable");
 const provider = option("--provider", false);
 const wrapper = {
-  "claude-agent-sdk": "adapters/providers/claude-agent-sdk.js",
-  "codex-app-server": "adapters/providers/codex-app-server.js",
-  "pi-rpc": "adapters/providers/optional/pi-rpc.js",
-  agy: "adapters/providers/optional/agy.js",
-  "cursor-agent": "adapters/providers/optional/cursor-agent.js",
-  "kiro-acp": "adapters/providers/optional/kiro-acp.js",
+  "claude-agent-sdk": "adapters/providers/claude-agent-sdk.ts",
+  "codex-app-server": "adapters/providers/codex-app-server.ts",
+  "pi-rpc": "adapters/providers/optional/pi-rpc.ts",
+  agy: "adapters/providers/optional/agy.ts",
+  "cursor-agent": "adapters/providers/optional/cursor-agent.ts",
+  "kiro-acp": "adapters/providers/optional/kiro-acp.ts",
 }[adapterId];
 if (wrapper === undefined) throw new Error(`unsupported adapter ${adapterId}`);
 const agentsRoot = resolve(new URL("../../../", import.meta.url).pathname);
@@ -55,14 +55,30 @@ if (await realpath(providerExecutable) !== await realpath(pinnedExecutable)) {
 const digest = async (path) => createHash("sha256").update(await readFile(path)).digest("hex");
 const executableSha256 = await digest(pinnedExecutable);
 if (executableSha256 !== implementation.executable_sha256) throw new Error("provider executable digest does not match the compatibility pin");
-const wrapperPath = resolve(new URL("../dist", import.meta.url).pathname, wrapper);
+const wrapperPath = resolve(new URL("../src", import.meta.url).pathname, wrapper);
 if (await realpath(wrapperPath) !== await realpath(join(agentsRoot, implementation.wrapper_entrypoint))) {
   throw new Error("wrapper entrypoint does not match the compatibility path");
 }
 // Repository-owned wrapper code carries Git provenance: the repository commit
-// plus the wrapper path. Only external artifacts keep hash pins.
-const wrapperRepositoryCommit = (await execFileAsync("git", ["-C", agentsRoot, "rev-parse", "HEAD"])).stdout.trim();
-if (!/^[0-9a-f]{40,64}$/u.test(wrapperRepositoryCommit)) throw new Error("wrapper repository commit is unavailable");
+// plus the tracked wrapper path. Only external artifacts keep hash pins. All
+// GIT_* environment variables are stripped so repository discovery cannot be
+// redirected.
+/** @type {Record<string, string>} */
+const gitEnvironment = Object.fromEntries(
+  Object.entries(process.env).filter(([key, value]) => value !== undefined && !key.startsWith("GIT_")),
+);
+gitEnvironment.GIT_CONFIG_GLOBAL = "/dev/null";
+gitEnvironment.GIT_CONFIG_SYSTEM = "/dev/null";
+const git = async (...args) =>
+  (await execFileAsync("git", ["-C", agentsRoot, ...args], { env: gitEnvironment })).stdout.trim();
+const wrapperRepositoryCommit = await git("rev-parse", "HEAD");
+if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(wrapperRepositoryCommit)) throw new Error("wrapper repository commit is unavailable");
+await git("cat-file", "-e", `HEAD:${implementation.wrapper_entrypoint}`).catch(() => {
+  throw new Error("wrapper entrypoint is not tracked at the repository HEAD");
+});
+await git("diff", "--quiet", "HEAD", "--", implementation.wrapper_entrypoint).catch(() => {
+  throw new Error("wrapper entrypoint differs from its committed content");
+});
 
 const directory = await mkdtemp(join(tmpdir(), `agent-fabric-${adapterId}-smoke-`));
 const workspace = join(directory, "workspace");
@@ -94,6 +110,7 @@ async function workspaceDigest(root) {
 
 const beforeDigest = await workspaceDigest(workspace);
 const args = [
+  "--import", join(agentsRoot, "node_modules/tsx/dist/loader.mjs"),
   wrapperPath,
   "--journal", join(directory, "journal.sqlite3"),
   "--provider-executable", pinnedExecutable,

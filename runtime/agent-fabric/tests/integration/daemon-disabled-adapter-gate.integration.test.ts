@@ -80,7 +80,7 @@ describe("daemon trusted adapter composition", () => {
     if (executable === undefined || executableHash === undefined) throw new TypeError("Codex fixture executable is unpinned");
     codex.enabled = true;
     codex.implementation.wrapper_entrypoint = executable;
-    await commitFixtureRepository(fixture.directory);
+    const fixtureCommit = await commitFixtureRepository(fixture.directory);
     codex.model_family_constraints = {
       allowed: ["openai"],
       requires_explicit_model: true,
@@ -104,6 +104,10 @@ describe("daemon trusted adapter composition", () => {
       expect(composed["codex-app-server"]).toMatchObject({
         command: [process.execPath, fixture.artifactPaths[0], "--provider-executable", fixture.artifactPaths[0]],
         modelPolicy: { allowedFamilies: ["openai"], requiresExplicitModel: true },
+        wrapperProvenance: {
+          repositoryCommit: fixtureCommit,
+          wrapperPath: "fixture-adapter",
+        },
       });
     } finally {
       await rm(fixture.directory, { recursive: true, force: true });

@@ -12,7 +12,7 @@ Promote the coordination-only agent fabric into a safely activated local model-e
 
 ## Required behaviour
 
-1. Every activated adapter is bound to Git wrapper provenance (the repository commit plus wrapper path for repository-owned wrapper code), verified upstream executable or package identity, protocol/schema and model-family constraints. Hash pins exist only for identities Git does not supply.
+1. Every activated adapter is bound to Git wrapper provenance: the wrapper entrypoint is tracked source, verified tracked at the owning repository's HEAD and byte-identical to its committed content, and recorded as repository commit plus wrapper path in the composed adapter evidence. Untracked, ignored or locally modified wrappers fail activation closed. Upstream executable or package identity, protocol/schema and model-family constraints stay hash-verified; hash pins exist only for identities Git does not supply.
 2. Provider work uses the admitted absolute working directory and exact matched
    permission profile. Generic work may use write tools/edit modes only when its
    task authority and matched profile explicitly grant them; approval bypasses,

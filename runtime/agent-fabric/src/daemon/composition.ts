@@ -50,10 +50,17 @@ export function parseDaemonAdapters(serialized: string | undefined): AdapterMap 
     if (modelPolicy !== undefined && (!isRecord(modelPolicy) || !Array.isArray(modelPolicy.allowedFamilies) || !modelPolicy.allowedFamilies.every((item) => typeof item === "string") || !Array.isArray(modelPolicy.allowedModelPatterns) || !modelPolicy.allowedModelPatterns.every((item) => typeof item === "string") || typeof modelPolicy.requiresExplicitModel !== "boolean")) {
       throw new TypeError(`daemon adapter model policy is invalid for ${adapterId}`);
     }
+    const wrapperProvenance = candidate.wrapperProvenance;
+    if (wrapperProvenance !== undefined && (!isRecord(wrapperProvenance) || typeof wrapperProvenance.repositoryCommit !== "string" || typeof wrapperProvenance.wrapperPath !== "string")) {
+      throw new TypeError(`daemon adapter wrapper provenance is invalid for ${adapterId}`);
+    }
     adapters[adapterId] = {
       command: candidate.command,
       environment: candidate.environment as Record<string, string>,
       ...(modelPolicy === undefined ? {} : { modelPolicy: modelPolicy as NonNullable<AdapterMap[string]["modelPolicy"]> }),
+      ...(wrapperProvenance === undefined ? {} : {
+        wrapperProvenance: wrapperProvenance as NonNullable<AdapterMap[string]["wrapperProvenance"]>,
+      }),
     };
   }
   return adapters;
@@ -95,7 +102,8 @@ export async function composeDaemonConfiguration(options: {
       eligibleLocalTrustedRoots.every((root, index) => root === allLocalTrustedRoots[index])
     ? candidateConfig
     : await loadFabricConfig({ ...configOptions, additionalWorkspaceRoots: eligibleLocalTrustedRoots });
-  await verifyAdapterCompatibility({ compatibilityPath: options.compatibilityPath, schemaPath: options.compatibilitySchemaPath, adapterIds: config.adapterIds, requireEnabled: true });
+  const verification = await verifyAdapterCompatibility({ compatibilityPath: options.compatibilityPath, schemaPath: options.compatibilitySchemaPath, adapterIds: config.adapterIds, requireEnabled: true });
+  const provenanceByAdapter = new Map(verification.wrapperProvenance.map((item) => [item.adapterId, item]));
   const adapters = Object.fromEntries(await Promise.all(config.adapterIds.map(async (adapterId) => {
     const command = config.adapterCommands[adapterId];
     if (command === undefined || command.length === 0) throw new TypeError(`activated adapter ${adapterId} has no trusted command`);
@@ -107,8 +115,11 @@ export async function composeDaemonConfiguration(options: {
     });
     let resolvedCommand = command.map((part) => expandTrustedCommandPart(part, options.agentsHome, options.stateDirectory));
     if (policy.wrapperEntrypoint === undefined) throw new TypeError(`${adapterId} compatibility entry has no pinned fabric wrapper`);
-    if (resolvedCommand.length < 2) throw new TypeError(`${adapterId} trusted command has no wrapper entrypoint`);
-    resolvedCommand[1] = policy.wrapperEntrypoint;
+    const provenance = provenanceByAdapter.get(adapterId);
+    if (provenance === undefined) throw new TypeError(`${adapterId} activation has no verified wrapper provenance`);
+    const wrapperIndex = resolvedCommand[1] === "--import" ? 3 : 1;
+    if (resolvedCommand.length <= wrapperIndex) throw new TypeError(`${adapterId} trusted command has no wrapper entrypoint`);
+    resolvedCommand[wrapperIndex] = policy.wrapperEntrypoint;
     if (policy.providerExecutable !== undefined) {
       if (!isAbsolute(policy.providerExecutable)) throw new TypeError(`${adapterId} provider executable must be absolute`);
       resolvedCommand = replaceUniqueOption(resolvedCommand, "--provider-executable", policy.providerExecutable);
@@ -122,6 +133,10 @@ export async function composeDaemonConfiguration(options: {
         allowedFamilies: policy.allowed,
         allowedModelPatterns: policy.patterns,
         requiresExplicitModel: policy.requiresExplicitModel,
+      },
+      wrapperProvenance: {
+        repositoryCommit: provenance.repositoryCommit,
+        wrapperPath: provenance.wrapperPath,
       },
     }] as const;
   })));
