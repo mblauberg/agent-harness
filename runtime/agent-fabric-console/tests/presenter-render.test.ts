@@ -188,6 +188,7 @@ function richDataset(
         phase: "implement",
         health: "blocked",
         nextMilestone: "Console GREEN",
+        declaredProgress: { plan: "open", counts: { blocked: 0, ready: 0, active: 1, complete: 0, cancelled: 0, degraded: 0 } },
       }),
     ],
     work: [
@@ -2492,5 +2493,103 @@ describe("structured presenter and responsive Fabric renderer", () => {
       changed,
     );
     expect(afterRevision.intents).toStrictEqual([]);
+  });
+});
+
+describe("declared run progress presentation", () => {
+  function runsDataset(
+    declaredProgress: NonNullable<
+      import("@local/agent-fabric-protocol").OperatorViewSummaryMap["runs"]["declaredProgress"]
+    >,
+  ): { dataset: FabricConsoleDataset; controller: ConsoleControllerState } {
+    const dataset = richDataset();
+    const runRow = dataset.pages.runs.rows[0];
+    if (runRow === undefined || runRow.summary?.kind !== "run") {
+      throw new Error("run fixture unavailable");
+    }
+    const progressed: FabricConsoleDataset = {
+      ...dataset,
+      pages: {
+        ...dataset.pages,
+        runs: {
+          ...dataset.pages.runs,
+          rows: [{
+            ...runRow,
+            summary: { ...runRow.summary, declaredProgress },
+          }],
+        },
+      },
+    };
+    const baseController = controllerState();
+    return {
+      dataset: progressed,
+      controller: {
+        ...baseController,
+        activeView: "runs",
+        selectionByView: {
+          ...baseController.selectionByView,
+          runs: { stableId: runRow.stableId, revision: runRow.revision },
+        },
+      },
+    };
+  }
+
+  it("never renders a denominator, ratio, percentage or ETA for the open arm", () => {
+    const { dataset, controller } = runsDataset({
+      plan: "open",
+      counts: { blocked: 0, ready: 1, active: 1, complete: 3, cancelled: 0, degraded: 0 },
+    });
+    const presented = presentFabricConsole(
+      dataset,
+      controller,
+      createFabricUiState(),
+      { columns: 120, rows: 32 },
+    );
+    expect(presented.masterRows[0]?.secondary).toContain("progress open | 3 complete");
+    const serialised = JSON.stringify(presented);
+    // The finite n/N arm is deferred to the plan-declaration cutover; until
+    // then no rendering may fabricate a denominator from known counts.
+    expect(serialised).not.toContain("3/");
+    expect(serialised).not.toMatch(/\d+ ?%|percentage|\bETA\b/iu);
+  });
+
+  it("shows an open plan as known counts without a denominator, percentage or ETA", () => {
+    const { dataset, controller } = runsDataset({
+      plan: "open",
+      counts: { blocked: 1, ready: 0, active: 2, complete: 4, cancelled: 0, degraded: 0 },
+    });
+    const presented = presentFabricConsole(
+      dataset,
+      controller,
+      createFabricUiState(),
+      { columns: 120, rows: 32 },
+    );
+    expect(presented.masterRows[0]?.secondary).toContain("progress open | 4 complete");
+    expect(presented.detail?.lines).toContainEqual({
+      label: "Progress",
+      value: "open plan | 4 complete | active 2 | ready 0 | blocked 1 | degraded 0 | cancelled 0 | no declared total",
+    });
+    const serialised = JSON.stringify(presented);
+    expect(serialised).not.toMatch(/\d+ ?%|percentage|\bETA\b/iu);
+    expect(serialised).not.toContain("4/");
+  });
+
+  it("shows an unknown plan by reason without fabricating counts", () => {
+    const { dataset, controller } = runsDataset({
+      plan: "unknown",
+      reason: "unrecognised task state: parked",
+    });
+    const presented = presentFabricConsole(
+      dataset,
+      controller,
+      createFabricUiState(),
+      { columns: 120, rows: 32 },
+    );
+    expect(presented.masterRows[0]?.secondary).toContain("progress unknown");
+    expect(presented.detail?.lines).toContainEqual({
+      label: "Progress",
+      value: "unknown | unrecognised task state: parked",
+    });
+    expect(JSON.stringify(presented)).not.toMatch(/\d+ ?%|percentage|\bETA\b/iu);
   });
 });

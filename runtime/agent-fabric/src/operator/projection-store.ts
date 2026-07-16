@@ -32,6 +32,7 @@ import type {
   ProjectionEventsRequest,
   ProjectionEventsResult,
   ProjectionEvent,
+  DeclaredRunProgress,
   RunProjection,
   Timestamp,
 } from "@local/agent-fabric-protocol";
@@ -59,6 +60,7 @@ export type OperatorProjectionStoreOptions = CoreServiceOptions & {
 
 export type NativeNotificationProjection = "include" | "omit";
 export type RunSessionProjection = "include" | "omit";
+export type DeclaredRunProgressProjection = "include" | "omit";
 
 type LoadedOperatorDetail = {
   revision: number;
@@ -208,6 +210,7 @@ export class OperatorProjectionStore {
     request: OperatorViewPageRequest,
     nativeNotificationProjection: NativeNotificationProjection,
     runSessionProjection: RunSessionProjection = "include",
+    declaredRunProgressProjection: DeclaredRunProgressProjection = "include",
   ): OperatorViewPageResult {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
@@ -226,7 +229,13 @@ export class OperatorProjectionStore {
         this.#projectRows(request.projectId, authenticated)
       ), selectedSessionId);
       case "runs": return this.#viewPage(request, "runs", () => (
-        this.#runRows(request.projectId, selectedSessionId, authenticated, runSessionProjection)
+        this.#runRows(
+          request.projectId,
+          selectedSessionId,
+          authenticated,
+          runSessionProjection,
+          declaredRunProgressProjection,
+        )
       ), selectedSessionId);
       case "work": return this.#viewPage(request, "work", () => (
         this.#workRows(request.projectId, selectedSessionId, authenticated)
@@ -316,6 +325,7 @@ export class OperatorProjectionStore {
   detail(
     request: OperatorDetailReadRequest,
     runSessionProjection: RunSessionProjection = "include",
+    declaredRunProgressProjection: DeclaredRunProgressProjection = "include",
   ): OperatorDetailReadResult {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
@@ -329,6 +339,7 @@ export class OperatorProjectionStore {
         request.projectId,
         selectedSessionId,
         runSessionProjection,
+        declaredRunProgressProjection,
       );
       if (request.detailRef.expectedRevision !== loaded.revision) {
         return {
@@ -1207,6 +1218,7 @@ export class OperatorProjectionStore {
     projectSessionId: ProjectSessionId | undefined,
     authenticated: AuthenticatedOperatorCredential,
     runSessionProjection: RunSessionProjection,
+    declaredRunProgressProjection: DeclaredRunProgressProjection,
   ): OperatorViewRow<"runs">[] {
     return this.#rowsForRuns(projectId, projectSessionId).map((run): OperatorViewRow<"runs"> => {
       const phase = text(run, "lifecycle_state");
@@ -1234,6 +1246,9 @@ export class OperatorProjectionStore {
             phase,
             health: runHealth(phase),
             nextMilestone: nextMilestone(phase),
+            ...(declaredRunProgressProjection === "include"
+              ? { declaredProgress: this.#declaredRunProgress(runId) }
+              : {}),
           },
           detailRef: {
             kind: "run",
@@ -1512,6 +1527,7 @@ export class OperatorProjectionStore {
     projectId: ProjectId,
     projectSessionId: ProjectSessionId | undefined,
     runSessionProjection: RunSessionProjection,
+    declaredRunProgressProjection: DeclaredRunProgressProjection,
   ): LoadedOperatorDetail {
     switch (detailRef.kind) {
       case "project": return this.#loadProjectDetail(detailRef, projectId);
@@ -1521,6 +1537,7 @@ export class OperatorProjectionStore {
         projectId,
         projectSessionId,
         runSessionProjection,
+        declaredRunProgressProjection,
       );
       case "task": return this.#loadTaskDetail(detailRef, projectId, projectSessionId);
       case "agent": return this.#loadAgentDetail(detailRef, projectId, projectSessionId);
@@ -1584,6 +1601,7 @@ export class OperatorProjectionStore {
     projectId: ProjectId,
     projectSessionId: ProjectSessionId | undefined,
     runSessionProjection: RunSessionProjection,
+    declaredRunProgressProjection: DeclaredRunProgressProjection,
   ): LoadedOperatorDetail {
     const stored = row(this.#database.prepare(`
       SELECT r.* FROM runs r
@@ -1619,8 +1637,40 @@ export class OperatorProjectionStore {
         chairAgentId: parseIdentifier<"AgentId">(text(stored, "chair_agent_id"), "runDetail.chairAgentId"),
         chairGeneration: integer(stored, "chair_generation"),
         health: runHealth(phase),
+        ...(declaredRunProgressProjection === "include"
+          ? { declaredProgress: this.#declaredRunProgress(detailRef.coordinationRunId) }
+          : {}),
       },
     };
+  }
+
+  /**
+   * Server-scoped task-state counts for one run, read in the caller's open
+   * transaction. No run-level finite plan denominator exists yet, so the
+   * daemon declares the open arm; a task ledger it cannot classify fails
+   * closed to the unknown arm rather than dropping tasks from the counts.
+   */
+  #declaredRunProgress(runId: string): DeclaredRunProgress {
+    const counts = {
+      blocked: 0,
+      ready: 0,
+      active: 0,
+      complete: 0,
+      cancelled: 0,
+      degraded: 0,
+    };
+    const values = this.#database.prepare(`
+      SELECT state, COUNT(*) AS tasks FROM tasks WHERE run_id=? GROUP BY state
+    `).all(runId);
+    for (const value of values) {
+      const stored = row(value, "run task-state count");
+      const state = text(stored, "state");
+      if (!Object.hasOwn(counts, state)) {
+        return { plan: "unknown", reason: `unrecognised task state: ${state}` };
+      }
+      counts[state as keyof typeof counts] = integer(stored, "tasks");
+    }
+    return { plan: "open", counts };
   }
 
   #loadTaskDetail(

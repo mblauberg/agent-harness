@@ -2392,12 +2392,27 @@ const projectSummaryCodec = objectCodec(
   { kind: literal("project"), goal: text, acceptedScopeRef: nullable(artifactRefCodec), repositoryRevision: text },
   { repository: gitRepositorySummaryCodec },
 );
+const DECLARED_RUN_TASK_STATES = [
+  "blocked", "ready", "active", "complete", "cancelled", "degraded",
+] as const;
+const declaredRunTaskStateCountsCodec = objectCodec(
+  Object.fromEntries(
+    DECLARED_RUN_TASK_STATES.map((state) => [state, integer({ minimum: 0 })]),
+  ),
+);
+// A finite arm is deliberately deferred to the plan-declaration package: it
+// requires an exact plan-revision binding and settled cancelled-task
+// denominator semantics, and lands as its own result-shape cutover.
+const declaredRunProgressCodec = unionOf([
+  objectCodec({ plan: literal("open"), counts: declaredRunTaskStateCountsCodec }),
+  objectCodec({ plan: literal("unknown"), reason: text }),
+]);
 const runSummaryCodec = objectCodec({
   kind: literal("run"),
   phase: text,
   health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
   nextMilestone: text,
-}, { projectSessionId: identifier });
+}, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec });
 const workSummaryCodec = objectCodec({
   kind: literal("work"),
   state: text,
@@ -2538,7 +2553,7 @@ const operatorDetailCodec = unionOf([
     chairAgentId: identifier,
     chairGeneration: positiveInteger,
     health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
-  }, { projectSessionId: identifier }),
+  }, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec }),
   objectCodec({ kind: literal("task"), taskId: identifier, objective: text, state: text, ownerAgentId: nullable(identifier) }),
   objectCodec({
     kind: literal("agent"),
