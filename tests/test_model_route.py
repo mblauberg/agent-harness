@@ -65,7 +65,10 @@ def test_fable_unavailable_falls_back_to_opus_and_records_substitution():
     assert route["substitution"] == "fable unavailable; used opus"
 
 
-def test_openai_aliases_resolve_to_gpt_56_family():
+def test_openai_aliases_resolve_to_account_default_dispatch():
+    # The Codex account is a ChatGPT subscription: explicit model ids are
+    # rejected by the runtime (HTTP 400), so codex routes dispatch on the
+    # account default while retaining the catalog id for effort/audit (#190).
     expected = {
         "flagship": "gpt-5.6-sol",
         "workhorse": "gpt-5.6-terra",
@@ -74,7 +77,10 @@ def test_openai_aliases_resolve_to_gpt_56_family():
     for alias, model in expected.items():
         result, route = resolve("--adapter", "codex", "--alias", alias, "--role", "worker")
         assert result.returncode == 0
-        assert route["resolved_model"] == model
+        assert route["resolved_model"] == ""
+        assert route["catalog_model"] == model
+        assert route["model_selection"] == "account-default"
+        assert route["identity_source"] == "account-default"
         assert route["model_family"] == "openai"
 
 
@@ -113,14 +119,15 @@ def test_explicit_ultra_fails_for_noneligible_routes():
         assert route["effort"] == ""
 
 
-def test_ultra_role_default_degrades_for_unsupported_explicit_model():
+def test_codex_rejects_explicit_model_for_account_default_adapter():
+    # An explicit id would be sent to the runtime and rejected with HTTP 400,
+    # so the resolver fails closed instead of emitting a doomed route (#190).
     result, route = resolve(
         "--adapter", "codex", "--alias", "flagship", "--role", "lead", "--model", "gpt-4.1"
     )
-    assert result.returncode == 0
-    assert route["requested_effort"] == "ultra"
-    assert route["effort"] == "high"
-    assert "not ultra-eligible" in route["effort_substitution"]
+    assert result.returncode == 1
+    assert route["status"] == "adapter_account_default_only"
+    assert route["resolved_model"] == "gpt-4.1"
 
 
 def test_ultra_role_default_uses_runtime_effort_fallback():

@@ -66,6 +66,9 @@ def load_adapter_compatibility(adapter: str) -> tuple[dict[str, Any] | None, str
         "unresolved_pins": entry["unresolved_pins"],
         "allowed_families": allowed,
         "allowed_model_patterns": patterns,
+        "requires_explicit_model": constraints.get("requires_explicit_model") is True
+        if isinstance(constraints, dict)
+        else False,
     }, ""
 
 
@@ -254,6 +257,10 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
     if not adapter:
         return emit({**base, "status": "unknown_adapter"}, 2)
     args.effort_transport = adapter.get("effort_transport", "none")
+    # account-default adapters dispatch on the provider account's default
+    # model: the runtime rejects explicit model ids, so the resolver keeps the
+    # catalog id for effort/audit lookups but emits an empty dispatch model.
+    account_default = adapter.get("model_selection") == "account-default"
 
     endpoint = adapter["endpoint_provider"]
     compatibility: dict[str, Any] | None = None
@@ -299,11 +306,32 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             compatibility_metadata["adapter_active"] = (
                 compatibility["compatibility_adapter"] in active_adapters
             )
+        if account_default and compatibility["requires_explicit_model"]:
+            return emit(
+                {
+                    **base,
+                    "status": "account_default_conflicts_with_compatibility",
+                    "endpoint_provider": endpoint,
+                    **compatibility_metadata,
+                },
+                2,
+            )
     substitution = ""
     fallback_model = ""
     identity_source = ""
 
     if args.model:
+        if account_default:
+            return emit(
+                {
+                    **base,
+                    "status": "adapter_account_default_only",
+                    "endpoint_provider": endpoint,
+                    "resolved_model": args.model,
+                    **compatibility_metadata,
+                },
+                1,
+            )
         model = args.model
         family = infer_family(model, catalog)
         identity_source = "model-pattern"
@@ -505,6 +533,15 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
         "fallback_model": fallback_model,
         "distinct_from_lead": distinct,
     }
+    if account_default:
+        record.update(
+            {
+                "resolved_model": "",
+                "catalog_model": model,
+                "model_selection": "account-default",
+                "identity_source": "account-default",
+            }
+        )
     if compatibility:
         record.update(
             {
