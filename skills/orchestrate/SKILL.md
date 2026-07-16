@@ -68,9 +68,9 @@ full contract, gates and recovery transitions.
 
 ## Autonomous-implementation mode
 
-Pulls **accepted/ready** issues through `implement` unattended, never skipping
-the user PR-review/merge gate. Lower authority than autopilot's run-until-STOP
-loop. See [autonomous-implementation.md](references/autonomous-implementation.md)
+Pulls **accepted/ready** issues through `implement` unattended. Merge stays
+user-controlled by default, deferring to the nearest repository merge policy.
+Lower authority than autopilot's run-until-STOP loop. See [autonomous-implementation.md](references/autonomous-implementation.md)
 for the entry gate, loop, receipt contract and the autopilot distinction.
 
 ## References
