@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -29,6 +30,19 @@ FILTERED_JOBS = {
     "review-portal-supervisor": "review-portal-supervisor",
     "zizmor": "workflows",
 }
+# PR #168 repair cycle 2: fabric tests execute exactly these repo files
+# outside runtime/agent-fabric — the model-routing acceptance suite runs
+# scripts/model-route and the delivery-run fixture runs
+# skills/deliver/scripts/*.py — so those paths must retrigger the fabric
+# job. This allowlist is exact by design: adding an executed dependency
+# means adding it here deliberately, and nothing else in docs/ or skills/
+# may path-trigger a non-harness job.
+FABRIC_EXECUTED_DEPENDENCIES = frozenset(
+    {
+        "scripts/model-route",
+        "skills/deliver/scripts/**",
+    }
+)
 JOB_PERMISSIONS = {
     "detect-changes": {"pull-requests": "read"},
     "harness": {"contents": "read"},
@@ -66,6 +80,43 @@ def _steps(job: dict[str, object]) -> list[dict[str, object]]:
     assert isinstance(value, list)
     assert all(isinstance(item, dict) for item in value)
     return value
+
+
+def _flatten_rules(rules: object) -> list[str]:
+    flat: list[str] = []
+    assert isinstance(rules, list)
+    for rule in rules:
+        if isinstance(rule, list):
+            flat.extend(_flatten_rules(rule))
+        else:
+            assert isinstance(rule, str)
+            flat.append(rule)
+    return flat
+
+
+def _path_filters(document: dict[str, object]) -> dict[str, list[str]]:
+    # yaml.safe_load resolves the &anchors/*aliases in the filters block, so
+    # shared rule groups arrive as nested lists and are flattened here.
+    detect = _job(document, "detect-changes")
+    filter_step = next(
+        step for step in _steps(detect) if str(step.get("uses", "")).startswith("dorny/paths-filter@")
+    )
+    filters = yaml.safe_load(str(filter_step.get("with", {}).get("filters")))
+    assert isinstance(filters, dict)
+    return {name: _flatten_rules(rules) for name, rules in filters.items()}
+
+
+def _filter_matches(pattern: str, path: str) -> bool:
+    # The filters block deliberately uses only two glob forms: exact tracked
+    # paths and directory prefixes written as `prefix/**`. Fail loudly on any
+    # other form so unsupported syntax cannot silently defeat the coverage
+    # assertion below.
+    if pattern.endswith("/**"):
+        prefix = pattern[: -len("/**")]
+        assert prefix and not any(ch in prefix for ch in "*?["), f"unsupported glob form: {pattern}"
+        return path == prefix or path.startswith(prefix + "/")
+    assert not any(ch in pattern for ch in "*?["), f"unsupported glob form: {pattern}"
+    return path == pattern
 
 
 def _setup_action() -> dict[str, object]:
@@ -126,29 +177,19 @@ def test_ci_gates_build_jobs_behind_path_filters_and_one_aggregate_check() -> No
     # The filter only inspects pull requests; pushes to main force-run all
     # jobs through the job outputs below.
     assert filter_step.get("if") == "github.event_name == 'pull_request'"
-    filters = yaml.safe_load(str(filter_step.get("with", {}).get("filters")))
-    assert isinstance(filters, dict)
-
-    def _flatten(rules: object) -> list[str]:
-        flat: list[str] = []
-        assert isinstance(rules, list)
-        for rule in rules:
-            if isinstance(rule, list):
-                flat.extend(_flatten(rule))
-            else:
-                assert isinstance(rule, str)
-                flat.append(rule)
-        return flat
-
-    flattened = {name: _flatten(rules) for name, rules in filters.items()}
+    flattened = _path_filters(document)
     # PR #168 repair cycle 1: the harness filter must cover every surface
     # scripts/check-harness validates, so skills-, docs- and root-document
-    # changes always run the policy gate. No other build filter may widen
-    # onto those surfaces.
+    # changes always run the policy gate. Repair cycle 2 added the repo-wide
+    # scan residue (CHANGELOG.md, .gitignore): scripts/check-harness scans
+    # every tracked file and tests/test_harness_contract.py validates
+    # .gitignore, so those files must retrigger the harness job too.
     for required in (
         "skills/**",
         "docs/**",
+        ".gitignore",
         "AGENTS.md",
+        "CHANGELOG.md",
         "HARNESS.md",
         "MAINTAINING.md",
         "README.md",
@@ -158,9 +199,18 @@ def test_ci_gates_build_jobs_behind_path_filters_and_one_aggregate_check() -> No
         "THIRD_PARTY_NOTICES.md",
     ):
         assert required in flattened["harness"], required
+    # Non-harness jobs must not path-trigger on docs/ or skills/ broadly.
+    # The only exception is the exact executed-dependency allowlist for the
+    # fabric job (repair cycle 2): the blanket prohibition is narrowed, not
+    # deleted, and any new entry must be added to the allowlist deliberately.
+    assert FABRIC_EXECUTED_DEPENDENCIES == {"scripts/model-route", "skills/deliver/scripts/**"}
+    assert FABRIC_EXECUTED_DEPENDENCIES <= set(flattened["fabric"])
     for name, rules in flattened.items():
-        if name != "harness":
-            assert not any(rule.startswith(("docs/", "skills/")) for rule in rules), name
+        if name == "harness":
+            continue
+        allowed = FABRIC_EXECUTED_DEPENDENCIES if name == "fabric" else frozenset()
+        docs_skills = {rule for rule in rules if rule.startswith(("docs/", "skills/"))}
+        assert docs_skills <= allowed, name
     # Fabric tests read config/ fixtures (review profiles, acceptance
     # scenarios, agent-fabric.yaml), so config changes rerun the fabric job.
     assert "config/**" in flattened["fabric"]
@@ -208,6 +258,29 @@ def test_ci_gates_build_jobs_behind_path_filters_and_one_aggregate_check() -> No
     command = str(status_step.get("run", ""))
     assert '.value.result != "success" and .value.result != "skipped"' in command
     assert "exit 1" in command
+
+
+def test_every_tracked_file_matches_at_least_one_path_filter() -> None:
+    # PR #168 repair cycle 2 (Findings A and C): scripts/check-harness scans
+    # every tracked file, so a tracked file outside every filter would let a
+    # PR touching only that file skip all build jobs, pass the all-skipped
+    # ci-status aggregate, and break the next push to main. This closure
+    # assertion makes such residue impossible to reintroduce.
+    flattened = _path_filters(_workflow())
+    arms = sorted({rule for rules in flattened.values() for rule in rules})
+    tracked = subprocess.run(
+        ["git", "ls-files"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert tracked
+    unmatched = [path for path in tracked if not any(_filter_matches(arm, path) for arm in arms)]
+    assert unmatched == [], (
+        "tracked files outside every CI path filter; add each one to the "
+        f"filter of the job that validates it: {unmatched}"
+    )
 
 
 def test_ci_runs_complete_harness_and_fabric_gates() -> None:

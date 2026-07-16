@@ -38,12 +38,14 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         with:
+          # Invariant: every tracked file matches at least one filter, so no
+          # change can skip every build job while ci-status reports green.
           # The harness filter covers every surface scripts/check-harness
-          # validates (skills, docs, root documents, release attribution
-          # files), so policy-gated changes always run the policy gate
-          # (PR #168 repair cycle 1). Changes outside every filter — for
-          # example CHANGELOG.md — skip all build jobs and complete on
-          # detect-changes plus ci-status alone.
+          # validates — skills, docs, root documents, release attribution
+          # files, and the repo-wide scan residue (CHANGELOG.md, .gitignore)
+          # — so policy-gated changes always run the policy gate.
+          # tests/test_ci_repository_assurance_policy.py enforces the
+          # invariant against `git ls-files` (PR #168 repair cycle 2).
           filters: |
             ci-contract: &ci-contract
               - '.github/workflows/ci.yml'
@@ -64,8 +66,10 @@ jobs:
               - 'scripts/**'
               - 'skills/**'
               - 'tests/**'
+              - '.gitignore'
               - 'ACKNOWLEDGEMENTS.md'
               - 'AGENTS.md'
+              - 'CHANGELOG.md'
               - 'HARNESS.md'
               - 'LICENSE'
               - 'LICENSES/**'
@@ -79,6 +83,12 @@ jobs:
               - *node-workspace
               - 'config/**'
               - 'runtime/agent-fabric/**'
+              # Executed by fabric tests: the model-routing acceptance suite
+              # runs scripts/model-route, and the delivery-run fixture runs
+              # skills/deliver/scripts/*.py. Exact executed dependencies
+              # only — the policy test rejects broader docs/skills globs.
+              - 'scripts/model-route'
+              - 'skills/deliver/scripts/**'
             console:
               - *ci-contract
               - *node-workspace
