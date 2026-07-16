@@ -2730,6 +2730,32 @@ export class Fabric {
         operatorCommand(credential, request.command);
         return this.#projectSessions.closeProjectSession(credential.context, request);
       }
+      case FABRIC_OPERATIONS.projectSessionLaunchPrepare: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionLaunchPrepare];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        if (
+          request.projectId !== credential.context.projectId ||
+          credential.projectSessionId !== request.projectSessionId ||
+          credential.sessionGeneration !== request.expectedSessionGeneration
+        ) {
+          throw new ProjectFabricCoreError(
+            "CAPABILITY_FORBIDDEN",
+            "launch preparation requires the exact session-bound operator capability",
+          );
+        }
+        if (this.#launchCustody === undefined) {
+          throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "launch custody runtime is unavailable");
+        }
+        const replayed = this.#operatorActions.replayLaunchPreview(credential.context, request);
+        if (replayed !== undefined) return replayed;
+        const intent = await this.#launchCustody.prepareLaunchIntent(request);
+        return await this.#operatorActions.preview(credential.context, {
+          command: request.command,
+          projectId: request.projectId,
+          intent,
+        });
+      }
       case FABRIC_OPERATIONS.membershipBind: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.membershipBind];
         if (request.origin !== "operator") throw new FabricError("CAPABILITY_FORBIDDEN", "agent membership binding uses the chair dispatcher");

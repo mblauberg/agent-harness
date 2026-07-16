@@ -25,6 +25,45 @@ Promote the coordination-only agent fabric into a safely activated local model-e
 7. Herdr observation reads a durable monotonic event cursor and renders one-line summaries in a separate local observer pane. Message events include a terminal-safe 160-character body preview. It never types into an agent composer, receives mail or acknowledges delivery.
 8. Seat expiry warnings are automatic. Authority extension remains an explicit operator action: close the old run only after daemon-produced barrier evidence, provision a fresh immutable generation, atomically cut over the roster, reconnect every seat, and run health plus round-trip smokes. The global 31-day maximum remains non-configurable by projects.
 
+## Fresh coordination-run launch
+
+A trusted local Console starts the first current-schema coordination run through
+the same project-session lifecycle used thereafter. It creates the session,
+selects the session-bound operator capability, and moves the reviewed launch
+packet to `awaiting_launch`. The negotiated `launch-custody.v1` extension then
+exposes:
+
+```text
+fabric.v1.project-session-launch.prepare
+```
+
+Its request contains only the operator command context, `projectId`,
+`projectSessionId`, `expectedSessionGeneration`, and the reviewed
+`launchPacketRef`. The daemon reads the current project/session rows, closes the
+adapter contract and resource plan, normalises the chair authority, computes
+all CAS and digest bindings, validates the resulting launch intent, and returns
+an ordinary consequential `OperatorActionPreview`. The Console commits that
+preview with `fabric.v1.operator-action.commit`; it never authors the launch
+intent or its custody digests.
+
+Preparation is read-only and command replay returns the same preview. An
+interruption before preview persistence is retried with the same request. A
+commit interruption uses operator-action status plus idempotent commit replay and
+launch-specific recovery;
+a proved no-effect launch moves to `launch_failed`, from which preparation
+derives the exact failed action and accepts only a fresh packet, run and
+provider-action identity. Ambiguous provider effect remains quarantined and is
+not replayed.
+
+After the chair launch commits, the chair creates or attaches the Claude peer
+through the existing agent protocol. Only then may the existing `mcp provision`
+command bind a complete Codex/Claude roster and install an immutable seat
+generation. `mcp provision` remains renewal-only: it still requires an active
+run, current chair lease and at least two existing agents. The unprovisioned MCP
+server remains available with no Fabric tools or resources until that sequence
+has completed. This path adds no provider login, provider activation, database
+migration or new authority model.
+
 ## Activation order
 
 1. Claude Agent SDK.

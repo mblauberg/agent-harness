@@ -11,6 +11,7 @@ import type {
   OperatorActionReconcileRequest,
   OperatorActionStatus,
   OperatorActionStatusRequest,
+  ProjectSessionLaunchPrepareRequest,
   ProjectSessionLaunchCurrentState,
   LaunchProviderActionJournalRefV1,
   RegisteredExternalEffectState,
@@ -302,6 +303,44 @@ export class OperatorActionStore {
     if (!Number.isSafeInteger(this.#previewTtlMs) || this.#previewTtlMs < 1) {
       throw new TypeError("operator preview TTL must be a positive safe integer");
     }
+  }
+
+  replayLaunchPreview(
+    context: AuthenticatedOperatorContext,
+    request: ProjectSessionLaunchPrepareRequest,
+  ): OperatorActionPreview | undefined {
+    const previewId = `preview_${sha256(`${context.operatorId}:${request.command.commandId}`).slice(0, 48)}`;
+    const stored = this.#database.prepare(`
+      SELECT operator_id, project_session_id, operation, payload_digest, preview_json
+        FROM operator_previews WHERE preview_id=?
+    `).get(previewId);
+    if (!isRow(stored)) return undefined;
+    const envelope = parseStoredPreview(text(stored, "preview_json"));
+    const intent = envelope.preview.intent;
+    const exactBinding =
+      text(stored, "operator_id") === context.operatorId &&
+      text(stored, "project_session_id") === request.projectSessionId &&
+      text(stored, "operation") === "launch" &&
+      intent.kind === "project-session-launch" &&
+      intent.projectId === request.projectId &&
+      intent.projectSessionId === request.projectSessionId &&
+      intent.expectedSessionRevision === request.command.expectedRevision &&
+      intent.expectedSessionGeneration === request.expectedSessionGeneration &&
+      canonicalJson(intent.launchPacketRef) === canonicalJson(request.launchPacketRef);
+    const payloadDigest = intent.kind === "project-session-launch"
+      ? sha256(canonicalJson(sanitisedPreviewRequest({
+          command: request.command,
+          projectId: request.projectId,
+          intent,
+        })))
+      : "";
+    if (!exactBinding || text(stored, "payload_digest") !== payloadDigest) {
+      throw new ProjectFabricCoreError(
+        "DEDUPE_CONFLICT",
+        "launch preparation command identity was reused with changed input",
+      );
+    }
+    return envelope.preview;
   }
 
   async preview(

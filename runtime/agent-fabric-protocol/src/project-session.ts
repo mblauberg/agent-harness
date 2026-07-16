@@ -171,6 +171,14 @@ export type ProjectSessionTransitionRequest = {
     | { to: "awaiting_acceptance"; closureEvidence: ArtifactRef };
 };
 
+export type ProjectSessionLaunchPrepareRequest = {
+  command: OperatorMutationContext;
+  projectId: ProjectId;
+  projectSessionId: ProjectSessionId;
+  expectedSessionGeneration: number;
+  launchPacketRef: ArtifactRef;
+};
+
 export type ProjectSessionCloseRequest = {
   command: OperatorMutationContext;
   projectSessionId: ProjectSessionId;

@@ -165,8 +165,13 @@ describe("public protocol credential routing", () => {
     const launch = operatorOperationsForActions(["launch"]);
     expect(launch).toEqual(expect.arrayContaining([
       FABRIC_OPERATIONS.projectSessionCreate,
+      FABRIC_OPERATIONS.projectSessionLaunchPrepare,
       FABRIC_OPERATIONS.intakeDraftCreate,
+      FABRIC_OPERATIONS.operatorActionCommit,
+      FABRIC_OPERATIONS.operatorActionStatus,
     ]));
+    expect(launch).not.toContain(FABRIC_OPERATIONS.operatorActionPreview);
+    expect(launch).not.toContain(FABRIC_OPERATIONS.operatorActionReconcile);
     expect(launch).not.toContain(FABRIC_OPERATIONS.chairTakeover);
 
     const consequential = operatorOperationsForActions(["pause", "git", "external-effect"]);

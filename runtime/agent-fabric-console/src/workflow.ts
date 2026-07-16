@@ -1054,7 +1054,7 @@ export function createProductionConsoleWorkflowPlanner(
       switch (stored.review.kind) {
         case "project-session-create": {
           const client = options.client.projectSessions;
-          if (client === undefined) throw new Error("project-session creation is unavailable");
+          if (client?.create === undefined) throw new Error("project-session creation is unavailable");
           const request = parseOperation<ProjectSessionCreateRequest>(
             FABRIC_OPERATIONS.projectSessionCreate,
             { ...stored.request, command },
@@ -1066,7 +1066,7 @@ export function createProductionConsoleWorkflowPlanner(
         }
         case "project-session-transition": {
           const client = options.client.projectSessions;
-          if (client === undefined) throw new Error("project-session transition is unavailable");
+          if (client?.transition === undefined) throw new Error("project-session transition is unavailable");
           result = await client.transition(parseOperation<ProjectSessionTransitionRequest>(
             FABRIC_OPERATIONS.projectSessionTransition,
             { ...stored.request, command },
@@ -1075,7 +1075,7 @@ export function createProductionConsoleWorkflowPlanner(
         }
         case "project-session-close": {
           const client = options.client.projectSessions;
-          if (client === undefined) throw new Error("project-session acceptance is unavailable");
+          if (client?.close === undefined) throw new Error("project-session acceptance is unavailable");
           result = await client.close(parseOperation<ProjectSessionCloseRequest>(
             FABRIC_OPERATIONS.projectSessionClose,
             { ...stored.request, command },
