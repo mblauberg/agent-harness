@@ -75,6 +75,7 @@ import type {
   ProjectSessionCloseRequest,
   ProjectSessionCreateRequest,
   ProjectSessionGetRequest,
+  ProjectSessionLaunchPrepareRequest,
   ProjectSessionTransitionRequest,
 } from "./project-session.js";
 import type {
@@ -122,9 +123,10 @@ export interface ProtocolRpcTransport {
 export interface ProjectSessionClient {
   create(input: ProjectSessionCreateRequest): Promise<ProjectSession>;
   get(input: ProjectSessionGetRequest): Promise<ProjectSession>;
-  transition(input: ProjectSessionTransitionRequest): Promise<ProjectSession>;
-  close(input: ProjectSessionCloseRequest): Promise<ProjectSession>;
-  bindMembership(input: Extract<MembershipBindRequest, { origin: "operator" }>): Promise<MembershipBindResult>;
+  transition?(input: ProjectSessionTransitionRequest): Promise<ProjectSession>;
+  close?(input: ProjectSessionCloseRequest): Promise<ProjectSession>;
+  prepareLaunch?(input: ProjectSessionLaunchPrepareRequest): Promise<OperatorActionPreview>;
+  bindMembership?(input: Extract<MembershipBindRequest, { origin: "operator" }>): Promise<MembershipBindResult>;
 }
 
 export interface BaselineFabricClient {
@@ -308,11 +310,30 @@ function principalOperations<Principal extends OperationPrincipalKind>(
 
 function projectSessions(transport: ProtocolRpcTransport): ProjectSessionClient {
   return {
-    create: (input) => transport.call(FABRIC_OPERATIONS.projectSessionCreate, input),
-    get: (input) => transport.call(FABRIC_OPERATIONS.projectSessionGet, input),
-    transition: (input) => transport.call(FABRIC_OPERATIONS.projectSessionTransition, input),
-    close: (input) => transport.call(FABRIC_OPERATIONS.projectSessionClose, input),
-    bindMembership: (input) => transport.call(FABRIC_OPERATIONS.membershipBind, input),
+    create: (input: ProjectSessionCreateRequest) =>
+      transport.call(FABRIC_OPERATIONS.projectSessionCreate, input),
+    get: (input: ProjectSessionGetRequest) =>
+      transport.call(FABRIC_OPERATIONS.projectSessionGet, input),
+    ...(hasFeature(transport, "project-sessions.v1") &&
+      hasOperation(transport, FABRIC_OPERATIONS.projectSessionTransition)
+      ? { transition: (input: ProjectSessionTransitionRequest) =>
+          transport.call(FABRIC_OPERATIONS.projectSessionTransition, input) }
+      : {}),
+    ...(hasFeature(transport, "project-sessions.v1") &&
+      hasOperation(transport, FABRIC_OPERATIONS.projectSessionClose)
+      ? { close: (input: ProjectSessionCloseRequest) =>
+          transport.call(FABRIC_OPERATIONS.projectSessionClose, input) }
+      : {}),
+    ...(hasFeature(transport, "launch-custody.v1") &&
+      hasOperation(transport, FABRIC_OPERATIONS.projectSessionLaunchPrepare)
+      ? { prepareLaunch: (input: ProjectSessionLaunchPrepareRequest) =>
+          transport.call(FABRIC_OPERATIONS.projectSessionLaunchPrepare, input) }
+      : {}),
+    ...(hasFeature(transport, "project-sessions.v1") &&
+      hasOperation(transport, FABRIC_OPERATIONS.membershipBind)
+      ? { bindMembership: (input: Extract<MembershipBindRequest, { origin: "operator" }>) =>
+          transport.call(FABRIC_OPERATIONS.membershipBind, input) }
+      : {}),
   };
 }
 
@@ -382,9 +403,6 @@ export function createOperatorClient(transport: ProtocolRpcTransport): Negotiate
     ...(hasFeature(transport, "project-sessions.v1") && hasOperations(transport, [
       FABRIC_OPERATIONS.projectSessionCreate,
       FABRIC_OPERATIONS.projectSessionGet,
-      FABRIC_OPERATIONS.projectSessionTransition,
-      FABRIC_OPERATIONS.projectSessionClose,
-      FABRIC_OPERATIONS.membershipBind,
     ]) ? { projectSessions: projectSessions(transport) } : {}),
     ...(hasFeature(transport, "operator-control.v1") && hasOperations(transport, [
       FABRIC_OPERATIONS.operatorAttach,

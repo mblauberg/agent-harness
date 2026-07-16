@@ -6,6 +6,7 @@ import {
   parseLaunchPacketV1,
   parseLaunchResourcePlanV1,
   parseProjectSessionLaunchCurrentState,
+  parseProjectSessionLaunchIntent,
   parseArtifactRef,
   parseLaunchProviderActionJournalRefV1,
   parseOperationResult,
@@ -829,6 +830,80 @@ export class LaunchCustodyService {
 
   observeChairBridgeLoss(input: ChairBridgeLossObservation): boolean {
     return this.#database.transaction(() => this.#persistChairBridgeLoss(input))();
+  }
+
+  async prepareLaunchIntent(input: Readonly<{
+    projectId: string;
+    projectSessionId: string;
+    expectedSessionGeneration: number;
+    launchPacketRef: ArtifactRef;
+  }>): Promise<LaunchCustodyIntent> {
+    this.#fault("launch:intent-prepare:begin");
+    const project = row(this.#database.prepare(`
+      SELECT canonical_root, trust_record_digest, revision
+        FROM projects WHERE project_id=?
+    `).get(input.projectId), "launch project");
+    const root = realpathSync(text(project, "canonical_root"));
+    if (root !== text(project, "canonical_root")) forbidden("trusted project root is not canonical");
+    const session = row(this.#database.prepare(`
+      SELECT state, revision, generation, budget_ref, launch_packet_path, launch_packet_digest
+        FROM project_sessions WHERE project_session_id=? AND project_id=?
+    `).get(input.projectSessionId, input.projectId), "launch project session");
+    if (integer(session, "generation") !== input.expectedSessionGeneration) {
+      stale("launch project-session generation changed");
+    }
+    const sessionState = text(session, "state");
+    let retryOf: ProjectSessionLaunchIntent["retryOf"];
+    if (sessionState === "awaiting_launch") {
+      assertSameArtifact(input.launchPacketRef, parseArtifactRef({
+        path: text(session, "launch_packet_path"),
+        digest: exactDigest(session.launch_packet_digest, "stored launch packet digest"),
+      }, "stored launch packet"), "stored launch packet");
+    } else if (sessionState === "launch_failed") {
+      const failed = row(this.#database.prepare(`
+        SELECT provider_adapter_id, provider_action_id
+          FROM project_session_launch_custody
+         WHERE project_session_id=?
+         ORDER BY custody_attempt_generation DESC LIMIT 1
+      `).get(input.projectSessionId), "failed launch custody");
+      retryOf = {
+        providerAdapterId: text(failed, "provider_adapter_id"),
+        providerActionId: text(failed, "provider_action_id") as never,
+      };
+    } else {
+      throw new ProjectFabricCoreError(
+        "LIFECYCLE_PRECONDITION_FAILED",
+        "launch preparation requires awaiting_launch or proved launch_failed",
+      );
+    }
+    const packet = parsePacket(jsonArtifact(root, input.launchPacketRef, "launch packet"), root);
+    parsePlan(jsonArtifact(root, packet.resourcePlanRef, "launch resource plan"));
+    const contract = await this.#adapterContracts.inspect(packet.provider.adapterId);
+    const intent = parseProjectSessionLaunchIntent({
+      kind: "project-session-launch",
+      projectId: input.projectId,
+      projectSessionId: input.projectSessionId,
+      expectedProjectRevision: integer(project, "revision"),
+      expectedSessionRevision: integer(session, "revision"),
+      expectedSessionGeneration: integer(session, "generation"),
+      trustRecordDigest: exactDigest(project.trust_record_digest, "launch trust record digest"),
+      launchPacketRef: input.launchPacketRef,
+      authorityRef: `sha256:${sha256(canonicalJson(packet.chairAuthority))}`,
+      budgetRef: text(session, "budget_ref"),
+      resourcePlanRef: packet.resourcePlanRef,
+      providerAdapterId: packet.provider.adapterId,
+      providerActionId: packet.provider.actionId,
+      providerContractDigest: `sha256:${sha256(canonicalJson(contract))}`,
+      resourceStateDigest: computeLaunchResourceStateDigest(
+        this.#database,
+        input.projectId,
+        input.projectSessionId,
+      ),
+      ...(retryOf === undefined ? {} : { retryOf }),
+    });
+    await this.inspect(intent);
+    this.#fault("launch:intent-prepare:complete");
+    return intent;
   }
 
   async readChairLiveHandoffCurrentState(

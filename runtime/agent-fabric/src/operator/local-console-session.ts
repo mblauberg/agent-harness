@@ -50,6 +50,7 @@ const SESSION_ACTIONS = [
   "stop",
 ] as const satisfies readonly NonTakeoverOperatorAction[];
 const NON_ATTACHABLE_SESSION_STATES = new Set(["closed", "cancelled", "launch_failed"]);
+const NON_SELECTABLE_SESSION_STATES = new Set(["closed", "cancelled"]);
 const REQUIRED_FEATURES: readonly ProtocolFeature[] = Object.freeze([
   "operator-control.v1",
   "operator-projection.v1",
@@ -327,7 +328,7 @@ function resultProtocolIncompatible(
   });
 }
 
-async function discoverAttachableSessions(input: {
+async function discoverProjectSessions(input: {
   client: NegotiatedOperatorClient;
   credential: OperatorCapabilityCredential;
   projectId: ProjectId;
@@ -360,7 +361,7 @@ async function discoverAttachableSessions(input: {
         throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
       }
       ids.add(session.projectSessionId);
-      if (!NON_ATTACHABLE_SESSION_STATES.has(session.state)) discovered.push(session);
+      discovered.push(session);
     }
     if (!discovery.sessions.value.hasMore) return discovered;
     const next = discovery.sessions.value.nextCursor;
@@ -369,6 +370,29 @@ async function discoverAttachableSessions(input: {
     }
     after = next;
   }
+}
+
+function attachableSessions(
+  sessions: readonly ProjectSessionDiscovery[],
+): readonly ProjectSessionDiscovery[] {
+  return sessions.filter(({ state }) => !NON_ATTACHABLE_SESSION_STATES.has(state));
+}
+
+/**
+ * An explicitly named session is selectable while an operator may still act on
+ * it: live states plus `launch_failed`, whose recovery path is a fresh
+ * operator-prepared launch on the same session. Closed and cancelled sessions
+ * stay non-selectable.
+ */
+function selectableSession(
+  sessions: readonly ProjectSessionDiscovery[],
+  projectSessionId: ProjectSessionId,
+): ProjectSessionDiscovery | undefined {
+  const session = sessions.find(
+    (candidate) => candidate.projectSessionId === projectSessionId,
+  );
+  if (session === undefined || NON_SELECTABLE_SESSION_STATES.has(session.state)) return undefined;
+  return session;
 }
 
 function mutationContext(input: {
@@ -554,19 +578,18 @@ export async function openLocalOperatorConsoleSession(
     });
     projectClient = projectConnection.client;
     const projectCompatibility = projectConnection.compatibility;
-    let attachableProjectSessions = await discoverAttachableSessions({
+    let discoveredProjectSessions = await discoverProjectSessions({
       client: projectClient,
       credential: project.credential as OperatorCapabilityCredential,
       projectId: project.projectId as ProjectId,
       canonicalRoot: identity.canonicalRoot,
     });
+    let attachableProjectSessions = attachableSessions(discoveredProjectSessions);
     const selected = options.projectSessionId === undefined
       ? attachableProjectSessions.length === 1
         ? attachableProjectSessions[0]
         : undefined
-      : attachableProjectSessions.find(
-          ({ projectSessionId }) => projectSessionId === options.projectSessionId,
-        );
+      : selectableSession(discoveredProjectSessions, options.projectSessionId);
     if (options.projectSessionId !== undefined && selected === undefined) {
       throw new LocalOperatorConsoleUnavailableError("authority-unavailable");
     }
@@ -650,26 +673,23 @@ export async function openLocalOperatorConsoleSession(
     let selectionQueue: Promise<void> = Promise.resolve();
     const refreshProjectSessions = async (): Promise<readonly ProjectSessionDiscovery[]> => {
       if (closed) throw new Error("local Console session is closed");
-      attachableProjectSessions = await discoverAttachableSessions({
+      discoveredProjectSessions = await discoverProjectSessions({
         client: retainedProjectClient,
         credential: projectCredentialValue,
         projectId,
         canonicalRoot: identity.canonicalRoot,
       });
+      attachableProjectSessions = attachableSessions(discoveredProjectSessions);
       return attachableProjectSessions;
     };
     const selectProjectSession = async (projectSessionId: ProjectSessionId): Promise<void> => {
       const change = async (): Promise<void> => {
         if (closed) throw new Error("local Console session is closed");
         if (activeProjectSessionId === projectSessionId && sessionClient !== undefined) return;
-        let selectedSession = attachableProjectSessions.find(
-          (candidate) => candidate.projectSessionId === projectSessionId,
-        );
+        let selectedSession = selectableSession(discoveredProjectSessions, projectSessionId);
         if (selectedSession === undefined) {
           await refreshProjectSessions();
-          selectedSession = attachableProjectSessions.find(
-            (candidate) => candidate.projectSessionId === projectSessionId,
-          );
+          selectedSession = selectableSession(discoveredProjectSessions, projectSessionId);
         }
         if (selectedSession === undefined) {
           throw new LocalOperatorConsoleUnavailableError("authority-unavailable");

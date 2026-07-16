@@ -679,6 +679,7 @@ describe("public local operator Console session", () => {
     ]);
 
     let selected: Awaited<ReturnType<typeof openLocalOperatorConsoleSession>> | undefined;
+    let retrySelected: Awaited<ReturnType<typeof openLocalOperatorConsoleSession>> | undefined;
     try {
       selected = await openLocalOperatorConsoleSession({
         projectRoot: projectA,
@@ -703,15 +704,37 @@ describe("public local operator Console session", () => {
           value: { projectSessionId: "session_pagination_active" },
         },
       });
+      await selected.selectProjectSession("session_pagination_terminal_000" as never);
+      expect(selected.projectSessionId).toBe("session_pagination_terminal_000");
+      expect(selected.attachableProjectSessions.map(({ projectSessionId }) => projectSessionId)).toEqual([
+        "session_pagination_active",
+      ]);
+      retrySelected = await openLocalOperatorConsoleSession({
+        projectRoot: projectA,
+        projectSessionId: "session_pagination_terminal_001" as never,
+        surface: "standalone",
+        paths,
+        daemon: { executionProfile: "headless", workspaceRoots: [projectA, projectB] },
+        clientId: "console_pagination_retry",
+      });
+      expect(retrySelected.projectSessionId).toBe("session_pagination_terminal_001");
+      expect(retrySelected.attachableProjectSessions.map(({ projectSessionId }) => projectSessionId)).toEqual([
+        "session_pagination_active",
+      ]);
     } finally {
       await Promise.allSettled([
+        retrySelected?.close() ?? Promise.resolve(),
         selected?.close() ?? Promise.resolve(),
         project.close(),
       ]);
     }
     await expectSecretsAbsent(
       [paths.stateDirectory, paths.runtimeDirectory],
-      [project.credential.token, ...(selected === undefined ? [] : [selected.projectCredential.token, selected.credential.token])],
+      [
+        project.credential.token,
+        ...(selected === undefined ? [] : [selected.projectCredential.token, selected.credential.token]),
+        ...(retrySelected === undefined ? [] : [retrySelected.projectCredential.token, retrySelected.credential.token]),
+      ],
     );
   });
 
