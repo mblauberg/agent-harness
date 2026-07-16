@@ -1,17 +1,18 @@
 ---
 name: work-map
-description: "Use when a multi-session effort needs one persistent route showing current leg, blockers, dependencies, and next work. Not for one-session checklists or handoffs; use session."
+description: "Use when a multi-session effort needs one durable, curated route linking its specification and work items. Not for live status, ownership, dependencies, user gates or session handoffs; use the project's work tracker and session."
 ---
 
 # work-map: the map for multi-session efforts
 
 A `session` handoff carries one session's baton. Across many sessions or agents,
-the work map holds the route: one file per effort, updated as legs complete and
-read first on resume.
+the work map preserves the stable route: one file per effort, read for durable
+orientation and changed only when that route changes.
 
-Record curated project/run/lead dependencies, outcome legs and human gates.
-The map is not live task truth: link canonical Fabric or project artifacts and
-never infer claims, completion, leases or current membership from the map.
+The project's work tracker owns live work state. In Provenant, GitHub issues
+own the current owner, dependencies and user gates, while Project Status owns
+workflow state. An effort map links those owners and never restates current
+status, owner, dependencies or user gates.
 
 ## The map file
 
@@ -20,61 +21,52 @@ Use the project's canonical effort file. If no owner exists, propose
 otherwise return the map without writing. Structure:
 
 ```markdown
-# EFFORT: <name>        Updated: YYYY-MM-DD  Status: active|blocked|done
+# EFFORT: <name>
 
 ## Destination
-What done looks like, in one paragraph. Link the spec.
+What the route is intended to deliver. Link the owning specification.
 
-## Route (legs, ordered)
-- [x] Leg 1 — <outcome> (done YYYY-MM-DD, commit/PR ref)
-- [>] Leg 2 — <outcome> — IN PROGRESS, handoff: HANDOFF-....md
-- [ ] Leg 3 — <outcome> (depends: leg 2)
+## Route
+- [Programme issue](https://example.invalid/issues/1)
+- [Related delivery](https://example.invalid/pull/2)
 
-## Blocked / parked
-- <branch> — waiting on <gate/owner>, register row <ref>
-
-## Invariants for every leg
-Rules no session may break, with links — not restated content.
-
-## Trail (one line per route transition, newest first)
-- YYYY-MM-DD: <leg/status/dependency change>. <next>.
+## Invariants
+- [Governing decision](https://example.invalid/decisions/1)
 ```
 
 ## Rules
 
-- **Legs are outcomes, not tasks**: each is independently verifiable and small
-  enough for one session. Split an oversized leg at the next update.
-- **Resume order** (interleaves with `session` start): project state file →
-  this map → the claimed leg's handoff only → start. Never reconstruct the
-  route from old transcripts or piled-up handoffs; consumed handoffs should
-  already be archived.
-- **Update on route transitions, not every session**: activate/block/complete a
-  leg or change a dependency/gate. The map is curated durable project state;
-  session-level detail stays in handoffs.
-- **One chair/map owner writes the map.** Parallel workers write namespaced
-  claim or handoff artifacts; the chair records `[>]` and `[x]` after checking
-  the leg is unclaimed. Do not race on the shared file.
-  Completing `[x]` consumes and archives that handoff in the same update, so
-  finished legs never retain an apparently-current baton.
-- **Effort done** → status `done`, then archive the map with the project's
-  move-never-delete rule (`engineering-docs`).
+- **Link, never restate live work state.** Do not add status fields, task
+  checkboxes, completion claims, owner names, dependencies, blockers or user
+  gates. Readers follow the linked issue and its Project Status field.
+- **Route entries are links, not task summaries.** Stable grouping and ordering
+  are allowed; issue and pull-request prose carries changing detail.
+- **Resume order:** project state file → issue and Project Status → this map for
+  route context → the claimed session handoff only. Never reconstruct the route
+  from transcripts or piled-up handoffs.
+- **Handoffs stay temporary.** They carry continuity for an active session or
+  run, are not linked as route state, and are removed or archived when consumed.
+- **One map writer.** Parallel workers write namespaced continuity artifacts;
+  one chair updates the shared route after checking the tracker.
+- Archive a route map under the project's move-never-delete rule only when the
+  owning issue records that disposition.
 - Validate an authored map with
-  `scripts/validate_work_map.py <EFFORT-file>` before handoff. It enforces the
-  single active leg and consumed-handoff invariants.
+  `scripts/validate_work_map.py <EFFORT-file>` before handoff.
 
 ## Red flags
 
-- Three handoff files and no map → you needed work-map a session ago.
-- Map restates the spec or invariants verbatim → link, don't copy; the map
-  is a route, not a briefing pack.
-- Trail growing past ~20 lines → prune consumed history to the archive;
-  the route section already records outcomes.
-- "I'll re-plan the whole effort" mid-route → re-planning is a leg: grill it,
-  update Destination/Route once, dated.
+- `Status:`, task checkboxes or an "Updated" freshness claim → delete them and
+  link the work tracker.
+- Map restates a specification, decision or issue → link, don't copy.
+- A handoff appears as route state → keep it in the temporary continuity layer.
+- Re-planning changes accepted scope → return to `scope`, then update stable
+  route links after the owning issue records the decision.
 
 ## Adapter-absent path
 
-Console, Herdr and GitHub are optional. Continue from canonical project
-artifacts and emit the skill-owned artifact kind in
-[portable-workflow.v1.json](portable-workflow.v1.json). That filesystem
-artifact remains a curated route, never live task truth.
+When GitHub is unavailable, use the project's designated canonical work
+tracker; a project with no tracker names one canonical work-state owner in
+its state file before any route map links it. Console and Herdr remain
+optional. The portable
+[effort-map artifact](portable-workflow.v1.json) records curated route links;
+it never becomes live task truth.

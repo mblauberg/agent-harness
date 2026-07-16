@@ -5,7 +5,7 @@
 ### Conversational intake
 
 The Console shall provide a task input with an expandable structured plan. The
-human may instead open a detailed form or choose `Discuss/scoping first`.
+user may instead open a detailed form or choose `Discuss/scoping first`.
 
 Each intake is a Fabric-owned revisioned entity with a stable `intake_id` and
 states `draft`, `awaiting-chair`, `discussing`, `awaiting-human`, `accepted`,

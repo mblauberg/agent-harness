@@ -16,7 +16,7 @@ its companion.
 Default to static analysis and frozen routing fixtures. Do not inspect session
 history, private memory or project content merely because it exists.
 
-For personal work, a direct human request authorises read-only analysis of the
+For personal work, a direct user request authorises read-only analysis of the
 named local histories. Do not require a second privacy receipt,
 redaction pass, retention date or minimum-cell suppression. Read histories in
 place; keep temporary excerpts local and run-owned; never commit raw transcripts
@@ -24,12 +24,12 @@ or promote them to project truth. Ask only when roots or the useful time window
 are materially ambiguous. Unsupported or unattributable evidence is `N/A`,
 never zero.
 
-An aggregate or paraphrased report to the human in the same authorised
+An aggregate or paraphrased report to the user in the same authorised
 session is local delivery, not sharing/export, and needs no second
 disclosure confirmation. Run-owned scratch is allowed. Separate
 authority is required before creating a persistent repository/shared artifact,
 sending raw excerpts to another provider, or disclosing to a new audience or
-external destination. When authorised, confirm with the human the audience,
+external destination. When authorised, confirm with the user the audience,
 destination and whether excerpts are allowed; exclude secrets and out-of-scope
 third-party content.
 
@@ -42,7 +42,7 @@ third-party content.
    provider-sidecar parity, provenance/licence, authority/state writes, scripts,
    hooks/MCP/network surfaces and deterministic fixtures.
 3. If local history analysis was requested, classify provenance before
-   calculating signals: human, platform metadata, notification, managed worker,
+   calculating signals: user, platform metadata, notification, managed worker,
    skill injection, command or unknown. Never infer selection from a skill
    merely being loaded, and state small-sample limitations.
 4. Use balanced, frozen routing evals for undertrigger and overtrigger

@@ -24,7 +24,7 @@ tried before reaching for multiple agents:
 
 | Topology | Use when | Cost |
 |---|---|---|
-| **Orchestrator-workers (supervisor)** | central control, human oversight, decomposable tasks | supervisor context is a bottleneck; its failure cascades; paraphrase/"telephone" loss |
+| **Orchestrator-workers (supervisor)** | central control, user oversight, decomposable tasks | supervisor context is a bottleneck; its failure cascades; paraphrase/"telephone" loss |
 | **Handoff (peer routing)** | can't know which specialist is needed until the conversation unfolds | no central state-keeper; divergence risk |
 | **Peer network (decentralised)** | breadth-first exploration; rigid planning counterproductive | coordination cost grows with agent count; needs convergence constraints |
 | **Hierarchical (strategy/plan/execution)** | large projects with genuine management layers | inter-layer overhead; strategy-execution misalignment |

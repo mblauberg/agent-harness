@@ -23,7 +23,7 @@ concurrent-write consistency.
   traces/              # dispatches, failovers, objective checks, disagreements
   SYNTHESIS.md         # the orchestrator's merged result
   FINAL_GATE.md        # completion checklist; fail closed if any required gate is missing
-  decisions.md         # resolved calls + unresolved-for-human items
+  decisions.md         # resolved calls + unresolved-for-user items
 ```
 
 ## Manifest schema
@@ -42,7 +42,7 @@ One row per artifact so any layer can find prior work without re-reading everyth
 `FINAL_GATE.md` should include P0/P1 findings triaged, objective anchors, cross-family verifier
 guarantee, `CROSS-FAMILY-NOT-RUN` exceptions, and high-stakes/low-oracle coverage. A cross-family
 verifier certifies only when `status=ok`, `cross_family=true`, and
-`read_only_guarantee=enforced/oauth_safe_mode`; best-effort results are scout signals unless a human
+`read_only_guarantee=enforced/oauth_safe_mode`; best-effort results are scout signals unless a user
 accepts the weaker guarantee.
 
 ## Rules

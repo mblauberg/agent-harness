@@ -33,5 +33,5 @@ review verdicts, artifact digests and pending gates into tracked project docs,
 fixtures and the PR evidence index. That curated projection is public evidence;
 it does not replace or weaken validation of the private canonical receipt.
 
-`awaiting_acceptance` is machine-ready, not complete. Human acceptance and any
+`awaiting_acceptance` is machine-ready, not complete. User acceptance and any
 production promotion remain separate gates.

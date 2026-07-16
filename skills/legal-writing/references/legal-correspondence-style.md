@@ -45,7 +45,7 @@ Use `Hi` only for informal internal or familiar professional correspondence wher
 - Do not threaten, bait, editorialise or sound wounded.
 - Do not over-apologise or over-explain.
 - Do not make legal threats, concessions, undertakings, settlement offers, service admissions or rights-reservation statements unless the user instruction and forum context support them.
-- If a reply is likely to escalate conflict, draft a short holding response or suggest a non-email step for human decision.
+- If a reply is likely to escalate conflict, draft a short holding response or suggest a non-email step for user decision.
 
 ## Concision Rules
 

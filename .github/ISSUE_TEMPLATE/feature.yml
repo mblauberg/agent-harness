@@ -21,7 +21,7 @@ body:
       description: >-
         What went wrong in real work? Give the task you were doing, what the
         harness did, and what it cost you: a wrong result, a wasted run, a gate
-        that missed something, a human review that should not have been needed.
+        that missed something, a user review that should not have been needed.
     validations:
       required: true
 

@@ -4,7 +4,7 @@
 > summarized, compacted, crash, or hit transient failures many times. Nothing
 > in the conversation survives. The conductor does no deep work in its own
 > context — it delegates, persists every meaningful result to a file, and
-> keeps only a one-line pointer in-head. A fresh session (or a human) must be
+> keeps only a one-line pointer in-head. A fresh session (or a user) must be
 > able to resume from the files alone.
 
 *Implemented by `templates/GOAL.template.md`, `templates/STATE.template.md`,
@@ -25,7 +25,7 @@ stage writes into the same mission directory.
 
 | File | Owner | Mutability | Role |
 |---|---|---|---|
-| `GOAL.md` | **human** | edited by human only | North star (`{{MISSION}}`) + the `STATUS: RUN/STOP` gate + `{{LOCKED_CONSTRAINTS}}` + steering directives |
+| `GOAL.md` | **user** | edited by user only | North star (`{{MISSION}}`) + the `STATUS: RUN/STOP` gate + `{{LOCKED_CONSTRAINTS}}` + steering directives |
 | `STATE.md` | conductor | **rewritten every iteration** | The heartbeat + the single recover-after-compaction anchor |
 | `QUEUE.md` | conductor | rewritten per iteration | The durable **work queue and item-lease ledger** — one row per unit: `id / status / depends-on / lease-owner / lease-expiry`. `PENDING` = selectable, `LEASED` = in-flight (record-before-launch), `DONE`, `BLOCKED`, `DEFERRED`. |
 | `HANDOFF.md` | conductor | regenerated on material change | Capstone synthesis + terminal pickup, refreshed before STOP |
@@ -66,4 +66,4 @@ Flipping `GOAL.md`'s `STATUS` to `STOP` requires `GOAL` + `STATE` + `HANDOFF`
 to agree on the terminal truth — a `STOP` written while `HANDOFF.md` is stale
 is a finish-blocker. `STATE.md` and `QUEUE.md` must show zero leased rows and
 an empty selectable frontier before a `PAUSED — reason: idle-frontier`
-checkpoint is valid; only a human `STATUS: STOP` closes the mission.
+checkpoint is valid; only a user `STATUS: STOP` closes the mission.

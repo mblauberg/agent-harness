@@ -35,7 +35,7 @@ omitted semantics in the companion detail diagram or adjacent prose.
    loop narrower; label a partial spine and move complete routing into adjacent
    prose instead.
 6. Give each Mermaid block an `accTitle` and `accDescr`. Provide an equivalent
-   table or short ordered description for load-bearing routes, and keep human
+   table or short ordered description for load-bearing routes, and keep user
    gates visually distinct in the view where they control progression.
 
 Run Markdown-mode `mmdc` from a temporary working directory with an explicit

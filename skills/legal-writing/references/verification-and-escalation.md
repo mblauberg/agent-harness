@@ -49,7 +49,7 @@ Stop at an internal, clearly qualified draft when:
 - an authority or quotation cannot be pinpoint-verified;
 - the task requires legal judgement beyond the supplied instructions; or
 - a signature, certification, undertaking, concession, filing, service or
-  external communication lacks current human authority.
+  external communication lacks current user authority.
 
 Record the competing readings and practical consequence in the project's
 canonical control or status document. Do not hide the gap in polished prose.
@@ -58,5 +58,5 @@ canonical control or status document. Do not hide the gap in polished prose.
 
 Drafting and verification do not authorise filing, lodging, service, upload,
 signature, witnessing, certification, disclosure or communication. Treat each
-external act and recipient as a separate human-authorised step, then retain the
+external act and recipient as a separate user-authorised step, then retain the
 evidence that proves what occurred.
