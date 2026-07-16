@@ -1,0 +1,42 @@
+# Fragment extracted from provenant's .github/workflows/ci.yml. Append this
+# job to the project's own CI workflow, listing every real build/test/lint
+# job under `needs`. This is the ONE job named in the branch ruleset's
+# required status check — never pin an individual build job as required,
+# because adding a job later would silently need a manual ruleset edit.
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Main-push runs are exempt from cancellation: a required check that gets
+  # cancelled on main never regenerates (main is not re-pushed), so a
+  # cancelled run would leave that commit's ci-status verdict wrong forever.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # ... real build/test/lint jobs here, each optionally path-filtered via a
+  # detect-changes job (see provenant's ci.yml) so ci-status still reports
+  # promptly on docs-only or partial-surface changes ...
+
+  ci-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    needs:
+      - job-one   # replace with this project's real job ids
+      - job-two
+    if: always()
+    steps:
+      - name: Fail unless every needed job succeeded or was skipped by filter
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS_JSON" | jq -r 'to_entries[] | "\(.key)=\(.value.result)"'
+          blocking="$(echo "$NEEDS_JSON" | jq -r \
+            'to_entries[]
+             | select(.value.result != "success" and .value.result != "skipped")
+             | "\(.key)=\(.value.result)"')"
+          if [ -n "$blocking" ]; then
+            echo "Blocking job results:"
+            echo "$blocking"
+            exit 1
+          fi
+          echo "All needed jobs succeeded or were skipped by the path filter."
