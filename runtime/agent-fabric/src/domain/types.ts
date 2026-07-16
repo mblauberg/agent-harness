@@ -17,6 +17,7 @@ export type FabricOpenOptions = {
     command: string[];
     environment: Record<string, string>;
     modelPolicy?: { allowedFamilies: string[]; allowedModelPatterns: string[]; requiresExplicitModel: boolean };
+    wrapperProvenance?: { repositoryCommit: string; wrapperPath: string };
   }>;
   capabilityKey?: string;
   executionProfile?: string;
