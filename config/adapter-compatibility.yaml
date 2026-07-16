@@ -1,5 +1,5 @@
 schema_version: 1
-verification_date: "2026-07-15"
+verification_date: "2026-07-16"
 adapter_contract_version: 1
 capability_fixture_version: 1
 activation_policy:
@@ -13,13 +13,13 @@ adapters:
     implementation:
       kind: npm-package
       package: "@anthropic-ai/claude-agent-sdk"
-      installed_version: "0.3.207"
-      resolved_artifact: "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.207.tgz"
-      lock_integrity_sha512: "y0PkQRmQBi96MHiN5Xzfq+GaddxCZCqI/cXEQBLYBLXGa4i1nDSlulQqkMBj2RorrrSGQJ6Wdw+uhu6OfHNPzA=="
+      installed_version: "0.3.211"
+      resolved_artifact: "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.211.tgz"
+      lock_integrity_sha512: "JhbLu6o1v2g9fjqkO+LDNPWrE0bgd9UeRQQ41JBGouAgows3KyPPYgU2WU0q7M2onuwQxR5plGDpas01F+oaUA=="
       entrypoint: "node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"
-      entrypoint_sha256: "7f12ca8bcc75fcdb4e32a75653cd1d4b773fc48327179d4beaaf5af37fa44944"
+      entrypoint_sha256: "a66a151410072ee506ee1e8ec0afcfe00e1d0674643e3e31650f8108c3a6af6c"
       executable: "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
-      executable_sha256: "1b471d62d1117482689d75447f5e050c640da717a5a3c91e6c13792450f8c662"
+      executable_sha256: "5a728a76198b6eca7f3c7cdbff43bab44b77b48c2108f7a3107d889773382629"
       wrapper_entrypoint: "runtime/agent-fabric/dist/adapters/providers/claude-agent-sdk.js"
       wrapper_entrypoint_sha256: "bd7e49552a5157f488d377799939d797232d1507feeef234eb127fab84073d2c"
       wrapper_manifest: "config/adapter-manifests/claude-agent-sdk.json"
@@ -27,9 +27,9 @@ adapters:
     contract:
       adapter_version: 1
       protocol: claude-agent-sdk+claude-code-cli
-      protocol_version: "sdk-0.3.207/cli-2.1.210"
+      protocol_version: "sdk-0.3.211/cli-2.1.211"
       schema_source: "node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts"
-      schema_sha256: "96897d0a7cf010109a219d14a5b0a3746d08a299d4c7c2241986c8a321c1a96f"
+      schema_sha256: "99962fa0d89201e6512fe6624d142c4ec02147aceed474e8c88ec224ead30400"
       capability_fixture_version: 1
     runtime_range:
       fabric_node: ">=24.15.0 <25"
