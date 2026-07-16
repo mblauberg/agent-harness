@@ -2,7 +2,11 @@
 
 Use this process for user- and agent-originated repository work. Project
 Status is the sole workflow state; labels describe content or gates, not
-progress.
+progress. The label taxonomy is declarative in
+[`.github/labels.yml`](../../.github/labels.yml), synced with pruning: a label
+absent from that file is deleted on the next sync, so never hand-create one.
+Issue intake uses the issue forms under `.github/ISSUE_TEMPLATE/`; blank
+issues are disabled.
 
 ## Statuses
 
@@ -101,14 +105,18 @@ git push -u origin issue-148-runbook-mechanics
 Open the pull request against `main` and link the issue per the rule in
 [Execute and review](#execute-and-review): `Closes #N` only when merge leaves
 no user or external-action gate, otherwise `References #N` with the issue left
-open:
+open. The body must follow the repository template
+([`.github/pull_request_template.md`](../../.github/pull_request_template.md));
+`gh pr create --body` bypasses the template, so fill a copy — evidence rows
+bound to the exact head SHA and the independent-review block included — and
+pass it explicitly:
 
 ```sh
+cp .github/pull_request_template.md /tmp/pr-body.md
+# fill in every section, then:
 gh pr create --base main \
   --title "docs(runbooks): document agent GitHub mechanics" \
-  --body "Summary of the change.
-
-Closes #148"
+  --body-file /tmp/pr-body.md
 ```
 
 Set the issue to `In review` while exact-head checks and independent review
@@ -126,7 +134,7 @@ effort or session document owns it. Ownership of each transition:
 | `Ready` to `In progress` | Implementing agent | Work on the accepted scope starts |
 | `In progress` to `In review` | Implementing agent | The pull request, exact-head checks or independent review is active |
 | `In review` to `Awaiting user` | Implementing agent | Machine gates pass; a user decision or acceptance remains |
-| Any later state to `Done` | User; merge auto-closes a `Closes #N` issue and the user confirms | No gate remains; the terminal reason or integrated pull request is recorded |
+| Any later state to `Done` | Merging agent or user; merge auto-closes a `Closes #N` issue | No gate remains; the terminal reason or integrated pull request is recorded |
 
 Move an item with the project CLI. The Status field id is stable for this
 project:
@@ -147,9 +155,31 @@ gh project field-list 2 --owner mblauberg --format json \
   --jq '.fields[] | select(.name == "Status")'
 ```
 
+### Merge
+
+Merge authority is repo-based. This repository is a personal harness, not
+production: by user directive (2026-07-16), repository auto-merge is enabled
+and agents merge directly. An agent merges a pull request once it has passed
+its tier's review pressure (routine: chair plus native checks; substantial:
+fresh native plus the cross-family leg on the exact head; crucial: both) and
+CI is green on the exact head, without waiting for the user. `gh pr merge
+--auto` may be queued once those gates are met.
+
+The user review/merge gate applies only when the agent is stuck: split review
+verdicts it cannot settle with primary-source evidence, an exhausted repair
+budget, or a decision outside its granted authority. Standing user gates are
+unchanged: branch deletion, history rewrites, credential or connector setup,
+pushes to shared branches outside authorised merges, and risk-tier downgrades.
+
+Branch protection requires the head to be strictly up to date with `main`, so
+concurrent pull requests still integrate as a serialised merge train: merge
+one, update the next onto the new `main`, rerun the exact-head checks and
+independent review (an update-merge is a new commit and invalidates prior
+exact-head evidence), then merge it.
+
 ### After merge
 
-Integration to `main` is a user gate; the user merges. Afterwards:
+Afterwards:
 
 1. Confirm the issue closed (`Closes #N`) or close it with its terminal reason
    recorded, and confirm Status is `Done`.

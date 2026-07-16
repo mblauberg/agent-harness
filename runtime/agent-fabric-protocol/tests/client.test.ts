@@ -75,6 +75,116 @@ describe("negotiated operator client", () => {
     expect(Object.hasOwn(client, "takeover")).toBe(false);
   });
 
+  it("composes project-session methods from the exact granted operations", async () => {
+    const result = { projectSessionId: "ps_01" };
+    const transport = new RecordingTransport(
+      ["project-sessions.v1", "launch-custody.v1"],
+      result,
+      "operator",
+      [
+        FABRIC_OPERATIONS.projectSessionCreate,
+        FABRIC_OPERATIONS.projectSessionGet,
+        FABRIC_OPERATIONS.projectSessionLaunchPrepare,
+      ],
+    );
+
+    const client = createOperatorClient(transport);
+    const projectSessions = client.projectSessions;
+    if (projectSessions === undefined) throw new Error("expected project-session core surface");
+    expect(Object.keys(projectSessions).sort()).toStrictEqual(["create", "get", "prepareLaunch"]);
+
+    await expect(projectSessions.create({} as never)).resolves.toBe(result);
+    await expect(projectSessions.get({} as never)).resolves.toBe(result);
+    await expect(projectSessions?.prepareLaunch?.({} as never)).resolves.toBe(result);
+    expect(transport.calls.map(({ operation }) => operation)).toStrictEqual([
+      FABRIC_OPERATIONS.projectSessionCreate,
+      FABRIC_OPERATIONS.projectSessionGet,
+      FABRIC_OPERATIONS.projectSessionLaunchPrepare,
+    ]);
+  });
+
+  it.each([
+    {
+      name: "launch feature without launch operation",
+      features: ["project-sessions.v1", "launch-custody.v1"] as const,
+      operations: [
+        FABRIC_OPERATIONS.projectSessionCreate,
+        FABRIC_OPERATIONS.projectSessionGet,
+      ],
+    },
+    {
+      name: "launch operation without launch feature",
+      features: ["project-sessions.v1"] as const,
+      operations: [
+        FABRIC_OPERATIONS.projectSessionCreate,
+        FABRIC_OPERATIONS.projectSessionGet,
+        FABRIC_OPERATIONS.projectSessionLaunchPrepare,
+      ],
+    },
+  ])("omits launch preparation for $name", ({ features, operations }) => {
+    const client = createOperatorClient(new RecordingTransport(features, {}, "operator", operations));
+
+    expect(Object.keys(client.projectSessions ?? {}).sort()).toStrictEqual(["create", "get"]);
+  });
+
+  it("exposes and routes each granted project-session mutation", async () => {
+    const transport = new RecordingTransport(
+      ["project-sessions.v1"],
+      {},
+      "operator",
+      [
+        FABRIC_OPERATIONS.projectSessionCreate,
+        FABRIC_OPERATIONS.projectSessionGet,
+        FABRIC_OPERATIONS.projectSessionTransition,
+        FABRIC_OPERATIONS.projectSessionClose,
+        FABRIC_OPERATIONS.membershipBind,
+      ],
+    );
+    const projectSessions = createOperatorClient(transport).projectSessions;
+    if (projectSessions === undefined) throw new Error("expected project-session core surface");
+
+    expect(Object.keys(projectSessions).sort()).toStrictEqual([
+      "bindMembership",
+      "close",
+      "create",
+      "get",
+      "transition",
+    ]);
+    await projectSessions.transition?.({} as never);
+    await projectSessions.close?.({} as never);
+    await projectSessions.bindMembership?.({} as never);
+    expect(transport.calls.map(({ operation }) => operation)).toStrictEqual([
+      FABRIC_OPERATIONS.projectSessionTransition,
+      FABRIC_OPERATIONS.projectSessionClose,
+      FABRIC_OPERATIONS.membershipBind,
+    ]);
+  });
+
+  it("omits the project-session group when launch custody lacks the core session operations", () => {
+    const client = createOperatorClient(new RecordingTransport(
+      ["launch-custody.v1"],
+      {},
+      "operator",
+      [FABRIC_OPERATIONS.projectSessionLaunchPrepare],
+    ));
+
+    expect(client.projectSessions).toBeUndefined();
+  });
+
+  it("omits the project-session group when either core session operation is not granted", () => {
+    const client = createOperatorClient(new RecordingTransport(
+      ["project-sessions.v1", "launch-custody.v1"],
+      {},
+      "operator",
+      [
+        FABRIC_OPERATIONS.projectSessionCreate,
+        FABRIC_OPERATIONS.projectSessionLaunchPrepare,
+      ],
+    ));
+
+    expect(client.projectSessions).toBeUndefined();
+  });
+
   it("sends project-session reads through the stable typed operation", async () => {
     const session = {
       projectSessionId: "ps_01",
@@ -94,7 +204,7 @@ describe("negotiated operator client", () => {
     };
     const transport = new RecordingTransport(["project-sessions.v1"], session);
     const client = createOperatorClient(transport);
-    if (client.projectSessions === undefined) throw new Error("expected project-session feature");
+    if (client.projectSessions?.get === undefined) throw new Error("expected project-session read operation");
 
     const result = await client.projectSessions.get({
       projectId: "project_01" as never,

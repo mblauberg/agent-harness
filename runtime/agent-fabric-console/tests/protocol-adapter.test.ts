@@ -352,6 +352,7 @@ describe("public protocol adapter", () => {
                     phase: "implement",
                     health: "healthy",
                     nextMilestone: "review",
+                    declaredProgress: { plan: "open", counts: { blocked: 0, ready: 0, active: 1, complete: 0, cancelled: 0, degraded: 0 } },
                   },
                   detailRef: {
                     kind: "run",
@@ -724,6 +725,7 @@ describe("public protocol adapter", () => {
         "operator-projection.v2",
         "scoped-gate-read.v1",
         "run-session-projection.v1",
+        "declared-run-progress.v1",
         "artifact-content-read.v1",
       ],
     });
@@ -741,6 +743,7 @@ describe("public protocol adapter", () => {
           "operator-projection.v2",
           "scoped-gate-read.v1",
           "run-session-projection.v1",
+          "declared-run-progress.v1",
           "artifact-content-read.v1",
         ],
       },
@@ -769,7 +772,7 @@ describe("public protocol adapter", () => {
 
     expect(result).toStrictEqual({
       ok: false,
-      missingFeatures: ["run-session-projection.v1"],
+      missingFeatures: ["run-session-projection.v1", "declared-run-progress.v1"],
     });
   });
 
@@ -789,6 +792,7 @@ describe("public protocol adapter", () => {
         "operator-projection.v2",
         "scoped-gate-read.v1",
         "run-session-projection.v1",
+        "declared-run-progress.v1",
         "artifact-content-read.v1",
         "message-body-read.v1",
         "operator-repository-read.v1",
@@ -831,6 +835,7 @@ describe("public protocol adapter", () => {
         "operator-projection.v2",
         "scoped-gate-read.v1",
         "run-session-projection.v1",
+        "declared-run-progress.v1",
         "artifact-content-read.v1",
       ],
       projection: {},

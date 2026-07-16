@@ -182,7 +182,7 @@ function validateLossSource(source: GenerationLossSource, principalGeneration: n
   }
 }
 
-function generationLossRef(
+export function generationLossRef(
   runId: string,
   agentId: string,
   generationLossId: string,
@@ -197,17 +197,25 @@ function generationLossRef(
   };
 }
 
-function revisionBody(generationLossId: string): Readonly<Record<string, unknown>> {
+export function generationLossRevisionBody(input: Readonly<{
+  generationLossId: string;
+  revision: number;
+  state: GenerationLossHead["state"];
+  abandonKind: GenerationLossHead["abandonKind"];
+  recoveryActionRef: Readonly<{ adapterId: string; actionId: string }> | null;
+  activeRecoveryCustodyId: string | null;
+  terminalEvidenceDigest: string | null;
+}>): Readonly<Record<string, unknown>> {
   return {
     schemaVersion: 1,
     sourceKind: "generation-loss",
-    generationLossId,
-    revision: 1,
-    state: "open",
-    abandonKind: "none",
-    recoveryActionRef: null,
-    activeRecoveryCustodyId: null,
-    terminalEvidenceDigest: null,
+    generationLossId: input.generationLossId,
+    revision: input.revision,
+    state: input.state,
+    abandonKind: input.abandonKind,
+    recoveryActionRef: input.recoveryActionRef,
+    activeRecoveryCustodyId: input.activeRecoveryCustodyId,
+    terminalEvidenceDigest: input.terminalEvidenceDigest,
   };
 }
 
@@ -445,6 +453,89 @@ export class GenerationLossRepository {
     };
   }
 
+  finalizeAuthorizedDirectOpenInCurrentTransaction(input: Readonly<{
+    sourceHead: GenerationLossHead;
+    finalRevision: number;
+    terminalEvidenceDigest: string;
+    finalSemanticDigest: string;
+    finalSourceRefDigest: string;
+    authorityBatchId: string;
+    authorityApplyId: string;
+    authorityApplyDigest: string;
+    recordedAt: number;
+  }>): void {
+    if (!this.#database.inTransaction) throw new Error("lifecycle terminal apply requires a transaction");
+    const head = input.sourceHead;
+    const finalBody = generationLossRevisionBody({
+      generationLossId: head.generationLossId,
+      revision: input.finalRevision,
+      state: "abandoned",
+      abandonKind: "direct-open",
+      recoveryActionRef: null,
+      activeRecoveryCustodyId: null,
+      terminalEvidenceDigest: input.terminalEvidenceDigest,
+    });
+    const finalSemanticDigest = lifecycleDigest("generation-loss-semantic", finalBody);
+    if (finalSemanticDigest !== input.finalSemanticDigest ||
+        finalSemanticDigest !== input.finalSourceRefDigest) {
+      throw new Error("prepared lifecycle terminal semantic changed");
+    }
+    const ownerRef = {
+      kind: "generation-loss",
+      generationLossRef: generationLossRef(
+        head.runId,
+        head.agentId,
+        head.generationLossId,
+        input.finalRevision,
+      ),
+      sourceRefDigest: input.finalSourceRefDigest,
+    };
+    const journal = {
+      schemaVersion: 1,
+      ownerRef,
+      priorJournalDigest: head.journalDigest,
+      semanticDigest: finalSemanticDigest,
+      sourceRefDigest: input.finalSourceRefDigest,
+      authorityBatchId: input.authorityBatchId,
+      authorityApplyId: input.authorityApplyId,
+      authorityApplyDigest: input.authorityApplyDigest,
+      originFreshApplyId: null,
+      originFreshApplyDigest: null,
+      recordedAt: input.recordedAt,
+    };
+    const journalJson = canonicalJson(journal);
+    const journalDigest = lifecycleDigest("generation-loss-journal", journal);
+    this.#database.prepare(`
+      INSERT INTO lifecycle_generation_loss_revisions(
+        project_session_id,run_id,agent_id,generation_loss_id,revision,
+        prior_revision,prior_journal_digest,state,abandon_kind_code,
+        recovery_action_adapter_id,recovery_action_id,active_recovery_custody_id,
+        terminal_evidence_digest,semantic_json,semantic_digest,source_ref_digest,
+        origin_fresh_apply_id,origin_fresh_apply_digest,receipt_batch_id,
+        receipt_apply_id,receipt_apply_digest,journal_json,journal_digest,recorded_at
+      ) VALUES (?,?,?,?,?,?,?,'abandoned','direct-open',NULL,NULL,NULL,?,?,?,?,
+                NULL,NULL,?,?,?,?,?,?)
+    `).run(
+      head.projectSessionId, head.runId, head.agentId, head.generationLossId,
+      input.finalRevision, head.revision, head.journalDigest,
+      input.terminalEvidenceDigest, canonicalJson(finalBody), finalSemanticDigest,
+      input.finalSourceRefDigest, input.authorityBatchId, input.authorityApplyId,
+      input.authorityApplyDigest, journalJson, journalDigest, input.recordedAt,
+    );
+    const changed = this.#database.prepare(`
+      UPDATE lifecycle_generation_loss_heads
+         SET current_revision=?,state='abandoned',abandon_kind_code='direct-open',
+             semantic_digest=?,source_ref_digest=?,journal_digest=?,terminal=1,
+             head_revision=head_revision+1
+       WHERE run_id=? AND agent_id=? AND generation_loss_id=? AND current_revision=?
+         AND journal_digest=? AND terminal=0
+    `).run(
+      input.finalRevision, finalSemanticDigest, input.finalSourceRefDigest, journalDigest,
+      head.runId, head.agentId, head.generationLossId, head.revision, head.journalDigest,
+    );
+    if (changed.changes !== 1) throw new Error("generation-loss head compare-and-set failed");
+  }
+
   #readIdentityHighWater(runId: string, agentId: string): IdentityHighWater {
     const stored = row(this.#database.prepare(`
       SELECT provider_generation,principal_generation,revision
@@ -621,7 +712,15 @@ export class GenerationLossRepository {
       creationDigest,
       input.observedAt,
     );
-    const semantic = revisionBody(generationLossId);
+    const semantic = generationLossRevisionBody({
+      generationLossId,
+      revision: 1,
+      state: "open",
+      abandonKind: "none",
+      recoveryActionRef: null,
+      activeRecoveryCustodyId: null,
+      terminalEvidenceDigest: null,
+    });
     const semanticJson = canonicalJson(semantic);
     const semanticDigest = lifecycleDigest("generation-loss-semantic", semantic);
     const sourceRefDigest = semanticDigest;

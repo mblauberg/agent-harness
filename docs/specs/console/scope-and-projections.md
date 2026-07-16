@@ -120,11 +120,16 @@ operator experience:
    session/coordination/delivery/workstream IDs, lead, accepted-scope ref,
    current-plan ref/revision and last-event time. A coordination run and its
    delivery workstreams remain distinct rows or an explicit parent/child group.
-2. **Declared progress.** Run detail carries a tagged `finite`, `open` or
-   `unknown` progress fact for an exact plan revision. The finite arm carries a
-   denominator and mutually consistent task-state counts. The open arm carries
-   known counts without a denominator. Neither arm carries an inferred
-   percentage or ETA. Stale, unavailable and conflicting facts retain normal
+2. **Declared progress.** Run detail carries a tagged progress fact. The
+   current cut ships the `open` and `unknown` arms only: the open arm carries
+   known task-state counts without a denominator; the unknown arm carries only
+   its reason. No arm carries an inferred percentage, completion ratio,
+   denominator or ETA. The `finite` arm — a declared denominator with mutually
+   consistent task-state counts, bound to an exact plan revision with settled
+   cancelled-task denominator semantics — is deliberately deferred to the
+   plan-declaration package and lands as its own result-shape cutover; until
+   then a finite arm on the wire is rejected, never translated or synthesised
+   from known counts. Stale, unavailable and conflicting facts retain normal
    projection provenance.
 3. **Workflow facts.** Work items expose their authoritative bounded objective,
    dependency IDs, parent/workstream/run binding, state, owner, checks, barriers,

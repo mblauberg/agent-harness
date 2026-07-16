@@ -629,6 +629,34 @@ afterEach(() => {
 });
 
 describe("launch custody", () => {
+  it("retries daemon-owned launch-intent preparation after an interruption without persisting partial custody", async () => {
+    let armed = true;
+    const fixture = createFixture({
+      fault: (label) => {
+        if (label === "launch:intent-prepare:complete" && armed) {
+          armed = false;
+          throw new Error("fault:launch:intent-prepare:complete");
+        }
+      },
+    });
+    const request = {
+      projectId: fixture.intent.projectId,
+      projectSessionId: fixture.intent.projectSessionId,
+      expectedSessionGeneration: fixture.intent.expectedSessionGeneration,
+      launchPacketRef: fixture.intent.launchPacketRef,
+    };
+
+    await expect(fixture.service.prepareLaunchIntent(request))
+      .rejects.toThrow("fault:launch:intent-prepare:complete");
+    expect(fixture.database.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM runs) AS runs,
+        (SELECT COUNT(*) FROM operator_commands) AS commands,
+        (SELECT COUNT(*) FROM project_session_launch_custody) AS custody
+    `).get()).toEqual({ runs: 0, commands: 0, custody: 0 });
+    await expect(fixture.service.prepareLaunchIntent(request)).resolves.toEqual(fixture.intent);
+  });
+
   it("binds the exact provider-session attestation contract into launch custody", () => {
     expect(parseLaunchAdapterContract(contract)).toEqual(contract);
     expect(() => parseLaunchAdapterContract({
@@ -736,6 +764,20 @@ describe("launch custody", () => {
       projectId: "project_01",
       intent: fixture.intent,
     } as unknown as OperatorActionPreviewRequest);
+    expect(actions.replayLaunchPreview(context, {
+      command,
+      projectId: "project_01" as never,
+      projectSessionId: "session_launch_01" as never,
+      expectedSessionGeneration: 1,
+      launchPacketRef: fixture.intent.launchPacketRef,
+    } as never)).toEqual(preview);
+    expect(() => actions.replayLaunchPreview(context, {
+      command,
+      projectId: "project_01" as never,
+      projectSessionId: "session_launch_01" as never,
+      expectedSessionGeneration: 1,
+      launchPacketRef: { ...fixture.intent.launchPacketRef, digest: digest("changed packet") },
+    } as never)).toThrowError(/reused with changed input/u);
     const receipt = await actions.commit(context, {
       command: {
         ...command,

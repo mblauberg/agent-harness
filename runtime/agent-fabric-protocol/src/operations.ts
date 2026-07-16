@@ -109,6 +109,7 @@ const DEFINITIONS = defineOperations({
   projectSessionGet: { operation: "fabric.v1.project-session.read", feature: "project-sessions.v1", principals: ["operator"], kind: "extension" },
   projectSessionTransition: { operation: "fabric.v1.project-session.transition", feature: "project-sessions.v1", principals: ["operator"], kind: "extension" },
   projectSessionClose: { operation: "fabric.v1.project-session.close", feature: "project-sessions.v1", principals: ["operator"], kind: "extension" },
+  projectSessionLaunchPrepare: { operation: "fabric.v1.project-session-launch.prepare", feature: "launch-custody.v1", principals: ["operator"], kind: "extension" },
   membershipBind: { operation: "fabric.v1.project-session.membership.bind", feature: "project-sessions.v1", principals: ["operator", "agent"], kind: "extension" },
   operatorAttach: { operation: "fabric.v1.operator.attach", feature: "operator-control.v1", principals: ["operator"], kind: "extension" },
   operatorDetach: { operation: "fabric.v1.operator.detach", feature: "operator-control.v1", principals: ["operator"], kind: "extension" },
