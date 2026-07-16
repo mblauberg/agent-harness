@@ -238,6 +238,8 @@ run_one() {  # $1 tool $2 model $3 effort -> writes clean answer to OUT, echoes 
   identity=""
   effort_substitution=""
   substitution=""
+  catalog_model=""
+  model_selection=""
   requested_effort="$effort"
   effort_source=""
   effort_capability_source=""
