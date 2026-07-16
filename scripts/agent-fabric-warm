@@ -1,0 +1,39 @@
+#!/bin/sh
+# Rebuild the workspace dist when the compiled fabric CLI is absent or older
+# than its TypeScript sources, so scripts/agent-fabric and
+# scripts/agent-fabric-mcp keep executing compiled JS instead of falling back
+# to the slow tsx loader path. No-op when the dist is already fresh.
+set -eu
+
+script_path=$0
+while [ -L "$script_path" ]; do
+  link=$(readlink "$script_path")
+  case "$link" in
+    /*) script_path=$link ;;
+    *) script_path=$(dirname "$script_path")/$link ;;
+  esac
+done
+script_dir=$(CDPATH= cd -- "$(dirname -- "$script_path")" && pwd)
+agents_home=${AGENTS_HOME:-"$(dirname -- "$script_dir")"}
+case "$agents_home" in /*) ;; *) echo "AGENTS_HOME must be absolute" >&2; exit 2 ;; esac
+package_root="$agents_home/runtime/agent-fabric"
+
+dist_cli="$package_root/dist/cli/main.js"
+if [ -f "$dist_cli" ] && ! find "$package_root/src" -type f -name '*.ts' -newer "$dist_cli" -print -quit | grep -q .; then
+  echo "agent-fabric dist fresh: $dist_cli"
+  exit 0
+fi
+
+if [ ! -d "$agents_home/node_modules" ]; then
+  echo "agent-fabric dist stale and node_modules missing; run 'npm ci' in $agents_home first" >&2
+  exit 1
+fi
+
+echo "agent-fabric dist stale; rebuilding workspace"
+cd "$agents_home"
+npm run build
+
+# The incremental build re-emits only changed outputs, so bump the wrapper
+# freshness sentinels once the build has succeeded; otherwise an untouched
+# entrypoint stays older than its sources and the tsx fallback persists.
+touch "$dist_cli" "$package_root/dist/mcp/main.js"
