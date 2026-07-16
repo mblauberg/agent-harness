@@ -32,4 +32,4 @@
 
 - name: agent-go
   color: "0e8a16"
-  description: Triaged and ready; an agent lane is authorised to implement without further user input
+  description: The user authorises autonomous implementation dispatch; readiness lives in Project Status
