@@ -44,11 +44,15 @@ function resolveVitestBin(): string {
  * Shelling out to `vitest list --json` sidesteps both problems: it is
  * always exactly what CI's `npm run test*` scripts would execute.
  */
-function listVitestFiles(args: string[]): Set<string> {
+function listVitestFiles(
+  args: string[],
+  environment: NodeJS.ProcessEnv = process.env,
+): Set<string> {
   const vitestBin = resolveVitestBin();
   const stdout = execFileSync(process.execPath, [vitestBin, "list", ...args, "--json"], {
     cwd: packageRoot,
     encoding: "utf8",
+    env: environment,
     timeout: 180_000,
   });
   const rows = JSON.parse(stdout) as Array<{ file: string }>;
@@ -101,7 +105,7 @@ function replayableVitestArgs(scriptCommand: string): string[] {
 
 describe("fabric vitest lane partition", () => {
   it(
-    "runs every ordinary suite file exactly once, disjoint from evaluation/load",
+    "partitions every suite file across ordinary, dedicated, and opt-in lanes",
     async () => {
       const packageJson = JSON.parse(
         await readFile(path.join(packageRoot, "package.json"), "utf8"),
@@ -130,6 +134,13 @@ describe("fabric vitest lane partition", () => {
         ...listVitestFiles(replayableVitestArgs(requireScript("test:evaluation"))),
         ...listVitestFiles(replayableVitestArgs(requireScript("test:load"))),
       ]);
+      const liveSmokePath = "tests/integration/adapter-compatibility.live-smoke.test.ts";
+      expect(listVitestFiles([liveSmokePath])).toEqual(new Set());
+      const liveSmokeFiles = listVitestFiles([liveSmokePath], {
+        ...process.env,
+        AGENT_FABRIC_LIVE_COMPATIBILITY_SMOKE: "1",
+      });
+      expect(liveSmokeFiles).toEqual(new Set([liveSmokePath]));
 
       // Sanity: neither side is vacuous. A glob or script typo that matches
       // nothing would otherwise let the disjointness and coverage checks
@@ -142,13 +153,14 @@ describe("fabric vitest lane partition", () => {
       const overlap = [...ordinaryFiles].filter((file) => dedicatedFiles.has(file));
       expect(overlap).toEqual([]);
 
-      // Complete: every test file that exists on disk lands in exactly one
-      // of the two buckets. If a future test file is added under an
-      // evaluation/load-shaped path but the excludes aren't updated to
-      // match (or vice versa), this fails loudly instead of silently
-      // double-running or dropping it.
-      const partitioned = new Set([...ordinaryFiles, ...dedicatedFiles]);
-      expect(partitioned.size).toBe(ordinaryFiles.size + dedicatedFiles.size);
+      // Complete: every test file on disk lands in exactly one ordinary,
+      // evaluation/load, or opt-in live bucket. A future test that matches
+      // none or more than one fails loudly instead of being dropped or run
+      // twice.
+      const partitioned = new Set([...ordinaryFiles, ...dedicatedFiles, ...liveSmokeFiles]);
+      expect(partitioned.size).toBe(
+        ordinaryFiles.size + dedicatedFiles.size + liveSmokeFiles.size,
+      );
       expect([...partitioned].sort()).toEqual(allTestFiles);
     },
     180_000,
