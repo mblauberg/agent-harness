@@ -556,8 +556,194 @@ def test_resolved_role_effort_reaches_codex_adapter_and_receipt():
         assert record["requested_effort"] == "max"
         assert record["effort"] == "xhigh"
         assert record["effort_capability_source"] == "runtime-model-catalog"
+        assert record["resolved_model"] == ""
+        assert record["catalog_model"] == "gpt-5.6-sol"
+        assert record["model_selection"] == "account-default"
         args = args_file.read_text(encoding="utf-8").splitlines()
+        assert "-m" not in args
         assert "model_reasoning_effort=xhigh" in args
+
+
+def test_codex_capability_discovery_failure_blocks_execution_with_receipt():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        invoked = tmp / "codex.exec-invoked"
+        write_executable(
+            bin_dir / "codex",
+            f'''#!/usr/bin/env bash
+            if [ "$1" = "debug" ] && [ "$2" = "models" ]; then
+              echo "capability discovery unavailable" >&2
+              exit 23
+            fi
+            touch {invoked}
+            exit 9
+            ''',
+        )
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "codex",
+                "--orchestrator-family",
+                "anthropic",
+                "--out",
+                str(tmp / "out.txt"),
+                "--prompt",
+                "Review",
+            ],
+            cwd=td,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert DISPATCH_SCHEMA <= set(record)
+        assert record["status"] == "capability_discovery_failed"
+        assert record["effort_capability_source"] == "runtime-discovery-failed"
+        assert record["certification_eligible"] is False
+        assert record["read_only_guarantee"] == "none"
+        assert not invoked.exists()
+
+
+def test_mixed_malformed_codex_capabilities_block_execution_with_receipt():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        invoked = tmp / "codex.exec-invoked"
+        write_executable(
+            bin_dir / "codex",
+            f'''#!/usr/bin/env bash
+            if [ "$1" = "debug" ] && [ "$2" = "models" ]; then
+              printf '%s\n' '{{"models":[{{"display_name":"missing slug"}},{{"slug":"gpt-5.6-terra","supported_reasoning_levels":[{{"effort":"high"}}]}}]}}'
+              exit 0
+            fi
+            touch {invoked}
+            exit 9
+            ''',
+        )
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "codex",
+                "--orchestrator-family",
+                "anthropic",
+                "--out",
+                str(tmp / "out.txt"),
+                "--prompt",
+                "Review",
+            ],
+            cwd=td,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert DISPATCH_SCHEMA <= set(record)
+        assert record["status"] == "capability_discovery_failed"
+        assert record["certification_eligible"] is False
+        assert not invoked.exists()
+
+
+def test_unrelated_codex_model_without_efforts_blocks_execution_with_receipt():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        invoked = tmp / "codex.exec-invoked"
+        write_executable(
+            bin_dir / "codex",
+            f'''#!/usr/bin/env bash
+            if [ "$1" = "debug" ] && [ "$2" = "models" ]; then
+              printf '%s\n' '{{"models":[{{"slug":"gpt-5.6-terra","supported_reasoning_levels":[]}}]}}'
+              exit 0
+            fi
+            touch {invoked}
+            exit 9
+            ''',
+        )
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "codex",
+                "--orchestrator-family",
+                "anthropic",
+                "--out",
+                str(tmp / "out.txt"),
+                "--prompt",
+                "Review",
+            ],
+            cwd=td,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert DISPATCH_SCHEMA <= set(record)
+        assert record["status"] == "capability_discovery_failed"
+        assert record["certification_eligible"] is False
+        assert not invoked.exists()
+
+
+def test_duplicate_codex_discovery_member_blocks_execution_with_receipt():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        invoked = tmp / "codex.exec-invoked"
+        write_executable(
+            bin_dir / "codex",
+            f'''#!/usr/bin/env bash
+            if [ "$1" = "debug" ] && [ "$2" = "models" ]; then
+              printf '%s\n' '{{"models":[{{"slug":"gpt-5.6-sol","supported_reasoning_levels":[{{"effort":"high","effort":"max"}}]}}]}}'
+              exit 0
+            fi
+            touch {invoked}
+            exit 9
+            ''',
+        )
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "codex",
+                "--orchestrator-family",
+                "anthropic",
+                "--out",
+                str(tmp / "out.txt"),
+                "--prompt",
+                "Review",
+            ],
+            cwd=td,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert DISPATCH_SCHEMA <= set(record)
+        assert record["status"] == "capability_discovery_failed"
+        assert record["certification_eligible"] is False
+        assert not invoked.exists()
 
 
 def test_codex_explicit_model_rejection_never_reports_it_as_resolved():

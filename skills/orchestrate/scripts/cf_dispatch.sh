@@ -268,7 +268,7 @@ run_one() {  # $1 tool $2 model $3 effort -> writes clean answer to OUT, echoes 
         --out "$capabilities_file" >>"$diag" 2>&1; then
         rm -f "$capabilities_file"
       fi
-      [ -f "$capabilities_file" ] && route_cmd+=(--capabilities-file "$capabilities_file")
+      route_cmd+=(--capabilities-file "$capabilities_file")
     fi
     [ -n "$effort" ] && route_cmd+=(--effort "$effort")
     [ -n "$model" ] && route_cmd+=(--model "$model")

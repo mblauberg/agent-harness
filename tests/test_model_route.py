@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "model-route"
@@ -82,6 +84,17 @@ def test_openai_aliases_resolve_to_account_default_dispatch():
         assert route["model_selection"] == "account-default"
         assert route["identity_source"] == "account-default"
         assert route["model_family"] == "openai"
+
+
+def test_account_default_codex_ignores_runtime_selectable_model_list():
+    result, route = resolve(
+        "--adapter", "codex", "--alias", "flagship", "--role", "worker",
+        "--available-model", "gpt-5.6-terra",
+    )
+    assert result.returncode == 0
+    assert route["resolved_model"] == ""
+    assert route["catalog_model"] == "gpt-5.6-sol"
+    assert route["model_selection"] == "account-default"
 
 
 def test_aliases_supply_proportionate_default_effort():
@@ -185,6 +198,26 @@ def test_capability_snapshot_controls_default_fallback(tmp_path):
     assert route["effort_capability_source"] == "runtime-model-catalog"
 
 
+def test_account_default_missing_catalog_model_uses_audited_dated_efforts(tmp_path):
+    snapshot = tmp_path / "caps.json"
+    snapshot.write_text(json.dumps(capability_snapshot({
+            "gpt-5.6-terra": {
+                "resolved_model": "gpt-5.6-terra",
+                "supported_efforts": ["high", "xhigh", "max"],
+            }
+        })))
+    result, route = resolve(
+        "--adapter", "codex", "--alias", "flagship", "--role", "lead",
+        "--capabilities-file", str(snapshot),
+    )
+    assert result.returncode == 0
+    assert route["catalog_model"] == "gpt-5.6-sol"
+    assert route["resolved_model"] == ""
+    assert route["effort"] == "ultra"
+    assert route["effort_capability_source"] == "dated-catalog"
+    assert "catalog model absent from runtime snapshot" in route["effort_substitution"]
+
+
 def test_explicit_unsupported_effort_fails_against_runtime_snapshot(tmp_path):
     snapshot = tmp_path / "caps.json"
     snapshot.write_text(json.dumps(capability_snapshot({
@@ -205,6 +238,76 @@ def test_explicit_unsupported_effort_fails_against_runtime_snapshot(tmp_path):
 def test_malformed_capability_snapshot_fails_closed(tmp_path):
     snapshot = tmp_path / "caps.json"
     snapshot.write_text("{}")
+    result, route = resolve(
+        "--adapter", "codex", "--alias", "flagship", "--role", "lead",
+        "--capabilities-file", str(snapshot),
+    )
+    assert result.returncode == 1
+    assert route["status"] == "capability_discovery_failed"
+
+
+@pytest.mark.parametrize(
+    "models",
+    [
+        {"gpt-unrelated": {"resolved_model": "gpt-unrelated", "supported_efforts": []}},
+        {"gpt-unrelated": {"resolved_model": "gpt-unrelated", "supported_efforts": [" "]}},
+        {"gpt-key": {"resolved_model": "gpt-other", "supported_efforts": ["high"]}},
+        {"gpt-key": {"resolved_model": "", "supported_efforts": ["high"]}},
+        {
+            "GPT-Duplicate": {
+                "resolved_model": "GPT-Duplicate",
+                "supported_efforts": ["high"],
+            },
+            "gpt-duplicate": {
+                "resolved_model": "gpt-duplicate",
+                "supported_efforts": ["max"],
+            },
+        },
+    ],
+)
+def test_capability_snapshot_rejects_incomplete_or_inconsistent_models(tmp_path, models):
+    snapshot = tmp_path / "caps.json"
+    snapshot.write_text(json.dumps(capability_snapshot(models)))
+    result, route = resolve(
+        "--adapter", "codex", "--alias", "flagship", "--role", "lead",
+        "--capabilities-file", str(snapshot),
+    )
+    assert result.returncode == 1
+    assert route["status"] == "capability_discovery_failed"
+
+
+@pytest.mark.parametrize(
+    "duplicate_fragment",
+    [
+        '"schema_version":1,"schema_version":1',
+        '"models":{"gpt-5.6-sol":{"resolved_model":"gpt-5.6-sol",'
+        '"supported_efforts":["high"]},"gpt-5.6-sol":{"resolved_model":"gpt-5.6-sol",'
+        '"supported_efforts":["max"]}}',
+        '"models":{"gpt-5.6-sol":{"resolved_model":"gpt-5.6-sol",'
+        '"resolved_model":"gpt-5.6-sol","supported_efforts":["high"]}}',
+        '"models":{"gpt-5.6-sol":{"resolved_model":"gpt-5.6-sol",'
+        '"supported_efforts":["high"],"supported_efforts":["max"]}}',
+    ],
+)
+def test_persisted_capability_snapshot_rejects_duplicate_json_members(
+    tmp_path, duplicate_fragment
+):
+    observed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    default_models = (
+        '"models":{"gpt-5.6-sol":{"resolved_model":"gpt-5.6-sol",'
+        '"supported_efforts":["high"]}}'
+    )
+    fields = [
+        duplicate_fragment,
+        '"source":"codex debug models"',
+        f'"observed_at":"{observed_at}"',
+    ]
+    if not duplicate_fragment.startswith('"models"'):
+        fields.append(default_models)
+    if not duplicate_fragment.startswith('"schema_version"'):
+        fields.append('"schema_version":1')
+    snapshot = tmp_path / "caps.json"
+    snapshot.write_text("{" + ",".join(fields) + "}")
     result, route = resolve(
         "--adapter", "codex", "--alias", "flagship", "--role", "lead",
         "--capabilities-file", str(snapshot),

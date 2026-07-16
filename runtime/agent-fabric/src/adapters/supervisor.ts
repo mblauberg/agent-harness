@@ -811,6 +811,7 @@ export class AdapterSupervisor {
       request.nextProviderSessionGeneration !== request.expectedProviderSessionGeneration + 1 ||
       request.bridgeGeneration < 2
     ) throw new ProviderAdapterError("PRIVATE_HANDOFF_UNAVAILABLE", "chair recovery handoff is invalid");
+    enforceModelPolicy(adapterId, definition, "spawn", { payload: request.payload });
     const handoffHash = createHash("sha256").update(handoff.capability).digest("hex");
     if (this.#consumedChairHandoffHashes.has(handoffHash)) {
       throw new ProviderAdapterError("PRIVATE_HANDOFF_UNAVAILABLE", "chair recovery handoff was already consumed");
