@@ -4841,6 +4841,41 @@ CREATE TABLE operator_input_attestations (
   FOREIGN KEY(project_session_id, coordination_run_id) REFERENCES runs(project_session_id, run_id)
 );
 
+CREATE TABLE agent_lifecycle_recovery_custody (
+  recovery_id TEXT PRIMARY KEY,
+  operator_id TEXT NOT NULL REFERENCES operator_principals(operator_id),
+  operator_command_id TEXT NOT NULL,
+  path TEXT NOT NULL CHECK (path IN ('abandon')),
+  project_session_id TEXT NOT NULL,
+  coordination_run_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  generation_loss_id TEXT NOT NULL,
+  apply_id TEXT NOT NULL,
+  expected_source_revision INTEGER NOT NULL CHECK (expected_source_revision >= 1),
+  gate_id TEXT NOT NULL REFERENCES scoped_gates(gate_id),
+  expected_gate_revision INTEGER NOT NULL CHECK (expected_gate_revision >= 1),
+  direct_input_attestation_id TEXT NOT NULL REFERENCES operator_input_attestations(attestation_id),
+  destructive_confirmation_digest TEXT NOT NULL,
+  operator_decision_digest TEXT NOT NULL,
+  terminal_evidence_digest TEXT NOT NULL,
+  intent_digest TEXT NOT NULL,
+  intent_json TEXT NOT NULL CHECK (json_valid(intent_json)=1),
+  state TEXT NOT NULL CHECK (state IN ('prepared','ambiguous','terminal')),
+  result_json TEXT,
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (operator_id, operator_command_id),
+  UNIQUE (apply_id),
+  FOREIGN KEY (coordination_run_id, agent_id, generation_loss_id)
+    REFERENCES lifecycle_generation_loss_heads(run_id, agent_id, generation_loss_id),
+  CHECK (length(destructive_confirmation_digest)=71 AND substr(destructive_confirmation_digest,1,7)='sha256:'),
+  CHECK (length(operator_decision_digest)=71 AND substr(operator_decision_digest,1,7)='sha256:'),
+  CHECK (length(terminal_evidence_digest)=71 AND substr(terminal_evidence_digest,1,7)='sha256:'),
+  CHECK (length(intent_digest)=71 AND substr(intent_digest,1,7)='sha256:'),
+  CHECK ((state='terminal')=(result_json IS NOT NULL))
+);
+
 CREATE TABLE operator_interventions (
   intervention_id TEXT PRIMARY KEY,
   run_id TEXT NOT NULL REFERENCES runs(run_id),
