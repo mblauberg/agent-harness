@@ -26,28 +26,28 @@ describe("terminal receipt authority recovery", () => {
       admittedAt: 10,
     };
     await authority.admitScope(scope);
-    const retirementOwnerRef = {
-      kind: "recovery-retirement",
-      retirementRef: {
+    const priorOwnerRef = {
+      kind: "custody",
+      custodyRef: {
         schemaVersion: 1,
         runId: scope.runId,
         agentId: "agent-generation-loss-terminal",
-        retirementId: "retirement-before-generation-loss",
-        revisionDec: "1",
+        custodyId: "custody-before-generation-loss",
+        custodyRevision: 1,
       },
-      sourceRefDigest: digest("recovery-retirement-source", { runId: scope.runId }),
+      sourceRefDigest: digest("custody-terminal-source", { runId: scope.runId }),
     };
-    const retirementSubject = {
+    const priorSubject = {
       schemaVersion: 1,
-      kind: "custody-recovery-retirement",
+      kind: "custody-terminal",
       projectSessionId: scope.projectSessionId,
       runId: scope.runId,
       agentId: "agent-generation-loss-terminal",
-      ownerRef: retirementOwnerRef,
+      ownerRef: priorOwnerRef,
     };
     await authority.appendReceipt(
-      digest("receipt-intent", retirementSubject),
-      retirementSubject,
+      digest("receipt-intent", priorSubject),
+      priorSubject,
     );
     const generationLossRef = {
       schemaVersion: 1,
