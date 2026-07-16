@@ -77,6 +77,7 @@ jobs:
             workflows:
               - '.github/workflows/**'
               - '.github/actions/**'
+              - '.github/zizmor.yml'
 
   harness:
     name: Harness policy and Python tests
@@ -261,6 +262,9 @@ jobs:
         uses: zizmorcore/zizmor-action@6599ee8b7a49aef6a770f63d261d214911a7ce02 # v0.6.0
         with:
           version: "1.27.0"
+          # Audit exactly the surfaces this job is path-filtered on.
+          inputs: ".github/workflows .github/actions"
+          config: .github/zizmor.yml
           online-audits: "false"
           advanced-security: "false"
           annotations: "true"
