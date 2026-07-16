@@ -1,8 +1,13 @@
 {
   "schemaVersion": 1,
   "datasetId": "agent-fabric-adapter-model-policy",
-  "version": "2026-07-10.1",
+  "version": "2026-07-16.1",
   "cases": [
+    {"id":"codex-account-default","modelFamily":"openai","modelId":null,"allowedFamilies":["openai"],"allowedModelPatterns":["gpt-*","codex*","o1*","o3*","o4*"],"requiresExplicitModel":false,"expected":{"allowed":true,"reason":"allowed"}},
+    {"id":"codex-account-default-family-reject","modelFamily":"anthropic","modelId":null,"allowedFamilies":["openai"],"allowedModelPatterns":["gpt-*","codex*","o1*","o3*","o4*"],"requiresExplicitModel":false,"expected":{"allowed":false,"reason":"family-forbidden"}},
+    {"id":"codex-explicit-forbidden-under-account-default","modelFamily":"openai","modelId":"grok-4","allowedFamilies":["openai"],"allowedModelPatterns":["gpt-*","codex*","o1*","o3*","o4*"],"requiresExplicitModel":false,"expected":{"allowed":false,"reason":"model-forbidden"}},
+    {"id":"codex-matching-explicit-still-forbidden","modelFamily":"openai","modelId":"gpt-5.6-sol","allowedFamilies":["openai"],"allowedModelPatterns":["gpt-*","codex*","o1*","o3*","o4*"],"requiresExplicitModel":false,"expected":{"allowed":false,"reason":"model-forbidden"}},
+    {"id":"open-weight-never-bridges-absent-model","modelFamily":"zhipu","modelId":null,"allowedFamilies":["open-weight"],"allowedModelPatterns":["glm-*"],"requiresExplicitModel":false,"expected":{"allowed":false,"reason":"family-forbidden"}},
     {"id":"cursor-composer","modelFamily":"cursor-composer","modelId":"composer-2.5","allowedFamilies":["cursor-composer","xai"],"allowedModelPatterns":["composer-*","cursor-grok-*"],"requiresExplicitModel":true,"expected":{"allowed":true,"reason":"allowed"}},
     {"id":"cursor-grok","modelFamily":"xai","modelId":"cursor-grok-4.5-high","allowedFamilies":["cursor-composer","xai"],"allowedModelPatterns":["composer-*","cursor-grok-*"],"requiresExplicitModel":true,"expected":{"allowed":true,"reason":"allowed"}},
     {"id":"cursor-gpt-reject","modelFamily":"openai","modelId":"gpt-5.6","allowedFamilies":["cursor-composer","xai"],"allowedModelPatterns":["composer-*","cursor-grok-*"],"requiresExplicitModel":true,"expected":{"allowed":false,"reason":"family-forbidden"}},

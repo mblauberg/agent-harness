@@ -54,6 +54,32 @@ describe("Stage 1 versioned JSON Schemas", () => {
     expect(unknown.keywords).toContain("additionalProperties");
   });
 
+  it("admits an account-default rejection route without treating the request as resolved", async () => {
+    const receiptSchema = await readSchema("fabric-receipt.schema.json");
+    const definitions = receiptSchema.$defs;
+    if (!isJsonObject(definitions) || !isJsonObject(definitions.modelRouteReceipt)) {
+      throw new TypeError("fabric receipt model-route schema is invalid");
+    }
+    const rejectedRoute = {
+      schema_version: 1,
+      status: "adapter_account_default_only",
+      adapter: "codex",
+      alias: "flagship",
+      role: "lead",
+      endpoint_provider: "openai",
+      model_family: "openai",
+      resolved_model: "",
+      requested_model: "gpt-5.6-sol",
+      catalog_model: "gpt-5.6-sol",
+      model_selection: "account-default",
+      identity_source: "account-default",
+    };
+
+    const result = validateWithSchema(definitions.modelRouteReceipt, rejectedRoute);
+    expect(result.details).toEqual([]);
+    expect(result.valid).toBe(true);
+  });
+
   it("validates adapter compatibility and exposes only explicitly gated adapters", async () => {
     const schema = await readSchema("adapter-compatibility.schema.json");
     const compatibility = await readYamlObject("adapter-compatibility.yaml");
@@ -77,7 +103,12 @@ describe("Stage 1 versioned JSON Schemas", () => {
       }
       expect(adapter.enabled, `${adapterId} activation state`).toBe(enabledAdapters.has(adapterId));
       const constraints = adapter.model_family_constraints;
-      if (isJsonObject(constraints) && constraints.requires_explicit_model === true) {
+      // An adapter that admits no model family at all (visibility-only herdr,
+      // allowed: []) dispatches nothing, so it carries no pattern binding.
+      if (
+        isJsonObject(constraints) && constraints.requires_explicit_model === true &&
+        Array.isArray(constraints.allowed) && constraints.allowed.length > 0
+      ) {
         expect(
           Array.isArray(constraints.allowed_model_patterns) && constraints.allowed_model_patterns.length > 0,
           `${adapterId} must bind self-reported family to a trusted model pattern`,

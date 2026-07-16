@@ -45,7 +45,7 @@ describe("Stage 5 adapter-model policy evaluation", () => {
     const raw: unknown = JSON.parse(await readFile(new URL("./adapter-model-policy-cases.json", import.meta.url), "utf8"));
     if (!isRecord(raw) || raw.schemaVersion !== 1 || !Array.isArray(raw.cases)) throw new TypeError("evaluation dataset is invalid");
     const cases = raw.cases.map(policyCase);
-    expect(cases).toHaveLength(12);
+    expect(cases).toHaveLength(17);
     for (const item of cases) {
       expect(assessAdapterModelPolicy({
         modelFamily: item.modelFamily,

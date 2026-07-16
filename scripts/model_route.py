@@ -66,6 +66,11 @@ def load_adapter_compatibility(adapter: str) -> tuple[dict[str, Any] | None, str
         "unresolved_pins": entry["unresolved_pins"],
         "allowed_families": allowed,
         "allowed_model_patterns": patterns,
+        # Fail closed on omission: only an explicit `false` opts an adapter
+        # into account-default dispatch (#190).
+        "requires_explicit_model": (constraints.get("requires_explicit_model") is not False)
+        if isinstance(constraints, dict)
+        else True,
     }, ""
 
 
@@ -115,12 +120,24 @@ def emit(record: dict[str, Any], code: int) -> int:
     return code
 
 
+def load_json(raw: str) -> Any:
+    def reject_duplicate_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON member: {key}")
+            result[key] = value
+        return result
+
+    return json.loads(raw, object_pairs_hook=reject_duplicate_members)
+
+
 def load_capabilities(path: str | None) -> tuple[dict[str, Any], str]:
     if not path:
         return {}, ""
     try:
-        data = json.loads(Path(path).read_text())
-    except (OSError, json.JSONDecodeError):
+        data = load_json(Path(path).read_text())
+    except (OSError, json.JSONDecodeError, ValueError):
         return {}, "capability_discovery_failed"
     if not isinstance(data, dict) or data.get("schema_version") != 1 or not isinstance(data.get("models"), dict):
         return {}, "capability_discovery_failed"
@@ -138,12 +155,25 @@ def load_capabilities(path: str | None) -> tuple[dict[str, Any], str]:
     models = data["models"]
     if not models:
         return {}, "capability_discovery_failed"
+    normalized_keys: set[str] = set()
     for key, item in models.items():
-        if not isinstance(key, str) or not isinstance(item, dict):
+        if not isinstance(key, str) or not key.strip() or not isinstance(item, dict):
             return {}, "capability_discovery_failed"
-        if not isinstance(item.get("resolved_model"), str) or not isinstance(item.get("supported_efforts"), list):
+        normalized_key = key.casefold()
+        resolved_model = item.get("resolved_model")
+        efforts = item.get("supported_efforts")
+        if normalized_key in normalized_keys:
             return {}, "capability_discovery_failed"
-        if any(not isinstance(effort, str) for effort in item["supported_efforts"]):
+        normalized_keys.add(normalized_key)
+        if (
+            not isinstance(resolved_model, str)
+            or not resolved_model.strip()
+            or resolved_model.casefold() != normalized_key
+            or not isinstance(efforts, list)
+            or not efforts
+        ):
+            return {}, "capability_discovery_failed"
+        if any(not isinstance(effort, str) or not effort.strip() for effort in efforts):
             return {}, "capability_discovery_failed"
     return models, ""
 
@@ -154,9 +184,16 @@ def resolve_effort(
     model: str,
     family_config: dict[str, Any],
     requested_effort: str,
+    account_default: bool,
 ) -> tuple[str | None, str, str, str]:
     """Return effective effort, substitution, failure status, capability source."""
-    if args.capability_models and model.lower() not in args.capability_models:
+    capability_model_available = model.lower() in args.capability_models
+    catalog_model_missing = bool(
+        account_default
+        and args.capability_models
+        and not capability_model_available
+    )
+    if args.capability_models and not account_default and not capability_model_available:
         return None, "", "capability_model_unavailable", "runtime-model-catalog"
 
     ultra_eligible = (
@@ -194,7 +231,7 @@ def resolve_effort(
         return "", "adapter does not expose effort control", "", "adapter-no-effort-control"
 
     capability_models = args.capability_models
-    if capability_models:
+    if capability_models and not catalog_model_missing:
         item = capability_models.get(model.lower())
         if not item:
             return None, "", "capability_model_unavailable", "runtime-model-catalog"
@@ -213,7 +250,12 @@ def resolve_effort(
         return requested_effort, "", "", "provider-unverified"
 
     if requested_effort in supported:
-        return requested_effort, "", "", capability_source
+        substitution = (
+            "catalog model absent from runtime snapshot; used dated-catalog effort support"
+            if catalog_model_missing
+            else ""
+        )
+        return requested_effort, substitution, "", capability_source
     if args.effort:
         return None, "", "effort_unsupported", capability_source
     fallback = next(
@@ -222,12 +264,13 @@ def resolve_effort(
     )
     if not fallback:
         return None, "", "no_effort_available", capability_source
-    return (
-        fallback,
-        f"{requested_effort} unavailable (runtime/model capability); used {fallback}",
-        "",
-        capability_source,
-    )
+    substitution = f"{requested_effort} unavailable (runtime/model capability); used {fallback}"
+    if catalog_model_missing:
+        substitution = (
+            "catalog model absent from runtime snapshot; used dated-catalog effort support; "
+            + substitution
+        )
+    return fallback, substitution, "", capability_source
 
 
 def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
@@ -254,13 +297,29 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
     if not adapter:
         return emit({**base, "status": "unknown_adapter"}, 2)
     args.effort_transport = adapter.get("effort_transport", "none")
+    # account-default adapters dispatch on the provider account's default
+    # model: the runtime rejects explicit model ids, so the resolver keeps the
+    # catalog id for effort/audit lookups but emits an empty dispatch model.
+    account_default = adapter.get("model_selection") == "account-default"
+
+    def emit_route(record: dict[str, Any], code: int) -> int:
+        """Emit, never exposing a catalog id as a dispatchable model (#190)."""
+        resolved = record.get("resolved_model")
+        if account_default and isinstance(resolved, str) and resolved:
+            record = {
+                **record,
+                "resolved_model": "",
+                "catalog_model": resolved,
+                "model_selection": "account-default",
+            }
+        return emit(record, code)
 
     endpoint = adapter["endpoint_provider"]
     compatibility: dict[str, Any] | None = None
     compatibility_metadata: dict[str, Any] = {}
     active_adapters: set[str] = set()
     if args.adapter_gate == "fabric" and args.adapter not in COMPATIBILITY_ADAPTER_IDS:
-        return emit(
+        return emit_route(
             {
                 **base,
                 "status": "adapter_compatibility_unknown",
@@ -271,7 +330,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
     if args.adapter in COMPATIBILITY_ADAPTER_IDS:
         compatibility, compatibility_status = load_adapter_compatibility(args.adapter)
         if compatibility_status:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": compatibility_status,
@@ -287,7 +346,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
         if args.adapter_gate == "fabric":
             active_adapters, activation_status = load_active_adapters(Path(args.fabric_config))
             if activation_status:
-                return emit(
+                return emit_route(
                     {
                         **base,
                         "status": activation_status,
@@ -299,16 +358,46 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             compatibility_metadata["adapter_active"] = (
                 compatibility["compatibility_adapter"] in active_adapters
             )
+        if account_default != (not compatibility["requires_explicit_model"]):
+            # The routing catalog and the compatibility pin must agree on
+            # account-default dispatch in both directions (#190).
+            return emit_route(
+                {
+                    **base,
+                    "status": "account_default_conflicts_with_compatibility",
+                    "endpoint_provider": endpoint,
+                    **compatibility_metadata,
+                },
+                2,
+            )
     substitution = ""
     fallback_model = ""
     identity_source = ""
 
     if args.model:
+        if account_default:
+            candidates = family_config.get("role_overrides", {}).get(args.role, {}).get(args.alias)
+            candidates = candidates or family_config.get("aliases", {}).get(args.alias, [])
+            return emit(
+                {
+                    **base,
+                    "status": "adapter_account_default_only",
+                    "endpoint_provider": endpoint,
+                    "model_family": fixed_family,
+                    "resolved_model": "",
+                    "requested_model": args.model,
+                    "catalog_model": candidates[0] if candidates else "",
+                    "model_selection": "account-default",
+                    "identity_source": "account-default",
+                    **compatibility_metadata,
+                },
+                1,
+            )
         model = args.model
         family = infer_family(model, catalog)
         identity_source = "model-pattern"
         if not family:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": "model_family_unknown",
@@ -318,7 +407,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
                 1,
             )
         if fixed_family and family != fixed_family:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": "adapter_family_mismatch",
@@ -330,7 +419,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             )
     else:
         if not fixed_family:
-            return emit(
+            return emit_route(
                 {**base, "status": "model_required_for_broker", "endpoint_provider": endpoint},
                 2,
             )
@@ -339,38 +428,43 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
         candidates = family_config.get("role_overrides", {}).get(args.role, {}).get(args.alias)
         candidates = candidates or family_config["aliases"].get(args.alias)
         if not candidates:
-            return emit({**base, "status": "alias_unavailable", "model_family": family}, 1)
-        available = {item.lower(): item for item in args.available_model}
-        if capability_models:
-            available.update(
-                {key.lower(): item["resolved_model"] for key, item in capability_models.items()}
-            )
-        if available:
-            chosen = next((candidate for candidate in candidates if candidate.lower() in available), None)
-            if not chosen:
-                return emit(
-                    {
-                        **base,
-                        "status": "no_candidate_available",
-                        "endpoint_provider": endpoint,
-                        "model_family": family,
-                        "candidates": candidates,
-                    },
-                    1,
-                )
-            model = available[chosen.lower()]
-            if chosen != candidates[0]:
-                substitution = f"{candidates[0]} unavailable; used {chosen}"
-            identity_source = "runtime-available+catalog"
-        else:
+            return emit_route({**base, "status": "alias_unavailable", "model_family": family}, 1)
+        if account_default:
             model = candidates[0]
             fallback_model = candidates[1] if len(candidates) > 1 else ""
-            identity_source = "dated-catalog"
+            identity_source = "account-default"
+        else:
+            available = {item.lower(): item for item in args.available_model}
+            if capability_models:
+                available.update(
+                    {key.lower(): item["resolved_model"] for key, item in capability_models.items()}
+                )
+            if available:
+                chosen = next((candidate for candidate in candidates if candidate.lower() in available), None)
+                if not chosen:
+                    return emit_route(
+                        {
+                            **base,
+                            "status": "no_candidate_available",
+                            "endpoint_provider": endpoint,
+                            "model_family": family,
+                            "candidates": candidates,
+                        },
+                        1,
+                    )
+                model = available[chosen.lower()]
+                if chosen != candidates[0]:
+                    substitution = f"{candidates[0]} unavailable; used {chosen}"
+                identity_source = "runtime-available+catalog"
+            else:
+                model = candidates[0]
+                fallback_model = candidates[1] if len(candidates) > 1 else ""
+                identity_source = "dated-catalog"
 
     compatibility_family = ""
     if compatibility:
         if args.adapter_gate == "fabric" and not compatibility["enabled"]:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": "adapter_disabled",
@@ -383,7 +477,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
                 1,
             )
         if args.adapter_gate == "fabric" and not compatibility_metadata["adapter_active"]:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": "adapter_inactive",
@@ -396,7 +490,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
                 1,
             )
         if args.adapter_gate == "fabric" and compatibility["unresolved_pins"]:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": "adapter_unresolved_pins",
@@ -410,7 +504,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             )
     distinct = bool(args.lead_family and family != args.lead_family)
     if compatibility and args.require_distinct and not args.lead_family:
-        return emit(
+        return emit_route(
             {
                 **base,
                 "status": "lead_family_required",
@@ -423,7 +517,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             2,
         )
     if compatibility and args.require_distinct and not distinct:
-        return emit(
+        return emit_route(
             {
                 **base,
                 "status": "same_family_forbidden",
@@ -442,7 +536,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             compatibility, family, model
         )
         if compatibility_status:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": compatibility_status,
@@ -457,7 +551,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             )
 
     if capability_error:
-        return emit(
+        return emit_route(
             {
                 **base,
                 "status": capability_error,
@@ -473,10 +567,10 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
         )
 
     effort, effort_substitution, effort_status, capability_source = resolve_effort(
-        args, family, model, family_config, requested_effort
+        args, family, model, family_config, requested_effort, account_default
     )
     if effort_status:
-        return emit(
+        return emit_route(
             {
                 **base,
                 "status": effort_status,
@@ -505,6 +599,15 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
         "fallback_model": fallback_model,
         "distinct_from_lead": distinct,
     }
+    if account_default:
+        record.update(
+            {
+                "resolved_model": "",
+                "catalog_model": model,
+                "model_selection": "account-default",
+                "identity_source": "account-default",
+            }
+        )
     if compatibility:
         record.update(
             {
@@ -513,10 +616,10 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             }
         )
     if args.require_distinct and not args.lead_family:
-        return emit({**record, "status": "lead_family_required"}, 2)
+        return emit_route({**record, "status": "lead_family_required"}, 2)
     if args.require_distinct and not distinct:
-        return emit({**record, "status": "same_family_forbidden"}, 1)
-    return emit(record, 0)
+        return emit_route({**record, "status": "same_family_forbidden"}, 1)
+    return emit_route(record, 0)
 
 
 def parser() -> argparse.ArgumentParser:

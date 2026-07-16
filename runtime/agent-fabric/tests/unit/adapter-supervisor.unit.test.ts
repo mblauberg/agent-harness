@@ -227,6 +227,45 @@ describe("persistent adapter supervision", () => {
     }
   });
 
+  it("rejects an explicit Codex recovery model before opening a transport", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-codex-recovery-policy-"));
+    const countPath = join(directory, "starts.txt");
+    const supervisor = new AdapterSupervisor({
+      "codex-app-server": {
+        command: [process.execPath, "--import", "tsx", fixturePath],
+        environment: { SUPERVISOR_COUNT_PATH: countPath },
+        modelPolicy: {
+          allowedFamilies: ["openai"],
+          allowedModelPatterns: ["gpt-*", "codex*"],
+          requiresExplicitModel: false,
+        },
+      },
+    });
+    try {
+      await expect(supervisor.recoverChair("codex-app-server", {
+        schemaVersion: 1,
+        recoveryId: "codex-chair-recovery-policy",
+        lossId: "codex-chair-loss-policy",
+        actionId: "codex-chair-recover-policy",
+        providerContractDigest: `sha256:${"8".repeat(64)}`,
+        resumeReference: "codex-recovered-chair-session",
+        expectedProviderSessionGeneration: 1,
+        nextProviderSessionGeneration: 2,
+        bridgeGeneration: 2,
+        payload: { cwd: "/workspace/project", modelFamily: "openai", model: "gpt-5.6-sol" },
+      }, {
+        capability: "codex-recovery-policy-capability",
+        socketPath: "/private/codex-recovery-policy.sock",
+        attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: { ...EXPECTED_CHAIR_PRINCIPAL, principalGeneration: 2 },
+      })).rejects.toMatchObject({ code: "MODEL_NOT_ALLOWED" });
+      await expect(readFile(countPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await supervisor.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("promotes one exact retained child and observes the idempotent chair binding", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-supervisor-chair-promotion-"));
     const countPath = join(directory, "starts.txt");

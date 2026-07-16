@@ -41,7 +41,7 @@
   },
   "adapters": {
     "claude": {"endpoint_provider": "anthropic", "fixed_model_family": "anthropic", "effort_transport": "flag"},
-    "codex": {"endpoint_provider": "openai", "fixed_model_family": "openai", "effort_transport": "flag"},
+    "codex": {"endpoint_provider": "openai", "fixed_model_family": "openai", "effort_transport": "flag", "model_selection": "account-default"},
     "cursor": {"endpoint_provider": "cursor", "fixed_model_family": null, "effort_transport": "model-id"},
     "agy": {"endpoint_provider": "agy", "fixed_model_family": null, "effort_transport": "model-id"},
     "copilot": {"endpoint_provider": "github", "fixed_model_family": null, "effort_transport": "flag"},

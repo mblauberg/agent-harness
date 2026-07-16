@@ -87,7 +87,7 @@ describe("daemon adapter composition", () => {
     }
   });
 
-  it("runs a task-bound ephemeral provider review through the generated MCP surface", async () => {
+  it("runs a task-bound account-default provider review through the generated MCP surface", async () => {
     vi.stubEnv("USER", "fabric-provider-user");
     vi.stubEnv("LOGNAME", "fabric-provider-login");
     const directory = await mkdtemp(join(tmpdir(), "af-ephemeral-"));
@@ -106,13 +106,14 @@ describe("daemon adapter composition", () => {
           environment: {
             FAKE_ADAPTER_JOURNAL: join(directory, "fake-journal.json"),
             FAKE_ADAPTER_EPHEMERAL_SPAWN: "1",
+            FAKE_ADAPTER_ACCOUNT_DEFAULT_MODEL: "1",
             FAKE_ADAPTER_REPORT_LOGIN_IDENTITY: "1",
             FAKE_ADAPTER_EPHEMERAL_SPAWN_DELAY_MS: "2000",
           },
           modelPolicy: {
             allowedFamilies: ["fake"],
             allowedModelPatterns: ["fake-reviewer-*"],
-            requiresExplicitModel: true,
+            requiresExplicitModel: false,
           },
         },
       },
@@ -163,7 +164,6 @@ describe("daemon adapter composition", () => {
           authorityId: reviewAuthority.authorityId,
           payload: {
             taskId: "daemon-ephemeral-review",
-            model: "fake-reviewer-v1",
             modelFamily: "fake",
             prompt: "Review the current implementation read-only.",
             cwd: "src",
@@ -227,7 +227,7 @@ describe("daemon adapter composition", () => {
           status: "terminal",
           executionCount: 1,
           effectCount: 1,
-          providerAnswer: "review:fake:fake-reviewer-v1:fabric-provider-user:fabric-provider-login",
+          providerAnswer: "review:fake:account-default:fabric-provider-user:fabric-provider-login",
           resultDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
         });
       } finally {

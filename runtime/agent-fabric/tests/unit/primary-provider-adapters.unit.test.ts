@@ -2193,7 +2193,9 @@ describe("Codex chair launch contract", () => {
         noEffectProofSchemas: {},
         publicPayloadSchema: {
           additionalProperties: false,
-          required: ["cwd", "modelFamily", "model", "prompt"],
+          // model is optional: ChatGPT-subscription accounts dispatch on the
+          // account default and reject explicit model ids (#190).
+          required: ["cwd", "modelFamily", "prompt"],
           properties: {
             cwd: { pattern: "^/" },
             modelFamily: { const: "openai" },
@@ -2236,6 +2238,45 @@ describe("Codex chair launch contract", () => {
       request.providerContractDigest,
       "codex-app-server",
       "codex-chair-valid-contract",
+    ));
+    expect(launchChair).toHaveBeenCalledOnce();
+    actionJournal.close();
+  });
+
+  it("admits an account-default launch payload without an explicit model", async () => {
+    // ChatGPT-subscription accounts reject explicit model ids (HTTP 400) and
+    // dispatch on the account default, so an absent model is valid (#190).
+    const actionJournal = await journal();
+    const boundary = codexBoundary();
+    const launchChair = vi.fn(async (input: { providerContractDigest: string; providerAdapterId: string; actionId: string }) => (
+      provedChairLaunch("codex-chair-account-default-thread", input.providerContractDigest, input.providerAdapterId, input.actionId)
+    ));
+    Reflect.set(boundary, "launchChair", launchChair);
+    const adapter = createCodexAppServerAdapter({
+      boundary,
+      journal: actionJournal,
+      chairLaunchHandoff: {
+        capability: "codex-account-default-capability-canary",
+        socketPath: "/private/codex-account-default.sock",
+        attestationChallenge: ATTESTATION_CHALLENGE,
+        expectedPrincipal: EXPECTED_CHAIR_PRINCIPAL,
+      },
+    });
+    const providerContractDigest = `sha256:${"3".repeat(64)}`;
+    await expect(adapter.request("launch_chair", {
+      schemaVersion: 1,
+      providerContractDigest,
+      actionId: "codex-chair-account-default",
+      payload: {
+        cwd: "/workspace/project",
+        modelFamily: "openai",
+        prompt: "begin reviewed coordination",
+      },
+    })).resolves.toEqual(provedChairLaunch(
+      "codex-chair-account-default-thread",
+      providerContractDigest,
+      "codex-app-server",
+      "codex-chair-account-default",
     ));
     expect(launchChair).toHaveBeenCalledOnce();
     actionJournal.close();
