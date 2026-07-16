@@ -250,6 +250,11 @@ export class AdapterSupervisor {
         expected: definition.wrapperProvenance,
       });
     }
+    // Accepted residual (verify->exec swap race): a narrow TOCTOU window remains
+    // between this re-verification and the transport's own exec of the wrapper
+    // command below. An attacker with concurrent write access could swap the
+    // wrapper bytes inside that window. Full closure needs snapshot execution
+    // (spawning from a verified, immutable copy) and is out of scope for #132.
     return new AdapterProcessTransport(environment === undefined ? definition : { ...definition, environment });
   }
 

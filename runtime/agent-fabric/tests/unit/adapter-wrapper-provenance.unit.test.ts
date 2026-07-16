@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { stringify } from "yaml";
@@ -13,6 +15,22 @@ import { repositoryPath } from "../support/primary-adapter-testkit.ts";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+const execFileAsync = promisify(execFile);
+
+async function fixtureGit(directory: string, ...args: string[]): Promise<void> {
+  await execFileAsync("git", [
+    "-C",
+    directory,
+    "-c",
+    "user.name=fixture",
+    "-c",
+    "user.email=fixture@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    ...args,
+  ]);
 }
 
 type ProvenanceFixture = {
@@ -425,6 +443,117 @@ describe("adapter wrapper Git provenance", () => {
     } finally {
       await supervisor.close();
     }
+  });
+
+  it("binds the consulted tsconfig chain and fails closed on a dirty tsconfig", async () => {
+    const fixture = await createProvenanceFixture();
+    const tsconfigPath = join(fixture.directory, "tsconfig.json");
+    await writeFile(tsconfigPath, `${JSON.stringify({ compilerOptions: { strict: true } })}\n`);
+    await commitFixtureRepository(fixture.directory, "add tsconfig");
+
+    // The tsconfig is now part of the tracked-and-clean verification set.
+    await expect(verify(fixture)).resolves.toMatchObject({ valid: true });
+
+    // tsx would read this tsconfig at runtime; a byte change without a commit
+    // could redirect module resolution, so it must fail closed naming the file.
+    await writeFile(tsconfigPath, `${JSON.stringify({ compilerOptions: { strict: false } })}\n`);
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("differs from its committed content: fixture (tsconfig.json)"),
+    });
+  });
+
+  it("fails closed when a consulted tsconfig is present but untracked", async () => {
+    const fixture = await createProvenanceFixture();
+    // Present on disk (tsx would read it) but never committed: it cannot be
+    // verified against HEAD, so span discovery fails closed naming it.
+    await writeFile(join(fixture.directory, "tsconfig.json"), `${JSON.stringify({ compilerOptions: { strict: true } })}\n`);
+
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("TypeScript configuration is present but not tracked at the repository HEAD: tsconfig.json"),
+    });
+  });
+
+  it("fails closed when a node_modules dependency symlink is redirected to another in-repo package", async () => {
+    const fixture = await createProvenanceFixture();
+    const packageRoot = join(fixture.directory, "wrapper-package");
+    const trackedTarget = join(fixture.directory, "fixture-protocol");
+    const decoyTarget = join(fixture.directory, "decoy-protocol");
+    await mkdir(join(packageRoot, "src"), { recursive: true });
+    await mkdir(join(trackedTarget, "src"), { recursive: true });
+    await mkdir(join(decoyTarget, "src"), { recursive: true });
+    await mkdir(join(packageRoot, "node_modules", "@local"), { recursive: true });
+    const packagedWrapper = join(packageRoot, "src", "wrapper.js");
+    await writeFile(join(packageRoot, "package.json"), JSON.stringify({
+      name: "@local/fixture-wrapper",
+      type: "module",
+      dependencies: { "@local/fixture-protocol": "file:../fixture-protocol" },
+    }));
+    await writeFile(packagedWrapper, 'export { parse } from "@local/fixture-protocol";\n');
+    await writeFile(join(trackedTarget, "package.json"), JSON.stringify({ name: "@local/fixture-protocol", type: "module" }));
+    await writeFile(join(trackedTarget, "src", "index.js"), 'export const parse = () => "safe";\n');
+    await writeFile(join(decoyTarget, "package.json"), JSON.stringify({ name: "@local/fixture-protocol", type: "module" }));
+    await writeFile(join(decoyTarget, "src", "index.js"), 'export const parse = () => "attacker";\n');
+    // The symlink points at the decoy package, not the tracked file: target.
+    await symlink(decoyTarget, join(packageRoot, "node_modules", "@local", "fixture-protocol"), "dir");
+    await commitFixtureRepository(fixture.directory, "redirected dependency symlink");
+    await writeCompatibility(fixture, packagedWrapper);
+
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("resolves outside its tracked location"),
+    });
+  });
+
+  it("fails closed on byte drift hidden with git update-index --assume-unchanged", async () => {
+    const fixture = await createProvenanceFixture();
+    const source = join(fixture.directory, "src", "index.js");
+    await writeFile(source, 'export const fixtureFirstPartySource = "tampered";\n');
+    // assume-unchanged makes `git diff --quiet HEAD` skip the file entirely; the
+    // index-free hash comparison reads the worktree bytes and still fails closed.
+    await fixtureGit(fixture.directory, "update-index", "--assume-unchanged", "src/index.js");
+
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("first-party source differs from its committed content: fixture (src/index.js)"),
+    });
+  });
+
+  it("fails closed against a git replace ref shadowing HEAD's tree", async () => {
+    const fixture = await createProvenanceFixture();
+    const source = join(fixture.directory, "src", "index.js");
+    // Build a tampered commit, then rewind HEAD to the clean commit and use a
+    // replace ref so the clean commit resolves to the tampered tree. A verifier
+    // that honored replacement objects would see the tampered worktree as clean;
+    // rev-parse HEAD still records the original clean commit.
+    await writeFile(source, 'export const fixtureFirstPartySource = "tampered";\n');
+    const tamperedCommit = await commitFixtureRepository(fixture.directory, "tampered tree");
+    await fixtureGit(fixture.directory, "reset", "--hard", fixture.repositoryCommit);
+    await fixtureGit(fixture.directory, "replace", fixture.repositoryCommit, tamperedCommit);
+    // The compatibility registry was committed into the tampered commit and
+    // removed by the rewind; restore it (it is not part of the provenance span).
+    await writeCompatibility(fixture, fixture.wrapperPath);
+    await writeFile(source, 'export const fixtureFirstPartySource = "tampered";\n');
+
+    // --no-replace-objects makes ls-tree resolve the genuine clean tree, so the
+    // tampered worktree byte drift is detected and fails closed.
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("first-party source differs from its committed content: fixture (src/index.js)"),
+    });
+  });
+
+  it("fails closed on an untracked file shadowing a first-party source span", async () => {
+    const fixture = await createProvenanceFixture();
+    // A new file physically present in the src span but absent from HEAD would
+    // be executed by tsx outside the verified set, so it fails closed naming it.
+    await writeFile(join(fixture.directory, "src", "shadow.js"), 'export const shadow = () => "untracked";\n');
+
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("untracked file shadowing HEAD: src/shadow.js"),
+    });
   });
 
   describe("Git environment injection", () => {
