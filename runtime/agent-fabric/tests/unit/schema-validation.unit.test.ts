@@ -77,7 +77,12 @@ describe("Stage 1 versioned JSON Schemas", () => {
       }
       expect(adapter.enabled, `${adapterId} activation state`).toBe(enabledAdapters.has(adapterId));
       const constraints = adapter.model_family_constraints;
-      if (isJsonObject(constraints) && constraints.requires_explicit_model === true) {
+      // An adapter that admits no model family at all (visibility-only herdr,
+      // allowed: []) dispatches nothing, so it carries no pattern binding.
+      if (
+        isJsonObject(constraints) && constraints.requires_explicit_model === true &&
+        Array.isArray(constraints.allowed) && constraints.allowed.length > 0
+      ) {
         expect(
           Array.isArray(constraints.allowed_model_patterns) && constraints.allowed_model_patterns.length > 0,
           `${adapterId} must bind self-reported family to a trusted model pattern`,
