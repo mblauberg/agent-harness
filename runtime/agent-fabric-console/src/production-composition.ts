@@ -29,6 +29,7 @@ import type { ConsoleControllerState } from "./controller.js";
 import { revisionToProtocol, type ConsoleRow } from "./model.js";
 import {
   bindConsoleProtocolClient,
+  type BootstrapUnavailableReason,
   type ConsoleProtocolBinding,
   type ConsoleSessionCompatibility,
   type FabricConsoleDataset,
@@ -376,19 +377,31 @@ async function loadInstalledFabric(): Promise<unknown> {
   return await import(packageName);
 }
 
-function unavailableReason(error: unknown):
-  | "configuration-missing"
-  | "start-failed"
-  | "schema-cutover-required"
-  | "authority-unavailable" {
+const PRODUCTION_BOOTSTRAP_UNAVAILABLE_REASONS = [
+  "configuration-missing",
+  "schema-cutover-required",
+  "authority-unavailable",
+  "daemon-unreachable",
+  "daemon-incompatible",
+  "socket-unavailable",
+  "daemon-election-conflict",
+  "daemon-spawn-failed",
+  "bootstrap-receipt-invalid",
+  "start-failed",
+] as const satisfies readonly BootstrapUnavailableReason[];
+
+type ProductionBootstrapUnavailableReason =
+  typeof PRODUCTION_BOOTSTRAP_UNAVAILABLE_REASONS[number];
+
+function unavailableReason(error: unknown): ProductionBootstrapUnavailableReason {
   if (isRecord(error)) {
     const reason = error.reason;
     if (
-      reason === "configuration-missing" ||
-      reason === "start-failed" ||
-      reason === "schema-cutover-required" ||
-      reason === "authority-unavailable"
-    ) return reason;
+      typeof reason === "string" &&
+      (PRODUCTION_BOOTSTRAP_UNAVAILABLE_REASONS as readonly string[]).includes(reason)
+    ) {
+      return reason as ProductionBootstrapUnavailableReason;
+    }
   }
   return "start-failed";
 }

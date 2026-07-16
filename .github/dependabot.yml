@@ -11,6 +11,17 @@ updates:
     labels:
       - dependencies
 
+  # Python test tooling for the harness gate: pyproject.toml + uv.lock
+  # (issue #200). Keeps the transitively pinned lock from rotting.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+
   - package-ecosystem: npm
     directory: /
     schedule:

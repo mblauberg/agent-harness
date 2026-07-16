@@ -1,0 +1,68 @@
+name: Work item
+description: Propose a bounded change or decision for user or agent triage.
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Users and agents use the same evidence and authority gates. Do not put
+        secrets, personal data or private project material in this issue.
+
+  - type: textarea
+    id: problem-evidence
+    attributes:
+      label: Problem and evidence
+      description: What needs attention, and what observable evidence supports it?
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: State the result a reviewer should be able to verify.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      description: Name the bounded change and what must remain untouched.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance evidence
+      description: List the checks or observations that prove the outcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Link blocking issues, decisions or artifacts; write "None" if there are none.
+    validations:
+      required: true
+
+  - type: textarea
+    id: risk-authority-gates
+    attributes:
+      label: Risk, authority and user gates
+      description: >-
+        State the likely risk tier, authorised write/external scope, prohibited
+        actions, and any decision, acceptance or release that still needs a user.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before filing
+      options:
+        - label: I have removed secrets, personal data and private project material.
+          required: true
+        - label: This is not a security vulnerability; those use the private route in SECURITY.md.
+          required: true

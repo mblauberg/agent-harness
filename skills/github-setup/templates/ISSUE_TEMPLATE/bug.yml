@@ -1,0 +1,72 @@
+name: Bug report
+description: The project behaves differently from its documented contract.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Do not report a security vulnerability here. Use the private route in
+        SECURITY.md. Redact credentials, private prompts, personal data and
+        private project names from everything you paste below.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: >-
+        The documented behaviour, the behaviour you saw, and the gap between
+        them. Quote the contract you are measuring against (a README line, a
+        spec, a script's help text) where you can.
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit or version
+      description: 'Output of: git rev-parse --short HEAD (or the released version string)'
+      placeholder: 0ea935f
+    validations:
+      required: true
+
+  - type: textarea
+    id: check
+    attributes:
+      label: CI or local gate output
+      description: >-
+        Run the project's local verification gate (its equivalent of
+        `ci-status`) and paste the output, whether it passes or fails. A bug
+        the gate already catches is a different bug from one it misses, and we
+        cannot tell which you have without this.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: >-
+        The smallest steps that reproduce it: the command, the files it
+        touched, and what came back.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system and relevant runtime/tool versions.
+      placeholder: "macOS 15.3, Node 24.2.0"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before you file
+      options:
+        - label: This is not a security vulnerability. Those go through SECURITY.md.
+          required: true
+        - label: I have removed credentials, personal data and private project names from this report.
+          required: true

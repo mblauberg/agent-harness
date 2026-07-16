@@ -3,7 +3,10 @@
 Pulls issues already marked **accepted/ready** by a user or governance gate
 (an issue tracker `ready`/`accepted` label or column, or equivalent) and
 drives each through the existing lifecycle skills, unattended, up to the
-user PR-review/merge gate. This is a thin mode of `orchestrate`: it selects
+merge gate. User-controlled merge is the global default; the nearest
+repository merge policy governs, and a repository that authorises agent
+merges (as provenant's GitHub workflow runbook does) lets the run merge once
+that policy's review and CI gates pass. This is a thin mode of `orchestrate`: it selects
 and sequences work; it does not scope, review, or accept it, and it does not
 fork a new receipt format.
 
@@ -49,7 +52,10 @@ one.
    verified-implementation loop, including receipt creation; it never
    pre-supposes a receipt is already sitting there.
 3. **STOP** at `implement`'s own user-acceptance gate (`awaiting_acceptance`
-   / PR opened for review). Do not merge, do not promote, and do not carry
+   / PR opened for review) unless the nearest repository merge policy
+   authorises agent merges, in which case merge once that policy's review
+   and CI gates pass on the exact head. Where no such policy exists, do not
+   merge. Never promote, and do not carry
    that issue's `RUN.json` past the state `implement` leaves it in. **Never
    fork a new receipt** — the canonical `delivery-run` from
    `deliver/templates/RUN.template.json`, created by `implement` at this
@@ -72,9 +78,9 @@ one.
 |---|---|---|
 | Scope source | pre-scoped accepted/ready issues only; never scopes | self-scopes open-ended missions |
 | Duration | one bounded pass over the current queue snapshot | persistent, survives sessions/crashes, until user `STATUS: STOP` |
-| User gate | stops at PR-review/merge for every single issue | user-out-of-loop during the loop; reaches users only at hard/one-way-door gates |
+| User gate | per issue: user PR-review/merge by default, or the repository's agent-merge policy where one exists | user-out-of-loop during the loop; reaches users only at hard/one-way-door gates |
 | State | uses `implement`/`deliver` receipts only, no durable lab state | `GOAL.md`/`STATE.md`/ADR/queue durable cross-session state |
-| Authority | lower — never proceeds past user review | higher — authorised to keep driving without per-item user sign-off |
+| Authority | lower — never proceeds past the per-issue merge gate its repository's policy sets | higher — authorised to keep driving without per-item user sign-off |
 
 Trigger this mode only on an explicit **bounded, pre-scoped issue queue**
 ("work through the ready/accepted issues", "implement the accepted backlog to
@@ -88,7 +94,8 @@ default to this lower-authority mode and let the user explicitly promote to
 
 - Not a scoping tool — an issue without acceptance criteria stops the mode;
   it does not trigger ad hoc scoping to make the issue runnable.
-- Not a merge/release tool — `release` and user merge remain separate,
-  user-authorised steps that happen after this mode stops.
+- Not a release tool — `release` remains a separate, user-authorised step.
+  Merging follows the nearest repository merge policy; absent one, user merge
+  happens after this mode stops.
 - Not a new receipt format — every issue's evidence lives in its own
   `implement`/`deliver` receipt; this mode only sequences and reports them.
