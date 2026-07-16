@@ -1,6 +1,8 @@
 # ADR 0006 — Defer a canonical backlog contract
 
-**Status:** Accepted 2026-07-13; amended 2026-07-15
+**Status:** Superseded 2026-07-16 by [ADR
+0011](0011-github-owns-work-state.md) (user, [issue
+#156](https://github.com/mblauberg/provenant/issues/156))
 
 ## Context
 

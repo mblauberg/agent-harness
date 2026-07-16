@@ -1,8 +1,8 @@
 # Adaptive agent harness lifecycle
 
-Status: Base implementation machine verified; final user acceptance pending
-Chair: Codex
-Paired design peer: Claude Code, Fable 5 (Opus fallback)
+[Issue #23](https://github.com/mblauberg/provenant/issues/23) and its Project
+Status field own delivery state, owner, dependencies and user gates for these
+requirements.
 
 The current contract permits direct read-only analysis of local session history, keeps sharing and export separately gated, and treats unsupported or unattributable evidence as `N/A`, never zero. It does not retain the synthetic collector, which had no provider-native adapter or producer. Route evaluation remains task-local, receipt-bound and content-free; it does not approve a learned or Pareto router.
 
@@ -408,15 +408,15 @@ score. Production/session examples enter a shared or exported dataset only
 after disclosure review and explicit approval. Capability cases and regression
 cases are labelled separately.
 
-## Implementation plan
+## Required delivery sequence
 
-| Phase | Status |
+| Phase | Required outcome |
 |---|---|
-| 1 — evidence foundations | Implemented and tested |
+| 1 — evidence foundations | Evidence contracts and tests |
 | 2 — neutral kernel | One public v1 contract for every profile |
-| 3 — bound gates | Implemented and tested |
-| 4 — managed evolution | Implemented; live installation not performed |
-| 5 — prove and accept | Deterministic proof complete; independent final review and user acceptance pending |
+| 3 — bound gates | Digest-bound authority, security and observation gates |
+| 4 — managed evolution | Reconciled installation and routing evidence |
+| 5 — prove and accept | Deterministic proof, independent review and explicit user acceptance |
 
 ### Phase 1 — evidence foundations
 
@@ -507,7 +507,7 @@ The refactor is complete when:
 | 9 | balanced core fixtures, held-out dataset and repeated Fable routing receipts |
 | 10 | `scripts/check-harness`, public-release check, clean-install and context-budget suites |
 | 11 | HREF-002 fresh native and Fable review artifacts after the final source freeze |
-| 12 | Pending explicit user acceptance; no release or push is authorised |
+| 12 | Explicit user acceptance evidence; no release or push authority is implied |
 
 ## Known risks and controls
 
@@ -522,16 +522,15 @@ The refactor is complete when:
 | Concurrent agent-fabric work conflicts | Unique files in Phase 1; shared entrypoints deferred until fabric ownership closes. |
 | Research becomes stale | Dated evidence cut-off, 90-day decision expiry and retrospective refresh proposal. |
 
-## Remaining user gates
+## User authority boundaries
 
 The held-out baseline justifies `deliver`; the instruction to implement this
 approved specification entirely selects that named entrypoint. Non-trivial
 neutral runs persist receipts; tiny routine one-shot work remains exempt.
 Requested local history is read in place and not retained as project truth.
-Sharing or exporting derived evidence remains a separate user decision.
-
-Final lifecycle acceptance remains pending. Runtime activation, live
-installation, provider login, push and release remain separate user decisions.
+Sharing or exporting derived evidence requires a separate user decision.
+Lifecycle acceptance, runtime activation, live installation, provider login,
+push and release each require separate user authority.
 
 ## Route and topology evaluation evidence
 

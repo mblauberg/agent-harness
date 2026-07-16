@@ -19,7 +19,6 @@ SCRATCH_NAMES = re.compile(r"^(?:\.temp|temp[-_.]|scratch[-_.]|.*\.(?:tmp|scratc
 FRESHNESS = re.compile(r"^(?:updated|last updated|last verified|as of)\s*:\s*(\S+)", re.I | re.M)
 HANDOFF_FIELD = re.compile(r"^(?:-\s*)?(?:\*\*)?(Status|Effort|Leg|Supersedes|Consumed-at)(?:\*\*)?\s*:\s*(.+?)\s*$", re.I | re.M)
 CANONICAL_KEY = re.compile(r"^(?:-\s*)?(?:\*\*)?Canonical key(?:\*\*)?\s*:\s*([A-Za-z0-9._-]+)\s*$", re.I | re.M)
-EFFORT_STATUS = re.compile(r"^(?:-\s*)?(?:\*\*)?Status(?:\*\*)?\s*:\s*(active|blocked|done)\s*$", re.I | re.M)
 
 
 @dataclass(frozen=True)
@@ -223,16 +222,6 @@ def audit(
                         findings.append(Finding("warning", "orphan-run-scratch", f"{rel}/{candidate_rel}", "scratch-like file is absent from the delivery artifact manifest"))
 
     active_handoffs: dict[tuple[str, str], str] = {}
-    done_efforts: set[str] = set()
-    for path in (item for item in walked_files(root) if item.match("EFFORT-*.md")):
-        if not path.is_file() or skipped(path, root):
-            continue
-        try:
-            match = EFFORT_STATUS.search(path.read_text(errors="replace")[:4096])
-        except OSError:
-            continue
-        if match and match.group(1).lower() == "done":
-            done_efforts.add(path.stem.removeprefix("EFFORT-").lower())
     for path in (item for item in walked_files(root) if item.match("HANDOFF-*.md")):
         if not path.is_file() or skipped(path, root):
             continue
@@ -259,8 +248,6 @@ def audit(
         leg = fields.get("leg", "none")
         key = (effort, leg)
         if status == "active" and not archived and key != ("none", "none"):
-            if effort in done_efforts:
-                findings.append(Finding("error", "done-effort-active-handoff", rel, f"effort {effort} is done; consume and archive this handoff"))
             if key in active_handoffs:
                 findings.append(Finding("error", "duplicate-active-handoff", rel, f"same effort/leg as {active_handoffs[key]}"))
             else:

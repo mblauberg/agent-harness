@@ -7,8 +7,8 @@ remove only ephemeral material whose ownership is proven.
 ## Three tiers
 
 1. **Current routing context** — project instructions, approved spec/design,
-   open decisions, rolling state and the active effort map. Keep it short and
-   current.
+   open decisions, canonical work-tracker links and the stable effort route
+   map. Keep it short; follow the linked owners for current state.
 2. **Recoverable run evidence** — manifests, synthesis, receipts, accepted
    findings and verification records. Preserve paths and provenance; a fresh
    agent should not need raw logs to resume.
