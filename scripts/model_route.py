@@ -120,12 +120,24 @@ def emit(record: dict[str, Any], code: int) -> int:
     return code
 
 
+def load_json(raw: str) -> Any:
+    def reject_duplicate_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON member: {key}")
+            result[key] = value
+        return result
+
+    return json.loads(raw, object_pairs_hook=reject_duplicate_members)
+
+
 def load_capabilities(path: str | None) -> tuple[dict[str, Any], str]:
     if not path:
         return {}, ""
     try:
-        data = json.loads(Path(path).read_text())
-    except (OSError, json.JSONDecodeError):
+        data = load_json(Path(path).read_text())
+    except (OSError, json.JSONDecodeError, ValueError):
         return {}, "capability_discovery_failed"
     if not isinstance(data, dict) or data.get("schema_version") != 1 or not isinstance(data.get("models"), dict):
         return {}, "capability_discovery_failed"

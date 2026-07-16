@@ -276,6 +276,46 @@ def test_capability_snapshot_rejects_incomplete_or_inconsistent_models(tmp_path,
     assert route["status"] == "capability_discovery_failed"
 
 
+@pytest.mark.parametrize(
+    "duplicate_fragment",
+    [
+        '"schema_version":1,"schema_version":1',
+        '"models":{"gpt-5.6-sol":{"resolved_model":"gpt-5.6-sol",'
+        '"supported_efforts":["high"]},"gpt-5.6-sol":{"resolved_model":"gpt-5.6-sol",'
+        '"supported_efforts":["max"]}}',
+        '"models":{"gpt-5.6-sol":{"resolved_model":"gpt-5.6-sol",'
+        '"resolved_model":"gpt-5.6-sol","supported_efforts":["high"]}}',
+        '"models":{"gpt-5.6-sol":{"resolved_model":"gpt-5.6-sol",'
+        '"supported_efforts":["high"],"supported_efforts":["max"]}}',
+    ],
+)
+def test_persisted_capability_snapshot_rejects_duplicate_json_members(
+    tmp_path, duplicate_fragment
+):
+    observed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    default_models = (
+        '"models":{"gpt-5.6-sol":{"resolved_model":"gpt-5.6-sol",'
+        '"supported_efforts":["high"]}}'
+    )
+    fields = [
+        duplicate_fragment,
+        '"source":"codex debug models"',
+        f'"observed_at":"{observed_at}"',
+    ]
+    if not duplicate_fragment.startswith('"models"'):
+        fields.append(default_models)
+    if not duplicate_fragment.startswith('"schema_version"'):
+        fields.append('"schema_version":1')
+    snapshot = tmp_path / "caps.json"
+    snapshot.write_text("{" + ",".join(fields) + "}")
+    result, route = resolve(
+        "--adapter", "codex", "--alias", "flagship", "--role", "lead",
+        "--capabilities-file", str(snapshot),
+    )
+    assert result.returncode == 1
+    assert route["status"] == "capability_discovery_failed"
+
+
 def test_untrusted_capability_snapshot_fails_closed(tmp_path):
     snapshot = tmp_path / "caps.json"
     snapshot.write_text(json.dumps({

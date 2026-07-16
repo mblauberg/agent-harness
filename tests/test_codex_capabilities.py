@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -73,3 +74,29 @@ def test_normalize_rejects_entire_mixed_payload_for_any_malformed_entry(malforme
 def test_normalize_rejects_empty_effort_sets_and_casefolded_duplicate_slugs(catalogue):
     with pytest.raises(ValueError):
         MODULE.normalize(catalogue)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"models":[{"slug":"gpt-a","supported_reasoning_levels":[{"effort":"high"}]}],'
+        '"models":[{"slug":"gpt-b","supported_reasoning_levels":[{"effort":"max"}]}]}',
+        '{"models":[{"slug":"gpt-a","slug":"gpt-b",'
+        '"supported_reasoning_levels":[{"effort":"high"}]}]}',
+        '{"models":[{"slug":"gpt-a","supported_reasoning_levels":[{"effort":"high"}],'
+        '"supported_reasoning_levels":[{"effort":"max"}]}]}',
+        '{"models":[{"slug":"gpt-a",'
+        '"supported_reasoning_levels":[{"effort":"high","effort":"max"}]}]}',
+    ],
+)
+def test_discovery_rejects_duplicate_json_members_before_normalization(tmp_path, monkeypatch, raw):
+    result = subprocess.CompletedProcess(
+        args=["codex", "debug", "models"],
+        returncode=0,
+        stdout=raw,
+        stderr="",
+    )
+    monkeypatch.setattr(MODULE.subprocess, "run", lambda *args, **kwargs: result)
+    output = tmp_path / "capabilities.json"
+    assert MODULE.main(["--out", str(output)]) == 1
+    assert not output.exists()

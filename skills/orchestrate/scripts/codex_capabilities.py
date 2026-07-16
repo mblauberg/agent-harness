@@ -12,6 +12,18 @@ import sys
 from typing import Any
 
 
+def load_json(raw: str) -> Any:
+    def reject_duplicate_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON member: {key}")
+            result[key] = value
+        return result
+
+    return json.loads(raw, object_pairs_hook=reject_duplicate_members)
+
+
 def normalize(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict) or not isinstance(raw.get("models"), list):
         raise ValueError("catalogue root must contain a models list")
@@ -68,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if result.returncode != 0:
             raise ValueError(f"codex debug models exited {result.returncode}: {result.stderr.strip()}")
-        snapshot = normalize(json.loads(result.stdout))
+        snapshot = normalize(load_json(result.stdout))
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError) as exc:
         print(f"capability discovery failed: {exc}", file=sys.stderr)
         return 1
