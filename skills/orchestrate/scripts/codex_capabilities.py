@@ -17,14 +17,24 @@ def normalize(raw: Any) -> dict[str, Any]:
         raise ValueError("catalogue root must contain a models list")
     models: dict[str, Any] = {}
     for item in raw["models"]:
-        if not isinstance(item, dict) or not isinstance(item.get("slug"), str):
-            continue
+        if not isinstance(item, dict):
+            raise ValueError("catalogue model entry must be an object")
+        slug = item.get("slug")
+        if not isinstance(slug, str) or not slug.strip():
+            raise ValueError("catalogue model slug must be a non-empty string")
+        levels = item.get("supported_reasoning_levels")
+        if not isinstance(levels, list):
+            raise ValueError("catalogue reasoning levels must be a list")
         efforts = []
-        for level in item.get("supported_reasoning_levels", []):
-            if isinstance(level, dict) and isinstance(level.get("effort"), str):
-                efforts.append(level["effort"].lower())
-        models[item["slug"].lower()] = {
-            "resolved_model": item["slug"],
+        for level in levels:
+            if not isinstance(level, dict):
+                raise ValueError("catalogue reasoning-level entry must be an object")
+            effort = level.get("effort")
+            if not isinstance(effort, str) or not effort.strip():
+                raise ValueError("catalogue reasoning effort must be a non-empty string")
+            efforts.append(effort.lower())
+        models[slug.lower()] = {
+            "resolved_model": slug,
             "supported_efforts": efforts,
         }
     if not models:

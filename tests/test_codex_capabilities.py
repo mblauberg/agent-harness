@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PATH = ROOT / "skills" / "orchestrate" / "scripts" / "codex_capabilities.py"
@@ -27,3 +29,29 @@ def test_normalize_rejects_empty_or_malformed_catalogue():
             pass
         else:
             raise AssertionError("expected malformed catalogue to fail")
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        "not a model entry",
+        {"slug": 7, "supported_reasoning_levels": []},
+        {"slug": "", "supported_reasoning_levels": []},
+        {"slug": "gpt-malformed"},
+        {"slug": "gpt-malformed", "supported_reasoning_levels": {}},
+        {"slug": "gpt-malformed", "supported_reasoning_levels": ["high"]},
+        {"slug": "gpt-malformed", "supported_reasoning_levels": [{"effort": 7}]},
+    ],
+)
+def test_normalize_rejects_entire_mixed_payload_for_any_malformed_entry(malformed):
+    raw = {
+        "models": [
+            {
+                "slug": "gpt-5.6-sol",
+                "supported_reasoning_levels": [{"effort": "high"}],
+            },
+            malformed,
+        ]
+    }
+    with pytest.raises(ValueError):
+        MODULE.normalize(raw)
