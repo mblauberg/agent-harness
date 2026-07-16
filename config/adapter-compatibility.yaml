@@ -79,7 +79,10 @@ adapters:
         - "o1*"
         - "o3*"
         - "o4*"
-      requires_explicit_model: true
+      # The installed Codex account is a ChatGPT subscription: the runtime
+      # rejects explicit model ids (HTTP 400) and requires the account's
+      # default model, so codex dispatch omits the model id (#190).
+      requires_explicit_model: false
     official_source_url: "https://github.com/openai/codex"
     unresolved_pins: []
 

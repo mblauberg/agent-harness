@@ -85,7 +85,10 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
     publicPayloadSchema: {
       type: "object",
       additionalProperties: false,
-      required: ["cwd", "modelFamily", "model", "prompt"],
+      // model is optional: a ChatGPT-subscription Codex account rejects
+      // explicit model ids (HTTP 400) and dispatches on the account's
+      // default model when the id is omitted (#190).
+      required: ["cwd", "modelFamily", "prompt"],
       properties: {
         cwd: { type: "string", minLength: 1, pattern: "^/" },
         modelFamily: { type: "string", const: "openai" },
@@ -134,9 +137,11 @@ function validateCodexChairLaunchPayload(payload: Record<string, unknown>): Reco
   const validated: Record<string, unknown> = {
     cwd,
     modelFamily,
-    model: requiredString(payload.model, "model"),
     prompt: requiredString(payload.prompt, "prompt"),
   };
+  // Optional: omitted for ChatGPT-subscription accounts, which reject
+  // explicit model ids and use the account default (#190).
+  copyString(payload, "model", validated);
   for (const field of stringFields) copyString(payload, field, validated);
   if (payload.ephemeral === false) validated.ephemeral = false;
   else if (payload.ephemeral !== undefined) {

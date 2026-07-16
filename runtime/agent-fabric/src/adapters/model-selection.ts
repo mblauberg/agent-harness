@@ -73,16 +73,24 @@ export function assessAdapterModelPolicy(input: {
   allowedModelPatterns?: readonly string[];
   requiresExplicitModel: boolean;
 }): { allowed: true; reason: "allowed" } | { allowed: false; reason: "model-required" | "family-forbidden" | "model-forbidden" } {
-  if (input.requiresExplicitModel && (input.modelId === undefined || input.modelId === null || input.modelId.length === 0)) {
+  const modelAbsent = input.modelId === undefined || input.modelId === null || input.modelId.length === 0;
+  if (input.requiresExplicitModel && modelAbsent) {
     return { allowed: false, reason: "model-required" };
   }
+  // An absent model with requiresExplicitModel false is an account-default
+  // dispatch (#190): the provider account's default model is used, so there
+  // is no identifier for the pattern gate to assess. The family gate still
+  // applies, and the open-weight family bridge always needs an explicit
+  // matching model.
+  const accountDefault = modelAbsent && !input.requiresExplicitModel;
   const patterns = input.allowedModelPatterns ?? [];
-  const patternMatch = patterns.length === 0 || patterns.some((pattern) => patternMatches(input.modelId ?? "", pattern));
+  const patternMatch = patterns.length === 0 ||
+    (!modelAbsent && patterns.some((pattern) => patternMatches(input.modelId ?? "", pattern)));
   const familyAllowed = input.allowedFamilies.includes(input.modelFamily) || (
     patterns.length > 0 && input.allowedFamilies.includes("open-weight") && patternMatch
   );
   if (!familyAllowed) return { allowed: false, reason: "family-forbidden" };
-  if (!patternMatch) {
+  if (!patternMatch && !accountDefault) {
     return { allowed: false, reason: "model-forbidden" };
   }
   return { allowed: true, reason: "allowed" };
