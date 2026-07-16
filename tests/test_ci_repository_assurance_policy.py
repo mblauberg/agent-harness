@@ -5,6 +5,7 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -30,16 +31,27 @@ FILTERED_JOBS = {
     "review-portal-supervisor": "review-portal-supervisor",
     "zizmor": "workflows",
 }
+# PR #168 repair cycle 3: the filters block defines two YAML-anchor helper
+# arms (ci-contract, node-workspace) that exist only to be aliased into the
+# consumed job filters; no detect-changes output reads them directly. Every
+# other filter key must be consumed by a job-driving output, so an orphan
+# filter arm that gates nothing can never satisfy the tracked-file closure
+# oracle in test_every_tracked_file_matches_at_least_one_path_filter.
+FILTER_HELPER_KEYS = frozenset({"ci-contract", "node-workspace"})
 # PR #168 repair cycle 2: fabric tests execute exactly these repo files
 # outside runtime/agent-fabric — the model-routing acceptance suite runs
-# scripts/model-route and the delivery-run fixture runs
+# scripts/model-route (a bash wrapper that execs scripts/model_route.py,
+# where the logic lives) and the delivery-run fixture runs
 # skills/deliver/scripts/*.py — so those paths must retrigger the fabric
-# job. This allowlist is exact by design: adding an executed dependency
-# means adding it here deliberately, and nothing else in docs/ or skills/
-# may path-trigger a non-harness job.
+# job. Repair cycle 3 added scripts/model_route.py: the wrapper was already
+# listed but the module it execs was not, so a PR changing only the Python
+# module skipped the fabric job that runs it. This allowlist is exact by
+# design: adding an executed dependency means adding it here deliberately,
+# and nothing else in docs/ or skills/ may path-trigger a non-harness job.
 FABRIC_EXECUTED_DEPENDENCIES = frozenset(
     {
         "scripts/model-route",
+        "scripts/model_route.py",
         "skills/deliver/scripts/**",
     }
 )
@@ -106,6 +118,91 @@ def _path_filters(document: dict[str, object]) -> dict[str, list[str]]:
     return {name: _flatten_rules(rules) for name, rules in filters.items()}
 
 
+def _consumed_filter_names(document: dict[str, object]) -> set[str]:
+    # The filter names a job-driving output actually reads: every
+    # detect-changes output forwards exactly one steps.filter.outputs.<name>,
+    # so the consumed set is derived from the outputs, never assumed.
+    detect = _job(document, "detect-changes")
+    outputs = detect.get("outputs")
+    assert isinstance(outputs, dict)
+    consumed: set[str] = set()
+    for expr in outputs.values():
+        match = re.search(r"steps\.filter\.outputs\.([a-z0-9-]+)", str(expr))
+        assert match, expr
+        consumed.add(match.group(1))
+    return consumed
+
+
+def _assert_all_filters_consumed(document: dict[str, object]) -> None:
+    # Every filter key is either a job-consumed filter or a declared helper
+    # anchor; an orphan arm that no output reads must not exist.
+    flattened = _path_filters(document)
+    consumed = _consumed_filter_names(document)
+    filter_keys = set(flattened)
+    assert filter_keys - FILTER_HELPER_KEYS == consumed
+    assert not (FILTER_HELPER_KEYS & consumed)
+
+
+def _inject_filter(document: dict[str, object], name: str, rules: list[str]) -> None:
+    # Add a filter arm to the parsed workflow by rewriting the paths-filter
+    # `with.filters` block, so _path_filters re-parses it exactly as the
+    # action would.
+    detect = _job(document, "detect-changes")
+    filter_step = next(
+        step for step in _steps(detect) if str(step.get("uses", "")).startswith("dorny/paths-filter@")
+    )
+    with_block = filter_step.get("with")
+    assert isinstance(with_block, dict)
+    filters = yaml.safe_load(str(with_block.get("filters")))
+    assert isinstance(filters, dict)
+    filters[name] = rules
+    with_block["filters"] = yaml.safe_dump(filters)
+
+
+def _jobs_for_changed_paths(document: dict[str, object], paths: list[str]) -> set[str]:
+    # Simulate dorny/paths-filter: a job is selected when any changed path
+    # matches any rule in the filter its detect-changes output consumes.
+    flattened = _path_filters(document)
+    selected: set[str] = set()
+    for job_name, output_name in FILTERED_JOBS.items():
+        rules = flattened[output_name]
+        if any(_filter_matches(rule, path) for rule in rules for path in paths):
+            selected.add(job_name)
+    return selected
+
+
+def _assert_no_continue_on_error(document: dict[str, object]) -> None:
+    # continue-on-error on any required job or step would neutralise failure
+    # propagation invisibly, so no job and no step may set it. No modelled
+    # exception exists today.
+    jobs = document.get("jobs")
+    assert isinstance(jobs, dict)
+    for job_name, job in jobs.items():
+        assert isinstance(job, dict)
+        assert "continue-on-error" not in job, job_name
+        for step in _steps(job):
+            assert "continue-on-error" not in step, job_name
+
+
+def _triggers(document: dict[str, object]) -> dict[str, object]:
+    # PyYAML resolves the bare `on:` key to boolean True (YAML 1.1), so read
+    # the trigger mapping under whichever key the loader produced.
+    on = document.get(True, document.get("on"))
+    assert isinstance(on, dict)
+    return on
+
+
+def _assert_trigger_semantics(document: dict[str, object]) -> None:
+    on = _triggers(document)
+    assert set(on) == {"push", "pull_request"}
+    # pull_request must fire on every PR: no paths, paths-ignore, branches or
+    # types restriction may narrow it (null or empty config only).
+    pull_request = on["pull_request"]
+    assert pull_request is None or pull_request == {}, pull_request
+    # push is restricted to the default branch and carries no other keys.
+    assert on["push"] == {"branches": ["main"]}
+
+
 def _filter_matches(pattern: str, path: str) -> bool:
     # The filters block deliberately uses only two glob forms: exact tracked
     # paths and directory prefixes written as `prefix/**`. Fail loudly on any
@@ -139,9 +236,8 @@ def test_ci_uses_immutable_actions_and_least_privilege() -> None:
     document = _workflow()
     # Top-level grants nothing; each job declares its own least privilege.
     assert document.get("permissions") == {}
-    workflow_source = WORKFLOW.read_text(encoding="utf-8")
-    assert "pull_request:" in workflow_source
-    assert re.search(r"(?m)^  push:\n    branches: \[main\]$", workflow_source)
+    # Trigger semantics (no path/branch restriction) are asserted
+    # semantically in test_ci_triggers_carry_no_path_or_branch_restrictions.
 
     jobs = document.get("jobs")
     assert isinstance(jobs, dict)
@@ -203,7 +299,11 @@ def test_ci_gates_build_jobs_behind_path_filters_and_one_aggregate_check() -> No
     # The only exception is the exact executed-dependency allowlist for the
     # fabric job (repair cycle 2): the blanket prohibition is narrowed, not
     # deleted, and any new entry must be added to the allowlist deliberately.
-    assert FABRIC_EXECUTED_DEPENDENCIES == {"scripts/model-route", "skills/deliver/scripts/**"}
+    assert FABRIC_EXECUTED_DEPENDENCIES == {
+        "scripts/model-route",
+        "scripts/model_route.py",
+        "skills/deliver/scripts/**",
+    }
     assert FABRIC_EXECUTED_DEPENDENCIES <= set(flattened["fabric"])
     for name, rules in flattened.items():
         if name == "harness":
@@ -266,8 +366,14 @@ def test_every_tracked_file_matches_at_least_one_path_filter() -> None:
     # PR touching only that file skip all build jobs, pass the all-skipped
     # ci-status aggregate, and break the next push to main. This closure
     # assertion makes such residue impossible to reintroduce.
-    flattened = _path_filters(_workflow())
-    arms = sorted({rule for rules in flattened.values() for rule in rules})
+    #
+    # Repair cycle 3 (orphan-filter finding): close over only the filters a
+    # job-driving output actually consumes, so an orphan filter arm that
+    # gates nothing can never satisfy this oracle.
+    document = _workflow()
+    flattened = _path_filters(document)
+    consumed = _consumed_filter_names(document)
+    arms = sorted({rule for name in consumed for rule in flattened[name]})
     tracked = subprocess.run(
         ["git", "ls-files"],
         cwd=ROOT,
@@ -281,6 +387,99 @@ def test_every_tracked_file_matches_at_least_one_path_filter() -> None:
         "tracked files outside every CI path filter; add each one to the "
         f"filter of the job that validates it: {unmatched}"
     )
+
+
+def test_path_filters_are_all_consumed_by_a_job_driving_output() -> None:
+    # PR #168 repair cycle 3: the coverage-closure oracle unions only the
+    # filters that detect-changes outputs consume. Assert that consumed set
+    # equals the FILTERED_JOBS output names, that each is read by exactly the
+    # jobs mapped to it, and that no filter key outside the helper anchors is
+    # left unconsumed — an orphan arm would gate nothing yet could satisfy
+    # closure.
+    document = _workflow()
+    flattened = _path_filters(document)
+    consumed = _consumed_filter_names(document)
+    assert consumed == set(FILTERED_JOBS.values())
+    for name in consumed:
+        consuming_jobs = {job for job, output in FILTERED_JOBS.items() if output == name}
+        assert len(consuming_jobs) == 1, name
+    filter_keys = set(flattened)
+    assert FILTER_HELPER_KEYS <= filter_keys
+    assert filter_keys - FILTER_HELPER_KEYS == consumed
+    _assert_all_filters_consumed(document)
+
+
+def test_orphan_filter_arm_fails_consumption_and_gates_nothing() -> None:
+    # Mutation: an orphan filter arm no output consumes must fail the
+    # consumption assertion and must not enter the closure arms.
+    document = _workflow()
+    _inject_filter(document, "orphan", ["new-surface.txt"])
+    with pytest.raises(AssertionError):
+        _assert_all_filters_consumed(document)
+    flattened = _path_filters(document)
+    consumed = _consumed_filter_names(document)
+    closure_arms = {rule for name in consumed for rule in flattened[name]}
+    assert "new-surface.txt" not in closure_arms
+
+
+def test_model_route_python_change_selects_the_fabric_job() -> None:
+    # PR #168 repair cycle 3 (P1): scripts/model-route is a bash wrapper that
+    # execs scripts/model_route.py, which the model-routing acceptance suite
+    # runs. A PR changing only the Python module must still select the fabric
+    # job that executes it.
+    document = _workflow()
+    selected = _jobs_for_changed_paths(document, ["scripts/model_route.py"])
+    assert "fabric" in selected
+
+
+def test_no_job_or_step_sets_continue_on_error() -> None:
+    # PR #168 repair cycle 3 (P2): continue-on-error on any required job or
+    # step would neutralise failure propagation invisibly.
+    _assert_no_continue_on_error(_workflow())
+
+
+def test_continue_on_error_on_a_step_fails_the_guard() -> None:
+    document = _workflow()
+    steps = _steps(_job(document, "ci-status"))
+    steps[0]["continue-on-error"] = True
+    with pytest.raises(AssertionError):
+        _assert_no_continue_on_error(document)
+
+
+def test_continue_on_error_on_a_job_fails_the_guard() -> None:
+    document = _workflow()
+    _job(document, "fabric")["continue-on-error"] = True
+    with pytest.raises(AssertionError):
+        _assert_no_continue_on_error(document)
+
+
+def test_ci_triggers_carry_no_path_or_branch_restrictions() -> None:
+    # PR #168 repair cycle 3 (P2): parse `on:` semantically so a push.paths
+    # or pull_request.paths restriction cannot slip past a substring check.
+    _assert_trigger_semantics(_workflow())
+
+
+@pytest.mark.parametrize(
+    "restriction",
+    [
+        {"paths": ["runtime/**"]},
+        {"paths-ignore": ["docs/**"]},
+        {"branches": ["main"]},
+        {"types": ["opened", "synchronize"]},
+    ],
+)
+def test_pull_request_trigger_restriction_fails_the_guard(restriction: dict[str, object]) -> None:
+    document = _workflow()
+    _triggers(document)["pull_request"] = restriction
+    with pytest.raises(AssertionError):
+        _assert_trigger_semantics(document)
+
+
+def test_push_trigger_extra_key_fails_the_guard() -> None:
+    document = _workflow()
+    _triggers(document)["push"] = {"branches": ["main"], "paths": ["runtime/**"]}
+    with pytest.raises(AssertionError):
+        _assert_trigger_semantics(document)
 
 
 def test_ci_runs_complete_harness_and_fabric_gates() -> None:
