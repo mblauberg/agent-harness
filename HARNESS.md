@@ -54,8 +54,9 @@ subscriptions never grant permission.
 This constitution is a standing user-approved envelope for routine version
 control: branches and linked worktrees for implementation, including parallel,
 need no per-instance approval. Worktrees use `.worktrees/<task-agent>`, one
-writer each; see `docs/worktrees.md`. Deletion, force-removal, history rewrites
-and integration or pushes to shared branches stay gated on the approvals above.
+writer each; see `docs/worktrees.md`. Merge authority is repo-based: agents
+merge per `docs/runbooks/github-workflow.md`. Deletion, force-removal, history
+rewrites and shared-branch pushes outside authorised merges stay gated.
 
 ## Routing and coverage
 

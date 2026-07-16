@@ -16,10 +16,11 @@ before any decision about orchestration, model choice, delegation, or memory.
   ask needed, including for parallel implementation. Linked worktrees live only
   at the owning repository's `.worktrees/<task-agent>` path, one writer each;
   see `docs/worktrees.md`. Branch deletion, force-removal, history rewrites and
-  integration or pushes to shared branches still need explicit user authority.
-- **GitHub (this repo only):** issue, branch, PR and Project-status mechanics
-  live in `docs/runbooks/github-workflow.md`; provenant-local process, not
-  harness doctrine.
+  shared-branch pushes outside authorised merges still need explicit user
+  authority.
+- **GitHub (this repo only):** issue, branch, PR, merge and Project-status
+  mechanics live in `docs/runbooks/github-workflow.md` (agent merges
+  authorised); provenant-local process, not harness doctrine.
 - **Style:** terse for inter-agent, mechanical, and status traffic; use
   domain-appropriate user prose. Load `$caveman` only on explicit request.
 
