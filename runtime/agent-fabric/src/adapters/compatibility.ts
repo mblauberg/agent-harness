@@ -128,13 +128,17 @@ function isWorkspaceDependency(name: string, specifier: unknown): boolean {
 }
 
 /**
- * The location a workspace dependency is *required* to occupy, derived only
- * from tracked data: a `file:` specifier resolves relative to the declaring
- * package, and any other workspace specifier resolves through the tracked npm
- * workspace layout at the repository root (the workspace globs plus the target
- * package's tracked name). Node module resolution follows the on-disk
- * `node_modules` symlink instead, which nothing tracks, so the caller binds
- * the two together and fails closed on any divergence.
+ * The *lexical* location a workspace dependency is required to occupy, derived
+ * only from tracked data: a `file:` specifier resolves relative to the
+ * declaring package, and any other workspace specifier resolves through the
+ * tracked npm workspace layout at the repository root (the workspace globs plus
+ * the target package's tracked name). The result is deliberately NOT passed
+ * through `realpath`: it is the committed on-disk location, and the caller
+ * compares it against the resolved `node_modules` path while separately
+ * rejecting a symlink that redirects that committed location elsewhere. Binding
+ * the lexical location (rather than a canonicalised one) is what stops a
+ * symlink from collapsing a tracked tree onto another real directory so the
+ * span walk skips the shadowed tree as already-visited.
  */
 async function expectedWorkspaceDependencyRoot(input: {
   packageRoot: string;
@@ -144,30 +148,24 @@ async function expectedWorkspaceDependencyRoot(input: {
   adapterId: string;
 }): Promise<string> {
   const { packageRoot, repositoryRoot, name, specifier, adapterId } = input;
-  let expectedRoot: string;
   if (typeof specifier === "string" && specifier.startsWith("file:")) {
     const target = specifier.slice("file:".length);
-    expectedRoot = isAbsolute(target) ? target : resolve(packageRoot, target);
-  } else {
-    expectedRoot = await workspacePackageRootByName({ repositoryRoot, name, adapterId });
+    return isAbsolute(target) ? target : resolve(packageRoot, target);
   }
-  try {
-    return await realpath(expectedRoot);
-  } catch (error: unknown) {
-    throw new FabricError(
-      "ADAPTER_ARTIFACT_MISSING",
-      `local workspace dependency target is unavailable: ${name} (expected at ${expectedRoot}, adapter ${adapterId})`,
-      { cause: error },
-    );
-  }
+  return workspacePackageRootByName({ repositoryRoot, name, adapterId });
 }
 
 /**
  * Finds the package root of a named workspace member from the tracked npm
  * workspace layout at the repository root. The root manifest must be tracked
- * at HEAD, and the member is located by its tracked `name`, so the expected
+ * at HEAD *and byte-identical to its committed content* before its workspace
+ * patterns are trusted: the patterns steer which directory a non-`file:`
+ * workspace dependency resolves to, so a locally modified (tracked but dirty)
+ * root manifest could redirect that resolution while provenance otherwise
+ * passes. The member is then located by its tracked `name`, so the expected
  * location is derived from committed data rather than the working tree's
- * `node_modules` graph.
+ * `node_modules` graph. (Unused while every production dependency is `file:`,
+ * but provenance-bound so the branch is safe the moment one is not.)
  */
 async function workspacePackageRootByName(input: {
   repositoryRoot: string;
@@ -179,6 +177,14 @@ async function workspacePackageRootByName(input: {
     throw new FabricError(
       "ADAPTER_COMPATIBILITY_INVALID",
       `workspace root manifest is not tracked at the repository HEAD, cannot bind dependency location: ${name} (adapter ${adapterId})`,
+    );
+  }
+  const trackedRootSha = (await trackedBlobShas(repositoryRoot, ["package.json"])).get("package.json");
+  const worktreeRootSha = await worktreeBlobSha(repositoryRoot, "package.json");
+  if (trackedRootSha === undefined || worktreeRootSha === undefined || worktreeRootSha !== trackedRootSha) {
+    throw new FabricError(
+      "ADAPTER_COMPATIBILITY_INVALID",
+      `workspace root manifest differs from its committed content, cannot bind dependency location: ${name} (package.json, adapter ${adapterId})`,
     );
   }
   const rootManifest = await readWorkspaceManifest(join(repositoryRoot, "package.json"));
@@ -222,6 +228,22 @@ async function workspacePackageRootByName(input: {
   );
 }
 
+/**
+ * Binds the on-disk `node_modules` resolution of a local workspace dependency
+ * to its tracked location and returns the *lexical* tracked root for the span
+ * walk. Three fail-closed conditions defeat the symlink-canonicalisation
+ * collapse:
+ *
+ *  1. the tracked location itself must not be a symlink — `realpath` of the
+ *     lexical target must equal the lexical target, so a committed directory
+ *     cannot be swapped for a symlink that redirects execution elsewhere;
+ *  2. the `node_modules/<name>` resolution tsx follows must land on that same
+ *     tracked location, so a redirected dependency symlink is rejected;
+ *  3. the returned root is the lexical tracked path, never the canonicalised
+ *     one, so the caller's span-walk `visited` set keys shadowed tracked trees
+ *     on their committed paths and cannot skip one as already-visited because a
+ *     symlink collapsed it onto a sibling package's real directory.
+ */
 async function resolveWorkspaceDependencyRoot(input: {
   packageRoot: string;
   repositoryRoot: string;
@@ -230,6 +252,29 @@ async function resolveWorkspaceDependencyRoot(input: {
   adapterId: string;
 }): Promise<string> {
   const { packageRoot, repositoryRoot, name, specifier, adapterId } = input;
+  const expectedLexical = await expectedWorkspaceDependencyRoot({
+    packageRoot,
+    repositoryRoot,
+    name,
+    specifier,
+    adapterId,
+  });
+  let expectedReal: string;
+  try {
+    expectedReal = await realpath(expectedLexical);
+  } catch (error: unknown) {
+    throw new FabricError(
+      "ADAPTER_ARTIFACT_MISSING",
+      `local workspace dependency target is unavailable: ${name} (expected at ${expectedLexical}, adapter ${adapterId})`,
+      { cause: error },
+    );
+  }
+  if (expectedReal !== expectedLexical) {
+    throw new FabricError(
+      "ADAPTER_COMPATIBILITY_INVALID",
+      `local workspace dependency tracked location is a symlink redirecting outside its committed directory: ${name} (${expectedLexical} resolves to ${expectedReal}, adapter ${adapterId})`,
+    );
+  }
   let resolved: string | undefined;
   let searchDirectory = packageRoot;
   for (;;) {
@@ -244,16 +289,15 @@ async function resolveWorkspaceDependencyRoot(input: {
     }
   }
   if (resolved === undefined) {
-    throw new FabricError("ADAPTER_ARTIFACT_MISSING", `local workspace dependency is unavailable: ${name}`);
+    throw new FabricError("ADAPTER_ARTIFACT_MISSING", `local workspace dependency is unavailable: ${name} (adapter ${adapterId})`);
   }
-  const expected = await expectedWorkspaceDependencyRoot({ packageRoot, repositoryRoot, name, specifier, adapterId });
-  if (resolved !== expected) {
+  if (resolved !== expectedReal) {
     throw new FabricError(
       "ADAPTER_COMPATIBILITY_INVALID",
-      `local workspace dependency resolves outside its tracked location: ${name} resolved to ${resolved} but the tracked manifest requires ${expected} (adapter ${adapterId})`,
+      `local workspace dependency resolves outside its tracked location: ${name} resolved to ${resolved} but the tracked manifest requires ${expectedLexical} (adapter ${adapterId})`,
     );
   }
-  return resolved;
+  return expectedLexical;
 }
 
 async function readFileMaybe(path: string): Promise<string | undefined> {
@@ -288,30 +332,65 @@ function parseTsconfigExtends(raw: string): { ok: true; extends: string[] } | { 
 }
 
 /**
- * Resolves a tsconfig `extends` target to a repository-relative path only when
- * it names a file inside the repository. Relative and absolute targets resolve
- * to a `.json` file (TypeScript appends the extension); bare specifiers resolve
- * through `node_modules` into third-party packages that sit outside the
- * first-party span, exactly like lockfile-pinned dependencies, so they are not
- * bound here.
+ * Resolves a tsconfig `extends` target for provenance binding.
+ *
+ * Bare specifiers resolve through `node_modules` into third-party packages that
+ * sit outside the first-party span, exactly like lockfile-pinned dependencies,
+ * so they are not bound here (undefined = accepted third-party).
+ *
+ * Relative and absolute targets resolve to a `.json` file (TypeScript appends
+ * the extension). One inside the repository is returned for byte-binding
+ * against HEAD. One that escapes the repository fails CLOSED rather than being
+ * silently ignored: tsx would still resolve and read it, leaving mutable
+ * out-of-repo configuration bound to nothing, which is exactly the fail-open
+ * the provenance check must not permit. There is no legitimate first-party
+ * producer whose `extends` escapes its own repository, so this is a hard
+ * verification failure naming the offending target.
  */
-function resolveTsconfigExtends(target: string, configDirectory: string, repositoryRoot: string): string | undefined {
+function resolveTsconfigExtends(
+  target: string,
+  configDirectory: string,
+  repositoryRoot: string,
+  adapterId: string,
+): string | undefined {
   if (!target.startsWith(".") && !isAbsolute(target)) return undefined;
   let candidate = isAbsolute(target) ? target : resolve(configDirectory, target);
   if (!candidate.endsWith(".json")) candidate = `${candidate}.json`;
   const contained = relative(repositoryRoot, candidate);
-  if (contained.length === 0 || contained.startsWith("..") || isAbsolute(contained)) return undefined;
+  if (contained.length === 0 || contained.startsWith("..") || isAbsolute(contained)) {
+    throw new FabricError(
+      "ADAPTER_COMPATIBILITY_INVALID",
+      `wrapper TypeScript configuration extends a path outside the repository: ${target} (adapter ${adapterId})`,
+    );
+  }
   return candidate;
 }
 
 /**
- * The effective tsconfig chain tsx would read for a consulted package root:
- * the root's own `tsconfig.json` plus every `extends` ancestor that resolves
- * inside the repository. Each present tsconfig must be tracked at HEAD (a
- * present-but-untracked one could redirect module resolution while provenance
- * passes, so it fails closed), and every collected path is returned for
- * byte-for-byte verification against HEAD alongside the source span. An absent
- * tsconfig is acceptable because tsx reads none at that root.
+ * The effective tsconfig chain tsx would read for a consulted package root.
+ *
+ * tsx does not read only `packageRoot/tsconfig.json`: it discovers a tsconfig
+ * by walking UPWARD from its working directory (the daemon roots tsx at the
+ * package directory it spawns — see daemon/client.ts `spawnDaemonChild`, which
+ * runs `node --import tsx` with `cwd` at the package root) to the filesystem
+ * root, adopting the nearest `tsconfig.json`. So a deleted package-level config
+ * silently promotes a dirtier ancestor config into effect, and a modified
+ * ancestor config can redirect module resolution while the package config looks
+ * clean. To model this, every `tsconfig.json` from the consulted package root
+ * up to the repository root is bound, plus every `extends` ancestor of each
+ * that resolves inside the repository:
+ *
+ *  - present + tracked at HEAD: collected for byte-for-byte HEAD verification;
+ *  - present + untracked: fails closed (it could redirect resolution while
+ *    provenance passes);
+ *  - absent + tracked at HEAD: fails closed (a tracked config deleted from the
+ *    working tree is a deletion attack that forces tsx onto a fallback);
+ *  - absent + untracked: skipped (tsx never had a config there).
+ *
+ * Binding the whole upward chain is a deliberate over-approximation of tsx's
+ * "nearest wins" rule: whichever config tsx actually adopts is guaranteed to be
+ * in the verified set, and removing a nearer tracked config to expose a dirtier
+ * ancestor cannot pass silently.
  */
 async function collectTsconfigChain(input: {
   packageRoot: string;
@@ -321,14 +400,32 @@ async function collectTsconfigChain(input: {
   const { packageRoot, repositoryRoot, adapterId } = input;
   const collected = new Set<string>();
   const visited = new Set<string>();
-  const pending = [join(packageRoot, "tsconfig.json")];
+  const pending: string[] = [];
+  // Seed the upward discovery chain: every tsconfig.json from the package root
+  // up to and including the repository root.
+  let directory = packageRoot;
+  for (;;) {
+    pending.push(join(directory, "tsconfig.json"));
+    if (directory === repositoryRoot) break;
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
   while (pending.length > 0) {
     const configPath = pending.pop();
     if (configPath === undefined || visited.has(configPath)) continue;
     visited.add(configPath);
-    const raw = await readFileMaybe(configPath);
-    if (raw === undefined) continue;
     const portable = portableRepositoryPath(repositoryRoot, configPath, adapterId);
+    const raw = await readFileMaybe(configPath);
+    if (raw === undefined) {
+      if (await isTrackedAtHead(repositoryRoot, portable)) {
+        throw new FabricError(
+          "ADAPTER_COMPATIBILITY_INVALID",
+          `wrapper TypeScript configuration is tracked at HEAD but missing from the working tree: ${portable} (adapter ${adapterId})`,
+        );
+      }
+      continue;
+    }
     if (!(await isTrackedAtHead(repositoryRoot, portable))) {
       throw new FabricError(
         "ADAPTER_COMPATIBILITY_INVALID",
@@ -344,7 +441,7 @@ async function collectTsconfigChain(input: {
       );
     }
     for (const target of parsed.extends) {
-      const resolved = resolveTsconfigExtends(target, dirname(configPath), repositoryRoot);
+      const resolved = resolveTsconfigExtends(target, dirname(configPath), repositoryRoot, adapterId);
       if (resolved !== undefined) pending.push(resolved);
     }
   }
@@ -426,14 +523,26 @@ async function firstPartySourceSpans(input: {
     for (const tsconfigPortable of await collectTsconfigChain({ packageRoot: root, repositoryRoot, adapterId })) {
       manifestPaths.add(tsconfigPortable);
     }
-    let sourceDirectory: string | undefined;
+    const lexicalSource = join(root, "src");
+    let realSource: string | undefined;
     try {
-      sourceDirectory = await realpath(join(root, "src"));
+      realSource = await realpath(lexicalSource);
     } catch {
-      sourceDirectory = undefined;
+      realSource = undefined;
     }
-    if (sourceDirectory !== undefined) {
-      const span = relative(repositoryRoot, sourceDirectory);
+    if (realSource !== undefined) {
+      // The src tree must be a committed directory, not a symlink redirecting
+      // execution onto another real path: a redirecting symlink would collapse
+      // the span onto a sibling tree (which the visited set may skip) while the
+      // committed src is never verified. Bind the lexical span and fail closed
+      // on any redirection.
+      if (realSource !== lexicalSource) {
+        throw new FabricError(
+          "ADAPTER_COMPATIBILITY_INVALID",
+          `wrapper workspace package src is a symlink redirecting outside its committed directory: ${lexicalSource} resolves to ${realSource} (adapter ${adapterId})`,
+        );
+      }
+      const span = relative(repositoryRoot, lexicalSource);
       if (span.length === 0 || span.startsWith("..") || isAbsolute(span)) {
         throw new FabricError(
           "ADAPTER_COMPATIBILITY_INVALID",
@@ -490,21 +599,44 @@ async function trackedBlobShas(repositoryRoot: string, paths: string[]): Promise
  * `hash-object`, or undefined when the file is absent. This reads the file
  * itself rather than trusting the index, so `assume-unchanged` / `skip-worktree`
  * cannot hide byte drift from the comparison against the tracked blob SHA.
+ *
+ * `--no-filters` hashes the raw worktree bytes with no attribute-driven clean
+ * filter applied: without it, a `.git/info/attributes` (or in-tree
+ * `.gitattributes`) entry plus a repo-local `filter.<name>.clean` command could
+ * normalise malicious worktree bytes back to the committed blob SHA, so the
+ * comparison against HEAD would pass over tampered content the runtime executes.
  */
 async function worktreeBlobSha(repositoryRoot: string, portablePath: string): Promise<string | undefined> {
   try {
-    return await gitOutput(repositoryRoot, ["hash-object", "--", portablePath]);
+    return await gitOutput(repositoryRoot, ["hash-object", "--no-filters", "--", portablePath]);
   } catch {
     return undefined;
   }
 }
 
+/**
+ * Yields every regular file physically present under a source span for the
+ * exhaustive untracked-shadow check. Fail-closed in two ways the previous
+ * silent version was not:
+ *
+ *  - a `readdir` failure propagates instead of returning quietly: swallowing it
+ *    would let an unreadable subtree pass the "exhaustive physical check" while
+ *    hiding whatever it contains;
+ *  - a non-regular entry (symlink, socket, device, FIFO) is rejected rather than
+ *    skipped: a symlink inside a span could redirect tsx onto content outside
+ *    the verified set and would never appear in the tracked blob map, so an
+ *    exhaustive check must treat it as tampering.
+ */
 async function* walkWorktreeFiles(directory: string): AsyncGenerator<string> {
   let entries: Dirent[];
   try {
     entries = await readdir(directory, { withFileTypes: true });
-  } catch {
-    return;
+  } catch (error: unknown) {
+    throw new FabricError(
+      "ADAPTER_COMPATIBILITY_INVALID",
+      `wrapper first-party source span could not be traversed: ${directory}`,
+      { cause: error },
+    );
   }
   for (const entry of entries) {
     const full = join(directory, entry.name);
@@ -512,6 +644,11 @@ async function* walkWorktreeFiles(directory: string): AsyncGenerator<string> {
       yield* walkWorktreeFiles(full);
     } else if (entry.isFile()) {
       yield full;
+    } else {
+      throw new FabricError(
+        "ADAPTER_COMPATIBILITY_INVALID",
+        `wrapper first-party source span contains a non-regular entry: ${full}`,
+      );
     }
   }
 }

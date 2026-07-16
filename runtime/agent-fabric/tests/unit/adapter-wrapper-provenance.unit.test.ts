@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -553,6 +553,201 @@ describe("adapter wrapper Git provenance", () => {
     await expect(verify(fixture)).rejects.toMatchObject({
       code: "ADAPTER_COMPATIBILITY_INVALID",
       message: expect.stringContaining("untracked file shadowing HEAD: src/shadow.js"),
+    });
+  });
+
+  it("fails closed when a clean filter normalises tampered bytes to the committed blob SHA", async () => {
+    const fixture = await createProvenanceFixture();
+    const source = join(fixture.directory, "src", "index.js");
+    // Committed content is `export const fixtureFirstPartySource = true;\n`.
+    await writeFile(source, 'export const fixtureFirstPartySource = "tampered";\n');
+    // A repo-local clean filter rewrites the tampered worktree bytes back to the
+    // committed content, so an attribute-aware `git hash-object` would report the
+    // committed blob SHA over malicious bytes the runtime actually executes.
+    await writeFile(join(fixture.directory, ".git", "info", "attributes"), "src/index.js filter=neutralise\n");
+    await fixtureGit(fixture.directory, "config", "filter.neutralise.clean", "sed 's/\"tampered\"/true/'");
+
+    // --no-filters hashes the raw worktree bytes, so the drift is still caught.
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("first-party source differs from its committed content: fixture (src/index.js)"),
+    });
+  });
+
+  it("fails closed when a tracked package tsconfig is deleted to expose an ancestor fallback", async () => {
+    const fixture = await createProvenanceFixture();
+    const packageRoot = join(fixture.directory, "pkg");
+    await mkdir(join(packageRoot, "src"), { recursive: true });
+    await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "@local/nested", type: "module" }));
+    const wrapper = join(packageRoot, "src", "wrapper.js");
+    await writeFile(wrapper, 'export const execute = () => "safe";\n');
+    const packageTsconfig = join(packageRoot, "tsconfig.json");
+    await writeFile(packageTsconfig, `${JSON.stringify({ compilerOptions: { strict: true } })}\n`);
+    await commitFixtureRepository(fixture.directory, "nested package with tsconfig");
+    await writeCompatibility(fixture, wrapper);
+
+    await expect(verify(fixture)).resolves.toMatchObject({ valid: true });
+
+    // Deleting the tracked package tsconfig would let tsx fall back to a dirtier
+    // ancestor config; the upward chain treats the deletion as tampering.
+    await rm(packageTsconfig);
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("tracked at HEAD but missing from the working tree: pkg/tsconfig.json"),
+    });
+  });
+
+  it("binds a tsconfig ancestor above the package and fails closed when it is dirtied", async () => {
+    const fixture = await createProvenanceFixture();
+    const packageRoot = join(fixture.directory, "pkg");
+    await mkdir(join(packageRoot, "src"), { recursive: true });
+    await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "@local/nested", type: "module" }));
+    const wrapper = join(packageRoot, "src", "wrapper.js");
+    await writeFile(wrapper, 'export const execute = () => "safe";\n');
+    // An ancestor tsconfig ABOVE the package root: tsx's upward discovery from
+    // the package directory reads it when the package has none of its own.
+    const ancestorTsconfig = join(fixture.directory, "tsconfig.json");
+    await writeFile(ancestorTsconfig, `${JSON.stringify({ compilerOptions: { strict: true } })}\n`);
+    await commitFixtureRepository(fixture.directory, "nested package under ancestor tsconfig");
+    await writeCompatibility(fixture, wrapper);
+
+    await expect(verify(fixture)).resolves.toMatchObject({ valid: true });
+
+    // Dirtying the ancestor config (never the package's own) must fail closed;
+    // downward-only chain discovery would have missed it entirely.
+    await writeFile(ancestorTsconfig, `${JSON.stringify({ compilerOptions: { strict: false } })}\n`);
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("first-party source differs from its committed content: fixture (tsconfig.json)"),
+    });
+  });
+
+  it("fails closed when a tsconfig extends a path outside the repository", async () => {
+    const fixture = await createProvenanceFixture();
+    const tsconfigPath = join(fixture.directory, "tsconfig.json");
+    await writeFile(tsconfigPath, `${JSON.stringify({ extends: "../outside/tsconfig.json", compilerOptions: {} })}\n`);
+    await commitFixtureRepository(fixture.directory, "tsconfig extends outside repo");
+    await writeCompatibility(fixture, fixture.wrapperPath);
+
+    // tsx would resolve and read the out-of-repo extends target, leaving mutable
+    // configuration unbound, so an escaping extends fails closed rather than being
+    // silently ignored.
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("extends a path outside the repository"),
+    });
+  });
+
+  it("fails closed when a workspace dependency's tracked location is a symlink onto another package", async () => {
+    const fixture = await createProvenanceFixture();
+    const packageRoot = join(fixture.directory, "wrapper-package");
+    const realTarget = join(fixture.directory, "other-package");
+    await mkdir(join(packageRoot, "src"), { recursive: true });
+    await mkdir(join(realTarget, "src"), { recursive: true });
+    await mkdir(join(packageRoot, "node_modules", "@local"), { recursive: true });
+    const packagedWrapper = join(packageRoot, "src", "wrapper.js");
+    await writeFile(join(packageRoot, "package.json"), JSON.stringify({
+      name: "@local/fixture-wrapper",
+      type: "module",
+      dependencies: { "@local/fixture-protocol": "file:../fixture-protocol" },
+    }));
+    await writeFile(packagedWrapper, 'export { parse } from "@local/fixture-protocol";\n');
+    await writeFile(join(realTarget, "package.json"), JSON.stringify({ name: "@local/other", type: "module" }));
+    await writeFile(join(realTarget, "src", "index.js"), 'export const parse = () => "attacker";\n');
+    // The tracked `file:` target `fixture-protocol` is itself a symlink onto a
+    // different real package, and node_modules honours it, so realpath collapses
+    // both sides onto one directory while the committed dependency tree is
+    // shadowed. Binding the lexical target rejects the redirection.
+    await symlink(realTarget, join(fixture.directory, "fixture-protocol"), "dir");
+    await symlink(
+      join(fixture.directory, "fixture-protocol"),
+      join(packageRoot, "node_modules", "@local", "fixture-protocol"),
+      "dir",
+    );
+    await commitFixtureRepository(fixture.directory, "symlinked workspace package");
+    await writeCompatibility(fixture, packagedWrapper);
+
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("symlink redirecting outside its committed directory"),
+    });
+  });
+
+  it("fails closed on a symlink inside a first-party source span", async () => {
+    const fixture = await createProvenanceFixture();
+    // A symlink physically present in the src span: tsx could follow it outside
+    // the verified set and it is never a tracked regular blob, so the exhaustive
+    // physical walk must reject it rather than skip it.
+    await symlink(fixture.executablePath, join(fixture.directory, "src", "link.js"), "file");
+
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("non-regular entry"),
+    });
+  });
+
+  const canForceReaddirFailure = typeof process.getuid === "function" && process.getuid() !== 0;
+  (canForceReaddirFailure ? it : it.skip)(
+    "fails closed when a source-span subdirectory cannot be traversed",
+    async () => {
+      const fixture = await createProvenanceFixture();
+      const unreadable = join(fixture.directory, "src", "sub");
+      await mkdir(unreadable);
+      // An unreadable subdirectory inside the span: the exhaustive physical walk
+      // must propagate the traversal failure instead of silently skipping it.
+      await chmod(unreadable, 0o000);
+      try {
+        await expect(verify(fixture)).rejects.toMatchObject({
+          code: "ADAPTER_COMPATIBILITY_INVALID",
+          message: expect.stringContaining("could not be traversed"),
+        });
+      } finally {
+        await chmod(unreadable, 0o755);
+      }
+    },
+  );
+
+  it("fails closed when the workspace root manifest is dirty while resolving a non-file: dependency", async () => {
+    const fixture = await createProvenanceFixture();
+    // A root workspaces layout whose wrapper package depends on a sibling via a
+    // non-file: workspace specifier, so resolution consults the root manifest's
+    // workspace patterns.
+    await writeFile(
+      join(fixture.directory, "package.json"),
+      `${JSON.stringify({ name: "@local/root", type: "module", workspaces: ["packages/*"] })}\n`,
+    );
+    const wrapperPkg = join(fixture.directory, "packages", "wrapper");
+    const protocolPkg = join(fixture.directory, "packages", "fixture-protocol");
+    await mkdir(join(wrapperPkg, "src"), { recursive: true });
+    await mkdir(join(protocolPkg, "src"), { recursive: true });
+    await mkdir(join(wrapperPkg, "node_modules", "@local"), { recursive: true });
+    const packagedWrapper = join(wrapperPkg, "src", "wrapper.js");
+    await writeFile(join(wrapperPkg, "package.json"), JSON.stringify({
+      name: "@local/fixture-wrapper",
+      type: "module",
+      dependencies: { "@local/fixture-protocol": "*" },
+    }));
+    await writeFile(packagedWrapper, 'export { parse } from "@local/fixture-protocol";\n');
+    await writeFile(join(protocolPkg, "package.json"), JSON.stringify({ name: "@local/fixture-protocol", type: "module" }));
+    await writeFile(join(protocolPkg, "src", "index.js"), 'export const parse = () => "safe";\n');
+    await symlink(protocolPkg, join(wrapperPkg, "node_modules", "@local", "fixture-protocol"), "dir");
+    await commitFixtureRepository(fixture.directory, "workspace layout with non-file dependency");
+    await writeCompatibility(fixture, packagedWrapper);
+
+    await expect(verify(fixture)).resolves.toMatchObject({
+      wrapperProvenance: [{ adapterId: "fixture", wrapperPath: "packages/wrapper/src/wrapper.js" }],
+    });
+
+    // Modify the tracked root manifest without committing: its workspace patterns
+    // steer non-file: resolution, so the dirty manifest must fail closed before
+    // its patterns are trusted.
+    await writeFile(
+      join(fixture.directory, "package.json"),
+      `${JSON.stringify({ name: "@local/root", type: "module", workspaces: ["packages/*"], description: "locally modified" })}\n`,
+    );
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("workspace root manifest differs from its committed content"),
     });
   });
 
