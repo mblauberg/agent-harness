@@ -27,8 +27,9 @@ It leaves the database and filesystem evidence untouched. Preflight/backfill cod
 only purpose is importing those earlier shapes shall be removed.
 
 Protocol initialization still rejects mismatched peers, but it does not retry an old profile or translate old result
-shapes. Independently optional current features continue to use exact negotiation, and adapter compatibility manifests
-continue to pin executable, wrapper and schema artifacts.
+shapes. Independently optional current features continue to use exact negotiation. The adapter compatibility registry
+pins external executable, package and schema artifacts by hash; repository-owned wrapper code carries Git provenance
+(repository commit plus tracked wrapper path) instead of hash manifests.
 
 ## Required behaviour
 

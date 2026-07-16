@@ -12,7 +12,7 @@ Promote the coordination-only agent fabric into a safely activated local model-e
 
 ## Required behaviour
 
-1. Every activated adapter is bound to verified wrapper closure, upstream executable or package, protocol/schema and model-family constraints.
+1. Every activated adapter is bound to Git wrapper provenance: the wrapper entrypoint is tracked source, verified tracked at the owning repository's HEAD and byte-identical to its committed content, and recorded as repository commit plus wrapper path in the composed adapter evidence. The verified first-party span covers the owning workspace package's src tree and every local workspace dependency's src tree (`@local/*` packages import their sources in the wrapper execution path via the `source` export condition), and provenance is re-derived immediately before every adapter process spawn. Untracked, ignored or locally modified wrapper code fails activation closed. Upstream executable or package identity, protocol/schema and model-family constraints stay hash-verified; hash pins exist only for identities Git does not supply. The tsx loader that executes tracked TypeScript source is a lockfile-pinned third-party dependency — the same trust class as the provider SDK dependencies that neither the removed manifest model nor Git provenance pins.
 2. Provider work uses the admitted absolute working directory and exact matched
    permission profile. Generic work may use write tools/edit modes only when its
    task authority and matched profile explicitly grant them; approval bypasses,
@@ -106,7 +106,7 @@ adds no competing schema.
 
 An adapter may enter `activeAdapters` only when its current `kind: available`
 capability snapshot
-binds the activated executable/package, wrapper closure, adapter contract,
+binds the activated executable/package, wrapper provenance, adapter contract,
 host/version, model catalogue, raw effort values, raw native-mode values,
 context boundary claims, orchestration bounds and enforceable permission
 source. The

@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 
 import { parse, stringify } from "yaml";
 
+import { commitFixtureRepository, writeWrapperPackageScaffold } from "./fixture-repository.ts";
+
 type Stage4AdapterId = "pi-rpc" | "agy";
 
 const FAMILIES: Record<Stage4AdapterId, string[]> = {
@@ -44,17 +46,12 @@ export async function createResolvedStage4Compatibility(adapterId: Stage4Adapter
   const directory = await mkdtemp(join(tmpdir(), `agent-fabric-${adapterId}-`));
   const executablePath = join(directory, `${adapterId}-fixture`);
   const protocolSchemaPath = join(directory, `${adapterId}-protocol.json`);
-  const wrapperManifestPath = join(directory, `${adapterId}-wrapper-manifest.json`);
   const executableBytes = `${adapterId} deterministic fixture\n`;
   const schemaBytes = `${JSON.stringify({ schemaVersion: 1, protocolVersion: 1 })}\n`;
   await writeFile(executablePath, executableBytes, { mode: 0o700 });
   await writeFile(protocolSchemaPath, schemaBytes, { mode: 0o600 });
-  const wrapperManifest = `${JSON.stringify({
-    schema_version: 1,
-    entrypoint: executablePath,
-    files: [{ path: executablePath, sha256: sha256(executableBytes) }],
-  })}\n`;
-  await writeFile(wrapperManifestPath, wrapperManifest, { mode: 0o600 });
+  await writeWrapperPackageScaffold(directory);
+  await commitFixtureRepository(directory);
   const compatibilityPath = join(directory, "adapter-compatibility.yaml");
   await writeFile(
     compatibilityPath,
@@ -74,9 +71,6 @@ export async function createResolvedStage4Compatibility(adapterId: Stage4Adapter
             executable: executablePath,
             executable_sha256: sha256(executableBytes),
             wrapper_entrypoint: executablePath,
-            wrapper_entrypoint_sha256: sha256(executableBytes),
-            wrapper_manifest: wrapperManifestPath,
-            wrapper_manifest_sha256: sha256(wrapperManifest),
           },
           contract: {
             adapter_version: 1,

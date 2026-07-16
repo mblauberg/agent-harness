@@ -84,10 +84,10 @@ export async function fabricStatus(arguments_: string[], paths: FabricPaths): Pr
   };
 }
 
-async function check(id: string, operation: () => void | Promise<void>): Promise<Check> {
+async function check(id: string, operation: () => string | undefined | Promise<string | undefined>): Promise<Check> {
   try {
-    await operation();
-    return { id, status: "pass", detail: "ok" };
+    const detail = await operation();
+    return { id, status: "pass", detail: detail === undefined || detail.length === 0 ? "ok" : detail };
   } catch (error: unknown) {
     return { id, status: "fail", detail: errorDetail(error) };
   }
@@ -96,13 +96,33 @@ async function check(id: string, operation: () => void | Promise<void>): Promise
 export async function fabricDoctor(arguments_: string[], paths: FabricPaths): Promise<Record<string, unknown>> {
   const selected = pathsFor(arguments_);
   let adapterIds: string[] = [];
+  let adapterCommands: string[][] = [];
   const checks: Check[] = [];
   checks.push(await check("configuration", async () => {
     const config = await loadFabricConfig({ globalPath: selected.config, agentsHome: selected.agentsHome });
     adapterIds = config.adapterIds;
+    adapterCommands = adapterIds.map((adapterId) => config.adapterCommands[adapterId] ?? []);
+  }));
+  checks.push(await check("wrapper-loader", async () => {
+    const loaderParts = [...new Set(adapterCommands.flat().filter((part) => part.includes("node_modules/tsx/dist/loader.mjs")))];
+    for (const part of loaderParts) {
+      const loaderPath = part.startsWith("${AGENTS_HOME}/") ? join(selected.agentsHome, part.slice("${AGENTS_HOME}/".length)) : part;
+      try {
+        await lstat(loaderPath);
+      } catch {
+        throw new Error(
+          `tsx loader is missing: ${loaderPath}. Adapter wrappers execute tracked TypeScript source through tsx; ` +
+          "reinstall dependencies including devDependencies (npm ci, not npm ci --omit=dev).",
+        );
+      }
+    }
+    return loaderParts.length === 0 ? "no tsx wrapper commands configured" : "tsx loader present";
   }));
   checks.push(await check("adapter-compatibility", async () => {
-    await verifyAdapterCompatibility({ compatibilityPath: selected.compatibility, schemaPath: selected.compatibilitySchema, adapterIds, requireEnabled: true });
+    const verification = await verifyAdapterCompatibility({ compatibilityPath: selected.compatibility, schemaPath: selected.compatibilitySchema, adapterIds, requireEnabled: true });
+    return verification.wrapperProvenance
+      .map((item) => `${item.adapterId}=${item.repositoryCommit}:${item.wrapperPath}`)
+      .join(" ");
   }));
   for (const [id, path, expectedKind] of [
     ["state-directory", paths.stateDirectory, "directory"],

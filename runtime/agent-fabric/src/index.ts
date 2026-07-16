@@ -111,7 +111,7 @@ export {
 } from "./domain/operations.js";
 export type { FabricOperation } from "./domain/operations.js";
 export { runAdapterConformance } from "./adapters/conformance.js";
-export { verifyAdapterCompatibility } from "./adapters/compatibility.js";
+export { verifyAdapterCompatibility, type WrapperProvenance } from "./adapters/compatibility.js";
 export { startOptionalAdapterLeg } from "./adapters/optional-leg.js";
 export { assessAdapterModelPolicy, resolveProviderAdapterSelection, validateAdapterModelSelection } from "./adapters/model-selection.js";
 export { resolveExecutionProfile, ExecutionProfileError } from "./profiles/execution.js";
