@@ -1,52 +1,63 @@
 ## Summary
 
-Describe the outcome and link the approved spec, issue or decision record.
+<!-- Two or three plain sentences: what changed and why, for a reader who
+     has not seen the diff. No jargon. Link the issue, approved spec or
+     decision record. Do not restate issue or Project status here; GitHub
+     issues and Project Status own work state. -->
 
-## Revision under review
+## Decision requested
 
-- Exact base branch and commit:
-- Exact head branch and commit:
+<!-- The exact decision the reviewing user is asked to make, e.g.
+     "Approve merge of <head SHA> to main." Name any user or external
+     gate that stays open after merge. -->
 
-A later commit invalidates exact-head checks and independent review. Rerun both
-against the new head.
+<!-- Change map: add a Mermaid diagram here ONLY when several actors,
+     dependencies or state transitions changed and prose alone would be
+     hard to review (runbook restraint rule, docs/runbooks/github-workflow.md).
+     Routine or single-file PRs get no diagram. -->
 
-## Risk and authority
+## Risk and rollback
 
-- Risk tier:
-- Authorised write scope:
-- Prohibited or external actions:
-- Human gates still pending:
+<!-- One or two lines: risk tier and blast radius, then the exact
+     rollback or forward-repair step if this change is wrong after
+     merge. -->
 
-## Test evidence
+## Evidence
 
-- [ ] `scripts/check-harness`
-- [ ] Fabric typecheck, tests and build (`npm run check`)
-- [ ] Fabric evaluation (`npm run test:evaluation`), when applicable
-- [ ] Fabric load evidence (`npm run test:load`), when applicable
-- [ ] Production dependency audit
+Base: `main` at `<sha>`. Head under review: `<branch>` at `<sha>`.
+A later commit invalidates every row below and the independent review;
+rerun both against the new head.
 
-List exact commands, results and any unavailable or intentionally skipped gate.
+<!-- Every row must be externally verifiable: an exact command with its
+     result, or a linked artifact, bound to the exact head SHA. Never
+     leave a cell empty — record a result or an N/A reason. Add rows for
+     change-specific gates (migration preflight, live smoke, evaluation,
+     load); do not delete rows.
 
-## Current contract and cutover
+     Compound gates cover:
+     - Contract and cutover: current schema, protocol and configuration
+       owners checked; any pre-release direct cutover, regeneration or
+       reset path recorded; no legacy reader, compatibility bridge or
+       historical-format promise added; persistence or schema changes
+       carry migration preflight, rollback or forward-repair, and
+       trigger or query-plan evidence.
+     - Security and operations: authority, secret-disclosure and
+       least-privilege boundaries; resource limits, failure behaviour
+       and recovery; live provider or daemon smoke when runtime
+       behaviour changed.
+     - Operator documentation: docs describe expected behaviour, not
+       workstation state. -->
 
-- [ ] Current schema, protocol and configuration owners checked
-- [ ] Any pre-release direct cutover, regeneration or reset path is recorded
-- [ ] No legacy reader, compatibility bridge or historical-format promise was added
-- [ ] Persistence or schema changes include migration preflight, rollback or forward-repair, and trigger or query-plan evidence as applicable
-- [ ] Not applicable
-
-## Security and operational evidence
-
-- [ ] Authority, secret-disclosure and least-privilege boundaries reviewed
-- [ ] Resource limits, failure behaviour and recovery evidence attached
-- [ ] Live provider or daemon smoke evidence attached when runtime behaviour changed
-- [ ] Not applicable
-
-## Documentation and rollback
-
-- [ ] Operator documentation reflects expected behaviour, not workstation state
-- [ ] Rollback or forward-repair procedure is recorded
-- [ ] Not applicable
+| gate | command or artifact | result | head SHA | N/A reason |
+| --- | --- | --- | --- | --- |
+| Harness style | `scripts/check-harness` | | | |
+| Fabric typecheck, tests, build | `npm run check` | | | |
+| Fabric evaluation | `npm run test:evaluation` | | | |
+| Fabric load | `npm run test:load` | | | |
+| Production dependency audit | | | | |
+| Contract and cutover | | | | |
+| Security and operations | | | | |
+| Operator documentation | | | | |
 
 ## Independent review
 
@@ -56,6 +67,11 @@ List exact commands, results and any unavailable or intentionally skipped gate.
 - Exact head reviewed:
 - Unresolved P0-P2 findings:
 
-## Acceptance
+<details>
+<summary>Implementation detail</summary>
 
-State which machine gates pass and which human acceptance or release gates remain pending.
+<!-- Approach and notable choices, authorised write scope, prohibited or
+     external actions, and anything a future maintainer needs to
+     understand the diff. -->
+
+</details>

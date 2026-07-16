@@ -68,7 +68,7 @@ Record the verdict (VOID/PARTIAL) **and the exact salvaged paths** (in `{{SALVAG
 
 "Did the background job hang?" is answered by an **OS-level liveness check** (`{{PROCESS_CHECK}}` — inspect the actual process / PID), **not** by the task manager's status line. A job can read "running" while genuinely progressing slowly, or while truly hung — the status line cannot tell you which.
 
-When a human asks "did the workflows get stuck?", **process-verify before answering.** Trusting the task list alone hides hangs.
+When a user asks "did the workflows get stuck?", **process-verify before answering.** Trusting the task list alone hides hangs.
 
 ---
 
@@ -85,7 +85,7 @@ Two concrete traps, both observed:
 
 ## 5. Bounded retry — the convergence rule
 
-A fix gets at most `{{MAX_RETRY_ATTEMPTS}}` attempts (default **2**). **If the 2nd fix still fails verification *with new gaps surfacing*, do NOT loop a 3rd time — ESCALATE** to the appropriate `{{ESCALATION_GATES}}` (human / domain-expert / judge-panel / spike / promotion-gate) and record the residual. Pre-declare the rule before fix #2 so the escalation is principled, not a surrender. A remediation that *diverged or never executed* (see §4) counts as a failed attempt, not a free retry.
+A fix gets at most `{{MAX_RETRY_ATTEMPTS}}` attempts (default **2**). **If the 2nd fix still fails verification *with new gaps surfacing*, do NOT loop a 3rd time — ESCALATE** to the appropriate `{{ESCALATION_GATES}}` (user / domain-expert / judge-panel / spike / promotion-gate) and record the residual. Pre-declare the rule before fix #2 so the escalation is principled, not a surrender. A remediation that *diverged or never executed* (see §4) counts as a failed attempt, not a free retry.
 
 Carve-out — **firm-stop vs genuine-placebo.** Be honest about which loop you are in:
 
@@ -127,7 +127,7 @@ restart resumes the mission. An idle steady state that loops is a bug.
 
 ## 7. The STOP-hook enforcement pattern
 
-Wire a **Stop hook** that preserves the human-only mission terminal but allows a
+Wire a **Stop hook** that preserves the user-only mission terminal but allows a
 durable idle pause. It re-invokes while selectable/in-flight work exists; a
 `STATE: PAUSED` idle-frontier checkpoint ends the driver without claiming the
 mission terminated. Only `{{STOP_CONDITION}}` closes the mission.
@@ -145,7 +145,7 @@ mission terminated. Only `{{STOP_CONDITION}}` closes the mission.
   A non-zero result re-invokes one iteration; a passing result exits the driver
   without closing the mission. If
   `STATUS == STOP`, it performs terminal handoff and exits the mission.
-- The human steers by editing the goal file; the only terminal mission exit is
+- The user steers by editing the goal file; the only terminal mission exit is
   `STATUS=STOP`.
 
 **Substrate realisations of the same gate:** on Claude Code this is a literal

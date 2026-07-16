@@ -24,7 +24,7 @@ def test_local_history_audit_is_local_first_and_export_gated():
     assert len(skill.split()) <= 500
     assert len(audit.split()) <= 600
     assert (
-        "direct human request authorises read-only analysis of the named "
+        "direct user request authorises read-only analysis of the named "
         "local histories" in lowered
     )
     assert "Do not require a second privacy receipt" in compact
@@ -33,7 +33,7 @@ def test_local_history_audit_is_local_first_and_export_gated():
     assert "persistent repository/shared artifact" in compact
     assert "sending raw excerpts to another provider" in compact
     assert "new audience or external destination" in compact
-    assert "confirm with the human" in compact
+    assert "confirm with the user" in compact
     assert "Unsupported or unattributable evidence is `N/A`, never zero" in compact
 
     method = " ".join(METHOD.read_text().split())
@@ -98,7 +98,8 @@ def test_normative_docs_match_the_local_first_contract():
     compact_adr = " ".join(adr.split())
     compact_spec = " ".join(spec.split())
 
-    assert "Status: Base implementation machine verified" in spec
+    assert "Issue #23" in spec
+    assert "Status: Base implementation machine verified" not in spec
     assert "current contract permits direct read-only analysis" in compact_spec
     assert "## Local skill evidence and shared exports" in spec
     assert "same authorised session is local delivery, not sharing/export" in compact_spec

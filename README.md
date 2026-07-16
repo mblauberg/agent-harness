@@ -15,10 +15,10 @@ vulnerabilities privately through [`SECURITY.md`](SECURITY.md).
 
 Over a bare agent, Provenant:
 
-- scopes work and requires human approval before implementation starts;
+- scopes work and requires user approval before implementation starts;
 - runs deterministic checks before results surface for review;
 - adds review by the *other* model family once the work is substantial; and
-- keeps acceptance and release as separate human decisions.
+- keeps acceptance and release as separate user decisions.
 
 It is built from three parts:
 
@@ -102,24 +102,24 @@ bootstrap line and the Codex block remain until removed by hand.
 
 ```mermaid
 flowchart TB
-    accTitle: The delivery loop and its three human gates
-    accDescr: After a session sets up clean context, the deliver kernel runs the loop top to bottom: scope writes the specification and risk tier, a human gate approves it, implement writes the test first whenever observable behaviour changes, verify runs deterministic checks, and review reads the work in a fresh context that never wrote it, and from the substantial tier up must include the other model family. Two dotted edges return: the approval gate sends the plan back to scope, and a blocking review finding sends the work back to implement for a bounded repair. A human gate then accepts, leading to retrospect and the next cycle. Release and observe sit outside the loop, behind a third human gate that authorises the external action.
-    SC["scope · spec, risk tier, acceptance criteria"] --> G1{{"HUMAN · approve the spec"}}
+    accTitle: The delivery loop and its three user gates
+    accDescr: After a session sets up clean context, the deliver kernel runs the loop top to bottom: scope writes the specification and risk tier, a user gate approves it, implement writes the test first whenever observable behaviour changes, verify runs deterministic checks, and review reads the work in a fresh context that never wrote it, and from the substantial tier up must include the other model family. Two dotted edges return: the approval gate sends the plan back to scope, and a blocking review finding sends the work back to implement for a bounded repair. A user gate then accepts, leading to retrospect and the next cycle. Release and observe sit outside the loop, behind a third user gate that authorises the external action.
+    SC["scope · spec, risk tier, acceptance criteria"] --> G1{{"USER · approve the spec"}}
     G1 -. "send back" .-> SC
     G1 --> IM["implement · test first when behaviour changes"]
     IM --> VF["verify · deterministic checks"]
     VF --> RV["review · fresh context<br/>the other model family at substantial+"]
     RV -. "blocking finding" .-> IM
-    RV --> G2{{"HUMAN · accept"}}
+    RV --> G2{{"USER · accept"}}
     G2 --> RT["retrospect"]
-    G2 -. "only if it ships" .-> G3{{"HUMAN · authorise the action"}}
+    G2 -. "only if it ships" .-> G3{{"USER · authorise the action"}}
     G3 --> RL["release · observe"]
 
     classDef gate fill:#8a6d1f,stroke:#f0c674,color:#ffffff,stroke-width:2px
     class G1,G2,G3 gate
 ```
 
-Gold hexagons are human gates. Every gate can stop progression; specification
+Gold hexagons are user gates. Every gate can stop progression; specification
 approval and acceptance can return work for revision. `review` runs in a fresh
 context that never wrote the diff, and from the `substantial` tier up it must
 include the other model family; a receipt missing that leg cannot reach
@@ -168,9 +168,11 @@ Durable boundaries:
 
 - access and credentials never grant authority;
 - creating branches and worktrees for implementation is pre-authorised by the
-  constitution; deletion, force-removal and integration stay gated;
+  constitution, and agents merge pull requests that pass their tier's review
+  pressure and green CI; deletion, force-removal and pushes to shared branches
+  outside authorised merges stay gated;
 - no two agents write one source surface at once; and
-- specification approval, acceptance and release stay separate human decisions
+- specification approval, acceptance and release stay separate user decisions
   ([`HARNESS.md`](HARNESS.md)).
 
 Agent Fabric owns answer-bearing provider execution and durable coordination;

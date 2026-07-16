@@ -1,7 +1,7 @@
 <!-- Modified from Impeccable for this harness; see the repository THIRD_PARTY_NOTICES.md. -->
 Shape the UX and UI for a feature before any code is written. This command produces a **design brief**: a structured artifact that guides implementation through discovery, not guesswork.
 
-`scope` owns the approved specification, authority and human gate. Shape is its
+`scope` owns the approved specification, authority and user gate. Shape is its
 frontend design-method companion; it cannot approve the brief or start code.
 
 **Scope**: Design planning only. This command does NOT write code. It produces the thinking that makes code good.

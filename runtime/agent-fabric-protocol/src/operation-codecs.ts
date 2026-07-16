@@ -209,6 +209,7 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.projectSessionGet]: object(["projectId", "projectSessionId", "expectedGeneration"]),
   [FABRIC_OPERATIONS.projectSessionTransition]: object(["command", "projectSessionId", "expectedGeneration", "transition"]),
   [FABRIC_OPERATIONS.projectSessionClose]: object(["command", "projectSessionId", "expectedGeneration", "terminalPath"]),
+  [FABRIC_OPERATIONS.projectSessionLaunchPrepare]: object(["command", "projectId", "projectSessionId", "expectedSessionGeneration", "launchPacketRef"]),
   [FABRIC_OPERATIONS.membershipBind]: object(["origin", "command", "projectSessionId", "coordinationRunId", "expectedMembershipRevision", "members"]),
   [FABRIC_OPERATIONS.operatorAttach]: object(["command", "projectId", "requestedExpiresAt"], ["projectSessionId", "expectedAttachmentGeneration"]),
   [FABRIC_OPERATIONS.operatorDetach]: object(["command", "attachmentGeneration"]),
@@ -401,6 +402,7 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.projectionViewPage]: object(["status", "view"], ["rows", "nextCursor", "hasMore", "snapshotRevision", "readTransactionId", "reason", "currentSnapshotRevision", "snapshotCursor"]),
   [FABRIC_OPERATIONS.projectionDetailRead]: object(["status"], ["detailRef", "detail", "snapshotRevision", "readTransactionId", "reason", "currentSnapshotRevision"]),
   [FABRIC_OPERATIONS.operatorActionPreview]: object(["previewId", "previewRevision", "previewDigest", "intent", "intentDigest", "beforeStateDigest", "consequenceClass", "evidenceRefs", "gateIds", "confirmationMode", "expiresAt"]),
+  [FABRIC_OPERATIONS.projectSessionLaunchPrepare]: object(["previewId", "previewRevision", "previewDigest", "intent", "intentDigest", "beforeStateDigest", "consequenceClass", "evidenceRefs", "gateIds", "confirmationMode", "expiresAt"]),
   [FABRIC_OPERATIONS.operatorActionCommit]: object(["commandId", "previewId", "previewRevision", "intentDigest", "beforeStateDigest", "afterStateDigest", "evidenceRefs", "committedAt"], ["effectRef", "launchProviderActionJournalRef"]),
   [FABRIC_OPERATIONS.operatorActionStatus]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "launchProviderActionJournalRef", "receipt", "code", "evidenceRefs"]),
   [FABRIC_OPERATIONS.operatorActionReconcile]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "launchProviderActionJournalRef", "receipt", "code", "evidenceRefs"]),
@@ -817,6 +819,13 @@ const projectSessionTransitionInputCodec = objectCodec({
     }),
     objectCodec({ to: literal("awaiting_acceptance"), closureEvidence: artifactRefCodec }),
   ]),
+});
+const projectSessionLaunchPrepareInputCodec = objectCodec({
+  command: operatorMutationCodec,
+  projectId: identifier,
+  projectSessionId: identifier,
+  expectedSessionGeneration: positiveInteger,
+  launchPacketRef: artifactRefCodec,
 });
 
 const runProjectionCodec = objectCodec({
@@ -2392,12 +2401,27 @@ const projectSummaryCodec = objectCodec(
   { kind: literal("project"), goal: text, acceptedScopeRef: nullable(artifactRefCodec), repositoryRevision: text },
   { repository: gitRepositorySummaryCodec },
 );
+const DECLARED_RUN_TASK_STATES = [
+  "blocked", "ready", "active", "complete", "cancelled", "degraded",
+] as const;
+const declaredRunTaskStateCountsCodec = objectCodec(
+  Object.fromEntries(
+    DECLARED_RUN_TASK_STATES.map((state) => [state, integer({ minimum: 0 })]),
+  ),
+);
+// A finite arm is deliberately deferred to the plan-declaration package: it
+// requires an exact plan-revision binding and settled cancelled-task
+// denominator semantics, and lands as its own result-shape cutover.
+const declaredRunProgressCodec = unionOf([
+  objectCodec({ plan: literal("open"), counts: declaredRunTaskStateCountsCodec }),
+  objectCodec({ plan: literal("unknown"), reason: text }),
+]);
 const runSummaryCodec = objectCodec({
   kind: literal("run"),
   phase: text,
   health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
   nextMilestone: text,
-}, { projectSessionId: identifier });
+}, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec });
 const workSummaryCodec = objectCodec({
   kind: literal("work"),
   state: text,
@@ -2538,7 +2562,7 @@ const operatorDetailCodec = unionOf([
     chairAgentId: identifier,
     chairGeneration: positiveInteger,
     health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
-  }, { projectSessionId: identifier }),
+  }, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec }),
   objectCodec({ kind: literal("task"), taskId: identifier, objective: text, state: text, ownerAgentId: nullable(identifier) }),
   objectCodec({
     kind: literal("agent"),
@@ -3361,6 +3385,7 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.projectionDetailRead) return operatorDetailReadInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorRepositoryRead) return gitRepositoryReadInputCodec;
   if (operation === FABRIC_OPERATIONS.projectSessionTransition) return projectSessionTransitionInputCodec;
+  if (operation === FABRIC_OPERATIONS.projectSessionLaunchPrepare) return projectSessionLaunchPrepareInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionPreview) return operatorActionPreviewInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionCommit) return operatorActionCommitCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionStatus) return operatorActionStatusInputCodec;
@@ -3465,6 +3490,7 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.projectionDetailRead) return operatorDetailReadResultCodec;
   if (operation === FABRIC_OPERATIONS.operatorRepositoryRead) return gitRepositoryReadResultCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionPreview) return operatorActionPreviewCodec;
+  if (operation === FABRIC_OPERATIONS.projectSessionLaunchPrepare) return operatorActionPreviewCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionCommit) return operatorActionReceiptCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionStatus || operation === FABRIC_OPERATIONS.operatorActionReconcile) {
     return operatorActionStatusCodec;

@@ -288,3 +288,58 @@ describe("structured Console model", () => {
     });
   });
 });
+
+describe("declared run progress fail-closed mapping", () => {
+  function runRow(summary: Record<string, unknown>): OperatorViewRow<"runs"> {
+    return {
+      itemId: "run_01",
+      itemRevision: 4,
+      fact: {
+        freshness: "live",
+        source: "fabric",
+        revision: 4,
+        observedAt,
+        value: {
+          summary,
+          detailRef: {
+            kind: "run",
+            projectSessionId: "session_01",
+            coordinationRunId: "run_01",
+            expectedRevision: 4,
+          },
+          actionAvailability: { state: "read-only", reason: "state-ineligible" },
+        },
+      },
+    } as never;
+  }
+  const baseSummary = {
+    kind: "run",
+    projectSessionId: "session_01",
+    phase: "active",
+    health: "healthy",
+    nextMilestone: "verification",
+  };
+
+  it("maps a negotiated run row with its tagged declared progress intact", () => {
+    const declaredProgress = {
+      plan: "open",
+      counts: { blocked: 0, ready: 1, active: 1, complete: 2, cancelled: 0, degraded: 0 },
+    };
+    const mapped = mapProtocolRow(
+      "runs",
+      runRow({ ...baseSummary, declaredProgress }),
+      Date.parse(observedAt),
+      "daemon-journal",
+    );
+    expect(mapped.summary).toMatchObject({ declaredProgress });
+  });
+
+  it("fails closed when an exact run projection omits declared progress", () => {
+    expect(() => mapProtocolRow(
+      "runs",
+      runRow(baseSummary),
+      Date.parse(observedAt),
+      "daemon-journal",
+    )).toThrow(/exact run projection has no declared progress/);
+  });
+});

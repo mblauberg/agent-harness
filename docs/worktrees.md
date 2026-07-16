@@ -1,10 +1,11 @@
 # Shared worktree policy
 
-The project constitution (`HARNESS.md`) is a standing human-approved envelope:
+The project constitution (`HARNESS.md`) is a standing user-approved envelope:
 creating linked worktrees for implementation work needs no per-instance
 approval. That authority still does not imply authority to delete a branch,
-force-remove state, integrate changes or let agents write overlapping scopes —
-each of those remains separately gated.
+force-remove state or let agents write overlapping scopes — each of those
+remains separately gated. Merge authority is repo-based; see the repository's
+workflow runbook (for this repo, `docs/runbooks/github-workflow.md`).
 
 ## Canonical location
 
@@ -20,7 +21,7 @@ platform cache, `/tmp`, a home-level pool, the current linked worktree, or an
 artifact `scaffolds/` directory. A nested repository or submodule owns its own
 `.worktrees`. Multi-repository work uses one authorised worktree per repository.
 
-Project instructions may strengthen this invariant. Only a direct human
+Project instructions may strengthen this invariant. Only a direct user
 instruction may make a one-run location exception.
 
 ## Helper
@@ -56,6 +57,6 @@ path and branch/detached state.
   commands and results. Do not guess the package manager or install mode.
 - Before removal, confirm a clean status, no live agent/pane and no unconsumed
   handoff. Use `git worktree remove`, never filesystem deletion.
-- Force removal, pruning and branch deletion require separate human authority.
+- Force removal, pruning and branch deletion require separate user authority.
 - `.worktrees/` is protected infrastructure: context cleaners, broad backups
   and scratch pruning must skip it.

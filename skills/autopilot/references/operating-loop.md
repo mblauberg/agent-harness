@@ -3,7 +3,7 @@
 The engine of an autonomous, long-running, multi-agent mission. You are the
 **conductor**: keep the durable state graph, delegate independent depth and
 lifecycle execution to existing skills, adjudicate evidence and synthesise
-verified outputs until a human writes STOP.
+verified outputs until a user writes STOP.
 
 This layer is domain-agnostic. Everything domain-specific is a **named config knob** you fill once at bootstrap. The same loop drives a literature review, a codebase migration, a security audit, an architecture design, or a market analysis with zero changes to this discipline.
 
@@ -23,7 +23,7 @@ Fill these once, in `GOAL.md`, before the first iteration. They are settled inpu
 | `{{DOMAIN}}` / `{{MISSION}}` | What this run produces and its north star (e.g. "exhaustively design and scaffold X", "synthesize the literature on Y", "audit Z for class-W vulnerabilities"). |
 | `{{LOCKED_CONSTRAINTS}}` | A do-not-re-litigate list the run designs **around**, not toward. Settled inputs. |
 | `{{ESCALATION_GATES}}` | Which work routes to which gate when the run cannot finish it autonomously. The taxonomy is generic (see §4); the specific gates are knobs. |
-| `{{BUILD_CEILING}}` | The line between what the run may build/produce autonomously and what requires explicit human authorization (e.g. "scaffold + local/mocked only; no real infra, no irreversible side effects"). |
+| `{{BUILD_CEILING}}` | The line between what the run may build/produce autonomously and what requires explicit user authorization (e.g. "scaffold + local/mocked only; no real infra, no irreversible side effects"). |
 | `{{RUNAWAY_CAPS}}` | The tunable ceilings of §0a (concurrency, forks, depth, per-unit budget). |
 
 Model/effort routing and hard-gate review panels are **not** knobs of this
@@ -37,14 +37,14 @@ on low-risk surfaces, conservative on the irreversible core.
 
 ## §0. Prime directive
 
-Produce the most thoroughly-reasoned output a **team-equivalent** could, by fanning agents over every work unit, forking at hard branch points, judging adversarially, and going **deeper and broader** until the human writes STOP in the goal file.
+Produce the most thoroughly-reasoned output a **team-equivalent** could, by fanning agents over every work unit, forking at hard branch points, judging adversarially, and going **deeper and broader** until the user writes STOP in the goal file.
 
 - **Spend is proportional to risk and information gain.** Correctness, coverage
   and traceability outrank token thrift, but repeated low-yield fan-out stops at
   the convergence caps (§0a).
 - **Never self-close the mission.** An empty queue triggers one bounded
   re-enumeration pass. If the frontier remains dry, write an idle checkpoint and
-  pause the operator without another self-wake. Only the human STOP gate
+  pause the operator without another self-wake. Only the user STOP gate
   terminates the mission (see §6).
 
 ---
@@ -57,8 +57,8 @@ Bound the open-endedness so a long run never explodes. Enforce `{{RUNAWAY_CAPS}}
 |---|---|---|
 | Max concurrent background jobs | ~4 | More queue as "next up"; launch as slots free. |
 | Max active parallel-deep-tracks (forks) | ~3 | Additional fork-worthy units wait "warm". |
-| Fork depth | ≤ 2 | One sub-fork; deeper requires a human note. |
-| Per-unit budget before escalation | ~3 jobs | If a **single work unit consumes more than ~3 jobs without converging, stop fanning and escalate to the human.** |
+| Fork depth | ≤ 2 | One sub-fork; deeper requires a user note. |
+| Per-unit budget before escalation | ~3 jobs | If a **single work unit consumes more than ~3 jobs without converging, stop fanning and escalate to the user.** |
 | Per-iteration spend checkpoint | every state rewrite | Log jobs launched this iteration and cumulative spend. |
 
 **No silent runaway.** If you hit a cap, say so in the state file. Never quietly drop work. **Caps are ceilings, not targets** — within them, prefer depth.
@@ -182,7 +182,7 @@ record the concrete models/effort it resolved to in `QUEUE.md`'s
 
 ## §4. Bounded retry and the convergence rule
 
-Maker-checker and fix loops are **bounded to ~3 iterations**, require **measurable improvement** each pass, and **escalate to the human on stall**. Never loop indefinitely.
+Maker-checker and fix loops are **bounded to ~3 iterations**, require **measurable improvement** each pass, and **escalate to the user on stall**. Never loop indefinitely.
 
 Concretely:
 
@@ -191,7 +191,7 @@ Concretely:
 - **Pre-declare this rule when you launch the 2nd fix**, so the convergence point is unambiguous in the record.
 - A remediation that **diverged or never executed** (e.g. resumed with null args and self-picked a different target) counts as a **failed attempt**, not a free retry.
 
-The escalation taxonomy this routes into is generic — **human tie-break / expert sign-off / judge-panel / evidence-spike / apply-step / promotion-review** — with the specific gates supplied by `{{ESCALATION_GATES}}`. See `recovery-and-cadence.md` §4–§5 for the never-trust-self-report and bounded-retry mechanics; decision records themselves are delegated to the owning `implement`/`deliver` lifecycle (see `state-contract.md`).
+The escalation taxonomy this routes into is generic — **user tie-break / expert sign-off / judge-panel / evidence-spike / apply-step / promotion-review** — with the specific gates supplied by `{{ESCALATION_GATES}}`. See `recovery-and-cadence.md` §4–§5 for the never-trust-self-report and bounded-retry mechanics; decision records themselves are delegated to the owning `implement`/`deliver` lifecycle (see `state-contract.md`).
 
 ---
 

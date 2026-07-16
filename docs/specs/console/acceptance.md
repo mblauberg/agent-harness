@@ -51,7 +51,7 @@ Implementation is accepted only when objective tests demonstrate:
 
 1. The Console runs inside and outside Herdr against the same protocol.
 2. Closing/restarting the Console neither stops nor duplicates active work.
-3. A human can identify project/run/phase/owner/next milestone/health/attention
+3. A user can identify project/run/phase/owner/next milestone/health/attention
    within 10 seconds in an 80x24 terminal; safety/critical-path items outrank
    FYIs, duplicates group, freshness is visible and no inferred percentage is
    displayed.
@@ -281,7 +281,7 @@ Implementation is accepted only when objective tests demonstrate:
     at every usable geometry. At 80x24 it presents stacked Needs you and
     active-runs surfaces; at 120x32 it presents the expanded composition. Across
     empty, coordinated-multi-workstream, independent-multi-session and degraded
-    fixtures, the human identifies the highest-priority required judgement and
+    fixtures, the user identifies the highest-priority required judgement and
     active run within 10 seconds. Inactivity, message volume, context pressure,
     pane absence and optional-integration outage produce no false Needs you row;
     advisory/FYI items remain in the collapsed Watch stream.
@@ -292,12 +292,16 @@ Implementation is accepted only when objective tests demonstrate:
     remaining-work, next-dependency, blocking-issue and evidence-path answers
     are correct within 20 seconds. Coordinated and independent topology fixtures
     never flatten a session, coordination run or delivery workstream identity.
-48. Progress fixtures cover finite, open, unknown, stale, unavailable and
-    conflicting plan facts plus a replan that adds and removes work. The finite
-    arm shows the exact declared denominator and consistent state counts. Open
-    and unknown arms show no percentage, completion ratio or ETA. Message/tool
+48. Progress fixtures cover open, unknown, stale, unavailable and conflicting
+    plan facts plus a replan that adds and removes work. Open and unknown arms
+    show no percentage, completion ratio, denominator or ETA, and a premature
+    finite arm on the wire is rejected rather than rendered. Message/tool
     floods, elapsed time, agent count, token use and model-authored completion
     claims do not change progress. Plan revisions and deltas remain visible.
+    Finite fixtures — the exact declared denominator with consistent state
+    counts for an exact plan revision — attach to the deferred
+    plan-declaration package that introduces the finite arm as its own
+    result-shape cutover.
 49. For a fixed event set, projection revision, clock and geometry, processed
     activity grouping and ordering are byte-identical. Each group retains actor,
     target, event kind, time, freshness, revision and source references; every
@@ -325,7 +329,7 @@ Implementation is accepted only when objective tests demonstrate:
 52. Colour, no-colour and high-contrast fixtures pair every urgency, lifecycle,
     freshness, focus and action state with text, symbol, border or position.
     Every required action is keyboard reachable and uses the same reviewed
-    command path as mouse activation. Human no-colour task success remains
+    command path as mouse activation. User no-colour task success remains
     within five percentage points of the default theme; visual inspection in
     supported light/dark terminal palettes supplements byte snapshots.
 53. Connection fixtures cover configuration, compatibility/pins, daemon
@@ -346,11 +350,11 @@ Implementation is accepted only when objective tests demonstrate:
 
 ## Authority and implementation gate
 
-Commit `c2fc623` records the human-approved product direction. Direct human
+Commit `c2fc623` records the user-approved product direction. Direct user
 clarifications remain authorised. Material additions require an exact authority
-trace or explicit human acceptance before they are binding.
+trace or explicit user acceptance before they are binding.
 
-Final human acceptance remains pending. Git push, release, deployment and other
+Final user acceptance remains pending. Git push, release, deployment and other
 separately gated effects remain unauthorised.
 
 ## Continuity and route-evidence usability fixtures

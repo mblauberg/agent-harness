@@ -8,6 +8,7 @@ import {
   GATE_SYSTEM_SUPERSESSION_FEATURE,
   LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC,
   LIFECYCLE_CURRENT_STATE_V1_CODEC,
+  DECLARED_RUN_PROGRESS_FEATURE,
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   RUN_SESSION_PROJECTION_FEATURE,
   authorityEnvelopeV2Contained,
@@ -203,6 +204,7 @@ import {
   type LifecycleCustodyHead,
 } from "../lifecycle/rotation-repository.js";
 import { LifecycleReceiptRepository } from "../lifecycle/receipt-repository.js";
+import { recoverTerminalAuthorityReceipt } from "../lifecycle/terminal-receipt-authority.js";
 import {
   GenerationLossRepository,
   type GenerationLossSource,
@@ -349,44 +351,6 @@ function sha256Digest(value: string): string {
 
 function lifecycleDigest(domain: string, value: unknown): string {
   return sha256Digest(`agent-fabric.lifecycle.v1\0${domain}\0${canonicalJson(value)}`);
-}
-
-function lifecycleReceiptSetMember(record: LifecycleReceiptRecord): readonly [
-  string, LifecycleDigest, LifecycleDigest, string, string, string, string, string,
-] {
-  const subject = record.subject;
-  const ownerRef = isRow(subject.ownerRef) ? subject.ownerRef : null;
-  if (typeof subject.kind !== "string" || typeof subject.agentId !== "string" || ownerRef === null) {
-    throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt page contains an invalid subject");
-  }
-  let ownerKind: string;
-  let ownerId: string;
-  let ownerRevision: string;
-  if (ownerRef.kind === "custody" && isRow(ownerRef.custodyRef)) {
-    ownerKind = "custody";
-    ownerId = stringField(ownerRef.custodyRef, "custodyId");
-    ownerRevision = String(numberField(ownerRef.custodyRef, "custodyRevision"));
-  } else if (ownerRef.kind === "generation-loss" && isRow(ownerRef.generationLossRef)) {
-    ownerKind = "generation-loss";
-    ownerId = stringField(ownerRef.generationLossRef, "generationLossId");
-    ownerRevision = String(numberField(ownerRef.generationLossRef, "generationLossRevision"));
-  } else if (ownerRef.kind === "recovery-retirement" && isRow(ownerRef.retirementRef)) {
-    ownerKind = "recovery-retirement";
-    ownerId = stringField(ownerRef.retirementRef, "retirementId");
-    ownerRevision = stringField(ownerRef.retirementRef, "revisionDec");
-  } else {
-    throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt page contains an invalid owner ref");
-  }
-  return [
-    String(record.receipt.authoritySequence),
-    record.receipt.receiptDigest,
-    record.receipt.intentDigest,
-    subject.kind,
-    subject.agentId,
-    ownerKind,
-    ownerId,
-    ownerRevision,
-  ];
 }
 
 function canonicalPath(path: string): string {
@@ -2730,6 +2694,32 @@ export class Fabric {
         operatorCommand(credential, request.command);
         return this.#projectSessions.closeProjectSession(credential.context, request);
       }
+      case FABRIC_OPERATIONS.projectSessionLaunchPrepare: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionLaunchPrepare];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        if (
+          request.projectId !== credential.context.projectId ||
+          credential.projectSessionId !== request.projectSessionId ||
+          credential.sessionGeneration !== request.expectedSessionGeneration
+        ) {
+          throw new ProjectFabricCoreError(
+            "CAPABILITY_FORBIDDEN",
+            "launch preparation requires the exact session-bound operator capability",
+          );
+        }
+        if (this.#launchCustody === undefined) {
+          throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "launch custody runtime is unavailable");
+        }
+        const replayed = this.#operatorActions.replayLaunchPreview(credential.context, request);
+        if (replayed !== undefined) return replayed;
+        const intent = await this.#launchCustody.prepareLaunchIntent(request);
+        return await this.#operatorActions.preview(credential.context, {
+          command: request.command,
+          projectId: request.projectId,
+          intent,
+        });
+      }
       case FABRIC_OPERATIONS.membershipBind: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.membershipBind];
         if (request.origin !== "operator") throw new FabricError("CAPABILITY_FORBIDDEN", "agent membership binding uses the chair dispatcher");
@@ -2890,6 +2880,7 @@ export class Fabric {
           request,
           context.features.includes(NATIVE_NOTIFICATION_PROJECTION_FEATURE) ? "include" : "omit",
           context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
+          context.features.includes(DECLARED_RUN_PROGRESS_FEATURE) ? "include" : "omit",
         );
       }
       case FABRIC_OPERATIONS.projectionDetailRead: {
@@ -2899,6 +2890,7 @@ export class Fabric {
         return this.#operatorProjections.detail(
           request,
           context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
+          context.features.includes(DECLARED_RUN_PROGRESS_FEATURE) ? "include" : "omit",
         );
       }
       case FABRIC_OPERATIONS.messageBodyRead: {
@@ -9295,153 +9287,7 @@ export class Fabric {
     ) {
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "prepared lifecycle terminal apply changed");
     }
-    const lookup = {
-      kind: "custody-terminal" as const,
-      projectSessionId: prepared.projectSessionId,
-      runId: prepared.runId,
-      agentId: prepared.agentId,
-      ownerRefDigest: prepared.ownerRefDigest as LifecycleDigest,
-      ownerRevision: prepared.finalRevision,
-    };
-    let record: LifecycleReceiptRecord | null;
-    try {
-      record = await authority.readReceipt(lookup);
-    } catch (error: unknown) {
-      throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle receipt authority read failed", { cause: error });
-    }
-    if (record === null) {
-      try {
-        await authority.appendReceipt(
-          prepared.intentDigest as LifecycleDigest,
-          prepared.subject,
-        );
-      } catch {
-        // Lost append responses are reconciled by the authoritative point read below.
-      }
-      try {
-        record = await authority.readReceipt(lookup);
-      } catch (error: unknown) {
-        throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle receipt authority reconciliation failed", { cause: error });
-      }
-    }
-    if (record === null) {
-      throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle authority receipt remains pending");
-    }
-    if (
-      canonicalJson(record.subject) !== prepared.subjectJson ||
-      record.receipt.intentDigest !== prepared.intentDigest ||
-      record.receipt.subjectDigest !== prepared.subjectDigest ||
-      !await authority.verifyReceipt(prepared.subject, record.receipt)
-    ) {
-      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt authority returned crossed evidence");
-    }
-    let reviewRecord: LifecycleReceiptRecord | null = null;
-    if (prepared.review !== null) {
-      const review = prepared.review;
-      const reviewLookup = {
-        kind: "review-adoption-decision" as const,
-        projectSessionId: prepared.projectSessionId,
-        runId: prepared.runId,
-        agentId: prepared.agentId,
-        ownerRefDigest: prepared.ownerRefDigest as LifecycleDigest,
-        ownerRevision: prepared.finalRevision,
-      };
-      try {
-        reviewRecord = await authority.readReceipt(reviewLookup);
-      } catch (error: unknown) {
-        throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle review receipt authority read failed", { cause: error });
-      }
-      if (reviewRecord === null) {
-        try {
-          await authority.appendReceipt(review.intentDigest as LifecycleDigest, review.subject);
-        } catch {
-          // Lost append responses are reconciled by the authoritative point read below.
-        }
-        try {
-          reviewRecord = await authority.readReceipt(reviewLookup);
-        } catch (error: unknown) {
-          throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle review receipt authority reconciliation failed", { cause: error });
-        }
-      }
-      if (reviewRecord === null) {
-        throw new FabricError("CAPABILITY_UNAVAILABLE", "lifecycle review authority receipt remains pending");
-      }
-      if (
-        canonicalJson(reviewRecord.subject) !== review.subjectJson ||
-        reviewRecord.receipt.intentDigest !== review.intentDigest ||
-        reviewRecord.receipt.subjectDigest !== review.subjectDigest ||
-        !await authority.verifyReceipt(reviewRecord.subject, reviewRecord.receipt)
-      ) {
-        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle review receipt authority returned crossed evidence");
-      }
-    }
-    const checkpoint = await authority.readScopeCheckpoint(prepared.projectSessionId, prepared.runId);
-    const pinnedCheckpoint = await authority.readScopeCheckpointAt(checkpoint.checkpointDigest);
-    if (
-      canonicalJson(checkpoint) !== canonicalJson(pinnedCheckpoint) ||
-      !await authority.verifyScopeCheckpoint(checkpoint) ||
-      checkpoint.authorityId !== record.receipt.authorityId ||
-      (reviewRecord !== null && checkpoint.authorityId !== reviewRecord.receipt.authorityId) ||
-      checkpoint.receiptCount < record.receipt.authoritySequence ||
-      checkpoint.headReceiptDigest === null
-    ) {
-      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt checkpoint is invalid");
-    }
-    let after = 0;
-    let receiptCovered = false;
-    let reviewReceiptCovered = false;
-    let previousReceiptDigest: LifecycleDigest | null = null;
-    const orderedRecordSet: Array<ReturnType<typeof lifecycleReceiptSetMember>> = [];
-    do {
-      const page = await authority.readScopePageAt(checkpoint.checkpointDigest, after, 256);
-      if (page.orderedRecords.length > 256 || orderedRecordSet.length + page.orderedRecords.length > 65_536) {
-        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt checkpoint exceeds its bounded scan");
-      }
-      for (const candidate of page.orderedRecords) {
-        const expectedSequence = orderedRecordSet.length + 1;
-        if (
-          candidate.receipt.authorityId !== checkpoint.authorityId ||
-          candidate.receipt.authoritySequence !== expectedSequence ||
-          candidate.receipt.previousReceiptDigest !== previousReceiptDigest ||
-          candidate.subject.projectSessionId !== prepared.projectSessionId ||
-          candidate.subject.runId !== prepared.runId ||
-          candidate.subject.kind !== candidate.receipt.kind ||
-          !await authority.verifyReceipt(candidate.subject, candidate.receipt)
-        ) {
-          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt checkpoint page is crossed");
-        }
-        orderedRecordSet.push(lifecycleReceiptSetMember(candidate));
-        previousReceiptDigest = candidate.receipt.receiptDigest;
-        receiptCovered ||= candidate.receipt.receiptDigest === record.receipt.receiptDigest &&
-          canonicalJson(candidate.subject) === prepared.subjectJson;
-        reviewReceiptCovered ||= reviewRecord !== null &&
-          candidate.receipt.receiptDigest === reviewRecord.receipt.receiptDigest &&
-          canonicalJson(candidate.subject) === prepared.review?.subjectJson;
-      }
-      if (page.nextAfter === null) {
-        if (orderedRecordSet.length !== checkpoint.receiptCount) {
-          throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt checkpoint ended before its authenticated count");
-        }
-        break;
-      }
-      if (
-        page.orderedRecords.length === 0 ||
-        page.nextAfter !== orderedRecordSet.length ||
-        page.nextAfter <= after ||
-        page.nextAfter > checkpoint.receiptCount
-      ) {
-        throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt checkpoint pagination crossed");
-      }
-      after = page.nextAfter;
-    } while (true);
-    if (
-      !receiptCovered ||
-      (prepared.review !== null && !reviewReceiptCovered) ||
-      previousReceiptDigest !== checkpoint.headReceiptDigest ||
-      checkpoint.orderedRecordSetDigest !== lifecycleDigest("scope-record-set", orderedRecordSet)
-    ) {
-      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle receipt is absent from its pinned checkpoint");
-    }
+    const { record, reviewRecord, checkpoint } = await recoverTerminalAuthorityReceipt(authority, prepared);
     try {
       this.#database.transaction(() => {
         this.#lifecycleReceipts.applyAuthorizedChildCustodyTerminalInCurrentTransaction({

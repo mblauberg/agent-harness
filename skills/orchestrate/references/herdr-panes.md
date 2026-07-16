@@ -19,7 +19,7 @@ mutable-branch dependency on it.
 ## Use a pane when
 
 - the worker may run longer than about two minutes;
-- the human benefits from watching or steering it;
+- the user benefits from watching or steering it;
 - it may block for input;
 - it is the other primary family or a bonus-family review leg worth observing;
 - the task must survive the lead's context churn.
@@ -57,7 +57,7 @@ dormant until its provider/model route is approved and `herdr integration
 install pi` has been evaluated.
 
 Herdr never grants worktree authority. Create or remove a worktree only under a
-human-approved authority envelope, and only at the owning repository's
+user-approved authority envelope, and only at the owning repository's
 `.worktrees/<task-agent>` path. Herdr control cannot broaden model-routing,
 disclosure, receipt, cleanup or resource-ownership rules.
 
@@ -69,9 +69,9 @@ Inspect the caller's layout before choosing a split:
 herdr pane layout --current
 ```
 
-Explicit human direction wins. Otherwise choose `right` or `down` from the
+Explicit user direction wins. Otherwise choose `right` or `down` from the
 returned pane geometry so neither child is needlessly cramped. Preserve the
-caller's focus with `--no-focus` unless the human asks to move it.
+caller's focus with `--no-focus` unless the user asks to move it.
 
 Discover the current CLI/model options first. Start the selected agent's normal
 interactive executable without a prompt, record the returned pane and terminal
@@ -166,7 +166,7 @@ uncleared project data into an external provider pane.
 For paired-primary work, persist the assignment through Fabric and use Herdr
 only for the bounded wake-up notification. The durable envelope records
 task/stage, chair, owner, peer, base revision, write scopes, prohibited actions,
-expected output, objective checks and human gates. The peer replies through the
+expected output, objective checks and user gates. The peer replies through the
 correlated Fabric exchange and writes any named artifact; pane scrollback is
 never the authoritative negotiation.
 
@@ -218,7 +218,7 @@ boundary and survives lead compaction or restart as unread Fabric state.
 Capture the worker's concise result and artifact paths, adjudicate them in the
 lead context, preserve a bounded status/failure receipt, then close or reuse the
 pane deliberately. Only close panes, tabs, workspaces or sessions created by
-this run; touching another owner's resource requires an explicit human request.
+this run; touching another owner's resource requires an explicit user request.
 Never stop the Herdr server from an active session as incidental cleanup. Do not
 retain a full pane transcript when the named artifact and receipt are sufficient.
 Clean pane-local temporary payload only when the run owns it; lifecycle and

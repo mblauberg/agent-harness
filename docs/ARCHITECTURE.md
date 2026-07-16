@@ -44,7 +44,7 @@ a run. Purple is reserved for the bonus families, which never can.
 ```mermaid
 flowchart TB
     accTitle: The full delivery lifecycle and its three human gates
-    accDescr: Session prepares context and scope produces the specification, risk tier and authority. A human gate approves the specification or sends it back to scope. Inside the deliver kernel, execute runs implement, tdd, refactor or diagnose, then deterministic verification runs, then a separate conditional evaluate gate runs only when behaviour is stochastic or judgement bearing, then an independent review in a fresh context that never authored the work. Review pressure scales with risk: routine work needs only the chair and its native checks, while substantial and above owe both a fresh native reviewer and the other primary family. A failed check or a blocking finding returns to execute for at most two repair cycles. The human acceptance gate accepts, rescopes or stops. Any external action needs a separate human authorisation before release and observation. A failed observation opens diagnose. Every path that returns work to scope, a structural review finding, a rescope at the acceptance gate, diagnostic evidence and the retrospect flywheel, converges on one back-to-scope collector rather than five separate return edges.
+    accDescr: Session prepares context and scope produces the specification, risk tier and authority. A human gate approves the specification or sends it back to scope. Inside the deliver kernel, execute runs implement, tdd, refactor or diagnose, then deterministic verification runs, then a separate conditional evaluate gate runs only when behaviour is stochastic or judgement bearing, then an independent review in a fresh context that never authored the work. Review pressure scales with risk: routine work needs only the chair and its native checks, while substantial and above owe both a fresh native reviewer and the other primary family. A failed check or a blocking finding returns to execute for a repair budget scaled to task complexity, roughly 1-2 cycles for routine work and up to 5 for complex work — a guardrail against unbounded loops, not a target. The human acceptance gate accepts, rescopes or stops. Any external action needs a separate human authorisation before release and observation. A failed observation opens diagnose. Every path that returns work to scope, a structural review finding, a rescope at the acceptance gate, diagnostic evidence and the retrospect flywheel, converges on one back-to-scope collector rather than five separate return edges.
     SE(["session"]) --> SC["scope<br/>spec, risk tier, authority"]
     SC --> G1{{"HUMAN GATE<br/>approve spec, risk tier, one-way doors"}}
     G1 -. "send back" .-> SC
@@ -349,14 +349,15 @@ location and lifecycle are defined in [worktrees.md](worktrees.md).
 ## Context and durable memory
 
 Project knowledge must remain visible to every family. Durable facts therefore
-live in project-owned state files, specifications, ADRs ([adr/](adr/)), runbooks
-and context digests. Private harness memory is limited to cross-project user
-preferences. Project-local work maps and GitHub issues remain the current work
-owners. Retention follows project and risk policy plus bounded run-artifact
-rules. A canonical backlog contract, cross-store migration, universal
-retention classes and typed deletion are deferred until concrete requirements
-justify them. The governing decisions are recorded in
-[adr/0001–0008](adr/README.md).
+live in project-owned state files, specifications, ADRs ([adr/](adr/)),
+runbooks and context digests.
+Private harness memory is limited to cross-project user preferences. For this
+repository, GitHub issues own the current owner, dependencies and user gates;
+Project Status owns workflow state. Project-local effort maps link that work
+without restating it. Retention follows project and risk policy plus bounded
+run-artifact rules. No canonical backlog contract, cross-store migration or god
+manifest is introduced. The governing decisions are recorded in the
+[ADR index](adr/README.md).
 
 Workers return compressed findings and artifact paths. Session hygiene checks
 freshness, size, duplication, stale logs, scratch manifests and handoff quality.

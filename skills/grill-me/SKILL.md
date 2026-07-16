@@ -17,7 +17,7 @@ the enclosing `scope` artifact when write authority exists; otherwise keep a
 compact chat register.
 
 If a question can be answered from the workspace or current authoritative
-sources, investigate it instead of spending human attention. Stop when the
+sources, investigate it instead of spending user attention. Stop when the
 shared decision/acceptance contract is clear, the user asks to stop, or the next
 branch needs unavailable owner authority. Return the resolved register to
 `scope` for a digest-bound handoff; the interview itself is not approval.

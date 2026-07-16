@@ -9,35 +9,25 @@ import {
   type LifecycleCustodyState,
 } from "./custody-codec.js";
 import type { LifecycleReceiptRecord } from "./receipt-authority.js";
+import type { GenerationLossHead } from "./generation-loss-repository.js";
 import {
   LifecycleRotationRepository,
   type LifecycleCustodyHead,
 } from "./rotation-repository.js";
 import { LifecycleReviewAdoptionStore, type ExternalReviewReceipt, type PreparedReviewAdoption } from "./review-adoption.js";
+import {
+  GenerationLossTerminalOwnerAdapter,
+  mutationPlan,
+  persistSingleOwnerTerminalPreparation,
+  type LifecycleMutationPlan,
+  type PreparedGenerationLossTerminal,
+  type PrepareGenerationLossTerminalInput,
+} from "./terminal-owner-receipt.js";
 
-const MUTATION_PLAN_RELATIONS = new Set([
-  "agent-state", "provider-session", "provider-lineage", "provider-action", "principal-capability",
-  "agent-bridge", "chair-bridge", "turn-lease", "write-lease", "delivery",
-  "task-owner", "result-obligation", "membership", "barrier", "freeze-owner",
-  "custody-revision", "custody-head", "generation-loss-revision", "generation-loss-head",
-  "review-cut", "review-binding", "review-binding-pointer", "recovery-issue",
-  "fresh-preparation", "fresh-handoff", "fresh-commit", "recovery-retirement", "audit",
-]);
-
-type LifecycleMutationPlanWrite = Readonly<{
-  relation: string;
-  keyDigest: string;
-  operation: "insert" | "update" | "delete";
-  expectedSemanticDigest: string | null;
-  afterSemanticJcs: string | null;
-  afterSemanticDigest: string | null;
-}>;
-
-type LifecycleMutationPlan = Readonly<{
-  schemaVersion: 1;
-  writes: readonly LifecycleMutationPlanWrite[];
-  writeSetDigest: string;
-}>;
+export type {
+  PreparedGenerationLossTerminal,
+  PrepareGenerationLossTerminalInput,
+} from "./terminal-owner-receipt.js";
 
 
 export type PreparedChildCustodyTerminal = Readonly<{
@@ -130,52 +120,20 @@ export type ExternallyVerifiedChildCustodyAuthorization = Readonly<{
   performAdoptionWrites: () => void;
 }>;
 
+export type ExternallyVerifiedGenerationLossAuthorization = Readonly<{
+  prepared: PreparedGenerationLossTerminal;
+  expectedRevision: number;
+  expectedScopeHead: Readonly<{ checkpointDigest: string; revision: number }>;
+  receipt: ExternallyVerifiedChildCustodyAuthorization["receipt"];
+  scopeCheckpoint: ExternallyVerifiedChildCustodyAuthorization["scopeCheckpoint"];
+  authorizedAt: number;
+  appliedAt: number;
+  localWrites: ExternallyVerifiedChildCustodyAuthorization["localWrites"];
+  auxiliaryLocalWrites?: ExternallyVerifiedChildCustodyAuthorization["auxiliaryLocalWrites"];
+  revalidateAdoptionWrites: () => void;
+  performAdoptionWrites: () => void;
+}>;
 
-function mutationPlan(value: Readonly<Record<string, unknown>>): LifecycleMutationPlan {
-  if (value.schemaVersion !== 1 || !Array.isArray(value.writes) || typeof value.writeSetDigest !== "string") {
-    throw new Error("lifecycle mutation plan is not lifecycleMutationPlanV1");
-  }
-  const writes = value.writes.map((candidate, index) => {
-    const write = row(candidate, `lifecycle mutation plan write ${index}`);
-    const relation = text(write, "relation");
-    if (!MUTATION_PLAN_RELATIONS.has(relation)) throw new Error("lifecycle mutation plan relation is invalid");
-    const operation = text(write, "operation");
-    if (!(["insert", "update", "delete"] as const).includes(operation as never)) {
-      throw new Error("lifecycle mutation plan operation is invalid");
-    }
-    const keyDigest = text(write, "keyDigest");
-    const expectedSemanticDigest = write.expectedSemanticDigest;
-    const afterSemanticJcs = write.afterSemanticJcs;
-    const afterSemanticDigest = write.afterSemanticDigest;
-    if (operation === "insert" && expectedSemanticDigest !== null) {
-      throw new Error("lifecycle mutation plan insert has an expected digest");
-    }
-    if (operation !== "insert" && typeof expectedSemanticDigest !== "string") {
-      throw new Error("lifecycle mutation plan update/delete lacks an expected digest");
-    }
-    if (operation === "delete" && (afterSemanticJcs !== null || afterSemanticDigest !== null)) {
-      throw new Error("lifecycle mutation plan delete has after state");
-    }
-    if (operation !== "delete" && (typeof afterSemanticJcs !== "string" || typeof afterSemanticDigest !== "string")) {
-      throw new Error("lifecycle mutation plan write lacks after state");
-    }
-    return {
-      relation,
-      keyDigest,
-      operation: operation as LifecycleMutationPlanWrite["operation"],
-      expectedSemanticDigest: expectedSemanticDigest as string | null,
-      afterSemanticJcs: afterSemanticJcs as string | null,
-      afterSemanticDigest: afterSemanticDigest as string | null,
-    };
-  });
-  const ordered = [...writes].sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
-  if (canonicalJson(writes) !== canonicalJson(ordered)) {
-    throw new Error("lifecycle mutation plan writes are not strictly sorted");
-  }
-  const writeSetDigest = lifecycleDigest("mutation-plan", { schemaVersion: 1, writes });
-  if (writeSetDigest !== value.writeSetDigest) throw new Error("lifecycle mutation plan write-set digest crossed");
-  return { schemaVersion: 1, writes, writeSetDigest };
-}
 
 export class LifecycleReceiptRepository {
   readonly #database: Database.Database;
@@ -195,7 +153,7 @@ export class LifecycleReceiptRepository {
   }
 
   persistVerifiedAuthorityReceiptInCurrentTransaction(
-    prepared: PreparedChildCustodyTerminal,
+    prepared: PreparedChildCustodyTerminal | PreparedGenerationLossTerminal,
     record: LifecycleReceiptRecord,
   ): void {
     if (!this.#database.inTransaction) {
@@ -210,9 +168,13 @@ export class LifecycleReceiptRepository {
       }
       return;
     }
+    const custodyTerminal = "custodyId" in prepared;
+    const kind = custodyTerminal ? "custody-terminal" as const : "generation-loss-terminal" as const;
+    const ownerKind = custodyTerminal ? "custody" as const : "generation-loss" as const;
+    const ownerId = custodyTerminal ? prepared.custodyId : prepared.generationLossId;
     const receiptBody = {
       schemaVersion: 1,
-      kind: "custody-terminal",
+      kind,
       authorityId: record.receipt.authorityId,
       authoritySequence: record.receipt.authoritySequence,
       previousReceiptDigest: record.receipt.previousReceiptDigest,
@@ -225,29 +187,33 @@ export class LifecycleReceiptRepository {
         subject_owner_kind,subject_owner_id,subject_owner_revision,subject_digest,
         authority_id,authority_sequence,previous_authority_sequence,previous_receipt_digest,
         receipt_json,receipt_digest,attestation,verified_at
-      ) VALUES (?, ?,1,?,?,?,'custody-terminal','custody',?,?,?,?,?,?,?,?,?,?,?)
-    `).run(
-      prepared.intentDigest,
-      prepared.batchId,
-      prepared.projectSessionId,
-      prepared.runId,
-      prepared.agentId,
-      prepared.custodyId,
-      prepared.finalRevision,
-      prepared.subjectDigest,
-      record.receipt.authorityId,
-      record.receipt.authoritySequence,
-      record.receipt.authoritySequence === 1 ? null : record.receipt.authoritySequence - 1,
-      record.receipt.previousReceiptDigest,
-      canonicalJson({
+      ) VALUES (@intent,@batch,1,@project,@run,@agent,@kind,@ownerKind,@ownerId,
+                @ownerRevision,@subject,@authority,@sequence,@previousSequence,
+                @previousDigest,@receiptJson,@receiptDigest,@attestation,@verifiedAt)
+    `).run({
+      intent: prepared.intentDigest,
+      batch: prepared.batchId,
+      project: prepared.projectSessionId,
+      run: prepared.runId,
+      agent: prepared.agentId,
+      kind,
+      ownerKind,
+      ownerId,
+      ownerRevision: prepared.finalRevision,
+      subject: prepared.subjectDigest,
+      authority: record.receipt.authorityId,
+      sequence: record.receipt.authoritySequence,
+      previousSequence: record.receipt.authoritySequence === 1 ? null : record.receipt.authoritySequence - 1,
+      previousDigest: record.receipt.previousReceiptDigest,
+      receiptJson: canonicalJson({
         ...receiptBody,
         receiptDigest: record.receipt.receiptDigest,
         attestation: record.receipt.attestation,
       }),
-      record.receipt.receiptDigest,
-      record.receipt.attestation,
-      this.#clock(),
-    );
+      receiptDigest: record.receipt.receiptDigest,
+      attestation: record.receipt.attestation,
+      verifiedAt: this.#clock(),
+    });
   }
 
   readPreparedChildCustodyTerminal(
@@ -351,6 +317,26 @@ export class LifecycleReceiptRepository {
     };
   }
 
+  readPreparedGenerationLossTerminal(
+    runId: string,
+    agentId: string,
+    generationLossId: string,
+    applyId: string,
+  ): PreparedGenerationLossTerminal | null {
+    return new GenerationLossTerminalOwnerAdapter(this.#database).readPrepared(
+      runId,
+      agentId,
+      generationLossId,
+      applyId,
+    );
+  }
+
+  prepareGenerationLossTerminalInCurrentTransaction(
+    input: PrepareGenerationLossTerminalInput,
+  ): PreparedGenerationLossTerminal {
+    return new GenerationLossTerminalOwnerAdapter(this.#database).prepare(input);
+  }
+
   prepareChildCustodyTerminalInCurrentTransaction(
     input: PrepareChildCustodyTerminalInput,
   ): PreparedChildCustodyTerminal {
@@ -419,208 +405,54 @@ export class LifecycleReceiptRepository {
       custodyRef: custodyRef(input.runId, input.agentId, input.custodyId, finalRevision),
       sourceRefDigest: finalSourceRefDigest,
     };
-    const transitionProofDigest = lifecycleDigest("transition-proof", input.transitionProof);
-    const mutationPlanDigest = normalizedMutationPlan.writeSetDigest;
-    const reviewAdoptionEnabled = (): boolean => false;
-    const reviewPlan = reviewAdoptionEnabled() && ownerKind === "chair" &&
-      terminal.disposition === "adopted" && input.review !== undefined
-      ? this.#reviews.prepareReservationInCurrentTransaction({
-          runId: input.runId,
-          agentId: input.agentId,
-          custodyId: input.custodyId,
-          applyId: input.applyId,
-          commandId: input.review.commandId,
-          head,
-          finalRevision,
-          finalSourceRefDigest,
-          lifecycleAdoptionEvidenceDigest: input.review.lifecycleAdoptionEvidenceDigest,
-          recordedAt: input.recordedAt,
-          source,
-          mutationPlan: normalizedMutationPlan,
-        })
-      : null;
-    const effectBody = {
-      schemaVersion: 1,
-      effectKind: "owner-transition",
-      role: "primary",
-      ownerBeforeRef: beforeRef,
-      beforeJournalDigest: head.journalDigest,
-      ownerAfterRef: afterRef,
-      afterSemanticDigest: finalSemanticDigest,
-    };
-    const effectDigest = lifecycleDigest("lifecycle-effect", effectBody);
-    const effectsSetDigest = lifecycleDigest("effect-set", [effectDigest]);
     const providerActionRef = {
       adapterId: text(source, "provider_action_adapter_id"),
       actionId: text(source, "provider_action_id"),
     };
-    const replay = {
-      schemaVersion: 1,
-      transactionId: input.applyId,
+    const prepared = persistSingleOwnerTerminalPreparation(this.#database, {
+      transitionKind: "custody-terminal",
+      subjectOwnerKind: "custody",
+      ownerId: input.custodyId,
       projectSessionId: head.projectSessionId,
       runId: input.runId,
       agentId: input.agentId,
-      transitionKind: "custody-terminal",
-      primaryOwnerBeforeRef: beforeRef,
-      primaryOwnerAfterRef: afterRef,
-      primaryOwnerBeforeJournalDigest: head.journalDigest,
-      primaryOwnerAfterSemanticDigest: finalSemanticDigest,
-      effectsSetDigest,
+      preRevision: head.revision,
+      finalRevision,
+      applyId: input.applyId,
+      beforeRef,
+      afterRef,
+      beforeJournalDigest: head.journalDigest,
+      finalSemanticDigest,
+      finalSourceRefDigest,
       admissionDigest: text(source, "admission_digest"),
       providerActionRef,
-      recoverySource: { kind: "none" },
       terminalDisposition: terminal.disposition,
       terminalEvidenceDigest,
       transitionProof: input.transitionProof,
-      transitionProofDigest,
       mutationPlan: normalizedMutationPlan,
-      mutationPlanDigest,
-      reviewReservationDigest: reviewPlan?.reservationDigest ?? null,
-      freshHandoffDigest: null,
-    };
-    const transitionReplayDigest = lifecycleDigest("transition-replay", replay);
-    const subject = {
-      schemaVersion: 1,
-      kind: "custody-terminal",
-      projectSessionId: head.projectSessionId,
-      runId: input.runId,
-      agentId: input.agentId,
-      ownerRef: afterRef,
-      admissionDigest: text(source, "admission_digest"),
-      providerActionRef,
-      fromState: head.state,
-      disposition: terminal.disposition,
-      terminalProofKind: terminal.proofKind,
-      terminalEvidenceDigest,
-      recoverySource: { kind: "none" },
-      recoverySourceDecisionDigest: null,
-      linkedLossEffectDigest: null,
-      transitionReplayDigest,
-    };
-    const subjectDigest = lifecycleDigest("receipt-subject", subject);
-    const ownerRefDigest = lifecycleDigest("receipt-owner-ref", afterRef);
-    const reviewPreparation = this.#reviews.buildBatchPreparation({
-      plan: reviewPlan,
-      projectSessionId: head.projectSessionId,
-      runId: input.runId,
-      agentId: input.agentId,
-      ownerRef: afterRef,
-      ownerRefDigest,
-      finalRevision,
-      custodyTerminalSubjectDigest: subjectDigest,
-      lifecycleAdoptionEvidenceDigest: input.review?.lifecycleAdoptionEvidenceDigest,
-      transitionReplayDigest,
-    });
-    const orderedSubjectSetDigest = lifecycleDigest("receipt-subject-set", [{
-      ordinalDec: "1",
-      kind: "custody-terminal",
-      ownerRefDigest,
-      ownerRevisionDec: String(finalRevision),
-      subjectDigest,
-    }, ...reviewPreparation.orderedSubjectMembers]);
-    const batchBody = {
-      schemaVersion: 1,
-      projectSessionId: head.projectSessionId,
-      runId: input.runId,
-      agentId: input.agentId,
-      plannedApplyId: input.applyId,
-      transitionKind: "custody-terminal",
-      primaryOwnerBeforeRef: beforeRef,
-      primaryOwnerAfterRef: afterRef,
-      primaryOwnerBeforeJournalDigest: head.journalDigest,
-      primaryOwnerAfterSemanticDigest: finalSemanticDigest,
-      effectsSetDigest,
-      transitionReplayDigest,
-      orderedSubjectSetDigest,
-      receiptIntentCountDec: reviewPreparation.intentCountDec,
-      secondaryIntentKind: reviewPreparation.secondaryKind,
-      reviewReservationRef: reviewPreparation.reservationRef,
-      freshHandoffRef: null,
-    };
-    const batchId = lifecycleDigest("receipt-batch-id", batchBody);
-    const intentBody = {
-      schemaVersion: 1,
-      batchId,
-      ordinalDec: "1",
-      kind: "custody-terminal",
-      subjectDigest,
-      transitionReplayDigest,
-    };
-    const intentDigest = lifecycleDigest("receipt-intent", intentBody);
-    const subjectJson = canonicalJson(subject);
-    const intentJson = canonicalJson(intentBody);
-    this.#database.prepare(`
-      INSERT INTO lifecycle_receipt_batches(
-        batch_id,planned_apply_id,project_session_id,run_id,agent_id,transition_kind,
-        planned_apply_kind,effects_set_digest,mutation_plan_digest,transition_replay_json,
-        transition_replay_digest,ordered_subject_set_digest,receipt_intent_count,
-        secondary_intent_kind,review_adoption_reservation_id,
-        review_adoption_reservation_digest,review_decision_loss_effect_key,
-        review_decision_loss_effect_role,review_decision_loss_effect_digest,
-        review_decision_loss_after_id,review_decision_loss_after_revision,
-        review_decision_loss_after_semantic_digest,review_decision_loss_after_source_ref_digest,
-        fresh_handoff_id,fresh_handoff_digest,fresh_handoff_source_mode,fresh_handoff_key,
-        recovery_retirement_id,recovery_retirement_plan_digest,created_at
-      ) VALUES (
-        @batchId,@applyId,@projectSessionId,@runId,@agentId,'custody-terminal','terminal',
-        @effectsSetDigest,@mutationPlanDigest,@replayJson,@transitionReplayDigest,
-        @orderedSubjectSetDigest,@intentCount,@secondaryKind,@reservationId,
-        @reservationDigest,'none',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,
-        'none',NULL,NULL,@createdAt)
-    `).run({
-      batchId,
-      applyId: input.applyId,
-      projectSessionId: head.projectSessionId,
-      runId: input.runId,
-      agentId: input.agentId,
-      effectsSetDigest,
-      mutationPlanDigest,
-      replayJson: canonicalJson(replay),
-      transitionReplayDigest,
-      orderedSubjectSetDigest,
-      intentCount: reviewPreparation.intentCount,
-      secondaryKind: reviewPreparation.secondaryKind,
-      reservationId: reviewPreparation.reservationId,
-      reservationDigest: reviewPreparation.reservationDigest,
-      createdAt: input.recordedAt,
-    });
-    this.#database.prepare(`
-      INSERT INTO lifecycle_receipt_custody_effects(
-        batch_id,ordinal,role,transition_kind,planned_apply_id,project_session_id,
-        run_id,agent_id,custody_id,pre_revision,pre_journal_digest,final_revision,
-        final_semantic_digest,final_source_ref_digest,effect_digest
-      ) VALUES (?,1,'primary','custody-terminal',?,?,?,?,?,?,?,?,?,?,?)
-    `).run(
-      batchId, input.applyId, head.projectSessionId, input.runId, input.agentId,
-      input.custodyId, head.revision, head.journalDigest, finalRevision,
-      finalSemanticDigest, finalSourceRefDigest, effectDigest,
-    );
-    this.#database.prepare(`
-      INSERT INTO lifecycle_receipt_intents(
-        batch_id,ordinal,batch_transition_kind,batch_intent_count,
-        batch_secondary_intent_kind,kind,project_session_id,run_id,agent_id,
-        subject_owner_kind,subject_owner_id,subject_owner_revision,
-        custody_effect_digest,generation_loss_effect_role,generation_loss_effect_digest,
-        recovery_retirement_effect_digest,fresh_origin_effect_digest,subject_json,
-        subject_digest,intent_digest,created_at
-      ) VALUES (?,1,'custody-terminal',?,?,'custody-terminal',?,?,?,
-                'custody',?,?,?,NULL,NULL,NULL,NULL,?,?,?,?)
-    `).run(
-      batchId, reviewPreparation.intentCount, reviewPreparation.secondaryKind,
-      head.projectSessionId, input.runId, input.agentId, input.custodyId,
-      finalRevision, effectDigest, subjectJson, subjectDigest, intentDigest,
-      input.recordedAt,
-    );
-    const preparedReview = this.#reviews.persistPreparedIntentInCurrentTransaction({
-      preparation: reviewPreparation,
-      batchId,
-      projectSessionId: head.projectSessionId,
-      runId: input.runId,
-      agentId: input.agentId,
-      custodyId: input.custodyId,
-      finalRevision,
-      custodyEffectDigest: effectDigest,
+      subjectFields: {
+        providerActionRef,
+        fromState: head.state,
+        disposition: terminal.disposition,
+        terminalProofKind: terminal.proofKind,
+        recoverySource: { kind: "none" },
+        recoverySourceDecisionDigest: null,
+        linkedLossEffectDigest: null,
+      },
       recordedAt: input.recordedAt,
+      persistEffect: (batchId, effectDigest) => {
+        this.#database.prepare(`
+          INSERT INTO lifecycle_receipt_custody_effects(
+            batch_id,ordinal,role,transition_kind,planned_apply_id,project_session_id,
+            run_id,agent_id,custody_id,pre_revision,pre_journal_digest,final_revision,
+            final_semantic_digest,final_source_ref_digest,effect_digest
+          ) VALUES (?,1,'primary','custody-terminal',?,?,?,?,?,?,?,?,?,?,?)
+        `).run(
+          batchId, input.applyId, head.projectSessionId, input.runId, input.agentId,
+          input.custodyId, head.revision, head.journalDigest, finalRevision,
+          finalSemanticDigest, finalSourceRefDigest, effectDigest,
+        );
+      },
     });
     return {
       projectSessionId: head.projectSessionId,
@@ -630,16 +462,7 @@ export class LifecycleReceiptRepository {
       preRevision: head.revision,
       finalRevision,
       applyId: input.applyId,
-      batchId,
-      effectDigest,
-      ownerRefDigest,
-      transitionReplayDigest,
-      subject,
-      subjectJson,
-      subjectDigest,
-      intent: intentBody,
-      intentJson,
-      intentDigest,
+      ...prepared,
       finalSemanticDigest,
       finalSourceRefDigest,
       fromState: head.state as PreparedChildCustodyTerminal["fromState"],
@@ -648,36 +471,74 @@ export class LifecycleReceiptRepository {
       terminalEvidenceDigest,
       ownerKind: ownerKind as "chair" | "child",
       mutationPlan: normalizedMutationPlan,
-      review: preparedReview,
+      review: null,
     };
   }
 
   applyAuthorizedChildCustodyTerminalInCurrentTransaction(
     input: ExternallyVerifiedChildCustodyAuthorization,
   ): LifecycleCustodyHead {
+    return this.#applyAuthorizedTerminalInCurrentTransaction(input) as LifecycleCustodyHead;
+  }
+
+  applyAuthorizedGenerationLossTerminalInCurrentTransaction(
+    input: ExternallyVerifiedGenerationLossAuthorization,
+  ): GenerationLossHead {
+    return this.#applyAuthorizedTerminalInCurrentTransaction(input) as GenerationLossHead;
+  }
+
+  #applyAuthorizedTerminalInCurrentTransaction(
+    input: ExternallyVerifiedChildCustodyAuthorization | ExternallyVerifiedGenerationLossAuthorization,
+  ): LifecycleCustodyHead | GenerationLossHead {
     if (!this.#database.inTransaction) throw new Error("lifecycle terminal apply requires a transaction");
     const prepared = input.prepared;
-    const head = this.#rotations.readHead(prepared.runId, prepared.agentId, prepared.custodyId);
-    if (head.revision !== input.expectedRevision || head.revision !== prepared.preRevision ||
-        head.state !== prepared.fromState || head.terminal) {
+    const custodyTerminal = "custodyId" in prepared;
+    const generationOwner = new GenerationLossTerminalOwnerAdapter(this.#database);
+    const generationPrepared = custodyTerminal ? null : prepared as PreparedGenerationLossTerminal;
+    const transitionKind = custodyTerminal ? "custody-terminal" as const : "generation-loss-terminal" as const;
+    const subjectOwnerKind = custodyTerminal ? "custody" as const : "generation-loss" as const;
+    const ownerId = custodyTerminal ? prepared.custodyId : prepared.generationLossId;
+    const head = custodyTerminal
+      ? this.#rotations.readHead(prepared.runId, prepared.agentId, prepared.custodyId)
+      : generationOwner.readExpectedHead(generationPrepared as PreparedGenerationLossTerminal, input.expectedRevision);
+    if (custodyTerminal &&
+        (head.revision !== input.expectedRevision || head.revision !== prepared.preRevision ||
+         head.state !== prepared.fromState || head.terminal)) {
       throw new Error("lifecycle custody is not the expected terminal source head");
     }
-    const plan = row(this.#database.prepare(`
-      SELECT batch.transition_replay_digest,batch.mutation_plan_digest,
-             batch.effects_set_digest,batch.secondary_intent_kind,
-             intent.subject_json,intent.subject_digest,intent.intent_digest,
-             effect.effect_digest,revision.terminal_evidence_digest
-        FROM lifecycle_receipt_batches batch
-        JOIN lifecycle_receipt_intents intent ON intent.batch_id=batch.batch_id AND intent.ordinal=1
-        JOIN lifecycle_receipt_custody_effects effect ON effect.batch_id=batch.batch_id
-        JOIN lifecycle_rotation_custody_revisions revision
-          ON revision.run_id=batch.run_id AND revision.agent_id=batch.agent_id
-         AND revision.custody_id=effect.custody_id AND revision.revision=effect.pre_revision
-       WHERE batch.batch_id=? AND batch.planned_apply_id=?
-         AND batch.project_session_id=? AND batch.run_id=? AND batch.agent_id=?
-         AND effect.final_revision=? AND effect.final_semantic_digest=?
-         AND effect.final_source_ref_digest=?
-    `).get(
+    const planSql = custodyTerminal ? `
+        SELECT batch.transition_replay_digest,batch.mutation_plan_digest,
+               batch.effects_set_digest,batch.secondary_intent_kind,
+               intent.subject_json,intent.subject_digest,intent.intent_digest,
+               effect.effect_digest,revision.terminal_evidence_digest
+          FROM lifecycle_receipt_batches batch
+          JOIN lifecycle_receipt_intents intent ON intent.batch_id=batch.batch_id AND intent.ordinal=1
+          JOIN lifecycle_receipt_custody_effects effect ON effect.batch_id=batch.batch_id
+          JOIN lifecycle_rotation_custody_revisions revision
+            ON revision.run_id=batch.run_id AND revision.agent_id=batch.agent_id
+           AND revision.custody_id=effect.custody_id AND revision.revision=effect.pre_revision
+         WHERE batch.batch_id=? AND batch.planned_apply_id=?
+           AND batch.project_session_id=? AND batch.run_id=? AND batch.agent_id=?
+           AND effect.final_revision=? AND effect.final_semantic_digest=?
+           AND effect.final_source_ref_digest=?
+      ` : `
+        SELECT batch.transition_replay_digest,batch.mutation_plan_digest,
+               batch.effects_set_digest,batch.secondary_intent_kind,
+               intent.subject_json,intent.subject_digest,intent.intent_digest,
+               effect.effect_digest,revision.terminal_evidence_digest
+          FROM lifecycle_receipt_batches batch
+          JOIN lifecycle_receipt_intents intent ON intent.batch_id=batch.batch_id AND intent.ordinal=1
+          JOIN lifecycle_receipt_generation_loss_effects effect ON effect.batch_id=batch.batch_id
+          JOIN lifecycle_generation_loss_revisions revision
+            ON revision.run_id=batch.run_id AND revision.agent_id=batch.agent_id
+           AND revision.generation_loss_id=effect.generation_loss_id
+           AND revision.revision=effect.pre_revision
+         WHERE batch.batch_id=? AND batch.planned_apply_id=?
+           AND batch.project_session_id=? AND batch.run_id=? AND batch.agent_id=?
+           AND effect.final_revision=? AND effect.final_semantic_digest=?
+           AND effect.final_source_ref_digest=?
+      `;
+    const plan = row(this.#database.prepare(planSql).get(
       prepared.batchId, prepared.applyId, prepared.projectSessionId, prepared.runId,
       prepared.agentId, prepared.finalRevision, prepared.finalSemanticDigest,
       prepared.finalSourceRefDigest,
@@ -727,14 +588,18 @@ export class LifecycleReceiptRepository {
     }
     const receiptBody = {
       schemaVersion: 1,
-      kind: "custody-terminal",
+      kind: transitionKind,
       authorityId: input.receipt.authorityId,
       authoritySequence: input.receipt.authoritySequence,
       previousReceiptDigest: input.receipt.previousReceiptDigest,
       intentDigest: prepared.intentDigest,
       subjectDigest: prepared.subjectDigest,
     };
-    const reviewReceipt = this.#reviews.requireAuthorityReceipt(prepared.review, input.reviewReceipt);
+    const custodyPrepared = custodyTerminal ? prepared : null;
+    const reviewReceipt = this.#reviews.requireAuthorityReceipt(
+      custodyPrepared?.review ?? null,
+      "reviewReceipt" in input ? input.reviewReceipt : undefined,
+    );
     const checkpointBody = {
       schemaVersion: 1,
       authorityId: input.receipt.authorityId,
@@ -755,7 +620,7 @@ export class LifecycleReceiptRepository {
       input.scopeCheckpoint.checkpointDigest === lifecycleDigest("scope-checkpoint", checkpointBody);
     if (!authorizationValid) throw new Error("externally verified lifecycle authorization is invalid");
     const validatedReviewReceipt = this.#reviews.validateAuthorityReceipt(
-      prepared.review,
+      custodyPrepared?.review ?? null,
       reviewReceipt,
       input.receipt.authorityId,
     );
@@ -779,16 +644,32 @@ export class LifecycleReceiptRepository {
         subject_owner_kind,subject_owner_id,subject_owner_revision,subject_digest,
         authority_id,authority_sequence,previous_authority_sequence,previous_receipt_digest,
         receipt_json,receipt_digest,attestation,verified_at
-      ) VALUES (?, ?,1,?,?,?,'custody-terminal','custody',?,?,?,?,?,?,?,?,?,?,?)
-    `).run(
-      prepared.intentDigest, prepared.batchId, prepared.projectSessionId, prepared.runId,
-      prepared.agentId, prepared.custodyId, prepared.finalRevision, prepared.subjectDigest,
-      input.receipt.authorityId, input.receipt.authoritySequence,
-      input.receipt.authoritySequence === 1 ? null : input.receipt.authoritySequence - 1,
-      input.receipt.previousReceiptDigest, receiptJson, input.receipt.receiptDigest,
-      input.receipt.attestation, input.receipt.verifiedAt,
-    );
-    this.#reviews.persistAuthorityReceiptInCurrentTransaction(prepared, validatedReviewReceipt);
+      ) VALUES (@intent,@batch,1,@project,@run,@agent,@kind,@ownerKind,@ownerId,
+                @ownerRevision,@subject,@authority,@sequence,@previousSequence,
+                @previousDigest,@receiptJson,@receiptDigest,@attestation,@verifiedAt)
+    `).run({
+      intent: prepared.intentDigest,
+      batch: prepared.batchId,
+      project: prepared.projectSessionId,
+      run: prepared.runId,
+      agent: prepared.agentId,
+      kind: transitionKind,
+      ownerKind: subjectOwnerKind,
+      ownerId,
+      ownerRevision: prepared.finalRevision,
+      subject: prepared.subjectDigest,
+      authority: input.receipt.authorityId,
+      sequence: input.receipt.authoritySequence,
+      previousSequence: input.receipt.authoritySequence === 1 ? null : input.receipt.authoritySequence - 1,
+      previousDigest: input.receipt.previousReceiptDigest,
+      receiptJson,
+      receiptDigest: input.receipt.receiptDigest,
+      attestation: input.receipt.attestation,
+      verifiedAt: input.receipt.verifiedAt,
+    });
+    if (custodyPrepared !== null) {
+      this.#reviews.persistAuthorityReceiptInCurrentTransaction(custodyPrepared, validatedReviewReceipt);
+    }
     const checkpointJson = canonicalJson({ ...checkpointBody,
       checkpointDigest: input.scopeCheckpoint.checkpointDigest,
       attestation: input.scopeCheckpoint.attestation });
@@ -822,26 +703,27 @@ export class LifecycleReceiptRepository {
       subjectDigest: prepared.subjectDigest,
     }, ...(validatedReviewReceipt === null ? [] : [validatedReviewReceipt.member])];
     const receiptSetDigest = lifecycleDigest("authority-receipt-set", receiptMembers);
+    const hasReview = custodyPrepared?.review !== null && custodyPrepared?.review !== undefined;
     const completionBody = {
       schemaVersion: 1,
       batchId: prepared.batchId,
-      transitionKind: "custody-terminal",
-      receiptIntentCountDec: prepared.review === null ? "1" : "2",
-      secondaryIntentKind: prepared.review === null ? "none" : "review-adoption-decision",
+      transitionKind,
+      receiptIntentCountDec: hasReview ? "2" : "1",
+      secondaryIntentKind: hasReview ? "review-adoption-decision" : "none",
       ordinalOne: {
         intentDigest: prepared.intentDigest,
         subjectDigest: prepared.subjectDigest,
         authorityReceiptDigest: input.receipt.receiptDigest,
       },
       ordinalTwo: validatedReviewReceipt?.completionOrdinal ?? null,
-      primaryEffect: { kind: "custody", effectDigest: prepared.effectDigest },
+      primaryEffect: { kind: subjectOwnerKind, effectDigest: prepared.effectDigest },
       linkedLossEffectDigest: null,
       secondaryEffect: null,
       effectsSetDigest,
       orderedAuthorityReceiptSetDigest: receiptSetDigest,
     };
     const completionDigest = lifecycleDigest("batch-completion", completionBody);
-    this.#database.prepare(`
+    const completionInsertPrefix = `
       INSERT INTO lifecycle_receipt_batch_completions(
         batch_id,transition_kind,receipt_intent_count,secondary_intent_kind,
         ordinal_one,ordinal_one_intent_digest,ordinal_one_subject_digest,
@@ -854,22 +736,36 @@ export class LifecycleReceiptRepository {
         linked_loss_effect_role,linked_loss_effect_digest,
         secondary_fresh_origin_effect_role,secondary_fresh_origin_effect_digest,
         ordered_authority_receipt_set_digest,completion_json,completion_digest,completed_at
-      ) VALUES (?,'custody-terminal',?,?,1,?,?,?, ?,?,?,?, ?, ?,
-                NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,?,?,?,?)
-    `).run(
+      )`;
+    const completionValues = [
       prepared.batchId,
-      prepared.review === null ? 1 : 2,
-      prepared.review === null ? "none" : "review-adoption-decision",
+      hasReview ? 2 : 1,
+      hasReview ? "review-adoption-decision" : "none",
       prepared.intentDigest, prepared.subjectDigest,
       input.receipt.receiptDigest,
       validatedReviewReceipt === null ? null : 2,
-      prepared.review?.intentDigest ?? null,
-      prepared.review?.subjectDigest ?? null,
+      custodyPrepared?.review?.intentDigest ?? null,
+      custodyPrepared?.review?.subjectDigest ?? null,
       validatedReviewReceipt?.receipt.receiptDigest ?? null,
       effectsSetDigest,
-      prepared.effectDigest, receiptSetDigest,
-      canonicalJson(completionBody), completionDigest, input.authorizedAt,
-    );
+    ];
+    if (custodyTerminal) {
+      this.#database.prepare(`${completionInsertPrefix}
+        VALUES (?,'custody-terminal',?,?,1,?,?,?, ?,?,?,?, ?, ?,
+                NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,?,?,?,?)
+      `).run(
+        ...completionValues, prepared.effectDigest, receiptSetDigest,
+        canonicalJson(completionBody), completionDigest, input.authorizedAt,
+      );
+    } else {
+      this.#database.prepare(`${completionInsertPrefix}
+        VALUES (?,'generation-loss-terminal',?,?,1,?,?,?, ?,?,?,?, ?, NULL,
+                'primary',?,NULL,NULL,NULL,NULL,NULL,NULL,NULL,?,?,?,?)
+      `).run(
+        ...completionValues, prepared.effectDigest, receiptSetDigest,
+        canonicalJson(completionBody), completionDigest, input.authorizedAt,
+      );
+    }
     const authorizationBody = {
       schemaVersion: 1,
       batchId: prepared.batchId,
@@ -893,7 +789,7 @@ export class LifecycleReceiptRepository {
       operation: "insert" | "update" | "delete";
     }>> = [
       { relation: "lifecycle_authority_receipts", key: `${prepared.batchId}:1`, operation: "insert" },
-      ...(prepared.review === null ? [] : [{
+      ...(!hasReview ? [] : [{
         relation: "lifecycle_authority_receipts",
         key: `${prepared.batchId}:2`,
         operation: "insert" as const,
@@ -910,16 +806,15 @@ export class LifecycleReceiptRepository {
       },
       { relation: "lifecycle_receipt_batch_completions", key: prepared.batchId, operation: "insert" },
       { relation: "lifecycle_receipt_batch_authorizations", key: prepared.batchId, operation: "insert" },
-      {
+      ...(custodyTerminal ? [{
         relation: "lifecycle_rotation_custody_revisions",
         key: `${prepared.runId}:${prepared.agentId}:${prepared.custodyId}:${prepared.finalRevision}`,
-        operation: "insert",
-      },
-      {
+        operation: "insert" as const,
+      }, {
         relation: "lifecycle_rotation_custody_heads",
         key: `${prepared.runId}:${prepared.agentId}:${prepared.custodyId}`,
-        operation: "update",
-      },
+        operation: "update" as const,
+      }] : generationOwner.systemWrites(generationPrepared as PreparedGenerationLossTerminal)),
       { relation: "lifecycle_transition_applies", key: prepared.applyId, operation: "insert" },
     ];
     const localWrites = [...input.localWrites, ...(input.auxiliaryLocalWrites ?? []), ...systemWrites]
@@ -937,11 +832,11 @@ export class LifecycleReceiptRepository {
       transitionReplayDigest: text(plan, "transition_replay_digest"),
       orderedAuthorityReceiptSetDigest: receiptSetDigest,
       verifiedScopeCheckpointDigest: input.scopeCheckpoint.checkpointDigest,
-      primaryOwnerAfterRef: {
+      primaryOwnerAfterRef: custodyTerminal ? {
         kind: "custody",
         custodyRef: custodyRef(prepared.runId, prepared.agentId, prepared.custodyId, prepared.finalRevision),
         sourceRefDigest: prepared.finalSourceRefDigest,
-      },
+      } : generationOwner.ownerAfterRef(generationPrepared as PreparedGenerationLossTerminal),
       freshHandoffRef: null,
       freshSourceMode: null,
       freshApplyPlanDigest: null,
@@ -952,22 +847,34 @@ export class LifecycleReceiptRepository {
       localWriteSetDigest,
     };
     const applyDigest = lifecycleDigest("transition-apply", applyBody);
-    this.#rotations.finalizeAuthorizedLifecycleCustodyInCurrentTransaction({
-      sourceHead: head,
-      finalRevision: prepared.finalRevision,
-      disposition: prepared.disposition,
-      proofKind: prepared.proofKind,
-      terminalEvidenceDigest: prepared.terminalEvidenceDigest,
-      finalSemanticDigest: prepared.finalSemanticDigest,
-      finalSourceRefDigest: prepared.finalSourceRefDigest,
-      authorityBatchId: prepared.batchId,
-      authorityApplyId: prepared.applyId,
-      authorityApplyDigest: applyDigest,
-      recordedAt: input.appliedAt,
-    });
+    if (custodyTerminal) {
+      this.#rotations.finalizeAuthorizedLifecycleCustodyInCurrentTransaction({
+        sourceHead: head as LifecycleCustodyHead,
+        finalRevision: prepared.finalRevision,
+        disposition: prepared.disposition,
+        proofKind: prepared.proofKind,
+        terminalEvidenceDigest: prepared.terminalEvidenceDigest,
+        finalSemanticDigest: prepared.finalSemanticDigest,
+        finalSourceRefDigest: prepared.finalSourceRefDigest,
+        authorityBatchId: prepared.batchId,
+        authorityApplyId: prepared.applyId,
+        authorityApplyDigest: applyDigest,
+        recordedAt: input.appliedAt,
+      });
+    } else {
+      generationOwner.finalizeAuthorized(
+        generationPrepared as PreparedGenerationLossTerminal,
+        head as GenerationLossHead,
+        { authorityApplyDigest: applyDigest, recordedAt: input.appliedAt },
+      );
+    }
     input.performAdoptionWrites();
-    if (validatedReviewReceipt !== null) {
-      this.#reviews.writePostStateInCurrentTransaction(prepared, validatedReviewReceipt.receipt, input.appliedAt);
+    if (validatedReviewReceipt !== null && custodyPrepared !== null) {
+      this.#reviews.writePostStateInCurrentTransaction(
+        custodyPrepared,
+        validatedReviewReceipt.receipt,
+        input.appliedAt,
+      );
     }
     this.#database.prepare(`
       INSERT INTO lifecycle_transition_applies(
@@ -983,16 +890,18 @@ export class LifecycleReceiptRepository {
         fresh_generation_loss_after_source_ref_digest,fresh_generation_loss_after_key,
         fresh_origin_effect_role,fresh_origin_effect_digest,local_write_set_digest,
         apply_json,apply_digest,applied_at
-      ) VALUES (?,'terminal','custody-terminal',?,?,?,?,?,?,NULL,NULL,'none',
+      ) VALUES (?,'terminal',?,?,?,?,?,?,?,NULL,NULL,'none',
                 NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,
                 'none',NULL,NULL,?,?,?,?)
     `).run(
-      prepared.applyId, prepared.batchId, completionDigest,
+      prepared.applyId, transitionKind, prepared.batchId, completionDigest,
       text(plan, "transition_replay_digest"), receiptSetDigest,
       input.scopeCheckpoint.checkpointDigest, text(plan, "mutation_plan_digest"),
       localWriteSetDigest, canonicalJson(applyBody), applyDigest, input.appliedAt,
     );
-    return this.#rotations.readHead(prepared.runId, prepared.agentId, prepared.custodyId);
+    return custodyTerminal
+      ? this.#rotations.readHead(prepared.runId, prepared.agentId, prepared.custodyId)
+      : generationOwner.readFinalHead(generationPrepared as PreparedGenerationLossTerminal);
   }
 
 }

@@ -3,7 +3,7 @@
 ## Decision and ownership
 
 Build a project-scoped operator Console as a separate executable package over
-the shared agent fabric. The Console is the human's primary local view of
+the shared agent fabric. The Console is the user's primary local view of
 project state, active runs, agents, evidence and decisions. It may initiate
 explicitly requested project sessions and typed operator actions, but it is not
 another task orchestrator or authority store.
@@ -18,7 +18,7 @@ another task orchestrator or authority store.
   contract. Its daemon clauses own lock-safe on-demand bootstrap, global
   daemon liveness/stop predicates, persistence migration and crash recovery.
 - This spec owns the project Console, operator projection, adaptive session
-  launch, human-attention workflow, Herdr control integration and optional Git
+  launch, user-attention workflow, Herdr control integration and optional Git
   and GitHub operator adapters.
 
 The linked Agent Fabric and operational-hardening owners shall be current and
@@ -42,19 +42,19 @@ shows that the TUI cannot provide an acceptable operator experience.
 
 ## Outcome
 
-Give one human a concise, continuously current control surface from which they
+Give one user a concise, continuously current control surface from which they
 can understand a project's position, see what requires judgement, start and
 observe agent work, review artifacts, respond naturally or through typed
 actions, and operate routine Git workflows. Agents retain autonomy over
 decomposition, topology, routing and replanning inside a broad approved project
 envelope.
 
-The design optimises human attention rather than maximising approval events.
+The design optimises user attention rather than maximising approval events.
 Google's agentic architecture guidance distinguishes dynamic orchestration,
-where agents plan and delegate, from human checkpoints for
+where agents plan and delegate, from user checkpoints for
 subjective, high-stakes or final decisions. This Console applies that split:
 routine work continues autonomously; only affected dependency subtrees wait at
-genuine human gates.
+genuine user gates.
 
 Sources:
 
@@ -86,7 +86,7 @@ project artifacts + Git/GitHub + Herdr + Fabric
 | Repository state | Git |
 | Hosted collaboration | Optional GitHub adapter |
 | Pane placement, process presence and visibility | Herdr |
-| Human projection and commands | Console; never canonical state |
+| User projection and commands | Console; never canonical state |
 
 The Console shall never write SQLite directly or infer task completion from a
 pane. It shall use a distinct authenticated human-operator principal, never a
@@ -120,11 +120,16 @@ operator experience:
    session/coordination/delivery/workstream IDs, lead, accepted-scope ref,
    current-plan ref/revision and last-event time. A coordination run and its
    delivery workstreams remain distinct rows or an explicit parent/child group.
-2. **Declared progress.** Run detail carries a tagged `finite`, `open` or
-   `unknown` progress fact for an exact plan revision. The finite arm carries a
-   denominator and mutually consistent task-state counts. The open arm carries
-   known counts without a denominator. Neither arm carries an inferred
-   percentage or ETA. Stale, unavailable and conflicting facts retain normal
+2. **Declared progress.** Run detail carries a tagged progress fact. The
+   current cut ships the `open` and `unknown` arms only: the open arm carries
+   known task-state counts without a denominator; the unknown arm carries only
+   its reason. No arm carries an inferred percentage, completion ratio,
+   denominator or ETA. The `finite` arm — a declared denominator with mutually
+   consistent task-state counts, bound to an exact plan revision with settled
+   cancelled-task denominator semantics — is deliberately deferred to the
+   plan-declaration package and lands as its own result-shape cutover; until
+   then a finite arm on the wire is rejected, never translated or synthesised
+   from known counts. Stale, unavailable and conflicting facts retain normal
    projection provenance.
 3. **Workflow facts.** Work items expose their authoritative bounded objective,
    dependency IDs, parent/workstream/run binding, state, owner, checks, barriers,

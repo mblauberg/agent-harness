@@ -5,36 +5,143 @@ on:
     branches: [main]
   pull_request:
 
-permissions:
-  contents: read
+# Least privilege: the workflow grants nothing by default; every job
+# declares exactly what it needs.
+permissions: {}
 
+# Concurrency policy (issue #170, deferred from #150/#168): PR runs cancel
+# their predecessor on the same ref — a superseded push means the stale run's
+# result can never matter, so cancelling it just frees runners faster.
+#
+# Main-push runs are exempt from cancellation. detect-changes forces every
+# path-filter output true on `push` (see below), so every job — including
+# ci-status, the single required check pinned on the branch protection
+# ruleset — always runs to completion on main. If a second push to main
+# cancelled an in-flight run, the earlier merged commit would keep a
+# "cancelled" ci-status forever: main is never re-pushed, so the verdict is
+# not regenerated, and that commit's regression signal is silently lost.
+# (PR merging is unaffected — required checks are evaluated on the PR head,
+# not on main's own commits — so this is about main's audit trail, not a
+# merge deadlock.) Excluding main from cancel-in-progress keeps every
+# main-push run alive to completion, so main always ends with a definitive
+# ci-status result.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # Path filtering happens here, never via workflow-level `paths:`, so the
+  # aggregate `ci-status` check below always reports and merges can never
+  # deadlock on a required check that stays pending.
+  detect-changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      # Pushes to main always run every job: full post-merge verification
+      # and warm caches on the default branch for pull requests to reuse.
+      harness: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.harness }}
+      fabric: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.fabric }}
+      console: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.console }}
+      herdr: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.herdr }}
+      review-portal-supervisor: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.review-portal-supervisor }}
+      workflows: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.workflows }}
+    steps:
+      - name: Filter changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        with:
+          # Invariant: every tracked file matches at least one filter, so no
+          # change can skip every build job while ci-status reports green.
+          # The harness filter covers every surface scripts/check-harness
+          # validates — skills, docs, root documents, release attribution
+          # files, and the repo-wide scan residue (CHANGELOG.md, .gitignore)
+          # — so policy-gated changes always run the policy gate.
+          # tests/test_ci_repository_assurance_policy.py enforces the
+          # invariant against `git ls-files` (PR #168 repair cycle 2).
+          filters: |
+            ci-contract: &ci-contract
+              - '.github/workflows/ci.yml'
+              - '.github/actions/**'
+            node-workspace: &node-workspace
+              - 'package.json'
+              - 'package-lock.json'
+              - 'tsconfig.json'
+              - 'runtime/agent-fabric-protocol/**'
+            harness:
+              - *ci-contract
+              - *node-workspace
+              - '.github/**'
+              - 'config/**'
+              - 'docs/**'
+              - 'evals/**'
+              - 'runtime/**'
+              - 'scripts/**'
+              - 'skills/**'
+              - 'tests/**'
+              - '.gitignore'
+              - 'ACKNOWLEDGEMENTS.md'
+              - 'AGENTS.md'
+              - 'CHANGELOG.md'
+              - 'HARNESS.md'
+              - 'LICENSE'
+              - 'LICENSES/**'
+              - 'MAINTAINING.md'
+              - 'NOTICE'
+              - 'README.md'
+              - 'SECURITY.md'
+              - 'THIRD_PARTY_NOTICES.md'
+            fabric:
+              - *ci-contract
+              - *node-workspace
+              - 'config/**'
+              - 'runtime/agent-fabric/**'
+              # Executed by fabric tests: the model-routing acceptance suite
+              # runs scripts/model-route, a bash wrapper that execs
+              # scripts/model_route.py where the routing logic lives, and the
+              # delivery-run fixture runs skills/deliver/scripts/*.py. Both the
+              # wrapper and the Python module it execs must retrigger fabric.
+              # Exact executed dependencies only — the policy test rejects
+              # broader docs/skills globs.
+              - 'scripts/model-route'
+              - 'scripts/model_route.py'
+              - 'skills/deliver/scripts/**'
+            console:
+              - *ci-contract
+              - *node-workspace
+              - 'runtime/agent-fabric/**'
+              - 'runtime/agent-fabric-console/**'
+            herdr:
+              - *ci-contract
+              - *node-workspace
+              - 'runtime/agent-fabric-herdr/**'
+            review-portal-supervisor:
+              - *ci-contract
+              - 'runtime/agent-fabric-review-portal-supervisor/**'
+            workflows:
+              - '.github/workflows/**'
+              - '.github/actions/**'
+              - '.github/zizmor.yml'
+
   harness:
     name: Harness policy and Python tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+    needs: detect-changes
+    if: needs.detect-changes.outputs.harness == 'true'
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - name: Pin npm
-        run: |
-          npm install --global npm@11.12.1
-          test "$(npm --version)" = "11.12.1"
-      - name: Install locked workspace dependencies
-        run: npm ci --no-audit --no-fund
+      - name: Set up Node.js workspace
+        uses: ./.github/actions/setup-node-workspace
       - name: Build TypeScript workspace for schema verification
         run: npm run build:types
       - name: Verify committed protocol schemas
@@ -57,27 +164,23 @@ jobs:
     name: Agent fabric TypeScript, tests and audit
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+    needs: detect-changes
+    if: needs.detect-changes.outputs.fabric == 'true'
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - name: Pin npm
-        run: |
-          npm install --global npm@11.12.1
-          test "$(npm --version)" = "11.12.1"
       - name: Assert protocol build starts clean
         run: test ! -e runtime/agent-fabric-protocol/dist
-      - name: Install locked workspace dependencies
-        run: npm ci --no-audit --no-fund
+      - name: Set up Node.js workspace
+        uses: ./.github/actions/setup-node-workspace
       - name: Build workspace in dependency order
         run: npm run build
+      - name: Run protocol tests
+        run: npm run test --workspace=@local/agent-fabric-protocol
       - name: Run fabric typecheck, build and tests
         env:
           AGENT_FABRIC_PORTABLE_TESTS: "1"
@@ -98,6 +201,10 @@ jobs:
     name: Review portal supervisor (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+    permissions:
+      contents: read
+    needs: detect-changes
+    if: needs.detect-changes.outputs.review-portal-supervisor == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -112,6 +219,11 @@ jobs:
           persist-credentials: false
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.94.1 --profile minimal --component clippy --component rustfmt
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: runtime/agent-fabric-review-portal-supervisor
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Verify checked-out SHA
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Check formatting
@@ -132,23 +244,17 @@ jobs:
     name: Agent fabric Console, evaluation, load and audit
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+    needs: detect-changes
+    if: needs.detect-changes.outputs.console == 'true'
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - name: Pin npm
-        run: |
-          npm install --global npm@11.12.1
-          test "$(npm --version)" = "11.12.1"
-      - name: Install locked workspace dependencies
-        run: npm ci --no-audit --no-fund
+      - name: Set up Node.js workspace
+        uses: ./.github/actions/setup-node-workspace
       - name: Build workspace in dependency order
         run: npm run build
       - name: Run Console typecheck, build and tests
@@ -166,23 +272,17 @@ jobs:
     name: Agent fabric Herdr adapter and audit
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+    needs: detect-changes
+    if: needs.detect-changes.outputs.herdr == 'true'
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - name: Pin npm
-        run: |
-          npm install --global npm@11.12.1
-          test "$(npm --version)" = "11.12.1"
-      - name: Install locked workspace dependencies
-        run: npm ci --no-audit --no-fund
+      - name: Set up Node.js workspace
+        uses: ./.github/actions/setup-node-workspace
       - name: Build workspace in dependency order
         run: npm run build
       - name: Run Herdr typecheck, build and tests
@@ -191,3 +291,60 @@ jobs:
           npm run test --workspace=@local/agent-fabric-herdr
       - name: Audit Herdr production dependencies
         run: npm audit --workspace=@local/agent-fabric-herdr --omit=dev --audit-level=high
+
+  zizmor:
+    name: Workflow security lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    needs: detect-changes
+    if: needs.detect-changes.outputs.workflows == 'true'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@6599ee8b7a49aef6a770f63d261d214911a7ce02 # v0.6.0
+        with:
+          version: "1.27.0"
+          # Audit exactly the surfaces this job is path-filtered on.
+          inputs: ".github/workflows .github/actions"
+          config: .github/zizmor.yml
+          online-audits: "false"
+          advanced-security: "false"
+          annotations: "true"
+
+  # Single required check. Succeeds only when every needed job either
+  # succeeded or was skipped by the path filter; fails closed on any
+  # failure or cancellation, including detect-changes itself.
+  ci-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    needs:
+      - detect-changes
+      - harness
+      - fabric
+      - review-portal-supervisor
+      - console
+      - herdr
+      - zizmor
+    if: always()
+    steps:
+      - name: Fail unless every needed job succeeded or was skipped by filter
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS_JSON" | jq -r 'to_entries[] | "\(.key)=\(.value.result)"'
+          blocking="$(echo "$NEEDS_JSON" | jq -r \
+            'to_entries[]
+             | select(.value.result != "success" and .value.result != "skipped")
+             | "\(.key)=\(.value.result)"')"
+          if [ -n "$blocking" ]; then
+            echo "Blocking job results:"
+            echo "$blocking"
+            exit 1
+          fi
+          echo "All needed jobs succeeded or were skipped by the path filter."

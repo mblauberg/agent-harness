@@ -5,7 +5,7 @@ Run every dimension. `N/A` is the correct result when the evidence is absent.
 | Dimension | Evidence and interpretation |
 |---|---|
 | Trigger selection | Selected opportunities / valid opportunities from an authorised routing eval, structured attribution or explicit invocation. Loading is not selection. |
-| User correction | Human corrections / provenance-valid human episodes from the requested local scope. Separate new scope, preferences, approvals and machine-origin text; do not export raw free text without disclosure authority. |
+| User correction | User corrections / provenance-valid user episodes from the requested local scope. Separate new scope, preferences, approvals and machine-origin text; do not export raw free text without disclosure authority. |
 | Workflow completion | Receipt/checkpoint stages reached / required stages; do not search ordinary prose for step headings. |
 | Static quality | Valid frontmatter, clear trigger/exclusion, early critical rules, safe YAML, portable references, compact body and progressive disclosure. |
 | Overtrigger | Balanced negative cases selected incorrectly. |
@@ -64,9 +64,9 @@ authority; do not add a second receipt or redaction ceremony. Historical data
 from an older skill contract may inform harness habits but cannot score a new
 skill. Mark unsupported attribution and insufficient denominators `N/A`.
 
-A compact aggregate or paraphrased report to the requesting human in the same
+A compact aggregate or paraphrased report to the requesting user in the same
 authorised session is local delivery, not export. For a persistent
 repository/shared artifact, raw cross-provider handoff, new audience or
 external destination, obtain separate authority and confirm permitted content
-with the human. Minimise authorised exports to aggregates or paraphrases. Never
+with the user. Minimise authorised exports to aggregates or paraphrases. Never
 commit raw provider history, secrets or third-party private content.

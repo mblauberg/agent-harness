@@ -63,13 +63,13 @@ From the project root:
   .agent-run/<id>/RUN.json --workspace-root "$PWD" --verify-hashes
 ```
 
-Human decisions link matching passing `kind: human` evidence. Deterministic
+User decisions link matching passing `kind: human` evidence. Deterministic
 evidence records an exit code and a receipt digest equal to its declared
 artifact digest; `--verify-hashes` then binds that artifact to its live bytes.
 Non-evaluation deterministic evidence must be a local JSON
 `deterministic-evidence-bundle`; its exact check IDs, gates, statuses, methods,
 source paths and exit codes must match the linked evidence rows.
-Judgement evidence records actual model lineage. Non-human evidence lists the
+Judgement evidence records actual model lineage. Non-user evidence lists the
 source paths it consumed, all within authority. A digest-bound
 `--project-policy` may add a complete project profile or add requirements to a
 built-in profile, never remove them.

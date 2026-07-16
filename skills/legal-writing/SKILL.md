@@ -34,7 +34,7 @@ does not map to the hub's observed/inferred evidence schema.
    Move wrong-home material first.
 4. Lock legal status, source anchors, exact quotations, authorities, labels,
    offer terms, non-admission/non-waiver wording, deadlines, attachments,
-   redactions and human-authority conditions.
+   redactions and user-authority conditions.
 5. Draft the minimum complete text in Australian English. Front-load the relief,
    request, answer or next step; use one proposition per paragraph, one home per
    point and exact pinpoints. Cut padding, duplicate history, intensifiers and
@@ -62,6 +62,6 @@ It adds no history or courtesy closer unless legally necessary.
 python3 "${AGENTS_HOME:-$HOME/.agents}/skills/legal-writing/scripts/lint_legal_style.py" path/to/source
 ```
 
-Lint is a guardrail; source checks, forum skills, render checks and human gates
+Lint is a guardrail; source checks, forum skills, render checks and user gates
 still apply. Changes to filing-facing, source-boundary or lint rules require the
 owning harness's independent review gate.

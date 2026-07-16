@@ -71,6 +71,7 @@ import type {
   ProjectSessionCloseRequest,
   ProjectSessionCreateRequest,
   ProjectSessionGetRequest,
+  ProjectSessionLaunchPrepareRequest,
   ProjectSessionTransitionRequest,
 } from "./project-session.js";
 import type {
@@ -218,6 +219,7 @@ type ExtensionOperationInputMap = {
   [FABRIC_OPERATIONS.projectSessionGet]: ProjectSessionGetRequest;
   [FABRIC_OPERATIONS.projectSessionTransition]: ProjectSessionTransitionRequest;
   [FABRIC_OPERATIONS.projectSessionClose]: ProjectSessionCloseRequest;
+  [FABRIC_OPERATIONS.projectSessionLaunchPrepare]: ProjectSessionLaunchPrepareRequest;
   [FABRIC_OPERATIONS.membershipBind]: MembershipBindRequest;
   [FABRIC_OPERATIONS.operatorAttach]: OperatorAttachRequest;
   [FABRIC_OPERATIONS.operatorDetach]: OperatorDetachRequest;
@@ -306,6 +308,7 @@ type ExtensionOperationResultMap = {
   [FABRIC_OPERATIONS.projectSessionGet]: ProjectSession;
   [FABRIC_OPERATIONS.projectSessionTransition]: ProjectSession;
   [FABRIC_OPERATIONS.projectSessionClose]: ProjectSession;
+  [FABRIC_OPERATIONS.projectSessionLaunchPrepare]: OperatorActionPreview;
   [FABRIC_OPERATIONS.membershipBind]: MembershipBindResult;
   [FABRIC_OPERATIONS.operatorAttach]: OperatorAttachment;
   [FABRIC_OPERATIONS.operatorDetach]: { detached: true; revision: number };

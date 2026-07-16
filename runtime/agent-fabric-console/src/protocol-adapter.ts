@@ -177,6 +177,7 @@ export function bindConsoleProtocolClient(
     "operator-projection.v2",
     "scoped-gate-read.v1",
     "run-session-projection.v1",
+    "declared-run-progress.v1",
     "artifact-content-read.v1",
   ].filter((feature) => !available.has(feature));
   if (missingFeatures.length > 0) {
@@ -1462,12 +1463,21 @@ export class ConsoleProtocolAdapter {
       }
       readTransactionId = result.readTransactionId;
       for (const row of result.rows) {
-        rows.push(mapProtocolRow(
-          view,
-          row,
-          this.#now(),
-          this.#binding.nativeNotificationProjection,
-        ));
+        try {
+          rows.push(mapProtocolRow(
+            view,
+            row,
+            this.#now(),
+            this.#binding.nativeNotificationProjection,
+          ));
+        } catch (error: unknown) {
+          // A row that violates a negotiated-shape invariant is an invalid
+          // projection, not a transport failure.
+          if (error instanceof TypeError) {
+            throw new ProjectionInvalidError(error.message);
+          }
+          throw error;
+        }
       }
       if (!result.hasMore) {
         return {

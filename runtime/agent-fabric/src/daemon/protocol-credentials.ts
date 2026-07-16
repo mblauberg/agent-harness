@@ -49,7 +49,10 @@ const operatorActionOperationBundles: Readonly<Record<OperatorAction, readonly F
   ],
   launch: [
     FABRIC_OPERATIONS.projectSessionCreate,
+    FABRIC_OPERATIONS.projectSessionLaunchPrepare,
     FABRIC_OPERATIONS.intakeDraftCreate,
+    FABRIC_OPERATIONS.operatorActionCommit,
+    FABRIC_OPERATIONS.operatorActionStatus,
   ],
   takeover: [FABRIC_OPERATIONS.chairTakeover],
   steer: operatorActionMutations,

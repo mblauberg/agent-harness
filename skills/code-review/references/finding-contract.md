@@ -42,7 +42,7 @@ Fix: smallest safe remedy and validation route.
 Evidence: test, command, caller, schema, or source anchor.
 ```
 
-When the human asks for compact findings, keep the same fields on one line:
+When the user asks for compact findings, keep the same fields on one line:
 
 ```text
 [P1][introduced] path/file.ts:42 — problem; mechanism/impact; fix; evidence.

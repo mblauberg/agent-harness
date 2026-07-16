@@ -13,7 +13,7 @@ leave no plausible execution ambiguity.
 Define the decision, affected users and done. Search current specs, registers
 and design systems. Emit the minimum `config/risk-policy.json` tier plus allowed
 source/artifact paths, prohibited actions, disclosure/secrets, external effects,
-expiry and approver. Only a human may downgrade risk. Judgement-bearing AI,
+expiry and approver. Only a user may downgrade risk. Judgement-bearing AI,
 ranking or heuristics require `evaluate`.
 
 Preserve decision context: intake/revision, goals, constraints, alternatives,
@@ -56,7 +56,7 @@ project files. In project-write mode, land only approved artifacts:
 |---|---|
 | Spec, stories, acceptance criteria | project docs via `engineering-docs` |
 | One-way decisions | project ADR process |
-| Human gates | existing register or `docs/OPEN_DECISIONS.md` |
+| User gates | existing register or `docs/OPEN_DECISIONS.md` |
 | Work items | project tracker |
 | Durable context | project context/state owners |
 
@@ -68,7 +68,7 @@ authoritative material with source, version/date and digest; never vendor
 without licence and redistribution authority.
 
 Before handoff confirm: branches decided/parked; explicit exclusions/failure
-modes; machine-readable authority/risk; anchored evidence; human approval of
+modes; machine-readable authority/risk; anchored evidence; user approval of
 spec and one-way doors. Execution handoff is digest-bound to exact approved
 scope, decisions and authority; change creates a new revision and gate.
 
@@ -77,4 +77,4 @@ scope, decisions and authority; change creates a new revision and gate.
 Without optional Console, Herdr or GitHub, use canonical project artifacts and
 emit the skill-owned kind in
 [portable-workflow.v1.json](portable-workflow.v1.json). It records scope
-evidence; never supplies human approval.
+evidence; never supplies user approval.
