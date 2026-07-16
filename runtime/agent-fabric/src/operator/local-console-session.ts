@@ -76,18 +76,79 @@ const OPTIONAL_FEATURES: readonly ProtocolFeature[] = Object.freeze([
   ...CURRENT_CONSOLE_OPTIONAL_FEATURES,
 ]);
 
+/**
+ * Truthful reasons a local Console bootstrap cannot attach. The four legacy
+ * arms (`configuration-missing`, `schema-cutover-required`,
+ * `authority-unavailable`, `start-failed`) collapsed every daemon/transport
+ * failure into `start-failed`; the specific daemon-election, socket, spawn,
+ * handshake and incompatibility arms preserve the exact causal finding the
+ * lifecycle-and-failure contract requires so the System view can name the
+ * failed stage and its bounded remediation rather than a generic collapse.
+ */
 export type LocalOperatorConsoleUnavailableReason =
   | "configuration-missing"
-  | "start-failed"
   | "schema-cutover-required"
-  | "authority-unavailable";
+  | "authority-unavailable"
+  | "daemon-unreachable"
+  | "daemon-incompatible"
+  | "socket-unavailable"
+  | "daemon-election-conflict"
+  | "daemon-spawn-failed"
+  | "bootstrap-receipt-invalid"
+  | "start-failed";
+
+const CONSOLE_UNAVAILABLE_CODES = {
+  "configuration-missing": "CONSOLE_CONFIGURATION_UNAVAILABLE",
+  "schema-cutover-required": "SCHEMA_CUTOVER_REQUIRED",
+  "authority-unavailable": "CONSOLE_AUTHORITY_UNAVAILABLE",
+  "daemon-unreachable": "CONSOLE_DAEMON_UNREACHABLE",
+  "daemon-incompatible": "CONSOLE_DAEMON_INCOMPATIBLE",
+  "socket-unavailable": "CONSOLE_SOCKET_UNAVAILABLE",
+  "daemon-election-conflict": "CONSOLE_DAEMON_ELECTION_CONFLICT",
+  "daemon-spawn-failed": "CONSOLE_DAEMON_SPAWN_FAILED",
+  "bootstrap-receipt-invalid": "CONSOLE_BOOTSTRAP_RECEIPT_INVALID",
+  "start-failed": "CONSOLE_START_FAILED",
+} as const satisfies Record<LocalOperatorConsoleUnavailableReason, string>;
+
+export type LocalOperatorConsoleUnavailableCode =
+  typeof CONSOLE_UNAVAILABLE_CODES[LocalOperatorConsoleUnavailableReason];
+
+/**
+ * Maps a `startFabricDaemon` failure to the exact truthful Console reason.
+ * Bootstrap surfaces stable, non-secret `code` strings (`BOOTSTRAP_*`,
+ * `SCHEMA_CUTOVER_REQUIRED`) and typed error names; anything unrecognised
+ * remains the honest `start-failed` fallback rather than a fabricated stage.
+ */
+export function daemonStartUnavailableReason(
+  error: unknown,
+): LocalOperatorConsoleUnavailableReason {
+  if (typeof error !== "object" || error === null) return "start-failed";
+  const code = "code" in error && typeof error.code === "string"
+    ? error.code
+    : null;
+  if (code === "SCHEMA_CUTOVER_REQUIRED") return "schema-cutover-required";
+  if (code === "BOOTSTRAP_SOCKET_MISMATCH") return "socket-unavailable";
+  if (code === "BOOTSTRAP_INCOMPATIBLE_INCUMBENT") return "daemon-incompatible";
+  if (
+    code === "BOOTSTRAP_HANDSHAKE_INVALID" ||
+    code === "BOOTSTRAP_ACTION_MISMATCH" ||
+    code === "BOOTSTRAP_RECEIPT_INVALID"
+  ) {
+    return "bootstrap-receipt-invalid";
+  }
+  const name = "name" in error && typeof error.name === "string"
+    ? error.name
+    : null;
+  if (name === "BootstrapElectionError") return "daemon-election-conflict";
+  if (name === "BootstrapSpawnPhaseError") return "daemon-spawn-failed";
+  if (typeof code === "string" && code.startsWith("BOOTSTRAP_")) {
+    return "daemon-unreachable";
+  }
+  return "start-failed";
+}
 
 export class LocalOperatorConsoleUnavailableError extends Error {
-  readonly code:
-    | "CONSOLE_CONFIGURATION_UNAVAILABLE"
-    | "CONSOLE_START_FAILED"
-    | "SCHEMA_CUTOVER_REQUIRED"
-    | "CONSOLE_AUTHORITY_UNAVAILABLE";
+  readonly code: LocalOperatorConsoleUnavailableCode;
   readonly reason: LocalOperatorConsoleUnavailableReason;
 
   constructor(reason: LocalOperatorConsoleUnavailableReason) {
@@ -96,13 +157,7 @@ export class LocalOperatorConsoleUnavailableError extends Error {
       : `local Console ${reason}`);
     this.name = "LocalOperatorConsoleUnavailableError";
     this.reason = reason;
-    this.code = reason === "configuration-missing"
-      ? "CONSOLE_CONFIGURATION_UNAVAILABLE"
-      : reason === "start-failed"
-        ? "CONSOLE_START_FAILED"
-        : reason === "schema-cutover-required"
-          ? "SCHEMA_CUTOVER_REQUIRED"
-          : "CONSOLE_AUTHORITY_UNAVAILABLE";
+    this.code = CONSOLE_UNAVAILABLE_CODES[reason];
   }
 }
 
@@ -548,13 +603,9 @@ export async function openLocalOperatorConsoleSession(
         : { ...paths, ...options.daemon }),
     });
   } catch (error: unknown) {
-    if (
-      typeof error === "object" && error !== null &&
-      "code" in error && error.code === "SCHEMA_CUTOVER_REQUIRED"
-    ) {
-      throw new LocalOperatorConsoleUnavailableError("schema-cutover-required");
-    }
-    throw new LocalOperatorConsoleUnavailableError("start-failed");
+    throw new LocalOperatorConsoleUnavailableError(
+      daemonStartUnavailableReason(error),
+    );
   }
 
   let privateClient: FabricDaemonClient | undefined;

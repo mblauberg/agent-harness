@@ -20,6 +20,8 @@ import { FABRIC_OPERATIONS } from "@local/agent-fabric-protocol";
 import {
   ConsoleProtocolAdapter,
   bindConsoleProtocolClient,
+  createBootstrapUnavailableDataset,
+  type BootstrapUnavailableReason,
   type ConsoleProtocolBinding,
   type ConsoleProtocolPort,
 } from "../src/protocol-adapter.js";
@@ -1173,6 +1175,54 @@ describe("public protocol adapter", () => {
     });
 
     expect(inspection).toBeNull();
+  });
+
+  it("renders a truthful System detail and remediation for every bootstrap reason", () => {
+    const reasons: readonly BootstrapUnavailableReason[] = [
+      "feature-unavailable",
+      "configuration-missing",
+      "schema-cutover-required",
+      "authority-unavailable",
+      "daemon-unreachable",
+      "daemon-incompatible",
+      "socket-unavailable",
+      "daemon-election-conflict",
+      "daemon-spawn-failed",
+      "bootstrap-receipt-invalid",
+      "start-failed",
+    ];
+    const details = new Set<string>();
+    for (const reason of reasons) {
+      const dataset = createBootstrapUnavailableDataset(reason, 1_000);
+      // The transport axis stays one honest label across every reason.
+      expect(dataset.connection).toStrictEqual({
+        state: "unavailable",
+        reason: "bootstrap-unavailable",
+      });
+      const row = dataset.pages.system.rows[0];
+      expect(row?.stableId).toBe("bootstrap");
+      expect(row?.freshness).toMatchObject({ state: "unavailable", reason });
+      const summary = row?.summary;
+      expect(summary?.kind).toBe("system");
+      expect(summary?.systemKind).toBe(
+        reason === "feature-unavailable" ? "daemon" : summary?.systemKind,
+      );
+      expect(summary?.state).toBe("unavailable");
+      expect(typeof summary?.detail).toBe("string");
+      expect((summary?.detail ?? "").length).toBeGreaterThan(0);
+      details.add(summary?.detail ?? "");
+    }
+    // Each reason yields its own distinct, non-collapsed operator detail.
+    expect(details.size).toBe(reasons.length);
+  });
+
+  it("names the exact daemon finding rather than a generic start-failed collapse", () => {
+    const unreachable = createBootstrapUnavailableDataset("daemon-unreachable", 1_000);
+    const generic = createBootstrapUnavailableDataset("start-failed", 1_000);
+    const unreachableDetail = unreachable.pages.system.rows[0]?.summary?.detail ?? "";
+    const genericDetail = generic.pages.system.rows[0]?.summary?.detail ?? "";
+    expect(unreachableDetail).toContain("no reachable Fabric daemon");
+    expect(unreachableDetail).not.toBe(genericDetail);
   });
 
   it("imports only the public protocol package across the Console source tree", async () => {
