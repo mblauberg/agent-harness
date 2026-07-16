@@ -36,6 +36,8 @@ DISPATCH_SCHEMA = {
     "model_family",
     "resolved_model",
     "identity_source",
+    "catalog_model",
+    "model_selection",
     "certification_eligible",
     "cross_family",
 }
@@ -556,6 +558,54 @@ def test_resolved_role_effort_reaches_codex_adapter_and_receipt():
         assert record["effort_capability_source"] == "runtime-model-catalog"
         args = args_file.read_text(encoding="utf-8").splitlines()
         assert "model_reasoning_effort=xhigh" in args
+
+
+def test_codex_explicit_model_rejection_never_reports_it_as_resolved():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        invoked = tmp / "codex.invoked"
+        write_executable(
+            bin_dir / "codex",
+            f'''#!/usr/bin/env bash
+            if [ "$1" = "debug" ] && [ "$2" = "models" ]; then
+              printf '%s\n' '{{"models":[{{"slug":"gpt-5.6-sol","supported_reasoning_levels":[{{"effort":"high"}}]}}]}}'
+              exit 0
+            fi
+            touch {invoked}
+            exit 9
+            ''',
+        )
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--tool",
+                "codex",
+                "--model",
+                "gpt-5.6-sol",
+                "--orchestrator-family",
+                "anthropic",
+                "--prompt",
+                "Review",
+            ],
+            cwd=td,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        record = json.loads(result.stdout)
+        assert result.returncode != 0
+        assert record["status"] == "adapter_account_default_only"
+        assert record["resolved_model"] == ""
+        assert record["requested_model"] == "gpt-5.6-sol"
+        assert record["catalog_model"] == "gpt-5.6-sol"
+        assert record["model_selection"] == "account-default"
+        assert record["identity_source"] == "account-default"
+        assert not invoked.exists()
 
 
 def test_interrupted_dispatch_cleans_internal_tempfiles():

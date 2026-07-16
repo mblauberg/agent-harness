@@ -338,12 +338,19 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
 
     if args.model:
         if account_default:
+            candidates = family_config.get("role_overrides", {}).get(args.role, {}).get(args.alias)
+            candidates = candidates or family_config.get("aliases", {}).get(args.alias, [])
             return emit(
                 {
                     **base,
                     "status": "adapter_account_default_only",
                     "endpoint_provider": endpoint,
-                    "resolved_model": args.model,
+                    "model_family": fixed_family,
+                    "resolved_model": "",
+                    "requested_model": args.model,
+                    "catalog_model": candidates[0] if candidates else "",
+                    "model_selection": "account-default",
+                    "identity_source": "account-default",
                     **compatibility_metadata,
                 },
                 1,

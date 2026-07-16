@@ -137,11 +137,16 @@ def test_codex_rejects_explicit_model_for_account_default_adapter():
     # An explicit id would be sent to the runtime and rejected with HTTP 400,
     # so the resolver fails closed instead of emitting a doomed route (#190).
     result, route = resolve(
-        "--adapter", "codex", "--alias", "flagship", "--role", "lead", "--model", "gpt-4.1"
+        "--adapter", "codex", "--alias", "flagship", "--role", "lead", "--model", "gpt-5.6-sol"
     )
     assert result.returncode == 1
     assert route["status"] == "adapter_account_default_only"
-    assert route["resolved_model"] == "gpt-4.1"
+    assert route["resolved_model"] == ""
+    assert route["requested_model"] == "gpt-5.6-sol"
+    assert route["catalog_model"] == "gpt-5.6-sol"
+    assert route["model_selection"] == "account-default"
+    assert route["identity_source"] == "account-default"
+    assert route["model_family"] == "openai"
 
 
 def test_ultra_role_default_uses_runtime_effort_fallback():

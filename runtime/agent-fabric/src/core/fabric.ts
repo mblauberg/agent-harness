@@ -746,7 +746,6 @@ function providerAnswerFromAdapterResult(value: unknown): string {
 function isTaskBoundEphemeralProviderPayload(value: unknown): value is Record<string, unknown> {
   return isRow(value) &&
     typeof value.taskId === "string" &&
-    typeof value.model === "string" &&
     typeof value.modelFamily === "string" &&
     typeof value.prompt === "string";
 }
@@ -5265,7 +5264,6 @@ export class Fabric {
       }
       ephemeralMaxTurns = reservedTurns;
       if (
-        typeof input.payload.model !== "string" || input.payload.model.trim().length === 0 ||
         typeof input.payload.modelFamily !== "string" || input.payload.modelFamily.trim().length === 0 ||
         typeof input.payload.prompt !== "string" || input.payload.prompt.trim().length === 0 ||
         Buffer.byteLength(input.payload.prompt, "utf8") > MAXIMUM_EPHEMERAL_PROVIDER_PROMPT_BYTES
