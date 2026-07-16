@@ -1,0 +1,50 @@
+name: Dependabot auto-merge
+
+# Patch-only, unattended auto-merge for Dependabot PRs (issue #155). Minor and
+# major updates are left untouched for maintainer review. This workflow never
+# checks out the PR head: dependabot/fetch-metadata reads PR metadata over the
+# API, and `gh pr merge --auto` only asks GitHub to merge once the repo
+# ruleset's single required check (`ci-status`) reports green, so there is no
+# pull_request_target/pwn-request surface here at all.
+on:
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: dependabot-automerge-${{ github.event.pull_request.number }}
+
+jobs:
+  automerge:
+    name: Auto-merge patch-level Dependabot PRs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Belt and braces: only Dependabot's own PRs against this repository (not
+    # a fork opening a PR while impersonating the actor name) reach the merge
+    # step below.
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Enable auto-merge for patch-level updates
+        if: steps.metadata.outputs.update-type == 'version-update:semver-patch'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --merge "$PR_URL"
+
+      - name: Log skip for minor or major updates
+        if: steps.metadata.outputs.update-type != 'version-update:semver-patch'
+        env:
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+        run: |
+          echo "Skipping auto-merge: update-type=$UPDATE_TYPE requires maintainer review."
