@@ -73,6 +73,27 @@ export type RunProjection = {
   health: "healthy" | "degraded" | "blocked" | "quarantined" | "unknown";
 };
 
+/** Server-scoped task-state counts backing a declared-progress fact. */
+export type DeclaredRunTaskStateCounts = {
+  blocked: number;
+  ready: number;
+  active: number;
+  complete: number;
+  cancelled: number;
+  degraded: number;
+};
+
+/**
+ * Fabric-declared run progress. The finite arm carries a declared denominator
+ * with mutually consistent task-state counts; the open arm carries known
+ * counts without a denominator; the unknown arm carries only its reason.
+ * No arm ever carries an inferred percentage, completion ratio or ETA.
+ */
+export type DeclaredRunProgress =
+  | { plan: "finite"; total: number; counts: DeclaredRunTaskStateCounts }
+  | { plan: "open"; counts: DeclaredRunTaskStateCounts }
+  | { plan: "unknown"; reason: string };
+
 export type OperatorProjectionSnapshot = {
   schemaVersion: 1;
   snapshotRevision: number;
@@ -458,6 +479,7 @@ export type OperatorViewSummaryMap = {
     phase: string;
     health: RunProjection["health"];
     nextMilestone: string;
+    declaredProgress?: DeclaredRunProgress;
   };
   work: { kind: "work"; state: string; checkState: WorkViewItem["checkState"] };
   agents: {
@@ -555,6 +577,7 @@ export type OperatorDetail =
       chairAgentId: AgentId;
       chairGeneration: number;
       health: RunProjection["health"];
+      declaredProgress?: DeclaredRunProgress;
     }
   | { kind: "task"; taskId: TaskId; objective: string; state: string; ownerAgentId: AgentId | null }
   | {

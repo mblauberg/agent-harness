@@ -2392,12 +2392,50 @@ const projectSummaryCodec = objectCodec(
   { kind: literal("project"), goal: text, acceptedScopeRef: nullable(artifactRefCodec), repositoryRevision: text },
   { repository: gitRepositorySummaryCodec },
 );
+const DECLARED_RUN_TASK_STATES = [
+  "blocked", "ready", "active", "complete", "cancelled", "degraded",
+] as const;
+const declaredRunTaskStateCountsCodec = objectCodec(
+  Object.fromEntries(
+    DECLARED_RUN_TASK_STATES.map((state) => [state, integer({ minimum: 0 })]),
+  ),
+);
+const declaredRunProgressBaseCodec = unionOf([
+  objectCodec({
+    plan: literal("finite"),
+    total: integer({ minimum: 0 }),
+    counts: declaredRunTaskStateCountsCodec,
+  }, {}, {
+    example: {
+      plan: "finite",
+      total: 6,
+      counts: { blocked: 1, ready: 1, active: 1, complete: 1, cancelled: 1, degraded: 1 },
+    },
+  }),
+  objectCodec({ plan: literal("open"), counts: declaredRunTaskStateCountsCodec }),
+  objectCodec({ plan: literal("unknown"), reason: text }),
+]);
+const declaredRunProgressCodec = parserBacked(
+  declaredRunProgressBaseCodec,
+  (value, path) => {
+    const record = value as Readonly<Record<string, unknown>>;
+    if (record.plan !== "finite") return value;
+    const counts = record.counts as Readonly<Record<string, unknown>>;
+    const sum = DECLARED_RUN_TASK_STATES
+      .reduce((total, state) => total + Number(counts[state]), 0);
+    if (sum !== record.total) {
+      throw new TypeError(`${path}.counts must sum to the declared finite total`);
+    }
+    return value;
+  },
+  declaredRunProgressBaseCodec.example,
+);
 const runSummaryCodec = objectCodec({
   kind: literal("run"),
   phase: text,
   health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
   nextMilestone: text,
-}, { projectSessionId: identifier });
+}, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec });
 const workSummaryCodec = objectCodec({
   kind: literal("work"),
   state: text,
@@ -2538,7 +2576,7 @@ const operatorDetailCodec = unionOf([
     chairAgentId: identifier,
     chairGeneration: positiveInteger,
     health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
-  }, { projectSessionId: identifier }),
+  }, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec }),
   objectCodec({ kind: literal("task"), taskId: identifier, objective: text, state: text, ownerAgentId: nullable(identifier) }),
   objectCodec({
     kind: literal("agent"),

@@ -1,4 +1,4 @@
-import type { ProjectionFact } from "@local/agent-fabric-protocol";
+import type { DeclaredRunProgress, ProjectionFact } from "@local/agent-fabric-protocol";
 
 import type { ConsoleControllerState } from "./controller.js";
 import type {
@@ -166,6 +166,35 @@ function attentionGroupingLabel(
   }`;
 }
 
+/**
+ * Declared progress renders only Fabric-declared facts: a finite plan may
+ * show `n/N`; open and unknown plans show known counts or the reason. No arm
+ * is ever rendered as a percentage, completion ratio or ETA.
+ */
+export function declaredProgressCompactLabel(progress: DeclaredRunProgress): string {
+  if (progress.plan === "unknown") return "progress unknown";
+  if (progress.plan === "finite") {
+    return `progress ${String(progress.counts.complete)}/${String(progress.total)}`;
+  }
+  return `progress open | ${String(progress.counts.complete)} complete`;
+}
+
+export function declaredProgressDetailLabel(progress: DeclaredRunProgress): string {
+  if (progress.plan === "unknown") return `unknown | ${progress.reason}`;
+  const counts = progress.counts;
+  const states = [
+    `active ${String(counts.active)}`,
+    `ready ${String(counts.ready)}`,
+    `blocked ${String(counts.blocked)}`,
+    `degraded ${String(counts.degraded)}`,
+    `cancelled ${String(counts.cancelled)}`,
+  ].join(" | ");
+  if (progress.plan === "finite") {
+    return `finite plan | ${String(counts.complete)}/${String(progress.total)} complete | ${states}`;
+  }
+  return `open plan | ${String(counts.complete)} complete | ${states} | no declared total`;
+}
+
 function summaryText(
   row: ConsoleRow,
   dataset: FabricConsoleDataset,
@@ -205,9 +234,14 @@ function summaryText(
       if (summary.projectSessionId === undefined) {
         throw new TypeError("exact run projection has no project-session identity");
       }
+      if (summary.declaredProgress === undefined) {
+        throw new TypeError("exact run projection has no declared progress");
+      }
       return [
         `${summary.projectSessionId} | ${summary.phase}`,
-        `${summary.health} | next ${summary.nextMilestone}`,
+        `${summary.health} | next ${summary.nextMilestone} | ${
+          declaredProgressCompactLabel(summary.declaredProgress)
+        }`,
       ];
     case "work":
       return [summary.state, `checks ${summary.checkState}`];
@@ -862,9 +896,16 @@ export function detailLines(
     if (row.summary.projectSessionId === undefined) {
       throw new TypeError("exact run projection has no project-session identity");
     }
+    if (row.summary.declaredProgress === undefined) {
+      throw new TypeError("exact run projection has no declared progress");
+    }
     lines.push({
       label: "Project session",
       value: row.summary.projectSessionId,
+    });
+    lines.push({
+      label: "Progress",
+      value: declaredProgressDetailLabel(row.summary.declaredProgress),
     });
   }
   lines.push(

@@ -206,6 +206,12 @@ function consoleSummary<View extends FabricView>(
   ) {
     throw new TypeError("exact run projection has no project-session identity");
   }
+  if (
+    view === "runs" &&
+    (summary as OperatorViewSummaryMap["runs"]).declaredProgress === undefined
+  ) {
+    throw new TypeError("exact run projection has no declared progress");
+  }
   if (view !== "attention") return summary as ConsoleViewSummaryMap[View];
   const attention = summary as OperatorViewSummaryMap["attention"];
   if (nativeNotificationProjection === "daemon-journal") {
