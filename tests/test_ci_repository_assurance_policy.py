@@ -141,10 +141,29 @@ def test_ci_gates_build_jobs_behind_path_filters_and_one_aggregate_check() -> No
         return flat
 
     flattened = {name: _flatten(rules) for name, rules in filters.items()}
-    # Docs- and skills-only changes must match no filter so they skip every
-    # build job (issue #150 acceptance evidence).
-    for rules in flattened.values():
-        assert not any(rule.startswith(("docs/", "skills/")) for rule in rules)
+    # PR #168 repair cycle 1: the harness filter must cover every surface
+    # scripts/check-harness validates, so skills-, docs- and root-document
+    # changes always run the policy gate. No other build filter may widen
+    # onto those surfaces.
+    for required in (
+        "skills/**",
+        "docs/**",
+        "AGENTS.md",
+        "HARNESS.md",
+        "MAINTAINING.md",
+        "README.md",
+        "LICENSES/**",
+        "NOTICE",
+        "SECURITY.md",
+        "THIRD_PARTY_NOTICES.md",
+    ):
+        assert required in flattened["harness"], required
+    for name, rules in flattened.items():
+        if name != "harness":
+            assert not any(rule.startswith(("docs/", "skills/")) for rule in rules), name
+    # Fabric tests read config/ fixtures (review profiles, acceptance
+    # scenarios, agent-fabric.yaml), so config changes rerun the fabric job.
+    assert "config/**" in flattened["fabric"]
     # A change to the CI contract itself re-runs every gated job. The
     # workflows gate uses the broader glob, which covers ci.yml.
     for gate in FILTERED_JOBS.values():
@@ -178,6 +197,12 @@ def test_ci_gates_build_jobs_behind_path_filters_and_one_aggregate_check() -> No
     # must fail closed on any needed job that failed or was cancelled.
     assert aggregate.get("if") == "always()"
     assert set(aggregate.get("needs", [])) == {"detect-changes", *FILTERED_JOBS}
+    # Every job in the workflow except the aggregate itself must be in its
+    # needs list, so a job added later cannot silently bypass the required
+    # check.
+    jobs = document.get("jobs")
+    assert isinstance(jobs, dict)
+    assert set(aggregate.get("needs", [])) == set(jobs) - {"ci-status"}
     (status_step,) = _steps(aggregate)
     assert status_step.get("env") == {"NEEDS_JSON": "${{ toJSON(needs) }}"}
     command = str(status_step.get("run", ""))

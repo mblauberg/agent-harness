@@ -38,8 +38,12 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         with:
-          # Docs- and skills-only changes intentionally match no filter, so
-          # they skip every build job (issue #150 acceptance evidence).
+          # The harness filter covers every surface scripts/check-harness
+          # validates (skills, docs, root documents, release attribution
+          # files), so policy-gated changes always run the policy gate
+          # (PR #168 repair cycle 1). Changes outside every filter — for
+          # example CHANGELOG.md — skip all build jobs and complete on
+          # detect-changes plus ci-status alone.
           filters: |
             ci-contract: &ci-contract
               - '.github/workflows/ci.yml'
@@ -54,13 +58,26 @@ jobs:
               - *node-workspace
               - '.github/**'
               - 'config/**'
+              - 'docs/**'
               - 'evals/**'
               - 'runtime/**'
               - 'scripts/**'
+              - 'skills/**'
               - 'tests/**'
+              - 'ACKNOWLEDGEMENTS.md'
+              - 'AGENTS.md'
+              - 'HARNESS.md'
+              - 'LICENSE'
+              - 'LICENSES/**'
+              - 'MAINTAINING.md'
+              - 'NOTICE'
+              - 'README.md'
+              - 'SECURITY.md'
+              - 'THIRD_PARTY_NOTICES.md'
             fabric:
               - *ci-contract
               - *node-workspace
+              - 'config/**'
               - 'runtime/agent-fabric/**'
             console:
               - *ci-contract
