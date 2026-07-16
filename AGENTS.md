@@ -1,6 +1,7 @@
 # Provenant: global agent instructions (all harnesses)
 
-Depth lives in `HARNESS.md` at this harness root (constitution: objective,
+Depth lives in `HARNESS.md` beside this file at the harness root
+`~/.agents`; both are symlinked into `~/.claude` (constitution: objective,
 topology, model routing, memory policy, execution/pane policy). Read it
 before any decision about orchestration, model choice, delegation, or memory.
 
