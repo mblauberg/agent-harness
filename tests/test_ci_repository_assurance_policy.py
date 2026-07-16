@@ -238,10 +238,11 @@ def test_ci_concurrency_policy_exempts_main_from_cancellation() -> None:
     # pinned on the branch protection ruleset — always runs on a main push.
     # cancel-in-progress must stay true for PR runs (superseded runs are
     # disposable) but must not cancel main-push runs: a cancelled main run
-    # would leave the merged commit's ci-status stuck at "cancelled" forever,
-    # since main is never re-pushed to retrigger it, and
-    # strict_required_status_checks_policy would then block every subsequent
-    # PR on a required check that can never turn green again.
+    # would leave the merged commit's ci-status at "cancelled" forever, since
+    # main is never re-pushed to retrigger it — the commit's regression
+    # signal is silently lost. PR merging itself is unaffected (required
+    # checks are evaluated on the PR head, not main's commits); the exemption
+    # protects main's audit trail.
     document = _workflow()
     concurrency = document.get("concurrency")
     assert isinstance(concurrency, dict)

@@ -17,13 +17,12 @@ permissions: {}
 # path-filter output true on `push` (see below), so every job — including
 # ci-status, the single required check pinned on the branch protection
 # ruleset — always runs to completion on main. If a second push to main
-# cancelled an in-flight run, the cancelled run's ci-status would report
-# "cancelled", not "success", against a commit that is already merged and can
-# never be re-pushed to trigger a fresh run. With
-# strict_required_status_checks_policy on, the next PR's merge would then
-# need an up-to-date green ci-status against that main commit, which can
-# never be produced again — a required check stuck unsatisfiable short of an
-# empty rebuild push. Excluding main from cancel-in-progress keeps every
+# cancelled an in-flight run, the earlier merged commit would keep a
+# "cancelled" ci-status forever: main is never re-pushed, so the verdict is
+# not regenerated, and that commit's regression signal is silently lost.
+# (PR merging is unaffected — required checks are evaluated on the PR head,
+# not on main's own commits — so this is about main's audit trail, not a
+# merge deadlock.) Excluding main from cancel-in-progress keeps every
 # main-push run alive to completion, so main always ends with a definitive
 # ci-status result.
 concurrency:
