@@ -9,10 +9,36 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+SETUP_ACTION = ROOT / ".github" / "actions" / "setup-node-workspace" / "action.yml"
+SETUP_ACTION_USES = "./.github/actions/setup-node-workspace"
 ROOT_PACKAGE = ROOT / "package.json"
 ROOT_LOCK = ROOT / "package-lock.json"
 FABRIC_PACKAGE = ROOT / "runtime" / "agent-fabric" / "package.json"
 IMMUTABLE_ACTION = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
+# Local composite actions are pinned by the commit under review itself; only
+# repository-local paths are exempt from the 40-hex SHA pin.
+LOCAL_ACTION = re.compile(r"^\./\.github/actions/[a-z0-9-]+$")
+# Path filtering (issue #150): build jobs are gated per-path by
+# detect-changes and a single always-run ci-status aggregate is the one
+# required check, so a skipped job can never leave a required check pending.
+FILTERED_JOBS = {
+    "harness": "harness",
+    "fabric": "fabric",
+    "console": "console",
+    "herdr": "herdr",
+    "review-portal-supervisor": "review-portal-supervisor",
+    "zizmor": "workflows",
+}
+JOB_PERMISSIONS = {
+    "detect-changes": {"pull-requests": "read"},
+    "harness": {"contents": "read"},
+    "fabric": {"contents": "read"},
+    "review-portal-supervisor": {"contents": "read"},
+    "console": {"contents": "read"},
+    "herdr": {"contents": "read"},
+    "zizmor": {"contents": "read"},
+    "ci-status": {},
+}
 WORKSPACE_GUIDES = (
     ROOT / "docs" / "runbooks" / "agent-fabric-operations.md",
     ROOT / "docs" / "runbooks" / "agent-fabric-traceability.md",
@@ -42,26 +68,121 @@ def _steps(job: dict[str, object]) -> list[dict[str, object]]:
     return value
 
 
+def _setup_action() -> dict[str, object]:
+    value = yaml.safe_load(SETUP_ACTION.read_text(encoding="utf-8"))
+    assert isinstance(value, dict)
+    return value
+
+
+def _setup_action_steps() -> list[dict[str, object]]:
+    runs = _setup_action().get("runs")
+    assert isinstance(runs, dict)
+    assert runs.get("using") == "composite"
+    steps = runs.get("steps")
+    assert isinstance(steps, list)
+    assert all(isinstance(item, dict) for item in steps)
+    return steps
+
+
 def test_ci_uses_immutable_actions_and_least_privilege() -> None:
     document = _workflow()
-    assert document.get("permissions") == {"contents": "read"}
+    # Top-level grants nothing; each job declares its own least privilege.
+    assert document.get("permissions") == {}
     workflow_source = WORKFLOW.read_text(encoding="utf-8")
     assert "pull_request:" in workflow_source
     assert re.search(r"(?m)^  push:\n    branches: \[main\]$", workflow_source)
 
     jobs = document.get("jobs")
     assert isinstance(jobs, dict)
+    assert set(jobs) == set(JOB_PERMISSIONS)
     for job_name, job in jobs.items():
         assert isinstance(job, dict)
-        assert job.get("permissions", {"contents": "read"}) == {"contents": "read"}, job_name
+        assert job.get("permissions") == JOB_PERMISSIONS[job_name], job_name
+        assert isinstance(job.get("timeout-minutes"), int), job_name
         for step in _steps(job):
             action = step.get("uses")
             if action is not None:
-                assert isinstance(action, str) and IMMUTABLE_ACTION.fullmatch(action), action
+                assert isinstance(action, str)
+                assert IMMUTABLE_ACTION.fullmatch(action) or LOCAL_ACTION.fullmatch(action), action
+                if action.startswith("./"):
+                    assert (ROOT / action[2:] / "action.yml").is_file(), action
                 if action.startswith("actions/checkout@"):
                     options = step.get("with")
                     assert isinstance(options, dict)
                     assert options.get("persist-credentials") is False
+    for step in _setup_action_steps():
+        action = step.get("uses")
+        if action is not None:
+            assert isinstance(action, str) and IMMUTABLE_ACTION.fullmatch(action), action
+
+
+def test_ci_gates_build_jobs_behind_path_filters_and_one_aggregate_check() -> None:
+    document = _workflow()
+
+    detect = _job(document, "detect-changes")
+    filter_step = next(
+        step for step in _steps(detect) if str(step.get("uses", "")).startswith("dorny/paths-filter@")
+    )
+    # The filter only inspects pull requests; pushes to main force-run all
+    # jobs through the job outputs below.
+    assert filter_step.get("if") == "github.event_name == 'pull_request'"
+    filters = yaml.safe_load(str(filter_step.get("with", {}).get("filters")))
+    assert isinstance(filters, dict)
+
+    def _flatten(rules: object) -> list[str]:
+        flat: list[str] = []
+        assert isinstance(rules, list)
+        for rule in rules:
+            if isinstance(rule, list):
+                flat.extend(_flatten(rule))
+            else:
+                assert isinstance(rule, str)
+                flat.append(rule)
+        return flat
+
+    flattened = {name: _flatten(rules) for name, rules in filters.items()}
+    # Docs- and skills-only changes must match no filter so they skip every
+    # build job (issue #150 acceptance evidence).
+    for rules in flattened.values():
+        assert not any(rule.startswith(("docs/", "skills/")) for rule in rules)
+    # A change to the CI contract itself re-runs every gated job. The
+    # workflows gate uses the broader glob, which covers ci.yml.
+    for gate in FILTERED_JOBS.values():
+        assert ".github/actions/**" in flattened[gate]
+        if gate == "workflows":
+            assert ".github/workflows/**" in flattened[gate]
+        else:
+            assert ".github/workflows/ci.yml" in flattened[gate]
+    assert "runtime/**" in flattened["harness"]
+    assert "tests/**" in flattened["harness"]
+    for gate in ("harness", "fabric", "console", "herdr"):
+        assert "package-lock.json" in flattened[gate]
+        assert "runtime/agent-fabric-protocol/**" in flattened[gate]
+    assert "runtime/agent-fabric/**" in flattened["console"]
+    assert "runtime/agent-fabric-review-portal-supervisor/**" in flattened["review-portal-supervisor"]
+
+    outputs = detect.get("outputs")
+    assert isinstance(outputs, dict)
+    for output_name in FILTERED_JOBS.values():
+        assert outputs.get(output_name) == (
+            "${{ github.event_name == 'push' && 'true' || steps.filter.outputs." + output_name + " }}"
+        )
+
+    for job_name, output_name in FILTERED_JOBS.items():
+        job = _job(document, job_name)
+        assert job.get("needs") == "detect-changes", job_name
+        assert job.get("if") == f"needs.detect-changes.outputs.{output_name} == 'true'", job_name
+
+    aggregate = _job(document, "ci-status")
+    # ci-status is the single required check: it must always report, and it
+    # must fail closed on any needed job that failed or was cancelled.
+    assert aggregate.get("if") == "always()"
+    assert set(aggregate.get("needs", [])) == {"detect-changes", *FILTERED_JOBS}
+    (status_step,) = _steps(aggregate)
+    assert status_step.get("env") == {"NEEDS_JSON": "${{ toJSON(needs) }}"}
+    command = str(status_step.get("run", ""))
+    assert '.value.result != "success" and .value.result != "skipped"' in command
+    assert "exit 1" in command
 
 
 def test_ci_runs_complete_harness_and_fabric_gates() -> None:
@@ -69,22 +190,33 @@ def test_ci_runs_complete_harness_and_fabric_gates() -> None:
     harness_steps = _steps(_job(document, "harness"))
     fabric_steps = _steps(_job(document, "fabric"))
 
-    for job_name in ("harness", "fabric", "console", "herdr"):
-        commands = [str(step.get("run", "")) for step in _steps(_job(document, job_name))]
-        pin_index = next(
-            index for index, command in enumerate(commands) if "npm install --global npm@11.12.1" in command
-        )
-        install_index = next(index for index, command in enumerate(commands) if "npm ci" in command)
-        assert pin_index < install_index
-        assert 'test "$(npm --version)" = "11.12.1"' in commands[pin_index]
-
-    harness_node_setup = next(
-        step for step in harness_steps if str(step.get("uses", "")).startswith("actions/setup-node@")
+    # The toolchain contract (Node 24, pinned npm before a locked install)
+    # moved into the shared composite action; assert it once there, then
+    # assert every workspace job consumes the composite after checkout.
+    setup_steps = _setup_action_steps()
+    node_setup = next(
+        step for step in setup_steps if str(step.get("uses", "")).startswith("actions/setup-node@")
     )
-    assert harness_node_setup.get("with", {}).get("node-version") == "24"
+    assert node_setup.get("with", {}).get("node-version") == "24"
+    setup_commands = [str(step.get("run", "")) for step in setup_steps]
+    pin_index = next(
+        index for index, command in enumerate(setup_commands) if "npm install --global npm@11.12.1" in command
+    )
+    install_index = next(
+        index for index, command in enumerate(setup_commands) if "npm ci --no-audit --no-fund" in command
+    )
+    assert pin_index < install_index
+    assert 'test "$(npm --version)" = "11.12.1"' in setup_commands[pin_index]
+
+    for job_name in ("harness", "fabric", "console", "herdr"):
+        steps = _steps(_job(document, job_name))
+        uses = [str(step.get("uses", "")) for step in steps]
+        checkout_index = next(index for index, action in enumerate(uses) if action.startswith("actions/checkout@"))
+        composite_index = uses.index(SETUP_ACTION_USES)
+        assert checkout_index < composite_index, job_name
+
     harness_commands = "\n".join(str(step.get("run", "")) for step in harness_steps)
     for required in (
-        "npm ci --no-audit --no-fund",
         "npm run build:types",
         "npm run schema:check:generated",
         "npm run build",
@@ -104,11 +236,8 @@ def test_ci_runs_complete_harness_and_fabric_gates() -> None:
     harness_index = harness_run_commands.index("scripts/check-harness")
     assert build_types_index < generated_check_index < build_index < status_index < harness_index
 
-    node_setup = next(step for step in fabric_steps if str(step.get("uses", "")).startswith("actions/setup-node@"))
-    assert node_setup.get("with", {}).get("node-version") == "24"
     fabric_commands = "\n".join(str(step.get("run", "")) for step in fabric_steps)
     for required in (
-        "npm ci --no-audit --no-fund",
         "npm run build",
         "npm run test --workspace=@local/agent-fabric-protocol",
         "npm run schema:check --workspace=@local/agent-fabric",
@@ -127,10 +256,22 @@ def test_clean_ci_builds_locked_protocol_before_daemon_typecheck() -> None:
     document = _workflow()
     fabric_steps = _steps(_job(document, "fabric"))
     node_setup = next(
-        step for step in fabric_steps if str(step.get("uses", "")).startswith("actions/setup-node@")
+        step for step in _setup_action_steps() if str(step.get("uses", "")).startswith("actions/setup-node@")
     )
     cache_paths = str(node_setup.get("with", {}).get("cache-dependency-path", "")).splitlines()
     assert cache_paths == ["package-lock.json"]
+
+    # The clean-protocol assertion must run before the composite installs
+    # dependencies so the job proves no stale dist survives checkout.
+    dist_clean_index = next(
+        index
+        for index, step in enumerate(fabric_steps)
+        if "test ! -e runtime/agent-fabric-protocol/dist" in str(step.get("run", ""))
+    )
+    composite_index = next(
+        index for index, step in enumerate(fabric_steps) if step.get("uses") == SETUP_ACTION_USES
+    )
+    assert dist_clean_index < composite_index
 
     root_package = json.loads(ROOT_PACKAGE.read_text(encoding="utf-8"))
     assert root_package.get("workspaces") == [
@@ -190,7 +331,6 @@ def test_ci_runs_console_and_herdr_product_gates() -> None:
     expected = {
         "console": {
             "commands": {
-                "npm ci --no-audit --no-fund",
                 "npm run build",
                 "npm run typecheck --workspace=@local/agent-fabric-console",
                 "npm run test --workspace=@local/agent-fabric-console",
@@ -201,7 +341,6 @@ def test_ci_runs_console_and_herdr_product_gates() -> None:
         },
         "herdr": {
             "commands": {
-                "npm ci --no-audit --no-fund",
                 "npm run build",
                 "npm run typecheck --workspace=@local/agent-fabric-herdr",
                 "npm run test --workspace=@local/agent-fabric-herdr",
@@ -211,14 +350,7 @@ def test_ci_runs_console_and_herdr_product_gates() -> None:
     }
     for job_name, contract in expected.items():
         steps = _steps(_job(document, job_name))
-        node_setup = next(
-            step for step in steps if str(step.get("uses", "")).startswith("actions/setup-node@")
-        )
-        assert node_setup.get("with", {}).get("node-version") == "24"
-        cache_paths = set(
-            str(node_setup.get("with", {}).get("cache-dependency-path", "")).splitlines()
-        )
-        assert cache_paths == {"package-lock.json"}
+        assert any(step.get("uses") == SETUP_ACTION_USES for step in steps)
         run_steps = [step for step in steps if "run" in step]
         assert all("working-directory" not in step for step in run_steps)
         commands = "\n".join(str(step.get("run", "")) for step in run_steps)
@@ -226,19 +358,12 @@ def test_ci_runs_console_and_herdr_product_gates() -> None:
 
 
 def test_repository_policy_covers_sensitive_fabric_surfaces() -> None:
+    # Issue #150: a single-maintainer repository gains nothing from
+    # per-directory rules that all name the same owner; the wildcard is the
+    # whole policy and keeps CODEOWNERS from drifting as directories move.
     codeowners = (ROOT / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
-    for path in (
-        "/runtime/agent-fabric/",
-        "/runtime/agent-fabric-protocol/",
-        "/runtime/agent-fabric-console/",
-        "/runtime/agent-fabric-herdr/",
-        "/runtime/agent-fabric/migrations/",
-        "/runtime/agent-fabric/schemas/",
-        "/config/model-routing.json",
-        "/config/adapter-compatibility.yaml",
-        "/scripts/static-security-check.py",
-    ):
-        assert path in codeowners
+    rules = [line for line in codeowners.splitlines() if line.strip() and not line.startswith("#")]
+    assert rules == ["* @mblauberg"]
 
     dependabot = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
     updates = dependabot.get("updates", [])
