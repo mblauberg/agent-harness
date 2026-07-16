@@ -4,6 +4,7 @@ import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 
 import {
+  DECLARED_RUN_PROGRESS_FEATURE,
   GATE_SYSTEM_SUPERSESSION_FEATURE,
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   RUN_SESSION_PROJECTION_FEATURE,
@@ -53,6 +54,7 @@ const REQUIRED_FEATURES: readonly ProtocolFeature[] = Object.freeze([
   "operator-control.v1",
   "operator-projection.v1",
   RUN_SESSION_PROJECTION_FEATURE,
+  DECLARED_RUN_PROGRESS_FEATURE,
   "artifact-content-read.v1",
 ] as const satisfies readonly ProtocolFeature[]);
 export const CURRENT_CONSOLE_OPTIONAL_FEATURES: readonly ProtocolFeature[] = Object.freeze([
