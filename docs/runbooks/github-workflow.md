@@ -2,7 +2,11 @@
 
 Use this process for user- and agent-originated repository work. Project
 Status is the sole workflow state; labels describe content or gates, not
-progress.
+progress. The label taxonomy is declarative in
+[`.github/labels.yml`](../../.github/labels.yml), synced with pruning: a label
+absent from that file is deleted on the next sync, so never hand-create one.
+Issue intake uses the issue forms under `.github/ISSUE_TEMPLATE/`; blank
+issues are disabled.
 
 ## Statuses
 
@@ -101,14 +105,18 @@ git push -u origin issue-148-runbook-mechanics
 Open the pull request against `main` and link the issue per the rule in
 [Execute and review](#execute-and-review): `Closes #N` only when merge leaves
 no user or external-action gate, otherwise `References #N` with the issue left
-open:
+open. The body must follow the repository template
+([`.github/pull_request_template.md`](../../.github/pull_request_template.md));
+`gh pr create --body` bypasses the template, so fill a copy — evidence rows
+bound to the exact head SHA and the independent-review block included — and
+pass it explicitly:
 
 ```sh
+cp .github/pull_request_template.md /tmp/pr-body.md
+# fill in every section, then:
 gh pr create --base main \
   --title "docs(runbooks): document agent GitHub mechanics" \
-  --body "Summary of the change.
-
-Closes #148"
+  --body-file /tmp/pr-body.md
 ```
 
 Set the issue to `In review` while exact-head checks and independent review
@@ -147,9 +155,19 @@ gh project field-list 2 --owner mblauberg --format json \
   --jq '.fields[] | select(.name == "Status")'
 ```
 
+### Merge
+
+Integration to `main` is a user gate; the user merges. Repository auto-merge
+is disabled: never queue `gh pr merge --auto`. Branch protection requires the
+head to be strictly up to date with `main`, so concurrent pull requests
+integrate as a manual, serialised merge train: merge one, update the next onto
+the new `main`, rerun the exact-head checks and independent review (an
+update-merge is a new commit and invalidates prior exact-head evidence), then
+merge it.
+
 ### After merge
 
-Integration to `main` is a user gate; the user merges. Afterwards:
+Afterwards:
 
 1. Confirm the issue closed (`Closes #N`) or close it with its terminal reason
    recorded, and confirm Status is `Done`.
