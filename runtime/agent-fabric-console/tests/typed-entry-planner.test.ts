@@ -4,8 +4,12 @@ import {
   FABRIC_OPERATIONS,
   type NegotiatedOperatorClient,
   type OperatorCapabilityCredential,
+  type OperatorActionPreview,
+  type OperatorClientId,
+  type OperatorId,
   type OperatorProjectionSnapshot,
   type ProjectId,
+  type ProjectSessionLaunchPrepareRequest,
   type ProjectSessionId,
   type ScopedGateReadRequest,
   type ScopedGateReadResult,
@@ -20,6 +24,8 @@ import { createProductionConsoleTypedEntryPlanner } from "../src/typed-entry-pla
 
 const projectId = "project_typed_entry" as ProjectId;
 const projectSessionId = "session_typed_entry" as ProjectSessionId;
+const operatorId = "operator_typed_entry" as OperatorId;
+const clientId = "console_typed_entry" as OperatorClientId;
 const credential = {
   capabilityId: "capability_typed_entry",
   token: "afop_typed_entry_secret",
@@ -166,11 +172,15 @@ function releaseGate(): ScopedGate {
 
 function client(
   read: (input: ScopedGateReadRequest) => Promise<ScopedGateReadResult>,
+  prepareLaunch?: (input: ProjectSessionLaunchPrepareRequest) => Promise<OperatorActionPreview>,
 ): NegotiatedOperatorClient {
   return {
     kind: "operator",
     features: [],
     operations: {},
+    ...(prepareLaunch === undefined
+      ? {}
+      : { projectSessions: { prepareLaunch } }),
     console: {
       readOnly: false,
       launchAvailable: true,
@@ -188,6 +198,120 @@ function client(
 }
 
 describe("production Console typed-entry planner", () => {
+  it("prepares Launch through the dedicated daemon API from the exact live Project row", async () => {
+    const launchIntent = {
+      kind: "project-session-launch" as const,
+      projectId,
+      projectSessionId,
+      expectedProjectRevision: 3,
+      expectedSessionRevision: 8,
+      expectedSessionGeneration: 2,
+      trustRecordDigest: digest,
+      launchPacketRef: { path: "launch/packet.json" as never, digest },
+      authorityRef: digest,
+      budgetRef: "budget_typed_entry",
+      resourcePlanRef: { path: "launch/resource-plan.json" as never, digest },
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_typed_entry" as never,
+      providerContractDigest: digest,
+      resourceStateDigest: digest,
+    };
+    const preview: OperatorActionPreview = {
+      previewId: "preview_launch_typed_entry",
+      previewRevision: 1,
+      previewDigest: digest,
+      intent: launchIntent,
+      intentDigest: digest,
+      beforeStateDigest: digest,
+      consequenceClass: "consequential",
+      evidenceRefs: [],
+      gateIds: [],
+      confirmationMode: "explicit",
+      expiresAt: "2099-01-01T00:00:00.000Z" as Timestamp,
+    };
+    const prepareLaunch = vi.fn(async (
+      _input: ProjectSessionLaunchPrepareRequest,
+    ): Promise<OperatorActionPreview> => preview);
+    const planner = createProductionConsoleTypedEntryPlanner({
+      client: client(vi.fn(), prepareLaunch),
+      credential,
+      projectId,
+      operatorId,
+      clientId,
+    });
+
+    expect(planner.capabilities.launch).toStrictEqual({ state: "available" });
+    const launchInput = {
+      kind: "launch",
+      fields: {},
+      eventId: "launch-typed-entry",
+      binding: {
+        view: "project",
+        itemId: projectId,
+        itemRevision: revisionFromProtocol(3),
+        projectionRevision: revisionFromProtocol(11),
+      },
+      dataset: dataset(),
+    } as const;
+    await expect(planner.buildIntent(launchInput)).resolves.toStrictEqual({
+      intent: launchIntent,
+      expectedRevision: 8,
+      daemonPreview: preview,
+    });
+    expect(prepareLaunch).toHaveBeenCalledWith({
+      command: expect.objectContaining({
+        credential,
+        expectedRevision: 8,
+        actor: operatorId,
+        provenance: {
+          kind: "console-direct-input",
+          clientId,
+          inputEventId: "launch-typed-entry",
+        },
+      }),
+      projectId,
+      projectSessionId,
+      expectedSessionGeneration: 2,
+      launchPacketRef: { path: "launch/packet.json", digest },
+    });
+    await expect(planner.buildIntent(launchInput)).resolves.toStrictEqual({
+      intent: launchIntent,
+      expectedRevision: 8,
+      daemonPreview: preview,
+    });
+    expect(prepareLaunch).toHaveBeenCalledTimes(2);
+    expect(prepareLaunch.mock.calls[1]?.[0].command.commandId)
+      .toBe(prepareLaunch.mock.calls[0]?.[0].command.commandId);
+    await planner.buildIntent({ ...launchInput, eventId: "launch-after-restart" });
+    expect(prepareLaunch.mock.calls[2]?.[0].command.commandId)
+      .not.toBe(prepareLaunch.mock.calls[0]?.[0].command.commandId);
+  });
+
+  it("rejects caller-authored Launch fields before contacting the daemon", async () => {
+    const prepareLaunch = vi.fn();
+    const planner = createProductionConsoleTypedEntryPlanner({
+      client: client(vi.fn(), prepareLaunch),
+      credential,
+      projectId,
+      operatorId,
+      clientId,
+    });
+
+    await expect(planner.buildIntent({
+      kind: "launch",
+      fields: { revision: "999" },
+      eventId: "launch-forged-field",
+      binding: {
+        view: "project",
+        itemId: projectId,
+        itemRevision: revisionFromProtocol(3),
+        projectionRevision: revisionFromProtocol(11),
+      },
+      dataset: dataset(),
+    })).rejects.toThrow("accepts no fields");
+    expect(prepareLaunch).not.toHaveBeenCalled();
+  });
+
   it("builds Promotion only from the exact approved release gate", async () => {
     const gate = releaseGate();
     const read = vi.fn(async () => ({
@@ -200,11 +324,13 @@ describe("production Console typed-entry planner", () => {
       client: client(read),
       credential,
       projectId,
+      operatorId,
+      clientId,
     });
     expect(planner.capabilities).toStrictEqual({
       launch: {
         state: "unavailable",
-        reason: "daemon-launch-intent-preparation-unavailable",
+        reason: "project-session-launch-prepare-unavailable",
       },
       git: {
         state: "unavailable",
@@ -216,6 +342,7 @@ describe("production Console typed-entry planner", () => {
     const result = await planner.buildIntent({
       kind: "promotion",
       fields: { gate: gate.gateId },
+      eventId: "promotion-typed-entry",
       binding: {
         view: "project",
         itemId: projectId,
@@ -257,9 +384,12 @@ describe("production Console typed-entry planner", () => {
       client: client(read),
       credential,
       projectId,
+      operatorId,
+      clientId,
     });
     const input = {
       kind: "promotion" as const,
+      eventId: "promotion-rejection",
       binding: {
         view: "project" as const,
         itemId: projectId,

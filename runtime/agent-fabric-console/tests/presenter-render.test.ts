@@ -1048,7 +1048,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
       workflowCapabilities: {
         intake: { state: "available" },
         gate: { state: "available" },
-        launch: { state: "unavailable", reason: "typed-planner-unregistered" },
+        launch: { state: "available" },
         git: { state: "unavailable", reason: "typed-planner-unregistered" },
         promotion: { state: "unavailable", reason: "typed-planner-unregistered" },
       },
@@ -1138,7 +1138,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
         id: "workflow:implement",
         label: "Implement...",
         enabled: false,
-        reason: "typed-planner-unregistered",
+        reason: "implementation-planning-unavailable",
       }),
     ]));
   });
@@ -2293,6 +2293,36 @@ describe("structured presenter and responsive Fabric renderer", () => {
     expect(complete.rows.join("\n")).toContain("Intent Expected revision:11");
     expect(complete.hitRegions.find(({ id }) => id === "review:continue"))
       .toMatchObject({ enabled: true });
+  });
+
+  it("keeps unresolved Launch custody observable and not closable", () => {
+    const workflow: ConsoleWorkflowReview = {
+      workflowId: "workflow-launch-unresolved",
+      kind: "operator-action",
+      source: "daemon-preview",
+      stage: "ambiguous",
+      previewDigest: "sha256:preview",
+      expectedRevision: revisionFromProtocol(11),
+      consequenceClass: "consequential",
+      confirmationMode: "explicit",
+      summary: "project-session-launch recovery",
+      details: [{ label: "commandId", value: "console_launch_command" }],
+      evidence: [],
+      openedByEventId: "event-launch-recovery",
+      armedByEventId: null,
+      result: "operator-action | console_launch_command | ambiguous",
+      failure: "LAUNCH_AMBIGUOUS",
+    };
+    const frame = renderFabricConsoleFrame(
+      richDataset(),
+      controllerState(),
+      createFabricUiState({ workflowReview: workflow }),
+      { columns: 200, rows: 18 },
+    );
+
+    expect(frame.hitRegions.find(({ id }) => id === "review:observe"))
+      .toMatchObject({ enabled: true });
+    expect(frame.hitRegions.some(({ id }) => id === "review:close")).toBe(false);
   });
 
   it.each(["editor", "guided", "palette"] as const)(

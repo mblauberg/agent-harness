@@ -229,13 +229,15 @@ function evidenceWorkflowActions(
         ? "confirm-terminal-neutralised"
         : "artifact-content-redacted";
   const decisionReason = intakeReason ?? artifactReason;
-  const launchReason = decisionReason ?? capabilityReason(capabilities.launch);
+  // Evidence-to-session implementation planning has no production binding yet.
+  // Do not let availability of Project-row launch preparation expose it.
+  const implementationReason = decisionReason ?? "implementation-planning-unavailable";
   return [
     guidedAction("discuss", discussionReason),
     guidedAction("accept", decisionReason),
     guidedAction("request-changes", discussionReason),
     guidedAction("defer", intakeReason),
-    guidedAction("implement", launchReason),
+    guidedAction("implement", implementationReason),
   ];
 }
 
@@ -253,11 +255,14 @@ function projectWorkflowActions(
       row.actionAvailability.actions.includes(action)
       ? null
       : "authority-insufficient";
+  const launchRecovery = dataset.snapshot?.session?.freshness === "live" &&
+    (dataset.snapshot.session.value?.state === "launching" ||
+      dataset.snapshot.session.value?.state === "launch_ambiguous");
   return [
     guidedAction(
       "launch",
       mutationReason ?? capabilityReason(capabilities.launch) ??
-        authorityReason("project-session-launch"),
+        (launchRecovery ? null : authorityReason("project-session-launch")),
     ),
     guidedAction(
       "git",
@@ -709,6 +714,11 @@ function workflowReviewActions(
         enabled: true,
         availableAction: null,
       },
+    ];
+  }
+  if (review.stage === "pending" || review.stage === "ambiguous") {
+    return [
+      { id: "review:observe", label: "Observe launch status", enabled: true, availableAction: null },
     ];
   }
   return [

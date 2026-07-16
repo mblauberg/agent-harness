@@ -16,10 +16,12 @@ import type { LaunchProviderActionJournalRefV1, ProviderActionRefV1 } from "./la
 import type { AgentLifecycleRecoveryIntentV1 } from "./lifecycle.js";
 import type { OperatorAction, OperatorCapabilityCredential, OperatorMutationContext } from "./operator.js";
 import type {
+  AgentId,
   ArtifactRef,
   CoordinationRunId,
   GateId,
   IntegrationId,
+  LeaseId,
   ProjectId,
   ProjectSessionId,
   ProviderActionId,
@@ -362,10 +364,35 @@ type OperatorActionReceiptBase = {
   committedAt: Timestamp;
 };
 
-export type OperatorActionReceipt = OperatorActionReceiptBase & (
-  | { effectRef?: ArtifactRef; launchProviderActionJournalRef?: never }
-  | { effectRef?: ArtifactRef; launchProviderActionJournalRef: LaunchProviderActionJournalRefV1 }
-);
+export type McpSeatProvisioningDescriptorV1 = Readonly<{
+  schemaVersion: 1;
+  projectSessionId: ProjectSessionId;
+  sessionRevision: number;
+  sessionGeneration: number;
+  coordinationRunId: CoordinationRunId;
+  runRevision: number;
+  chairAgentId: AgentId;
+  chairGeneration: number;
+  chairLeaseId: LeaseId;
+}>;
+
+type NonLaunchOperatorActionReceipt = OperatorActionReceiptBase & {
+  effectRef?: ArtifactRef;
+  launchProviderActionJournalRef?: never;
+};
+type LaunchOperatorActionReceipt = OperatorActionReceiptBase & {
+  effectRef?: ArtifactRef;
+  launchProviderActionJournalRef: LaunchProviderActionJournalRefV1;
+};
+export type OperatorActionReceipt = NonLaunchOperatorActionReceipt | LaunchOperatorActionReceipt;
+type TerminalSuccessLaunchJournal = Extract<
+  LaunchProviderActionJournalRefV1,
+  { journalState: "terminal"; outcomeKind: "terminal-success" }
+>;
+type TerminalNoEffectLaunchJournal = Extract<
+  LaunchProviderActionJournalRefV1,
+  { journalState: "terminal"; outcomeKind: "terminal-no-effect" }
+>;
 
 export type OperatorActionStatusRequest = {
   credential: OperatorCapabilityCredential;
@@ -413,7 +440,27 @@ export type OperatorActionStatus =
       attemptGeneration: number;
       gitCustody: GitCustodyStatus;
     }
-  | { status: "committed"; commandId: string; receipt: OperatorActionReceipt }
+  | {
+      status: "committed";
+      commandId: string;
+      receipt: NonLaunchOperatorActionReceipt;
+      launchProviderActionJournalRef?: never;
+      seatProvisioning?: never;
+    }
+  | {
+      status: "committed";
+      commandId: string;
+      receipt: LaunchOperatorActionReceipt;
+      launchProviderActionJournalRef: TerminalSuccessLaunchJournal;
+      seatProvisioning: McpSeatProvisioningDescriptorV1;
+    }
+  | {
+      status: "committed";
+      commandId: string;
+      receipt: LaunchOperatorActionReceipt;
+      launchProviderActionJournalRef: TerminalNoEffectLaunchJournal;
+      seatProvisioning?: never;
+    }
   | {
       status: "rejected";
       commandId: string;

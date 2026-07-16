@@ -584,7 +584,10 @@ describe("Console controller and two-phase actions", () => {
     const committed: OperatorActionStatus = {
       status: "committed",
       commandId: "target-command" as CommandId,
-      receipt: receipt("target-command"),
+      receipt: receipt("target-command") as Exclude<
+        OperatorActionReceipt,
+        { launchProviderActionJournalRef: unknown }
+      >,
     };
     const service = actions({
       status: vi.fn(async (): Promise<OperatorActionStatus> => ({

@@ -141,6 +141,20 @@ narrowed authority and their own capability. Swapping Claude and Codex
 leadership requires typed handoff/takeover custody; it does not change the
 protocol or create a fallback chain.
 
+In production Console, Launch is available only when the dedicated
+`projectSessions.prepareLaunch` operation and explicit operator-action commit
+surface are negotiated. The selected live Project row supplies the session
+revision, generation and reviewed launch-packet reference; Launch accepts no
+caller-authored CAS fields. Preview preparation uses a per-input-attempt command
+so an expired, effect-free preview can be replaced. Console derives the commit
+command ID from the operator, project, session, session generation and exact
+launch packet path/digest; input events and Console client instances are
+deliberately excluded. An exact reopen therefore polls the existing commit,
+while a new generation or packet gets a new identity. Provider dispatch still requires a
+separate explicit confirmation gesture. Sessions projected as `launching` or
+`launch_ambiguous` rehydrate through status-only observation; Console never
+redispatches or invokes generic action reconciliation for launch custody.
+
 For visible pairing, Herdr attaches panes or observer renderers while messages still travel through the durable fabric mailbox. For headless orchestration, no pane is required. Both profiles can coexist in one run.
 
 Herdr provides pane visibility and process supervision. Fabric events are
@@ -257,8 +271,11 @@ Claude to Codex mailbox messages through separate MCP proxies.
 
 Bind a new immutable seat generation to the exact current operator-launched
 project session and coordination run before the current credentials expire.
-Use the revisions, generations, chair identity and active chair lease reported
-by the current operator projection. The command derives the current active
+After launch reaches committed status, use the current `seatProvisioning`
+descriptor returned by `operatorActionStatus` for the session/run revisions,
+generations, chair identity and active chair lease. This descriptor is a
+current CAS projection and is not part of the immutable commit receipt; refresh
+status immediately before provisioning. The command derives the current active
 roster generation from the locked project pointer and passes it as the expected
 predecessor; there is no caller-selected rollback value. The requested expiry
 must be a future ISO timestamp no more than 31 days away and cannot outlive any

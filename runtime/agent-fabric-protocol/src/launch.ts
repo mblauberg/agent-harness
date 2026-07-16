@@ -175,7 +175,12 @@ export type LaunchProviderActionJournalRefV1 =
     })
   | (LaunchProviderActionJournalRefV1Common & {
       journalState: "terminal";
-      outcomeKind: "terminal-success" | "terminal-no-effect";
+      outcomeKind: "terminal-success";
+      outcomeDigest: Sha256Digest;
+    })
+  | (LaunchProviderActionJournalRefV1Common & {
+      journalState: "terminal";
+      outcomeKind: "terminal-no-effect";
       outcomeDigest: Sha256Digest;
     })
   | (LaunchProviderActionJournalRefV1Common & {

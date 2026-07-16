@@ -4,6 +4,8 @@ import type {
   OperatorCapabilityGrant,
   OperatorActionIntent,
   OperatorActionReconcileRequest,
+  OperatorActionReceipt,
+  OperatorActionStatus,
   OperatorGitIntent,
   GitRepositoryReadRequest,
   MessageBodyRef,
@@ -33,6 +35,7 @@ declare const gitIntent: OperatorGitIntent;
 declare const reconcileBase: Omit<OperatorActionReconcileRequest, "mode">;
 declare const promotionBase: Omit<Extract<OperatorActionIntent, { kind: "promotion" }>, "releaseBinding">;
 declare const externalIntent: Extract<OperatorActionIntent, { kind: "registered-external-effect" }>;
+declare const launchReceipt: Extract<OperatorActionReceipt, { launchProviderActionJournalRef: unknown }>;
 declare const operatorMutation: OperatorMutationContext;
 declare const repositoryReadBase: Omit<GitRepositoryReadRequest, "projectSessionId" | "target">;
 declare const activityItemBase: Omit<ActivityViewItem, "kind" | "messageBodyRef">;
@@ -107,6 +110,13 @@ export function compileTimeIllegalStateWitnesses(): void {
     mode: "redispatch",
   };
 
+  // @ts-expect-error launch receipts require a correlated terminal settlement status
+  const launchWithoutSettlement: OperatorActionStatus = {
+    status: "committed",
+    commandId: "command_launch_without_settlement",
+    receipt: launchReceipt,
+  };
+
   // @ts-expect-error a session worktree read must bind the exact project session
   const unboundSessionWorktree: GitRepositoryReadRequest = {
     ...repositoryReadBase,
@@ -138,6 +148,7 @@ export function compileTimeIllegalStateWitnesses(): void {
   void promotionWithoutRelease;
   void externalWithRelease;
   void redispatchReconcile;
+  void launchWithoutSettlement;
   void unboundSessionWorktree;
   void messageWithoutBodyRef;
   void decisionWithBodyRef;

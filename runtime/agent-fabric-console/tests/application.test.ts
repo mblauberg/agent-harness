@@ -23,6 +23,7 @@ import {
   guidedWorkflowPrompt,
   sessionSwitchBlockReason,
   startFabricConsoleApplication,
+  workflowSessionSwitchBlocked,
   type ConsoleBootstrapResult,
   type ConsoleBootstrapPort,
 } from "../src/application.js";
@@ -285,6 +286,9 @@ describe("typed Console application bootstrap boundary", () => {
       pendingCommandIds: [],
       lastActionStatus: { status: "committed" } as never,
     })).toBeNull();
+    expect(workflowSessionSwitchBlocked("pending")).toBe(true);
+    expect(workflowSessionSwitchBlocked("ambiguous")).toBe(true);
+    expect(workflowSessionSwitchBlocked("committed")).toBe(false);
   });
 
   it("names the exact required field in each guided workflow prompt", () => {
@@ -900,6 +904,7 @@ describe("typed Console application bootstrap boundary", () => {
             prepareGuided: vi.fn(async () => review),
             arm,
             commit,
+            observe: vi.fn(async ({ review: current }: { review: ConsoleWorkflowReview }) => current),
           },
           detach: async () => {},
           close: async () => {},
@@ -998,6 +1003,7 @@ describe("typed Console application bootstrap boundary", () => {
               armedByEventId: eventId,
             })),
             commit,
+            observe: vi.fn(async ({ review: current }: { review: ConsoleWorkflowReview }) => current),
           },
           detach: async () => {},
           close: async () => {},
@@ -1069,6 +1075,7 @@ describe("typed Console application bootstrap boundary", () => {
         review: input.review,
         reconnectProjectSessionId: null,
       })),
+      observe: vi.fn(async (input: { review: ConsoleWorkflowReview }) => input.review),
     };
     let event = 0;
     const application = await startFabricConsoleApplication({
