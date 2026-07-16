@@ -110,6 +110,7 @@ def test_ci_runs_complete_harness_and_fabric_gates() -> None:
     for required in (
         "npm ci --no-audit --no-fund",
         "npm run build",
+        "npm run test --workspace=@local/agent-fabric-protocol",
         "npm run schema:check --workspace=@local/agent-fabric",
         "npm run typecheck --workspace=@local/agent-fabric",
         "npm run test --workspace=@local/agent-fabric",
@@ -176,8 +177,10 @@ def test_clean_ci_builds_locked_protocol_before_daemon_typecheck() -> None:
 
     fabric_commands = "\n".join(str(step.get("run", "")) for step in fabric_steps)
     assert "test ! -e runtime/agent-fabric-protocol/dist" in fabric_commands
-    assert fabric_commands.index("npm run build") < fabric_commands.index(
-        "npm run typecheck --workspace=@local/agent-fabric"
+    assert (
+        fabric_commands.index("npm run build")
+        < fabric_commands.index("npm run test --workspace=@local/agent-fabric-protocol")
+        < fabric_commands.index("npm run typecheck --workspace=@local/agent-fabric")
     )
     assert "test -f runtime/agent-fabric-protocol/dist/index.d.ts" in fabric_commands
 
@@ -246,17 +249,19 @@ def test_repository_policy_covers_sensitive_fabric_surfaces() -> None:
 
     template = (ROOT / ".github" / "pull_request_template.md").read_text(encoding="utf-8").lower()
     for heading in (
-        "## risk and authority",
-        "## test evidence",
-        "## security and operational evidence",
-        "## documentation and rollback",
+        "## summary",
+        "## decision requested",
+        "## risk and rollback",
+        "## evidence",
         "## independent review",
     ):
         assert heading in template
 
-    current_contract = template.split("## current contract and cutover", 1)[1].split(
-        "\n## ", 1
-    )[0]
+    # The evidence table replaces attestation checkboxes with externally
+    # verifiable rows bound to the exact head.
+    assert "| gate | command or artifact | result | head sha | n/a reason |" in template
+    assert "- [ ]" not in template
+
     for evidence in (
         "direct cutover",
         "no legacy reader",
@@ -265,16 +270,18 @@ def test_repository_policy_covers_sensitive_fabric_surfaces() -> None:
         "rollback or forward-repair",
         "trigger or query-plan evidence",
     ):
-        assert evidence in current_contract
-    assert "historical formats remain readable" not in current_contract
+        assert evidence in template
+    assert "historical formats remain readable" not in template
 
     for evidence in (
-        "exact base",
-        "exact head",
+        "base:",
+        "head under review",
         "reviewer role",
         "model family",
-        "user gates still pending",
+        "exact head reviewed",
+        "stays open after merge",
         "later commit invalidates",
+        "mermaid",
     ):
         assert evidence in template
 

@@ -115,7 +115,8 @@ At minimum, the implementation review shall cover:
   provider-session retention;
 - `deliver`: canonical `delivery-run` ownership and explicit project-session,
   coordination-run and workstream relationships;
-- `work-map`: project/run/lead dependencies without becoming live task truth;
+- `work-map`: stable specification and work-item route links, while GitHub
+  issues and Project Status retain all live work state;
 - `release`: exact accepted-artifact and target-bound promotion gates;
 - `retrospect`: user-attention, gate latency and unnecessary-interruption
   evidence feeding the next scope cycle.
