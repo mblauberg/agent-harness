@@ -42,6 +42,7 @@ import {
   type ScopedGateReadRequest,
   type ScopedGateReadResult,
   type Sha256Digest,
+  type SystemViewItem,
   type TaskId,
   type Timestamp,
   type TopologyWaveCurrentReadRequestV1,
@@ -513,9 +514,81 @@ function closedProjectionUnavailable(
 export type BootstrapUnavailableReason =
   | "feature-unavailable"
   | "configuration-missing"
-  | "start-failed"
   | "schema-cutover-required"
-  | "authority-unavailable";
+  | "authority-unavailable"
+  | "daemon-unreachable"
+  | "daemon-incompatible"
+  | "socket-unavailable"
+  | "daemon-election-conflict"
+  | "daemon-spawn-failed"
+  | "bootstrap-receipt-invalid"
+  | "start-failed";
+
+/**
+ * Truthful System-view rendering for each bootstrap-unavailable reason. The
+ * transport axis stays `bootstrap-unavailable` (one honest connection axis),
+ * while the System `daemon` row names the exact causal finding and its bounded
+ * remediation instead of collapsing every daemon/transport failure into a
+ * generic message. Every detail is a safe, non-secret operator summary.
+ */
+const BOOTSTRAP_UNAVAILABLE_DETAILS: Record<
+  BootstrapUnavailableReason,
+  { kind: SystemViewItem["kind"]; detail: string }
+> = {
+  "feature-unavailable": {
+    kind: "daemon",
+    detail:
+      "the Fabric daemon does not negotiate a required Console feature — adopt the current build",
+  },
+  "configuration-missing": {
+    kind: "daemon",
+    detail:
+      "workspace trust configuration is unavailable — run fabric doctor to repair project configuration",
+  },
+  "schema-cutover-required": {
+    kind: "daemon",
+    detail: "CUTOVER REQUIRED — existing database preserved",
+  },
+  "authority-unavailable": {
+    kind: "daemon",
+    detail:
+      "the requested project session is not attachable under this operator authority",
+  },
+  "daemon-unreachable": {
+    kind: "daemon",
+    detail:
+      "no reachable Fabric daemon — the daemon socket is absent or unresponsive; retry to start it",
+  },
+  "daemon-incompatible": {
+    kind: "daemon",
+    detail:
+      "the running Fabric daemon is protocol-incompatible — stop it so the current build can start",
+  },
+  "socket-unavailable": {
+    kind: "daemon",
+    detail:
+      "the Fabric daemon socket did not match the trusted path — reconcile a stale daemon and retry",
+  },
+  "daemon-election-conflict": {
+    kind: "daemon",
+    detail:
+      "a concurrent Fabric daemon bootstrap is in progress — retry after the election settles",
+  },
+  "daemon-spawn-failed": {
+    kind: "daemon",
+    detail:
+      "the Fabric daemon failed to launch — inspect fabric doctor for the failed bootstrap stage",
+  },
+  "bootstrap-receipt-invalid": {
+    kind: "daemon",
+    detail:
+      "the Fabric daemon bootstrap receipt was invalid — reconcile the daemon and retry",
+  },
+  "start-failed": {
+    kind: "daemon",
+    detail: "the Fabric daemon could not be started",
+  },
+};
 
 export function createBootstrapUnavailableDataset(
   reason: BootstrapUnavailableReason,
@@ -546,14 +619,12 @@ export function createBootstrapUnavailableDataset(
               ageMs: 0,
               reason,
             },
-            summary: reason === "schema-cutover-required"
-              ? {
-                  kind: "system",
-                  systemKind: "daemon",
-                  state: "unavailable",
-                  detail: "CUTOVER REQUIRED — existing database preserved",
-                }
-              : null,
+            summary: {
+              kind: "system",
+              systemKind: BOOTSTRAP_UNAVAILABLE_DETAILS[reason].kind,
+              state: "unavailable",
+              detail: BOOTSTRAP_UNAVAILABLE_DETAILS[reason].detail,
+            },
             detailRef: null,
             actionAvailability: {
               state: "read-only",
