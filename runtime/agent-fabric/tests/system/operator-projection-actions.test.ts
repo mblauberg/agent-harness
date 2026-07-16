@@ -1952,6 +1952,7 @@ describe("operator action store", () => {
         };
       },
     };
+    let actionNow = now;
     const actions = new OperatorActionStore({
       database: fixture.database,
       operatorStore: fixture.operatorStore,
@@ -1961,7 +1962,8 @@ describe("operator action store", () => {
         observe: async () => { throw new Error("not expected"); },
       },
       launchCustody,
-      clock: () => now,
+      clock: () => actionNow,
+      previewTtlMs: 100,
     });
     const request: OperatorActionPreviewRequest = {
       command: {
@@ -1989,6 +1991,52 @@ describe("operator action store", () => {
       },
     }, { allowLaunchIntent: true })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
 
+    const expiredPreview = await actions.preview(fixture.context, {
+      ...request,
+      command: {
+        ...request.command,
+        commandId: identifier<"CommandId">("preview_launch_expired_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_launch_01"),
+          inputEventId: "input_preview_launch_expired_01",
+        },
+      },
+    }, { allowLaunchIntent: true });
+    actionNow += 101;
+    const expiredCommitRequest = {
+      command: {
+        ...request.command,
+        commandId: identifier<"CommandId">("commit_launch_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_launch_01"),
+          inputEventId: "input_commit_launch_01",
+        },
+      },
+      projectId,
+      previewId: expiredPreview.previewId,
+      expectedPreviewRevision: expiredPreview.previewRevision,
+      previewDigest: expiredPreview.previewDigest,
+      expectedIntentDigest: expiredPreview.intentDigest,
+      confirmation: { kind: "explicit", confirmationId: "confirm_launch_expired_01" },
+    } as const;
+    await expect(actions.commit(fixture.context, expiredCommitRequest)).rejects.toMatchObject({
+      code: "CAPABILITY_EXPIRED",
+    });
+    expect(launchTerminal).toBe(false);
+    expect(actions.status({
+      credential: launchCredential,
+      projectId,
+      commandId: expiredCommitRequest.command.commandId,
+    })).toEqual({ status: "not-found", commandId: expiredCommitRequest.command.commandId });
+    expect(fixture.database.prepare(`
+      SELECT COUNT(*) AS count FROM operator_commands WHERE operator_id=? AND command_id=?
+    `).get("operator_01", expiredCommitRequest.command.commandId)).toMatchObject({ count: 0 });
+    expect(fixture.database.prepare(`
+      SELECT COUNT(*) AS count FROM operator_effect_custody WHERE operator_id=? AND command_id=?
+    `).get("operator_01", expiredCommitRequest.command.commandId)).toMatchObject({ count: 0 });
+
     const preview = await actions.preview(fixture.context, request, { allowLaunchIntent: true });
     expect(preview).toMatchObject({
       intent,
@@ -1998,7 +2046,7 @@ describe("operator action store", () => {
     const commitRequest = {
       command: {
         ...request.command,
-        commandId: identifier<"CommandId">("commit_launch_01"),
+        commandId: expiredCommitRequest.command.commandId,
         provenance: {
           kind: "console-direct-input",
           clientId: identifier<"OperatorClientId">("console_launch_01"),
@@ -2013,6 +2061,9 @@ describe("operator action store", () => {
       confirmation: { kind: "explicit", confirmationId: "confirm_launch_01" },
     } as const;
     const receipt = await actions.commit(fixture.context, commitRequest);
+    await expect(actions.commit(fixture.context, expiredCommitRequest)).rejects.toMatchObject({
+      code: "DEDUPE_CONFLICT",
+    });
     expect(receipt).not.toHaveProperty("seatProvisioning");
     expect(actions.status({
       credential: launchCredential,

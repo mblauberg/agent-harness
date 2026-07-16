@@ -19,7 +19,6 @@ import {
 } from "@local/agent-fabric-protocol";
 
 import { createEmptyViewPages, revisionFromProtocol } from "../src/model.js";
-import { consoleLaunchCommandId } from "../src/launch-command.js";
 import type { FabricConsoleDataset } from "../src/protocol-adapter.js";
 import { createProductionConsoleTypedEntryPlanner } from "../src/typed-entry-planner.js";
 
@@ -266,8 +265,8 @@ describe("production Console typed-entry planner", () => {
         actor: operatorId,
         provenance: {
           kind: "console-direct-input",
-          clientId: "console_launch_custody",
-          inputEventId: expect.stringMatching(/^console_launch_/u),
+          clientId,
+          inputEventId: "launch-typed-entry",
         },
       }),
       projectId,
@@ -285,15 +284,7 @@ describe("production Console typed-entry planner", () => {
       .toBe(prepareLaunch.mock.calls[0]?.[0].command.commandId);
     await planner.buildIntent({ ...launchInput, eventId: "launch-after-restart" });
     expect(prepareLaunch.mock.calls[2]?.[0].command.commandId)
-      .toBe(prepareLaunch.mock.calls[0]?.[0].command.commandId);
-    expect(consoleLaunchCommandId({
-      phase: "prepare",
-      operatorId,
-      projectId,
-      projectSessionId,
-      sessionGeneration: 3,
-      launchPacketRef: { path: "launch/packet.json" as never, digest },
-    })).not.toBe(prepareLaunch.mock.calls[0]?.[0].command.commandId);
+      .not.toBe(prepareLaunch.mock.calls[0]?.[0].command.commandId);
   });
 
   it("rejects caller-authored Launch fields before contacting the daemon", async () => {

@@ -9,7 +9,7 @@ import type {
 } from "@local/agent-fabric-protocol";
 
 export function consoleLaunchCommandId(input: Readonly<{
-  phase: "prepare" | "commit";
+  phase: "commit";
   operatorId: OperatorId;
   projectId: ProjectId;
   projectSessionId: ProjectSessionId;

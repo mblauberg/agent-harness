@@ -465,7 +465,11 @@ export class OperatorActionStore {
       const code = Date.parse(envelope.preview.expiresAt) <= this.#clock()
         ? "preview-expired"
         : "preview-stale";
-      this.#recordRejected(context, request, stored, envelope, payloadHash, code);
+      if (code === "preview-expired" && envelope.preview.intent.kind === "project-session-launch") {
+        this.#recordRetryableLaunchExpiry(request, envelope);
+      } else {
+        this.#recordRejected(context, request, stored, envelope, payloadHash, code);
+      }
       throw error;
     }
     const current = await this.#readCurrentState(envelope.preview.intent);
@@ -2015,6 +2019,26 @@ export class OperatorActionStore {
         },
         "rejected",
       );
+    });
+    transaction();
+  }
+
+  #recordRetryableLaunchExpiry(
+    request: OperatorActionCommitRequest,
+    envelope: StoredPreviewEnvelope,
+  ): void {
+    const rejected: StoredRejectedAction = {
+      status: "rejected",
+      commandId: request.command.commandId,
+      code: "preview-expired",
+      evidenceRefs: envelope.preview.evidenceRefs,
+    };
+    const transaction = this.#database.transaction((): void => {
+      const latest = this.#previewRow(request.previewId);
+      this.#assertPreviewClaim(latest, request.command.commandId);
+      this.#database.prepare(`
+        UPDATE operator_previews SET preview_json=?, confirmed_command_id=NULL WHERE preview_id=?
+      `).run(canonicalJson({ preview: envelope.preview, action: rejected }), request.previewId);
     });
     transaction();
   }

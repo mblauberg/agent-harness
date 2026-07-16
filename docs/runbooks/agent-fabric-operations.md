@@ -145,11 +145,12 @@ In production Console, Launch is available only when the dedicated
 `projectSessions.prepareLaunch` operation and explicit operator-action commit
 surface are negotiated. The selected live Project row supplies the session
 revision, generation and reviewed launch-packet reference; Launch accepts no
-caller-authored CAS fields. Console derives separate prepare and commit command
-IDs from the operator, project, session, session generation and exact launch
-packet path/digest; input events and Console client instances are deliberately
-excluded. An exact reopen therefore polls the existing command, while a new
-generation or packet gets a new identity. Provider dispatch still requires a
+caller-authored CAS fields. Preview preparation uses a per-input-attempt command
+so an expired, effect-free preview can be replaced. Console derives the commit
+command ID from the operator, project, session, session generation and exact
+launch packet path/digest; input events and Console client instances are
+deliberately excluded. An exact reopen therefore polls the existing commit,
+while a new generation or packet gets a new identity. Provider dispatch still requires a
 separate explicit confirmation gesture. Sessions projected as `launching` or
 `launch_ambiguous` rehydrate through status-only observation; Console never
 redispatches or invokes generic action reconciliation for launch custody.
