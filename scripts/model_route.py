@@ -143,12 +143,25 @@ def load_capabilities(path: str | None) -> tuple[dict[str, Any], str]:
     models = data["models"]
     if not models:
         return {}, "capability_discovery_failed"
+    normalized_keys: set[str] = set()
     for key, item in models.items():
-        if not isinstance(key, str) or not isinstance(item, dict):
+        if not isinstance(key, str) or not key.strip() or not isinstance(item, dict):
             return {}, "capability_discovery_failed"
-        if not isinstance(item.get("resolved_model"), str) or not isinstance(item.get("supported_efforts"), list):
+        normalized_key = key.casefold()
+        resolved_model = item.get("resolved_model")
+        efforts = item.get("supported_efforts")
+        if normalized_key in normalized_keys:
             return {}, "capability_discovery_failed"
-        if any(not isinstance(effort, str) for effort in item["supported_efforts"]):
+        normalized_keys.add(normalized_key)
+        if (
+            not isinstance(resolved_model, str)
+            or not resolved_model.strip()
+            or resolved_model.casefold() != normalized_key
+            or not isinstance(efforts, list)
+            or not efforts
+        ):
+            return {}, "capability_discovery_failed"
+        if any(not isinstance(effort, str) or not effort.strip() for effort in efforts):
             return {}, "capability_discovery_failed"
     return models, ""
 

@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "model-route"
@@ -236,6 +238,36 @@ def test_explicit_unsupported_effort_fails_against_runtime_snapshot(tmp_path):
 def test_malformed_capability_snapshot_fails_closed(tmp_path):
     snapshot = tmp_path / "caps.json"
     snapshot.write_text("{}")
+    result, route = resolve(
+        "--adapter", "codex", "--alias", "flagship", "--role", "lead",
+        "--capabilities-file", str(snapshot),
+    )
+    assert result.returncode == 1
+    assert route["status"] == "capability_discovery_failed"
+
+
+@pytest.mark.parametrize(
+    "models",
+    [
+        {"gpt-unrelated": {"resolved_model": "gpt-unrelated", "supported_efforts": []}},
+        {"gpt-unrelated": {"resolved_model": "gpt-unrelated", "supported_efforts": [" "]}},
+        {"gpt-key": {"resolved_model": "gpt-other", "supported_efforts": ["high"]}},
+        {"gpt-key": {"resolved_model": "", "supported_efforts": ["high"]}},
+        {
+            "GPT-Duplicate": {
+                "resolved_model": "GPT-Duplicate",
+                "supported_efforts": ["high"],
+            },
+            "gpt-duplicate": {
+                "resolved_model": "gpt-duplicate",
+                "supported_efforts": ["max"],
+            },
+        },
+    ],
+)
+def test_capability_snapshot_rejects_incomplete_or_inconsistent_models(tmp_path, models):
+    snapshot = tmp_path / "caps.json"
+    snapshot.write_text(json.dumps(capability_snapshot(models)))
     result, route = resolve(
         "--adapter", "codex", "--alias", "flagship", "--role", "lead",
         "--capabilities-file", str(snapshot),

@@ -41,6 +41,7 @@ def test_normalize_rejects_empty_or_malformed_catalogue():
         {"slug": "gpt-malformed", "supported_reasoning_levels": {}},
         {"slug": "gpt-malformed", "supported_reasoning_levels": ["high"]},
         {"slug": "gpt-malformed", "supported_reasoning_levels": [{"effort": 7}]},
+        {"slug": "gpt-malformed", "supported_reasoning_levels": [{"effort": " "}]},
     ],
 )
 def test_normalize_rejects_entire_mixed_payload_for_any_malformed_entry(malformed):
@@ -55,3 +56,20 @@ def test_normalize_rejects_entire_mixed_payload_for_any_malformed_entry(malforme
     }
     with pytest.raises(ValueError):
         MODULE.normalize(raw)
+
+
+@pytest.mark.parametrize(
+    "catalogue",
+    [
+        {"models": [{"slug": "gpt-empty", "supported_reasoning_levels": []}]},
+        {
+            "models": [
+                {"slug": "GPT-Duplicate", "supported_reasoning_levels": [{"effort": "high"}]},
+                {"slug": "gpt-duplicate", "supported_reasoning_levels": [{"effort": "max"}]},
+            ]
+        },
+    ],
+)
+def test_normalize_rejects_empty_effort_sets_and_casefolded_duplicate_slugs(catalogue):
+    with pytest.raises(ValueError):
+        MODULE.normalize(catalogue)

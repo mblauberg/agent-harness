@@ -25,6 +25,8 @@ def normalize(raw: Any) -> dict[str, Any]:
         levels = item.get("supported_reasoning_levels")
         if not isinstance(levels, list):
             raise ValueError("catalogue reasoning levels must be a list")
+        if not levels:
+            raise ValueError("catalogue reasoning levels must not be empty")
         efforts = []
         for level in levels:
             if not isinstance(level, dict):
@@ -33,7 +35,10 @@ def normalize(raw: Any) -> dict[str, Any]:
             if not isinstance(effort, str) or not effort.strip():
                 raise ValueError("catalogue reasoning effort must be a non-empty string")
             efforts.append(effort.lower())
-        models[slug.lower()] = {
+        normalized_slug = slug.casefold()
+        if normalized_slug in models:
+            raise ValueError("catalogue model slugs must be unique when case-folded")
+        models[normalized_slug] = {
             "resolved_model": slug,
             "supported_efforts": efforts,
         }
