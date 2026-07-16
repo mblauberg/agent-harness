@@ -1,0 +1,21 @@
+# Locked Python test tooling for the harness gate (issue #200).
+#
+# This repository is not a Python package: `package = false` keeps uv from
+# building or installing the repo itself. The only managed surface is the
+# `test` dependency group, pinned transitively in uv.lock and installed in
+# CI with `uv sync --locked --only-group test`. Local runs are unchanged:
+# scripts/check-harness resolves HARNESS_PYTHON, then miniforge, then
+# python3, and any interpreter with pytest and PyYAML works.
+[project]
+name = "provenant"
+version = "0.0.0"
+requires-python = ">=3.11"
+
+[dependency-groups]
+test = [
+    "pytest>=8.4",
+    "pyyaml>=6.0.2",
+]
+
+[tool.uv]
+package = false
