@@ -2723,11 +2723,15 @@ export class Fabric {
         const replayed = this.#operatorActions.replayLaunchPreview(credential.context, request);
         if (replayed !== undefined) return replayed;
         const intent = await this.#launchCustody.prepareLaunchIntent(request);
-        return await this.#operatorActions.preview(credential.context, {
-          command: request.command,
-          projectId: request.projectId,
-          intent,
-        });
+        return await this.#operatorActions.preview(
+          credential.context,
+          {
+            command: request.command,
+            projectId: request.projectId,
+            intent,
+          },
+          { allowLaunchIntent: true },
+        );
       }
       case FABRIC_OPERATIONS.membershipBind: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.membershipBind];
@@ -2922,6 +2926,12 @@ export class Fabric {
       }
       case FABRIC_OPERATIONS.operatorActionPreview: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionPreview];
+        if (request.intent.kind === "project-session-launch") {
+          throw new FabricError(
+            "CAPABILITY_FORBIDDEN",
+            "project-session-launch previews are server-authored only; use projectSessionLaunchPrepare",
+          );
+        }
         const credential = operatorCredential();
         operatorCommand(credential, request.command);
         this.#assertChairLiveHandoffFeature(context, operation, request);
