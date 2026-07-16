@@ -108,7 +108,6 @@ describe("Section 21 Stage 3 adapter compatibility and activation gate", () => {
     adapter.enabled = true;
     adapter.unresolved_pins = [];
     implementation.wrapper_entrypoint = implementation.executable;
-    implementation.wrapper_entrypoint_sha256 = implementation.executable_sha256;
     contract.protocol_version = null;
     contract.schema_source = null;
     contract.schema_sha256 = null;
