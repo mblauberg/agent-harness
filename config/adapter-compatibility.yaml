@@ -52,22 +52,22 @@ adapters:
     implementation:
       kind: native-cli
       command: codex
-      installed_version: "0.144.4"
-      source_build: "rust-v0.144.4"
-      executable: "/opt/homebrew/Caskroom/codex/0.144.4/codex-aarch64-apple-darwin"
-      executable_sha256: "3302acbda5f53de1a71ebdb0c0f2aae0d47f9324aa9fb6b4e78a47014fd51c7d"
+      installed_version: "0.144.5"
+      source_build: "rust-v0.144.5"
+      executable: "/opt/homebrew/Caskroom/codex/0.144.5/codex-aarch64-apple-darwin"
+      executable_sha256: "5e29ab10ca1171be158f7335dd6bd8ce1aaf9af1556939db36a5ee338be6f5f2"
       wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/codex-app-server.ts"
     contract:
       adapter_version: 1
       protocol: codex-app-server
-      protocol_version: "cli-0.144.4"
+      protocol_version: "cli-0.144.5"
       schema_generator: "codex app-server generate-json-schema --experimental --out <directory>"
       schema_bundle: "runtime/agent-fabric/schemas/upstream/codex-app-server-0.144.1.bundle.json"
       schema_sha256: "cb82fd306ef371fcc787ec39032c5ec097e9c096a2c6fdeef3c39469dcadf48c"
       capability_fixture_version: 1
     runtime_range:
       supported_cli_versions:
-        - "0.144.4"
+        - "0.144.5"
       platforms:
         - darwin-arm64
     model_family_constraints:
