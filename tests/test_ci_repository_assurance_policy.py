@@ -1,3 +1,40 @@
+"""CI/repository policy assurance tests.
+
+Known residual (issue #179, following cross-family review of PR #168): the
+`continue-on-error` guard below (`_assert_no_continue_on_error`) is an
+in-repo pytest, which has an inherent self-referential limit that no amount
+of test-side hardening can close. A PR that adds `continue-on-error: true`
+to the very step that runs this suite (or to the `ci-status` aggregation
+step itself) makes that step's failure invisible to the job's own
+conclusion -- and `needs.<job>.result`, which `ci-status` reads to decide
+whether to `exit 1`, reports exactly that conclusion. The assertion still
+raises correctly inside the run; the required check simply never sees it.
+The same PR could, just as easily, delete this test file outright. Neither
+is fixable from inside the test suite: independent enforcement has to live
+outside the PR's own workflow run.
+
+What this repository already has (verified live via `gh api
+repos/.../rulesets`, 2026-07-16): a branch ruleset on `main` pins `ci-status`
+as a `required_status_checks` context with `strict_required_status_checks_
+policy: true` and an empty `bypass_actors` list, so no actor can merge past
+a red or pending `ci-status`. That closes the "merge without a green check"
+gap; it does not close the "the green check lied" gap above.
+
+What a personal/public, non-Enterprise repo does *not* get from rulesets:
+rule types that restrict *edits* to specific paths (`file_path_restriction`,
+`max_file_path_length`, `max_file_size`) are gated to GitHub Enterprise, so
+this repo cannot use a ruleset to lock `.github/workflows/ci.yml`, the
+composite action, or this test file against modification the way it locks
+pushes to `main`. The only lever available at this plan tier is a *second*,
+independently-sourced required status check -- one produced by a workflow
+run the PR under review cannot itself edit (e.g. triggered via
+`pull_request_target` against the base ref, or a scheduled post-merge
+audit) -- so that a single continue-on-error edit inside the PR's own
+`ci.yml` cannot neutralise both checks at once. That is the required-check
+pinning work tracked in #170; nothing further is actionable here as a
+test-suite change.
+"""
+
 from __future__ import annotations
 
 import json
@@ -73,10 +110,14 @@ WORKSPACE_GUIDES = (
 )
 
 
-def _workflow() -> dict[str, object]:
-    value = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+def _parse_workflow_text(text: str) -> dict[str, object]:
+    value = yaml.safe_load(text)
     assert isinstance(value, dict)
     return value
+
+
+def _workflow() -> dict[str, object]:
+    return _parse_workflow_text(WORKFLOW.read_text(encoding="utf-8"))
 
 
 def _job(document: dict[str, object], name: str) -> dict[str, object]:
@@ -171,10 +212,20 @@ def _jobs_for_changed_paths(document: dict[str, object], paths: list[str]) -> se
     return selected
 
 
-def _assert_no_continue_on_error(document: dict[str, object]) -> None:
+def _assert_no_continue_on_error(
+    document: dict[str, object],
+    setup_steps: list[dict[str, object]] | None = None,
+) -> None:
     # continue-on-error on any required job or step would neutralise failure
-    # propagation invisibly, so no job and no step may set it. No modelled
-    # exception exists today.
+    # propagation invisibly, so no job and no step may set it. This also
+    # covers the shared composite action (setup-node-workspace) that every
+    # workspace job runs through via `uses: ./...` -- a continue-on-error
+    # planted there is exactly as invisible to the ci-status aggregate as
+    # one planted directly in ci.yml, and prior to this check it was outside
+    # this guard's reach entirely, parsed and asserted on nowhere in this
+    # suite. `setup_steps` defaults to the real, on-disk composite action
+    # steps; tests pass a mutated copy to exercise the guard without
+    # touching the file. No modelled exception exists today.
     jobs = document.get("jobs")
     assert isinstance(jobs, dict)
     for job_name, job in jobs.items():
@@ -182,17 +233,51 @@ def _assert_no_continue_on_error(document: dict[str, object]) -> None:
         assert "continue-on-error" not in job, job_name
         for step in _steps(job):
             assert "continue-on-error" not in step, job_name
+    for step in setup_steps if setup_steps is not None else _setup_action_steps():
+        assert "continue-on-error" not in step, "setup-node-workspace"
 
 
 def _triggers(document: dict[str, object]) -> dict[str, object]:
     # PyYAML resolves the bare `on:` key to boolean True (YAML 1.1), so read
-    # the trigger mapping under whichever key the loader produced.
+    # the trigger mapping under whichever key the loader produced. This
+    # accessor only extracts the mapping; it cannot verify the key was
+    # actually spelled `on:` (every YAML-1.1 boolean spelling of "on"
+    # collapses to the identical `True` key, so the parsed document can
+    # never make that distinction) -- that is asserted separately, from the
+    # raw text, by _assert_exact_on_key.
     on = document.get(True, document.get("on"))
     assert isinstance(on, dict)
     return on
 
 
+# Every bare top-level key PyYAML's (YAML 1.1) bool resolver would fold to
+# the same boolean tag as a correctly-spelled `on:` -- so none of these may
+# appear verbatim, and `on` itself must appear exactly once.
+_ON_KEY_LOOKALIKES = frozenset({"on", "off", "yes", "no", "true", "false"})
+_TOP_LEVEL_KEY_PATTERN = re.compile(r"(?m)^([A-Za-z]+)\s*:")
+
+
+def _assert_exact_on_key(text: str) -> None:
+    # PyYAML (YAML 1.1) resolves every one of `on:`/`On:`/`ON:`/`true:`/...
+    # to the identical boolean `True` mapping key, so the *parsed* document
+    # can never tell a correctly-spelled bare `on:` trigger key apart from a
+    # casing typo, or from a stray duplicate of it -- both parse identically.
+    # GitHub's own workflow parser does not fold `on` to a boolean at all: it
+    # requires the exact lowercase string "on" and silently ignores any
+    # other spelling, so a typo parses cleanly through _triggers above yet
+    # the workflow never fires on GitHub. Scan the raw text directly for
+    # every top-level key that could have been intended as the trigger key --
+    # including a duplicate arm added alongside the real one -- and require
+    # there be exactly one, spelled exactly `on`.
+    hits = [key for key in _TOP_LEVEL_KEY_PATTERN.findall(text) if key.lower() in _ON_KEY_LOOKALIKES]
+    assert hits == ["on"], (
+        "workflow must declare exactly one literal lowercase `on:` top-level "
+        f"key with no YAML-1.1-boolean-spelled alias present; found {hits!r}"
+    )
+
+
 def _assert_trigger_semantics(document: dict[str, object]) -> None:
+    _assert_exact_on_key(WORKFLOW.read_text(encoding="utf-8"))
     on = _triggers(document)
     assert set(on) == {"push", "pull_request"}
     # pull_request must fire on every PR: no paths, paths-ignore, branches or
@@ -471,6 +556,26 @@ def test_continue_on_error_on_a_job_fails_the_guard() -> None:
         _assert_no_continue_on_error(document)
 
 
+def test_continue_on_error_inside_the_shared_setup_action_fails_the_guard() -> None:
+    # Prior to this guard covering the composite action, a continue-on-error
+    # planted in setup-node-workspace's own steps was outside every mutation
+    # test above -- none of them ever parsed or asserted on that file -- so
+    # this was a real, previously unenforced blind spot, not a hypothetical
+    # one.
+    document = _workflow()
+    setup_steps = _setup_action_steps()
+    setup_steps[-1]["continue-on-error"] = True
+    with pytest.raises(AssertionError):
+        _assert_no_continue_on_error(document, setup_steps)
+
+
+def test_setup_action_without_mutation_passes_the_continue_on_error_guard() -> None:
+    # Companion to the mutation test above: the real, on-disk composite
+    # action must independently satisfy the guard's default code path (no
+    # setup_steps override), proving the new coverage is not vacuous.
+    _assert_no_continue_on_error(_workflow())
+
+
 def test_ci_triggers_carry_no_path_or_branch_restrictions() -> None:
     # PR #168 repair cycle 3 (P2): parse `on:` semantically so a push.paths
     # or pull_request.paths restriction cannot slip past a substring check.
@@ -498,6 +603,39 @@ def test_push_trigger_extra_key_fails_the_guard() -> None:
     _triggers(document)["push"] = {"branches": ["main"], "paths": ["runtime/**"]}
     with pytest.raises(AssertionError):
         _assert_trigger_semantics(document)
+
+
+def test_exact_on_key_guard_passes_for_the_real_workflow() -> None:
+    _assert_exact_on_key(WORKFLOW.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("spelling", ["On", "ON", "oN", "True", "TRUE", "Yes"])
+def test_on_key_casing_typo_fails_the_exact_key_guard(spelling: str) -> None:
+    # GitHub requires the exact lowercase string "on" and silently ignores
+    # any other spelling, so every one of these casing typos must fail the
+    # raw-text guard even though at least the exact-cased YAML-1.1 boolean
+    # spellings ("On", "ON", "True", ...) would parse cleanly through
+    # _triggers (the parsed document cannot tell them apart from a correct
+    # `on:` -- that is the whole reason this guard reads the raw text
+    # instead).
+    text = re.sub(r"(?m)^on:", f"{spelling}:", WORKFLOW.read_text(encoding="utf-8"), count=1)
+    with pytest.raises(AssertionError):
+        _assert_exact_on_key(text)
+
+
+def test_duplicate_on_key_boolean_alias_fails_the_exact_key_guard() -> None:
+    # A real `on:` alongside a stray bare `On:` typo are two distinct
+    # PyYAML keys (string "on" vs boolean True) rather than a collision, so
+    # both would survive parsing simultaneously and the old
+    # `document.get(True, document.get("on"))` helper preferred the typo's
+    # (boolean-keyed) value over the real one. The raw-text guard rejects
+    # this shape outright instead of silently picking either key.
+    text = WORKFLOW.read_text(encoding="utf-8")
+    on_block = "on:\n  push:\n    branches: [main]\n  pull_request:\n"
+    assert on_block in text
+    mutated = text.replace(on_block, on_block + "On:\n  workflow_dispatch: {}\n", 1)
+    with pytest.raises(AssertionError):
+        _assert_exact_on_key(mutated)
 
 
 def test_ci_runs_complete_harness_and_fabric_gates() -> None:
