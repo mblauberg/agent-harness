@@ -8,6 +8,7 @@ import {
   GATE_SYSTEM_SUPERSESSION_FEATURE,
   LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC,
   LIFECYCLE_CURRENT_STATE_V1_CODEC,
+  DECLARED_RUN_PROGRESS_FEATURE,
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   RUN_SESSION_PROJECTION_FEATURE,
   authorityEnvelopeV2Contained,
@@ -2853,6 +2854,7 @@ export class Fabric {
           request,
           context.features.includes(NATIVE_NOTIFICATION_PROJECTION_FEATURE) ? "include" : "omit",
           context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
+          context.features.includes(DECLARED_RUN_PROGRESS_FEATURE) ? "include" : "omit",
         );
       }
       case FABRIC_OPERATIONS.projectionDetailRead: {
@@ -2862,6 +2864,7 @@ export class Fabric {
         return this.#operatorProjections.detail(
           request,
           context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
+          context.features.includes(DECLARED_RUN_PROGRESS_FEATURE) ? "include" : "omit",
         );
       }
       case FABRIC_OPERATIONS.messageBodyRead: {

@@ -145,6 +145,7 @@ function mutationFlowDataset(): FabricConsoleDataset {
             phase: "active",
             health: "healthy",
             nextMilestone: "pause safely",
+            declaredProgress: { plan: "open", counts: { blocked: 0, ready: 0, active: 1, complete: 0, cancelled: 0, degraded: 0 } },
           },
           detailRef: {
             kind: "run",

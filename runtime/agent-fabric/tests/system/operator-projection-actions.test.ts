@@ -964,6 +964,97 @@ describe("operator projection store", () => {
       },
     })).toThrowError(expect.objectContaining({ code: "CAPABILITY_FORBIDDEN" }));
   });
+
+  it("declares open-plan run progress from the transactional task ledger only when negotiated", () => {
+    const fixture = setupProjection();
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    fixture.database.exec(`
+      INSERT INTO tasks(
+        run_id, task_id, authority_id, objective, base_revision, state,
+        owner_agent_id, revision, owner_lease_generation, created_by
+      ) VALUES
+        ('run_01', 'task_02', 'authority_01', 'Review projection', 'base_01', 'ready', NULL, 1, 0, 'chair_01'),
+        ('run_01', 'task_03', 'authority_01', 'Land protocol cut', 'base_01', 'complete', 'chair_01', 2, 1, 'chair_01');
+    `);
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    const pageRequest: OperatorViewPageRequest<"runs"> = {
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "runs",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 5,
+    };
+    const declaredCounts = {
+      blocked: 0,
+      ready: 1,
+      active: 1,
+      complete: 1,
+      cancelled: 0,
+      degraded: 0,
+    };
+
+    const negotiated = fixture.projections.viewPage(pageRequest, "include", "include", "include");
+    expect(negotiated).toMatchObject({
+      status: "page",
+      view: "runs",
+      rows: [{
+        itemId: "run_01",
+        fact: {
+          freshness: "live",
+          value: {
+            summary: {
+              kind: "run",
+              declaredProgress: { plan: "open", counts: declaredCounts },
+            },
+          },
+        },
+      }],
+    });
+
+    const unnegotiated = fixture.projections.viewPage(pageRequest, "include", "include", "omit");
+    if (unnegotiated.status !== "page" || unnegotiated.view !== "runs") {
+      throw new Error("expected an unnegotiated runs page");
+    }
+    const unnegotiatedRow = unnegotiated.rows[0]?.fact;
+    if (unnegotiatedRow?.freshness !== "live") throw new Error("expected a live run row");
+    expect(unnegotiatedRow.value.summary).not.toHaveProperty("declaredProgress");
+
+    const detailRequest: OperatorDetailReadRequest = {
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      snapshotRevision: snapshot.snapshotRevision,
+      detailRef: {
+        kind: "run",
+        projectSessionId,
+        coordinationRunId: identifier<"CoordinationRunId">("run_01"),
+        expectedRevision: 4,
+      },
+    };
+    expect(fixture.projections.detail(detailRequest, "include", "include")).toMatchObject({
+      status: "current",
+      detail: {
+        freshness: "live",
+        value: {
+          kind: "run",
+          coordinationRunId: "run_01",
+          declaredProgress: { plan: "open", counts: declaredCounts },
+        },
+      },
+    });
+    const detailUnnegotiated = fixture.projections.detail(detailRequest, "include", "omit");
+    if (detailUnnegotiated.status !== "current" || detailUnnegotiated.detail.freshness !== "live") {
+      throw new Error("expected a live unnegotiated run detail");
+    }
+    expect(detailUnnegotiated.detail.value).not.toHaveProperty("declaredProgress");
+  });
 });
 
 describe("operator action store", () => {

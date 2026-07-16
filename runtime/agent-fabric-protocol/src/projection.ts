@@ -73,6 +73,31 @@ export type RunProjection = {
   health: "healthy" | "degraded" | "blocked" | "quarantined" | "unknown";
 };
 
+/** Server-scoped task-state counts backing a declared-progress fact. */
+export type DeclaredRunTaskStateCounts = {
+  blocked: number;
+  ready: number;
+  active: number;
+  complete: number;
+  cancelled: number;
+  degraded: number;
+};
+
+/**
+ * Fabric-declared run progress. The open arm carries known task-state counts
+ * without a denominator; the unknown arm carries only its reason. No arm
+ * ever carries an inferred percentage, completion ratio or ETA.
+ *
+ * A finite arm is deliberately deferred: it ships with the plan-declaration
+ * package as its own result-shape cutover, bound to an exact plan revision
+ * and with settled cancelled-task denominator semantics. No run-level finite
+ * denominator authority exists yet, so freezing that arm now would freeze
+ * unproven semantics into a closed shape.
+ */
+export type DeclaredRunProgress =
+  | { plan: "open"; counts: DeclaredRunTaskStateCounts }
+  | { plan: "unknown"; reason: string };
+
 export type OperatorProjectionSnapshot = {
   schemaVersion: 1;
   snapshotRevision: number;
@@ -458,6 +483,7 @@ export type OperatorViewSummaryMap = {
     phase: string;
     health: RunProjection["health"];
     nextMilestone: string;
+    declaredProgress?: DeclaredRunProgress;
   };
   work: { kind: "work"; state: string; checkState: WorkViewItem["checkState"] };
   agents: {
@@ -555,6 +581,7 @@ export type OperatorDetail =
       chairAgentId: AgentId;
       chairGeneration: number;
       health: RunProjection["health"];
+      declaredProgress?: DeclaredRunProgress;
     }
   | { kind: "task"; taskId: TaskId; objective: string; state: string; ownerAgentId: AgentId | null }
   | {

@@ -292,12 +292,16 @@ Implementation is accepted only when objective tests demonstrate:
     remaining-work, next-dependency, blocking-issue and evidence-path answers
     are correct within 20 seconds. Coordinated and independent topology fixtures
     never flatten a session, coordination run or delivery workstream identity.
-48. Progress fixtures cover finite, open, unknown, stale, unavailable and
-    conflicting plan facts plus a replan that adds and removes work. The finite
-    arm shows the exact declared denominator and consistent state counts. Open
-    and unknown arms show no percentage, completion ratio or ETA. Message/tool
+48. Progress fixtures cover open, unknown, stale, unavailable and conflicting
+    plan facts plus a replan that adds and removes work. Open and unknown arms
+    show no percentage, completion ratio, denominator or ETA, and a premature
+    finite arm on the wire is rejected rather than rendered. Message/tool
     floods, elapsed time, agent count, token use and model-authored completion
     claims do not change progress. Plan revisions and deltas remain visible.
+    Finite fixtures — the exact declared denominator with consistent state
+    counts for an exact plan revision — attach to the deferred
+    plan-declaration package that introduces the finite arm as its own
+    result-shape cutover.
 49. For a fixed event set, projection revision, clock and geometry, processed
     activity grouping and ordering are byte-identical. Each group retains actor,
     target, event kind, time, freshness, revision and source references; every

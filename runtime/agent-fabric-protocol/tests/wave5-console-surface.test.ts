@@ -1101,3 +1101,140 @@ describe("complete-grant Console facade", () => {
     );
   });
 });
+
+describe("negotiated declared-run-progress result shape", () => {
+  const legacyFeatures = [
+    "operator-projection.v1",
+    "operator-projection.v2",
+    "run-session-projection.v1",
+  ] as const;
+  const extendedFeatures = [...legacyFeatures, "declared-run-progress.v1"] as const;
+  const openProgress = {
+    plan: "open",
+    counts: { blocked: 0, ready: 1, active: 2, complete: 3, cancelled: 0, degraded: 0 },
+  } as const;
+  const unknownProgress = { plan: "unknown", reason: "unrecognised task state: parked" } as const;
+  const legacySummary = {
+    kind: "run",
+    projectSessionId: "ps_01",
+    phase: "active",
+    health: "healthy",
+    nextMilestone: "verification",
+  } as const;
+  const runRef = {
+    kind: "run",
+    projectSessionId: "ps_01",
+    coordinationRunId: "run_01",
+    expectedRevision: 1,
+  } as const;
+  const legacyDetail = {
+    kind: "run",
+    projectSessionId: "ps_01",
+    coordinationRunId: "run_01",
+    phase: "active",
+    chairAgentId: "chair_01",
+    chairGeneration: 1,
+    health: "healthy",
+  } as const;
+  const runsPage = (summary: unknown) => ({
+    status: "page",
+    view: "runs",
+    rows: [row(summary, runRef)],
+    nextCursor: 1,
+    hasMore: false,
+    snapshotRevision: 1,
+    readTransactionId: "read_declared_progress",
+  });
+  const detailRead = (detail: unknown) => ({
+    status: "current",
+    detailRef: runRef,
+    detail: {
+      freshness: "live",
+      source: "fabric",
+      revision: 1,
+      observedAt,
+      value: detail,
+    },
+    snapshotRevision: 4,
+    readTransactionId: "read_declared_progress_detail",
+  });
+
+  it("accepts every tagged progress arm on run rows and run detail", () => {
+    for (const progress of [openProgress, unknownProgress]) {
+      expect(parseOperationResult(
+        FABRIC_OPERATIONS.projectionViewPage,
+        runsPage({ ...legacySummary, declaredProgress: progress }),
+      )).toMatchObject({ status: "page", view: "runs" });
+      expect(parseOperationResult(
+        FABRIC_OPERATIONS.projectionDetailRead,
+        detailRead({ ...legacyDetail, declaredProgress: progress }),
+      )).toMatchObject({ status: "current" });
+    }
+  });
+
+  it("rejects a premature finite arm, negative counts and denominator or percentage keys", () => {
+    // The finite arm is deliberately deferred to the plan-declaration cutover;
+    // until then a declared denominator on the wire is rejected outright.
+    expect(() => parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage({
+        ...legacySummary,
+        declaredProgress: { plan: "finite", total: 6, counts: openProgress.counts },
+      }),
+    )).toThrowError();
+    expect(() => parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage({
+        ...legacySummary,
+        declaredProgress: {
+          plan: "open",
+          counts: { ...openProgress.counts, ready: -1 },
+        },
+      }),
+    )).toThrowError();
+    expect(() => parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage({
+        ...legacySummary,
+        declaredProgress: { ...openProgress, total: 6 },
+      }),
+    )).toThrowError();
+    expect(() => parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage({
+        ...legacySummary,
+        declaredProgress: { ...openProgress, percentage: 50 },
+      }),
+    )).toThrowError();
+  });
+
+  it("requires uniform negotiated presence on run rows and run detail", () => {
+    const legacyPage = parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage(legacySummary),
+    );
+    const extendedPage = parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage({ ...legacySummary, declaredProgress: openProgress }),
+    );
+    const legacyRead = parseOperationResult(
+      FABRIC_OPERATIONS.projectionDetailRead,
+      detailRead(legacyDetail),
+    );
+    const extendedRead = parseOperationResult(
+      FABRIC_OPERATIONS.projectionDetailRead,
+      detailRead({ ...legacyDetail, declaredProgress: openProgress }),
+    );
+    for (const [operation, legacy, extended] of [
+      [FABRIC_OPERATIONS.projectionViewPage, legacyPage, extendedPage],
+      [FABRIC_OPERATIONS.projectionDetailRead, legacyRead, extendedRead],
+    ] as const) {
+      expect(assertOperationResultFeatureShape(operation, legacyFeatures, legacy as never)).toBe(legacy);
+      expect(assertOperationResultFeatureShape(operation, extendedFeatures, extended as never)).toBe(extended);
+      expect(() => assertOperationResultFeatureShape(operation, extendedFeatures, legacy as never))
+        .toThrow(expect.objectContaining({ reason: "missing-negotiated-field" }));
+      expect(() => assertOperationResultFeatureShape(operation, legacyFeatures, extended as never))
+        .toThrow(expect.objectContaining({ reason: "unnegotiated-field" }));
+    }
+  });
+});
