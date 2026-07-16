@@ -52,7 +52,9 @@ export async function loadAdapterModelConstraints(input: {
     patterns: adapter.model_family_constraints.allowed_model_patterns === undefined
       ? []
       : stringArray(adapter.model_family_constraints.allowed_model_patterns),
-    requiresExplicitModel: adapter.model_family_constraints.requires_explicit_model === true,
+    // Fail closed on omission: only an explicit `requires_explicit_model:
+    // false` pin opts an adapter into account-default dispatch (#190).
+    requiresExplicitModel: adapter.model_family_constraints.requires_explicit_model !== false,
     ...(wrapperEntrypoint === undefined ? {} : { wrapperEntrypoint }),
     ...(providerExecutable === undefined ? {} : { providerExecutable }),
   };
@@ -77,11 +79,16 @@ export function assessAdapterModelPolicy(input: {
   if (input.requiresExplicitModel && modelAbsent) {
     return { allowed: false, reason: "model-required" };
   }
-  // An absent model with requiresExplicitModel false is an account-default
-  // dispatch (#190): the provider account's default model is used, so there
-  // is no identifier for the pattern gate to assess. The family gate still
-  // applies, and the open-weight family bridge always needs an explicit
-  // matching model.
+  // requiresExplicitModel false means account-default-only dispatch (#190):
+  // the provider account's default model is used and the runtime rejects
+  // explicit ids, so a present id fails closed here instead of reaching the
+  // provider's known rejection path.
+  if (!input.requiresExplicitModel && !modelAbsent) {
+    return { allowed: false, reason: "model-forbidden" };
+  }
+  // On the account-default path there is no identifier for the pattern gate
+  // to assess. The family gate still applies, and the open-weight family
+  // bridge always needs an explicit matching model.
   const accountDefault = modelAbsent && !input.requiresExplicitModel;
   const patterns = input.allowedModelPatterns ?? [];
   const patternMatch = patterns.length === 0 ||

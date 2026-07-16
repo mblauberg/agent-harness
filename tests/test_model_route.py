@@ -119,6 +119,20 @@ def test_explicit_ultra_fails_for_noneligible_routes():
         assert route["effort"] == ""
 
 
+def test_codex_failure_records_never_expose_a_dispatchable_model():
+    # Non-ok records must not present the catalog id as resolved_model:
+    # a consumer keying on resolved_model would dispatch an id the
+    # subscription runtime rejects (#190).
+    result, route = resolve(
+        "--adapter", "codex", "--alias", "workhorse", "--role", "worker", "--effort", "ultra"
+    )
+    assert result.returncode == 1
+    assert route["status"] == "effort_unsupported"
+    assert route["resolved_model"] == ""
+    assert route["catalog_model"] == "gpt-5.6-terra"
+    assert route["model_selection"] == "account-default"
+
+
 def test_codex_rejects_explicit_model_for_account_default_adapter():
     # An explicit id would be sent to the runtime and rejected with HTTP 400,
     # so the resolver fails closed instead of emitting a doomed route (#190).

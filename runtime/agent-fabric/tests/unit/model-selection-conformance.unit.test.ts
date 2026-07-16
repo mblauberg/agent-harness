@@ -38,7 +38,15 @@ describe("adapter model matching conformance", () => {
       allowedModelPatterns: ["gpt-*"],
       requiresExplicitModel: false,
     })).toEqual({ allowed: false, reason: "family-forbidden" });
-    // An explicit id keeps the full pattern gate even when not required.
+    // Account-default is exclusive: ANY explicit id fails closed, even one
+    // matching the allow-list, because the runtime rejects explicit ids.
+    expect(assessAdapterModelPolicy({
+      modelFamily: "openai",
+      modelId: "gpt-5.6-sol",
+      allowedFamilies: ["openai"],
+      allowedModelPatterns: ["gpt-*"],
+      requiresExplicitModel: false,
+    })).toEqual({ allowed: false, reason: "model-forbidden" });
     expect(assessAdapterModelPolicy({
       modelFamily: "openai",
       modelId: "grok-4",

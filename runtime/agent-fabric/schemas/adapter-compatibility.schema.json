@@ -86,7 +86,7 @@
     "modelConstraints": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["allowed"],
+      "required": ["allowed", "requires_explicit_model"],
       "properties": {
         "allowed": {"$ref": "#/$defs/stringArray"},
         "allowed_model_patterns": {"$ref": "#/$defs/stringArray"},

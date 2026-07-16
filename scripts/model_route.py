@@ -66,9 +66,11 @@ def load_adapter_compatibility(adapter: str) -> tuple[dict[str, Any] | None, str
         "unresolved_pins": entry["unresolved_pins"],
         "allowed_families": allowed,
         "allowed_model_patterns": patterns,
-        "requires_explicit_model": constraints.get("requires_explicit_model") is True
+        # Fail closed on omission: only an explicit `false` opts an adapter
+        # into account-default dispatch (#190).
+        "requires_explicit_model": (constraints.get("requires_explicit_model") is not False)
         if isinstance(constraints, dict)
-        else False,
+        else True,
     }, ""
 
 
@@ -262,12 +264,24 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
     # catalog id for effort/audit lookups but emits an empty dispatch model.
     account_default = adapter.get("model_selection") == "account-default"
 
+    def emit_route(record: dict[str, Any], code: int) -> int:
+        """Emit, never exposing a catalog id as a dispatchable model (#190)."""
+        resolved = record.get("resolved_model")
+        if account_default and isinstance(resolved, str) and resolved:
+            record = {
+                **record,
+                "resolved_model": "",
+                "catalog_model": resolved,
+                "model_selection": "account-default",
+            }
+        return emit(record, code)
+
     endpoint = adapter["endpoint_provider"]
     compatibility: dict[str, Any] | None = None
     compatibility_metadata: dict[str, Any] = {}
     active_adapters: set[str] = set()
     if args.adapter_gate == "fabric" and args.adapter not in COMPATIBILITY_ADAPTER_IDS:
-        return emit(
+        return emit_route(
             {
                 **base,
                 "status": "adapter_compatibility_unknown",
@@ -278,7 +292,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
     if args.adapter in COMPATIBILITY_ADAPTER_IDS:
         compatibility, compatibility_status = load_adapter_compatibility(args.adapter)
         if compatibility_status:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": compatibility_status,
@@ -294,7 +308,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
         if args.adapter_gate == "fabric":
             active_adapters, activation_status = load_active_adapters(Path(args.fabric_config))
             if activation_status:
-                return emit(
+                return emit_route(
                     {
                         **base,
                         "status": activation_status,
@@ -306,8 +320,10 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             compatibility_metadata["adapter_active"] = (
                 compatibility["compatibility_adapter"] in active_adapters
             )
-        if account_default and compatibility["requires_explicit_model"]:
-            return emit(
+        if account_default != (not compatibility["requires_explicit_model"]):
+            # The routing catalog and the compatibility pin must agree on
+            # account-default dispatch in both directions (#190).
+            return emit_route(
                 {
                     **base,
                     "status": "account_default_conflicts_with_compatibility",
@@ -336,7 +352,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
         family = infer_family(model, catalog)
         identity_source = "model-pattern"
         if not family:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": "model_family_unknown",
@@ -346,7 +362,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
                 1,
             )
         if fixed_family and family != fixed_family:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": "adapter_family_mismatch",
@@ -358,7 +374,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             )
     else:
         if not fixed_family:
-            return emit(
+            return emit_route(
                 {**base, "status": "model_required_for_broker", "endpoint_provider": endpoint},
                 2,
             )
@@ -367,7 +383,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
         candidates = family_config.get("role_overrides", {}).get(args.role, {}).get(args.alias)
         candidates = candidates or family_config["aliases"].get(args.alias)
         if not candidates:
-            return emit({**base, "status": "alias_unavailable", "model_family": family}, 1)
+            return emit_route({**base, "status": "alias_unavailable", "model_family": family}, 1)
         available = {item.lower(): item for item in args.available_model}
         if capability_models:
             available.update(
@@ -376,7 +392,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
         if available:
             chosen = next((candidate for candidate in candidates if candidate.lower() in available), None)
             if not chosen:
-                return emit(
+                return emit_route(
                     {
                         **base,
                         "status": "no_candidate_available",
@@ -398,7 +414,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
     compatibility_family = ""
     if compatibility:
         if args.adapter_gate == "fabric" and not compatibility["enabled"]:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": "adapter_disabled",
@@ -411,7 +427,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
                 1,
             )
         if args.adapter_gate == "fabric" and not compatibility_metadata["adapter_active"]:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": "adapter_inactive",
@@ -424,7 +440,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
                 1,
             )
         if args.adapter_gate == "fabric" and compatibility["unresolved_pins"]:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": "adapter_unresolved_pins",
@@ -438,7 +454,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             )
     distinct = bool(args.lead_family and family != args.lead_family)
     if compatibility and args.require_distinct and not args.lead_family:
-        return emit(
+        return emit_route(
             {
                 **base,
                 "status": "lead_family_required",
@@ -451,7 +467,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             2,
         )
     if compatibility and args.require_distinct and not distinct:
-        return emit(
+        return emit_route(
             {
                 **base,
                 "status": "same_family_forbidden",
@@ -470,7 +486,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             compatibility, family, model
         )
         if compatibility_status:
-            return emit(
+            return emit_route(
                 {
                     **base,
                     "status": compatibility_status,
@@ -485,7 +501,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             )
 
     if capability_error:
-        return emit(
+        return emit_route(
             {
                 **base,
                 "status": capability_error,
@@ -504,7 +520,7 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
         args, family, model, family_config, requested_effort
     )
     if effort_status:
-        return emit(
+        return emit_route(
             {
                 **base,
                 "status": effort_status,
@@ -550,10 +566,10 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             }
         )
     if args.require_distinct and not args.lead_family:
-        return emit({**record, "status": "lead_family_required"}, 2)
+        return emit_route({**record, "status": "lead_family_required"}, 2)
     if args.require_distinct and not distinct:
-        return emit({**record, "status": "same_family_forbidden"}, 1)
-    return emit(record, 0)
+        return emit_route({**record, "status": "same_family_forbidden"}, 1)
+    return emit_route(record, 0)
 
 
 def parser() -> argparse.ArgumentParser:

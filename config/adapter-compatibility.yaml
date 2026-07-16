@@ -113,6 +113,7 @@ adapters:
         - darwin-arm64
     model_family_constraints:
       allowed: []
+      requires_explicit_model: true
       route_role: visibility-and-wakeup-only
     official_source_url: "https://github.com/ogulcancelik/herdr"
     unresolved_pins: []
