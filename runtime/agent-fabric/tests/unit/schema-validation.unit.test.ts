@@ -54,6 +54,32 @@ describe("Stage 1 versioned JSON Schemas", () => {
     expect(unknown.keywords).toContain("additionalProperties");
   });
 
+  it("admits an account-default rejection route without treating the request as resolved", async () => {
+    const receiptSchema = await readSchema("fabric-receipt.schema.json");
+    const definitions = receiptSchema.$defs;
+    if (!isJsonObject(definitions) || !isJsonObject(definitions.modelRouteReceipt)) {
+      throw new TypeError("fabric receipt model-route schema is invalid");
+    }
+    const rejectedRoute = {
+      schema_version: 1,
+      status: "adapter_account_default_only",
+      adapter: "codex",
+      alias: "flagship",
+      role: "lead",
+      endpoint_provider: "openai",
+      model_family: "openai",
+      resolved_model: "",
+      requested_model: "gpt-5.6-sol",
+      catalog_model: "gpt-5.6-sol",
+      model_selection: "account-default",
+      identity_source: "account-default",
+    };
+
+    const result = validateWithSchema(definitions.modelRouteReceipt, rejectedRoute);
+    expect(result.details).toEqual([]);
+    expect(result.valid).toBe(true);
+  });
+
   it("validates adapter compatibility and exposes only explicitly gated adapters", async () => {
     const schema = await readSchema("adapter-compatibility.schema.json");
     const compatibility = await readYamlObject("adapter-compatibility.yaml");
