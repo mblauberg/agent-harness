@@ -305,4 +305,58 @@ the artifact digest before stopping the daemon. The fabric receipt hashes
 provider resume references and records full coordination fields; it does not
 expose provider secrets. Do not create or adopt a second run-receipt shape.
 
+## Codex Claude Code plugin retirement (issue #126)
+
+**Current status: not yet actionable.** The Claude Code "openai-codex"
+marketplace plugin remains the recorded degraded fallback for cross-family
+Codex legs today. Issue #176 must first prove fabric Codex dispatch end-to-end
+(bootstrap via #173, `claude.exe` repin via #169, seat provisioning, both
+transport smokes, a real fabric-routed review leg) and issue #190's account-
+default model contract fix must land, before normal answer-bearing Codex
+traffic can redirect through the `codex-app-server` adapter. Do not run the
+uninstall steps below until that evidence is posted on #126 and a maintainer
+confirms the cutover.
+
+The plugin transport (its `/rescue`, `/setup`, `/status`, `/result`,
+`/cancel`, `/review`, `/adversarial-review`, `/transfer` commands, the
+`app-server-broker.mjs` broker and `session-lifecycle-hook.mjs` Stop-hook
+shim) is Claude-Code-local state under `~/.claude/plugins/` and
+`~/.claude/hooks/` — outside this repository. Retiring it is an **operator**
+action, not a repo change:
+
+1. **Disable the plugin** — in `~/.claude/settings.json`, set
+   `"enabledPlugins"."codex@openai-codex"` to `false` (or remove the key) so
+   it stops loading `codex:*` skills, agents and commands.
+2. **Remove the SessionStart hook wiring** — delete the two plugin-support
+   entries from `~/.claude/settings.json`'s `hooks.SessionStart` list:
+   `sh ~/.claude/hooks/codex-plugin-patch.sh` and
+   `sh ~/.claude/hooks/codex-broker-sweep.sh`.
+3. **Clean up the patch-hook files** — remove
+   `~/.claude/hooks/codex-plugin-patch.sh` and its four per-file patches
+   (`~/.claude/hooks/codex-plugin.{app-server,codex,broker,lifecycle}.patch`)
+   plus `~/.claude/hooks/codex-broker-sweep.sh`. These re-applied local
+   resilience fixes on every session because the plugin cache is vendor-
+   overwritten on update; once the plugin is disabled they have nothing left
+   to patch.
+   - **Known drift**: the `lifecycle` patch (refcounted `SessionEnd`, so the
+     first session no longer nukes a shared broker) no longer applies cleanly
+     against plugin `1.0.6` — `patch -p1 --fuzz=3 --dry-run` fails 1 of 4
+     hunks, so that fix has already been silently inactive on the current
+     vendor build. Confirm this is expected drift rather than a regression
+     introduced by the uninstall itself; it does not block retirement since
+     the plugin is going away regardless.
+4. **Remove the marketplace registration** (optional, only if no other
+   plugin from it is wanted) — drop the `openai-codex` entry from
+   `~/.claude/settings.json`'s `extraKnownMarketplaces` and delete
+   `~/.claude/plugins/cache/openai-codex/`, `~/.claude/plugins/data/codex-openai-codex/`
+   and `~/.claude/plugins/marketplaces/openai-codex/`.
+5. **Verify** — start a fresh Claude Code session and confirm no `codex:*`
+   skill/agent/command appears, and that `scripts/agent-fabric doctor --json`
+   plus a fabric-routed Codex smoke both still pass without the plugin
+   present.
+
+Retain only a thin Stop-hook shim or the `/setup` readiness check if a
+concrete workflow still needs one after cutover; `scripts/agent-fabric doctor`
+already covers Codex adapter readiness, so the default is to retain neither.
+
 Do not delete the SQLite database, capability key, provider-native session, or `.agent-run` evidence as part of normal completion. Retention or destructive cleanup requires its own user decision.

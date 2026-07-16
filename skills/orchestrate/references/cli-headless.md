@@ -20,6 +20,18 @@ for adapter/auth preflight or an explicitly recorded degraded fallback, never
 as the primary worker substrate. A fallback verifier must enforce read-only or
 planning mode; advisory claims require independent verification.
 
+**Codex plugin retirement (#126).** The Claude Code "openai-codex" marketplace
+plugin (its `/rescue`, `/status`, `/result`, `/cancel` commands and app-server
+broker) is retired as an answer-bearing dispatch path; it is not documented
+here as a route because it never was one — this file's `codex` entries are
+the direct-CLI (`codex exec`) preflight/fallback covered by the safety rule
+above, dispatched through `cf_dispatch.sh`, not the plugin. Normal Codex work
+routes through Agent Fabric's `codex-app-server` adapter once #176 proves that
+route end-to-end; until then, cross-family Codex legs fall back to this
+direct-CLI path with `FABRIC-ROUNDTRIP-UNAVAILABLE` recorded, per orchestration
+doctrine. See `docs/runbooks/agent-fabric-operations.md` for the plugin's
+one-time operator uninstall steps once #176 lands.
+
 ## Harness-conditioned rule
 
 Treat `claude -p` and `codex exec` as noninteractive verifier surfaces, not native subagent surfaces.

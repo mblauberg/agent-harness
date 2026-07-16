@@ -6,6 +6,13 @@
 # Pass --orchestrator-family when known so same-family verifier routes fail closed.
 # It is an explicit degraded fallback or adapter preflight; normal answer-bearing
 # external work uses Agent Fabric request/reply.
+#
+# Codex note (issue #126, gated on #176/#190): the `codex` branch below dispatches
+# directly to `codex exec` as a same-process fallback/preflight. It is not the
+# retired Claude Code "openai-codex" marketplace plugin (separate transport, lives
+# outside this repo). Once #176 proves fabric Codex dispatch end-to-end, normal
+# answer-bearing Codex legs route through Agent Fabric's `codex-app-server` adapter;
+# this script keeps working unchanged as the recorded degraded fallback.
 set -uo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
