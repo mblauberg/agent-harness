@@ -59,8 +59,9 @@ one.
 4. **RECORD** the stopped issue (id, receipt path, gate reached) and advance
    to the next ready/accepted issue.
 5. **DEFER** a blocked or repair-exhausted issue back to the user/`scope`,
-   exactly as a standalone `implement` run would (its two-repair-cycle stop);
-   this mode does not retry past that boundary or route around it.
+   exactly as a standalone `implement` run would (its scaled repair-budget
+   stop, ~1-2 cycles routine and up to ~5 complex); this mode does not retry
+   past that boundary or route around it.
 6. **FINISH** when the ready/accepted queue snapshot is empty. There is no
    STOP file, no cross-session resume state, and no continuation past a
    user decision — each run is bounded to the queue it started with.
