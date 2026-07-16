@@ -2,6 +2,7 @@ import type {
   ArtifactRef,
   GitCurrentState,
   JsonValue,
+  OperatorAction,
   OperatorActionCommitRequest,
   OperatorActionIntent,
   OperatorActionPreview,
@@ -346,7 +347,14 @@ export class OperatorActionStore {
   async preview(
     context: AuthenticatedOperatorContext,
     request: OperatorActionPreviewRequest,
+    options?: { allowLaunchIntent?: boolean },
   ): Promise<OperatorActionPreview> {
+    if (request.intent.kind === "project-session-launch" && options?.allowLaunchIntent !== true) {
+      throw new ProjectFabricCoreError(
+        "CAPABILITY_FORBIDDEN",
+        "project-session-launch previews must be created via projectSessionLaunchPrepare",
+      );
+    }
     const authenticated = this.#authenticateCommand(context, request.command, request.projectId, request.intent);
     const current = await this.#readCurrentState(request.intent);
     validateCurrentState(request.intent, request.command.expectedRevision, current);
@@ -411,6 +419,9 @@ export class OperatorActionStore {
     request: OperatorActionCommitRequest,
   ): Promise<OperatorActionReceipt> {
     const stored = this.#previewRow(request.previewId);
+    if (text(stored, "operator_id") !== context.operatorId) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator preview belongs to another operator");
+    }
     const envelope = parseStoredPreview(text(stored, "preview_json"));
     const authenticated = this.#authenticateCommand(context, request.command, request.projectId, envelope.preview.intent);
     this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
@@ -1006,8 +1017,7 @@ export class OperatorActionStore {
     const authenticated = this.#operatorStore.authenticateCredential(request.credential.token);
     if (
       authenticated.capabilityId !== request.credential.capabilityId ||
-      authenticated.context.projectId !== request.projectId ||
-      !authenticated.actions.includes("read")
+      authenticated.context.projectId !== request.projectId
     ) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator status credential is not authorised");
     }
@@ -1023,6 +1033,12 @@ export class OperatorActionStore {
       authenticated.projectSessionId ?? null,
     );
     if (!isRow(command)) return { status: "not-found", commandId: request.commandId };
+    if (
+      !authenticated.actions.includes("read") &&
+      !authenticated.actions.includes(text(command, "operation") as OperatorAction)
+    ) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator status credential is not authorised");
+    }
     if (text(command, "status") === "rejected") {
       return parseRejectedStatus(text(command, "result_json"), request.commandId);
     }
