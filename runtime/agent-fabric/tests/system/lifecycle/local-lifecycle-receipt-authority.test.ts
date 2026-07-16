@@ -60,6 +60,28 @@ function custodyOwnerRef(custodyId: string): Record<string, unknown> {
   };
 }
 
+function generationLossOwnerRef(lossId: string): Record<string, unknown> {
+  return {
+    kind: "generation-loss",
+    generationLossRef: { schemaVersion: 1, runId: "run", agentId: "agent", generationLossId: lossId, generationLossRevision: 1 },
+    sourceRefDigest: digest("source", lossId),
+  };
+}
+
+// Mirrors the producer at terminal-owner-receipt.ts:205-216 (loss branch): a
+// generation-loss-terminal subject whose ownerRef is the generation-loss
+// afterRef, generationLossRef embedding the owning runId/agentId.
+function generationLossSubject(lossId: string): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    kind: "generation-loss-terminal",
+    projectSessionId: "session",
+    runId: "run",
+    agentId: "agent",
+    ownerRef: generationLossOwnerRef(lossId),
+  };
+}
+
 function reviewAdoptionSubject(custodyId: string): Record<string, unknown> {
   return {
     schemaVersion: 1,
@@ -207,10 +229,18 @@ describe("local lifecycle receipt authority", () => {
       authority.close();
     });
 
-    it("leaves deferred shapes without a producer unbound", async () => {
+    it("admits a correctly bound generation-loss-terminal receipt", async () => {
       const authority = await openAdmitted();
-      // generation-loss-terminal has no live producer, so its binding is not
-      // enforced: a custody ownerRef with crossed embedded identity is admitted.
+      await expect(authority.appendReceipt(digest("intent", "loss-green"), generationLossSubject("loss-green")))
+        .resolves.toMatchObject({ kind: "generation-loss-terminal" });
+      authority.close();
+    });
+
+    it("rejects a generation-loss-terminal receipt relabelled onto a crossed custody ownerRef", async () => {
+      // The confirmed cross-family P1: a caller relabels a subject to the once
+      // "unenforced" generation-loss-terminal kind and hands a custody ownerRef
+      // with a crossed embedded identity. Admission must now fail closed.
+      const authority = await openAdmitted();
       const subject = {
         schemaVersion: 1,
         kind: "generation-loss-terminal",
@@ -219,14 +249,88 @@ describe("local lifecycle receipt authority", () => {
         agentId: "agent",
         ownerRef: {
           kind: "custody",
-          custodyRef: { schemaVersion: 1, runId: "other-run", agentId: "other-agent", custodyId: "deferred", custodyRevision: 1 },
-          sourceRefDigest: digest("source", "deferred"),
+          custodyRef: { schemaVersion: 1, runId: "other-run", agentId: "other-agent", custodyId: "relabelled", custodyRevision: 1 },
+          sourceRefDigest: digest("source", "relabelled"),
         },
       };
-      await expect(authority.appendReceipt(digest("intent", "deferred"), subject))
-        .resolves.toMatchObject({ kind: "generation-loss-terminal" });
+      await expect(authority.appendReceipt(digest("intent", "relabelled"), subject)).rejects.toThrowError(/binding/u);
       authority.close();
     });
+
+    it("rejects a generation-loss-terminal receipt whose embedded identity is crossed", async () => {
+      const authority = await openAdmitted();
+      const subject = {
+        ...generationLossSubject("loss-identity"),
+        ownerRef: {
+          kind: "generation-loss",
+          generationLossRef: { schemaVersion: 1, runId: "other-run", agentId: "agent", generationLossId: "loss-identity", generationLossRevision: 1 },
+          sourceRefDigest: digest("source", "loss-identity"),
+        },
+      };
+      await expect(authority.appendReceipt(digest("intent", "loss-identity"), subject)).rejects.toThrowError(/identity is crossed/u);
+      authority.close();
+    });
+
+    it("rejects a generation-loss-terminal receipt whose ownerRef carries an extra variant", async () => {
+      const authority = await openAdmitted();
+      const subject = {
+        ...generationLossSubject("loss-extra"),
+        ownerRef: {
+          ...generationLossOwnerRef("loss-extra"),
+          custodyRef: { schemaVersion: 1, runId: "run", agentId: "agent", custodyId: "loss-extra", custodyRevision: 1 },
+        },
+      };
+      await expect(authority.appendReceipt(digest("intent", "loss-extra"), subject)).rejects.toThrowError(/crossed variant/u);
+      authority.close();
+    });
+
+    it.each([
+      ["fresh-origin", {
+        kind: "custody",
+        custodyRef: { schemaVersion: 1, runId: "run", agentId: "agent", custodyId: "origin", custodyRevision: 1 },
+        sourceRefDigest: digest("source", "origin"),
+      }],
+      ["custody-recovery-retirement", {
+        kind: "recovery-retirement",
+        retirementRef: { schemaVersion: 1, runId: "run", agentId: "agent", retirementId: "retire", revisionDec: "1" },
+        sourceRefDigest: digest("source", "retire"),
+      }],
+    ] as const)("refuses admission of %s, which has no enforced binding", async (kind, ownerRef) => {
+      // Neither kind has a legitimate appendReceipt producer (see the producer
+      // census above the binding table); admission fails closed rather than
+      // silently authenticating a crossed-identity ownerRef.
+      const authority = await openAdmitted();
+      const subject = {
+        schemaVersion: 1,
+        kind,
+        projectSessionId: "session",
+        runId: "run",
+        agentId: "agent",
+        ownerRef,
+      };
+      await expect(authority.appendReceipt(digest("intent", kind), subject))
+        .rejects.toThrowError(/no enforced binding for kind .*; admission refused/u);
+      authority.close();
+    });
+  });
+
+  it("reopens a ledger holding producer-shaped generation-loss-terminal receipts", async () => {
+    // Reload re-runs enforcement via #records/#validateLedger. A ledger of
+    // legitimately producer-authored generation-loss-terminal receipts (the
+    // real generation-loss ownerRef shape) must still open after fail-closed.
+    const stateDirectory = await provisionAuthority();
+    const first = openLocalLifecycleReceiptAuthority({ stateDirectory, expectedAuthorityId: "local-authority" });
+    await first.admitScope(admittedScope());
+    const custody = await first.appendReceipt(digest("intent", "reload-custody"), custodySubject("reload-custody"));
+    const loss = await first.appendReceipt(digest("intent", "reload-loss"), generationLossSubject("reload-loss"));
+    first.close();
+
+    const restarted = openLocalLifecycleReceiptAuthority({ stateDirectory, expectedAuthorityId: "local-authority" });
+    await expect(restarted.verifyReceipt(custodySubject("reload-custody"), custody)).resolves.toBe(true);
+    await expect(restarted.verifyReceipt(generationLossSubject("reload-loss"), loss)).resolves.toBe(true);
+    await expect(restarted.appendReceipt(digest("intent", "reload-loss"), generationLossSubject("reload-loss")))
+      .resolves.toStrictEqual(loss);
+    restarted.close();
   });
 
   it("rejects receipt rows whose authoritative lookup membership was changed", async () => {
