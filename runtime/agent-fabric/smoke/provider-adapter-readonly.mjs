@@ -111,6 +111,7 @@ async function workspaceDigest(root) {
 const beforeDigest = await workspaceDigest(workspace);
 const args = [
   "--import", join(agentsRoot, "node_modules/tsx/dist/loader.mjs"),
+  "--conditions=source",
   wrapperPath,
   "--journal", join(directory, "journal.sqlite3"),
   "--provider-executable", pinnedExecutable,

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { stringify } from "yaml";
 
 import { verifyAdapterCompatibility } from "../../src/adapters/compatibility.ts";
+import { AdapterSupervisor } from "../../src/adapters/supervisor.ts";
 import { commitFixtureRepository } from "../support/fixture-repository.ts";
 import { repositoryPath } from "../support/primary-adapter-testkit.ts";
 
@@ -203,6 +204,118 @@ describe("adapter wrapper Git provenance", () => {
     await writeCompatibility(fixture, outsideWrapper);
 
     await expect(verify(fixture)).rejects.toMatchObject({ code: "ADAPTER_COMPATIBILITY_INVALID" });
+  });
+
+  it("fails closed when an executed first-party sibling differs while the entrypoint stays clean", async () => {
+    const fixture = await createProvenanceFixture();
+    await writeFile(join(fixture.directory, "package.json"), JSON.stringify({ name: "@local/fixture-wrapper", type: "module" }));
+    await mkdir(join(fixture.directory, "src"));
+    const packagedWrapper = join(fixture.directory, "src", "wrapper.js");
+    const sibling = join(fixture.directory, "src", "sibling.js");
+    await writeFile(packagedWrapper, 'export { execute } from "./sibling.js";\n');
+    await writeFile(sibling, 'export const execute = () => "safe";\n');
+    await commitFixtureRepository(fixture.directory, "packaged wrapper");
+    await writeCompatibility(fixture, packagedWrapper);
+
+    await expect(verify(fixture)).resolves.toMatchObject({
+      wrapperProvenance: [{ adapterId: "fixture", wrapperPath: "src/wrapper.js" }],
+    });
+
+    await writeFile(sibling, 'export const execute = () => "tampered sibling";\n');
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("first-party source differs"),
+    });
+  });
+
+  it("fails closed when a local workspace dependency source differs", async () => {
+    const fixture = await createProvenanceFixture();
+    const packageRoot = join(fixture.directory, "wrapper-package");
+    const dependencyRoot = join(fixture.directory, "fixture-protocol");
+    await mkdir(join(packageRoot, "src"), { recursive: true });
+    await mkdir(join(dependencyRoot, "src"), { recursive: true });
+    await mkdir(join(packageRoot, "node_modules", "@local"), { recursive: true });
+    const packagedWrapper = join(packageRoot, "src", "wrapper.js");
+    await writeFile(join(packageRoot, "package.json"), JSON.stringify({
+      name: "@local/fixture-wrapper",
+      type: "module",
+      dependencies: { "@local/fixture-protocol": "file:../fixture-protocol" },
+    }));
+    await writeFile(packagedWrapper, 'export { parse } from "@local/fixture-protocol";\n');
+    await writeFile(join(dependencyRoot, "package.json"), JSON.stringify({
+      name: "@local/fixture-protocol",
+      type: "module",
+      exports: { ".": { source: "./src/index.js", import: "./src/index.js" } },
+    }));
+    await writeFile(join(dependencyRoot, "src", "index.js"), 'export const parse = () => "safe";\n');
+    await symlink(dependencyRoot, join(packageRoot, "node_modules", "@local", "fixture-protocol"), "dir");
+    await commitFixtureRepository(fixture.directory, "workspace dependency");
+    await writeCompatibility(fixture, packagedWrapper);
+
+    await expect(verify(fixture)).resolves.toMatchObject({
+      wrapperProvenance: [{ adapterId: "fixture", wrapperPath: "wrapper-package/src/wrapper.js" }],
+    });
+
+    await writeFile(join(dependencyRoot, "src", "index.js"), 'export const parse = () => "tampered dependency";\n');
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("first-party source differs"),
+    });
+  });
+
+  it("re-verifies provenance at spawn time and fails closed on a wrapper mutated after composition", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-spawn-provenance-"));
+    const wrapperPath = join(directory, "wrapper.mjs");
+    const responder = [
+      'import { createInterface } from "node:readline";',
+      "const input = createInterface({ input: process.stdin });",
+      'input.on("line", (line) => {',
+      "  const request = JSON.parse(line);",
+      "  process.stdout.write(`${JSON.stringify({ id: request.id, result: { protocolVersion: 1, adapterId: \"fixture\", operations: [\"spawn\"] } })}\\n`);",
+      "});",
+      "",
+    ].join("\n");
+    await writeFile(wrapperPath, responder);
+    const repositoryCommit = await commitFixtureRepository(directory);
+    const definition = {
+      command: [process.execPath, wrapperPath],
+      environment: {},
+      wrapperProvenance: { repositoryCommit, wrapperPath: "wrapper.mjs" },
+    };
+
+    const healthy = new AdapterSupervisor({ fixture: definition });
+    try {
+      await expect(healthy.request("fixture", "capabilities", {})).resolves.toMatchObject({ adapterId: "fixture" });
+    } finally {
+      await healthy.close();
+    }
+
+    // Mutate the wrapper after composition: the spawn-time re-derivation must
+    // fail closed before any process starts.
+    await writeFile(wrapperPath, `${responder}// tampered after composition\n`);
+    const tampered = new AdapterSupervisor({ fixture: definition });
+    try {
+      await expect(tampered.request("fixture", "capabilities", {})).rejects.toMatchObject({
+        code: "ADAPTER_COMPATIBILITY_INVALID",
+        message: expect.stringContaining("differs from its committed content"),
+      });
+    } finally {
+      await tampered.close();
+    }
+
+    // A committed mutation is still a provenance change relative to the
+    // composed evidence and must also fail closed until recomposition.
+    const changedCommit = await commitFixtureRepository(directory, "tampered wrapper");
+    expect(changedCommit).not.toBe(repositoryCommit);
+    const recommitted = new AdapterSupervisor({ fixture: definition });
+    try {
+      await expect(recommitted.request("fixture", "capabilities", {})).rejects.toMatchObject({
+        code: "ADAPTER_COMPATIBILITY_INVALID",
+        message: expect.stringContaining("changed since activation composition"),
+      });
+    } finally {
+      await recommitted.close();
+    }
   });
 
   describe("Git environment injection", () => {

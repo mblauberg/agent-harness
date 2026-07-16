@@ -2250,10 +2250,18 @@ describe("trusted primary adapter configuration", () => {
     expect(config).toMatchObject({
       adapters: {
         "claude-agent-sdk": {
-          command: expect.arrayContaining([expect.stringContaining("src/adapters/providers/claude-agent-sdk.ts")]),
+          command: expect.arrayContaining([
+            expect.stringContaining("node_modules/tsx/dist/loader.mjs"),
+            "--conditions=source",
+            expect.stringContaining("src/adapters/providers/claude-agent-sdk.ts"),
+          ]),
         },
         "codex-app-server": {
-          command: expect.arrayContaining([expect.stringContaining("src/adapters/providers/codex-app-server.ts")]),
+          command: expect.arrayContaining([
+            expect.stringContaining("node_modules/tsx/dist/loader.mjs"),
+            "--conditions=source",
+            expect.stringContaining("src/adapters/providers/codex-app-server.ts"),
+          ]),
         },
       },
     });

@@ -1,6 +1,6 @@
 import type { FabricOpenOptions } from "../domain/types.js";
 import { isAbsolute, resolve } from "node:path";
-import { verifyAdapterCompatibility } from "../adapters/compatibility.js";
+import { verifyAdapterCompatibility, wrapperCommandEntrypointIndex } from "../adapters/compatibility.js";
 import { loadAdapterModelConstraints } from "../adapters/model-selection.js";
 import { loadFabricConfig } from "../config/index.js";
 import { trustedWorkspaceRoots } from "../cli/workspace-trust.js";
@@ -50,6 +50,11 @@ export function parseDaemonAdapters(serialized: string | undefined): AdapterMap 
     if (modelPolicy !== undefined && (!isRecord(modelPolicy) || !Array.isArray(modelPolicy.allowedFamilies) || !modelPolicy.allowedFamilies.every((item) => typeof item === "string") || !Array.isArray(modelPolicy.allowedModelPatterns) || !modelPolicy.allowedModelPatterns.every((item) => typeof item === "string") || typeof modelPolicy.requiresExplicitModel !== "boolean")) {
       throw new TypeError(`daemon adapter model policy is invalid for ${adapterId}`);
     }
+    // Production compositions always attach wrapper provenance (see
+    // composeDaemonConfiguration, which fails without it); when present it
+    // must be well-formed, and the supervisor re-verifies it at every spawn.
+    // Test harnesses may inject provenance-less fixture adapters through
+    // AGENT_FABRIC_ADAPTERS_JSON, which is why absence is not rejected here.
     const wrapperProvenance = candidate.wrapperProvenance;
     if (wrapperProvenance !== undefined && (!isRecord(wrapperProvenance) || typeof wrapperProvenance.repositoryCommit !== "string" || typeof wrapperProvenance.wrapperPath !== "string")) {
       throw new TypeError(`daemon adapter wrapper provenance is invalid for ${adapterId}`);
@@ -117,9 +122,18 @@ export async function composeDaemonConfiguration(options: {
     if (policy.wrapperEntrypoint === undefined) throw new TypeError(`${adapterId} compatibility entry has no pinned fabric wrapper`);
     const provenance = provenanceByAdapter.get(adapterId);
     if (provenance === undefined) throw new TypeError(`${adapterId} activation has no verified wrapper provenance`);
-    const wrapperIndex = resolvedCommand[1] === "--import" ? 3 : 1;
-    if (resolvedCommand.length <= wrapperIndex) throw new TypeError(`${adapterId} trusted command has no wrapper entrypoint`);
+    const wrapperIndex = wrapperCommandEntrypointIndex(resolvedCommand);
+    if (wrapperIndex === -1) throw new TypeError(`${adapterId} trusted command has no wrapper entrypoint`);
     resolvedCommand[wrapperIndex] = policy.wrapperEntrypoint;
+    if (policy.wrapperEntrypoint.endsWith(".ts")) {
+      const loaderIndex = resolvedCommand.indexOf("--import");
+      const loader = loaderIndex === -1 ? undefined : resolvedCommand[loaderIndex + 1];
+      if (loader === undefined || !loader.endsWith("/tsx/dist/loader.mjs") || !resolvedCommand.includes("--conditions=source")) {
+        throw new TypeError(
+          `${adapterId} TypeScript wrapper requires the tsx loader and --conditions=source so first-party code executes from tracked source`,
+        );
+      }
+    }
     if (policy.providerExecutable !== undefined) {
       if (!isAbsolute(policy.providerExecutable)) throw new TypeError(`${adapterId} provider executable must be absolute`);
       resolvedCommand = replaceUniqueOption(resolvedCommand, "--provider-executable", policy.providerExecutable);

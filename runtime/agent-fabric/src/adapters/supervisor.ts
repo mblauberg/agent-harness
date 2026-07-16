@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 
 import { AdapterProcessTransport, AdapterTransportError } from "./process.js";
+import { verifySpawnWrapperProvenance } from "./compatibility.js";
 import { assessAdapterModelPolicy } from "./model-selection.js";
 import { FabricError } from "../errors.js";
 import {
@@ -20,6 +21,7 @@ export type AdapterProcessDefinition = {
   command: string[];
   environment: Record<string, string>;
   modelPolicy?: { allowedFamilies: string[]; allowedModelPatterns: string[]; requiresExplicitModel: boolean };
+  wrapperProvenance?: { repositoryCommit: string; wrapperPath: string };
 };
 
 export type AdapterSupervisorOptions = {
@@ -230,6 +232,27 @@ export class AdapterSupervisor {
   readonly #bridgeHealthTimer: NodeJS.Timeout;
   #bridgeHealthAuditInFlight = false;
 
+  /**
+   * Every adapter process spawn re-derives wrapper provenance immediately
+   * beforehand and requires it to match the provenance verified at
+   * composition, so a wrapper mutated between composition and spawn fails
+   * closed instead of executing.
+   */
+  async #openTransport(
+    adapterId: string,
+    definition: AdapterProcessDefinition,
+    environment?: Record<string, string>,
+  ): Promise<AdapterProcessTransport> {
+    if (definition.wrapperProvenance !== undefined) {
+      await verifySpawnWrapperProvenance({
+        adapterId,
+        command: definition.command,
+        expected: definition.wrapperProvenance,
+      });
+    }
+    return new AdapterProcessTransport(environment === undefined ? definition : { ...definition, environment });
+  }
+
   constructor(definitions: Record<string, AdapterProcessDefinition>, options: AdapterSupervisorOptions = {}) {
     this.#definitions = definitions;
     this.#controlTimeoutMs = options.controlTimeoutMs ?? DEFAULT_CONTROL_TIMEOUT_MS;
@@ -418,7 +441,7 @@ export class AdapterSupervisor {
         this.#loseChairBridge(chairKey, "retained chair bridge is unavailable");
         throw new ProviderAdapterError("CHAIR_BRIDGE_LOST", `${adapterId} retained chair bridge is unavailable`);
       }
-      transport = new AdapterProcessTransport(definition);
+      transport = await this.#openTransport(adapterId, definition);
       this.#transports.set(adapterId, transport);
     }
     try {
@@ -490,9 +513,7 @@ export class AdapterSupervisor {
       throw new ProviderAdapterError("PRIVATE_HANDOFF_UNAVAILABLE", "agent bridge private handoff was already consumed");
     }
     this.#consumedChildHandoffHashes.add(handoffHash);
-    const transport = new AdapterProcessTransport({
-      ...definition,
-      environment: {
+    const transport = await this.#openTransport(adapterId, definition, {
         ...definition.environment,
         AGENT_FABRIC_HANDOFF_KIND: "agent",
         AGENT_FABRIC_CAPABILITY: handoff.capability,
@@ -507,7 +528,6 @@ export class AdapterSupervisor {
           AGENT_FABRIC_LIFECYCLE_CUSTODY_ID: handoff.lifecycleAttestation.custodyId,
           AGENT_FABRIC_LIFECYCLE_CHECKPOINT_DIGEST: handoff.lifecycleAttestation.checkpointDigest,
         }),
-      },
     });
     try {
       const publicRequest = {
@@ -713,9 +733,7 @@ export class AdapterSupervisor {
       throw new ProviderAdapterError("PRIVATE_HANDOFF_UNAVAILABLE", "chair launch private handoff was already consumed");
     }
     this.#consumedChairHandoffHashes.add(handoffHash);
-    const transport = new AdapterProcessTransport({
-      ...definition,
-      environment: {
+    const transport = await this.#openTransport(adapterId, definition, {
         ...definition.environment,
         AGENT_FABRIC_HANDOFF_KIND: "chair",
         AGENT_FABRIC_CAPABILITY: handoff.capability,
@@ -725,7 +743,6 @@ export class AdapterSupervisor {
         AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID: handoff.expectedPrincipal.projectSessionId,
         AGENT_FABRIC_EXPECTED_RUN_ID: handoff.expectedPrincipal.runId,
         AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION: String(handoff.expectedPrincipal.principalGeneration),
-      },
     });
     try {
       const result = parseChairLaunchProviderResult(await transport.request("launch_chair", request, {
@@ -794,9 +811,7 @@ export class AdapterSupervisor {
       throw new ProviderAdapterError("PRIVATE_HANDOFF_UNAVAILABLE", "chair recovery handoff was already consumed");
     }
     this.#consumedChairHandoffHashes.add(handoffHash);
-    const transport = new AdapterProcessTransport({
-      ...definition,
-      environment: {
+    const transport = await this.#openTransport(adapterId, definition, {
         ...definition.environment,
         AGENT_FABRIC_HANDOFF_KIND: "chair",
         AGENT_FABRIC_CAPABILITY: handoff.capability,
@@ -806,7 +821,6 @@ export class AdapterSupervisor {
         AGENT_FABRIC_EXPECTED_PROJECT_SESSION_ID: handoff.expectedPrincipal.projectSessionId,
         AGENT_FABRIC_EXPECTED_RUN_ID: handoff.expectedPrincipal.runId,
         AGENT_FABRIC_EXPECTED_PRINCIPAL_GENERATION: String(handoff.expectedPrincipal.principalGeneration),
-      },
     });
     try {
       const result = parseChairLaunchProviderResult(await transport.request("recover_chair", request, {
