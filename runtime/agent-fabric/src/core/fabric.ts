@@ -117,6 +117,7 @@ import {
   type OperatorActionEffectPort,
   type OperatorActionStatePort,
 } from "../operator/action-store.js";
+import { LifecycleRecoveryCustodyService } from "../operator/lifecycle-recovery-custody.js";
 import {
   assertRunAcceptingWork,
   assertTaskOperationAdmitted,
@@ -1123,6 +1124,14 @@ export class Fabric {
       ...(this.#launchCustody === undefined ? {} : { launchCustody: this.#launchCustody }),
       ...(this.#launchCustody === undefined ? {} : { chairRecoveryCustody: this.#launchCustody }),
       ...(this.#launchCustody === undefined ? {} : { chairLiveHandoffCustody: this.#launchCustody }),
+      ...(this.#lifecycleReceiptAuthority === undefined ? {} : {
+        lifecycleRecoveryCustody: new LifecycleRecoveryCustodyService({
+          database: this.#database,
+          receipts: this.#lifecycleReceipts,
+          authority: this.#lifecycleReceiptAuthority,
+          clock: this.#clock,
+        }),
+      }),
       clock: this.#clock,
     });
     this.#projectSessions = new ProjectSessionStore({
