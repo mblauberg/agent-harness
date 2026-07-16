@@ -335,7 +335,9 @@ describe("typed Console application bootstrap boundary", () => {
         reason: "feature-unavailable",
       },
     });
-    expect(application.frame.rows.join("\n")).toContain("feature-unavailable");
+    expect(application.frame.rows.join("\n")).toContain(
+      "the Fabric daemon does not negotiate",
+    );
     expect(JSON.stringify(application.dataset)).not.toContain("token-never-render");
     await application.close("operator");
   });

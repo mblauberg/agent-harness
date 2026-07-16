@@ -26,6 +26,7 @@ export type {
 export type { HerdrDaemonProcessConfiguration } from "./daemon/herdr-composition.js";
 export {
   LocalOperatorConsoleUnavailableError,
+  daemonStartUnavailableReason,
   openLocalOperatorConsoleSession,
 } from "./operator/local-console-session.js";
 export { createOptionalGitHubHostedChecksAdapter } from "./operator/github-hosted-checks.js";
@@ -102,6 +103,8 @@ export type {
 export type {
   LocalOperatorConsoleSession,
   LocalOperatorConsoleSessionOptions,
+  LocalOperatorConsoleUnavailableReason,
+  LocalOperatorConsoleUnavailableCode,
 } from "./operator/local-console-session.js";
 export { FabricError } from "./errors.js";
 export {
