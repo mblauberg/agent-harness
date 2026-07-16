@@ -6,6 +6,10 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    # Only labels declared in .github/labels.yml; without this Dependabot
+    # recreates its per-ecosystem default labels that the label sync prunes.
+    labels:
+      - dependencies
 
   - package-ecosystem: npm
     directory: /
@@ -13,6 +17,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    labels:
+      - dependencies
     ignore:
       - dependency-name: "@types/node"
         update-types:

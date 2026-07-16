@@ -1,6 +1,5 @@
 name: Bug report
 description: The harness behaves differently from its documented contract.
-title: "[bug]: "
 labels: ["bug"]
 body:
   - type: markdown
