@@ -494,17 +494,23 @@ describe("Agent Fabric external lifecycle receipt authority worker", () => {
     };
 
     await requestRetainedRotation(context, "lifecycle:authority-worker:pre-persist-crash");
+    // Scope to this agent's own continuation failures and scan every recorded
+    // event rather than sampling only the most recent row: an unrelated
+    // continuation failure for another agent in the same run (or a second,
+    // later attempt for this agent) can otherwise race the fault-injected
+    // failure and make a single `ORDER BY created_at DESC LIMIT 1` read flaky.
     await eventually(() => {
       const database = new Database(context.fixture.databasePath, { readonly: true });
       try {
-        const failure = database.prepare(`
+        const failures = database.prepare(`
           SELECT payload_json FROM events
-           WHERE run_id=? AND type='lifecycle-continuation-failed'
-           ORDER BY created_at DESC LIMIT 1
-        `).get(context.fixture.runId) as { payload_json: string } | undefined;
-        expect(JSON.parse(failure?.payload_json ?? "{}")).toMatchObject({
-          message: "fault:lifecycle-rotation:after-authoritative-adoption-receipt",
-        });
+           WHERE run_id=? AND type='lifecycle-continuation-failed' AND actor_agent_id=?
+           ORDER BY created_at ASC
+        `).all(context.fixture.runId, context.agentId) as Array<{ payload_json: string }>;
+        expect(failures.map((failure) => JSON.parse(failure.payload_json) as Record<string, unknown>))
+          .toContainEqual(expect.objectContaining({
+            message: "fault:lifecycle-rotation:after-authoritative-adoption-receipt",
+          }));
       } finally {
         database.close();
       }
