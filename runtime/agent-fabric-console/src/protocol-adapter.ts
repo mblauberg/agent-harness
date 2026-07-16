@@ -179,6 +179,7 @@ export function bindConsoleProtocolClient(
     "scoped-gate-read.v1",
     "run-session-projection.v1",
     "declared-run-progress.v1",
+    "run-identity-projection.v1",
     "artifact-content-read.v1",
   ].filter((feature) => !available.has(feature));
   if (missingFeatures.length > 0) {

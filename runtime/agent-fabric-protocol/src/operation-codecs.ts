@@ -2416,12 +2416,29 @@ const declaredRunProgressCodec = unionOf([
   objectCodec({ plan: literal("open"), counts: declaredRunTaskStateCountsCodec }),
   objectCodec({ plan: literal("unknown"), reason: text }),
 ]);
+const runWorkstreamIdentityCodec = objectCodec({
+  workstreamId: identifier,
+  deliveryRunId: identifier,
+  leadAgentId: identifier,
+  state: enumeration(["active", "complete", "cancelled", "degraded", "abandoned"]),
+  lastEventAt: timestamp,
+});
+// The coordination arm is the only current run-kind arm. Accepted-scope and
+// current-plan refs are deliberately deferred to the plan-declaration
+// package: no run-level scope or plan binding authority exists in Fabric
+// yet, and each lands as its own result-shape cutover.
+const runIdentityCodec = objectCodec({
+  runKind: literal("coordination"),
+  chairAgentId: identifier,
+  workstreams: arrayOf(runWorkstreamIdentityCodec, { maximum: 1024 }),
+  lastEventAt: timestamp,
+});
 const runSummaryCodec = objectCodec({
   kind: literal("run"),
   phase: text,
   health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
   nextMilestone: text,
-}, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec });
+}, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec, identity: runIdentityCodec });
 const workSummaryCodec = objectCodec({
   kind: literal("work"),
   state: text,
@@ -2562,7 +2579,7 @@ const operatorDetailCodec = unionOf([
     chairAgentId: identifier,
     chairGeneration: positiveInteger,
     health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
-  }, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec }),
+  }, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec, identity: runIdentityCodec }),
   objectCodec({ kind: literal("task"), taskId: identifier, objective: text, state: text, ownerAgentId: nullable(identifier) }),
   objectCodec({
     kind: literal("agent"),

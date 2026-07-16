@@ -319,6 +319,18 @@ describe("declared run progress fail-closed mapping", () => {
     health: "healthy",
     nextMilestone: "verification",
   };
+  const identity = {
+    runKind: "coordination",
+    chairAgentId: "chair_01",
+    workstreams: [{
+      workstreamId: "ws_01",
+      deliveryRunId: "delivery_01",
+      leadAgentId: "lead_01",
+      state: "active",
+      lastEventAt: observedAt,
+    }],
+    lastEventAt: observedAt,
+  };
 
   it("maps a negotiated run row with its tagged declared progress intact", () => {
     const declaredProgress = {
@@ -327,19 +339,31 @@ describe("declared run progress fail-closed mapping", () => {
     };
     const mapped = mapProtocolRow(
       "runs",
-      runRow({ ...baseSummary, declaredProgress }),
+      runRow({ ...baseSummary, declaredProgress, identity }),
       Date.parse(observedAt),
       "daemon-journal",
     );
-    expect(mapped.summary).toMatchObject({ declaredProgress });
+    expect(mapped.summary).toMatchObject({ declaredProgress, identity });
   });
 
   it("fails closed when an exact run projection omits declared progress", () => {
     expect(() => mapProtocolRow(
       "runs",
-      runRow(baseSummary),
+      runRow({ ...baseSummary, identity }),
       Date.parse(observedAt),
       "daemon-journal",
     )).toThrow(/exact run projection has no declared progress/);
+  });
+
+  it("fails closed when an exact run projection omits run identity", () => {
+    expect(() => mapProtocolRow(
+      "runs",
+      runRow({
+        ...baseSummary,
+        declaredProgress: { plan: "unknown", reason: "fixture" },
+      }),
+      Date.parse(observedAt),
+      "daemon-journal",
+    )).toThrow(/exact run projection has no run identity/);
   });
 });

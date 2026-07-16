@@ -40,6 +40,7 @@ export const RESULT_SHAPE_FEATURES = [
   "gate-system-supersession.v1",
   "run-session-projection.v1",
   "declared-run-progress.v1",
+  "run-identity-projection.v1",
 ] as const;
 
 export const GATE_SYSTEM_SUPERSESSION_FEATURE = "gate-system-supersession.v1" as const;

@@ -1238,3 +1238,156 @@ describe("negotiated declared-run-progress result shape", () => {
     }
   });
 });
+
+describe("negotiated run-identity result shape", () => {
+  const legacyFeatures = [
+    "operator-projection.v1",
+    "operator-projection.v2",
+    "run-session-projection.v1",
+  ] as const;
+  const extendedFeatures = [...legacyFeatures, "run-identity-projection.v1"] as const;
+  const workstream = {
+    workstreamId: "ws_01",
+    deliveryRunId: "delivery_01",
+    leadAgentId: "lead_01",
+    state: "active",
+    lastEventAt: observedAt,
+  } as const;
+  const coordinationIdentity = {
+    runKind: "coordination",
+    chairAgentId: "chair_01",
+    workstreams: [workstream],
+    lastEventAt: observedAt,
+  } as const;
+  const legacySummary = {
+    kind: "run",
+    projectSessionId: "ps_01",
+    phase: "active",
+    health: "healthy",
+    nextMilestone: "verification",
+  } as const;
+  const runRef = {
+    kind: "run",
+    projectSessionId: "ps_01",
+    coordinationRunId: "run_01",
+    expectedRevision: 1,
+  } as const;
+  const legacyDetail = {
+    kind: "run",
+    projectSessionId: "ps_01",
+    coordinationRunId: "run_01",
+    phase: "active",
+    chairAgentId: "chair_01",
+    chairGeneration: 1,
+    health: "healthy",
+  } as const;
+  const runsPage = (summary: unknown) => ({
+    status: "page",
+    view: "runs",
+    rows: [row(summary, runRef)],
+    nextCursor: 1,
+    hasMore: false,
+    snapshotRevision: 1,
+    readTransactionId: "read_run_identity",
+  });
+  const detailRead = (detail: unknown) => ({
+    status: "current",
+    detailRef: runRef,
+    detail: {
+      freshness: "live",
+      source: "fabric",
+      revision: 1,
+      observedAt,
+      value: detail,
+    },
+    snapshotRevision: 4,
+    readTransactionId: "read_run_identity_detail",
+  });
+
+  it("accepts the coordination identity arm with and without workstreams on rows and detail", () => {
+    for (const identity of [coordinationIdentity, { ...coordinationIdentity, workstreams: [] }]) {
+      expect(parseOperationResult(
+        FABRIC_OPERATIONS.projectionViewPage,
+        runsPage({ ...legacySummary, identity }),
+      )).toMatchObject({ status: "page", view: "runs" });
+      expect(parseOperationResult(
+        FABRIC_OPERATIONS.projectionDetailRead,
+        detailRead({ ...legacyDetail, identity }),
+      )).toMatchObject({ status: "current" });
+    }
+  });
+
+  it("rejects premature run kinds, plan or scope refs and unclosed workstream states", () => {
+    // A delivery-workstream run-kind arm and the accepted-scope/current-plan
+    // refs are deferred to their own cutovers; premature fields are rejected,
+    // never translated.
+    expect(() => parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage({
+        ...legacySummary,
+        identity: { ...coordinationIdentity, runKind: "delivery-workstream" },
+      }),
+    )).toThrowError();
+    expect(() => parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage({
+        ...legacySummary,
+        identity: { ...coordinationIdentity, currentPlanRef: { revision: 1 } },
+      }),
+    )).toThrowError();
+    expect(() => parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage({
+        ...legacySummary,
+        identity: { ...coordinationIdentity, acceptedScopeRef: { path: "spec.md", digest: "sha256:00" } },
+      }),
+    )).toThrowError();
+    expect(() => parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage({
+        ...legacySummary,
+        identity: {
+          ...coordinationIdentity,
+          workstreams: [{ ...workstream, state: "paused" }],
+        },
+      }),
+    )).toThrowError();
+    expect(() => parseOperationResult(
+      FABRIC_OPERATIONS.projectionDetailRead,
+      detailRead({
+        ...legacyDetail,
+        identity: { ...coordinationIdentity, chairAgentId: undefined },
+      }),
+    )).toThrowError();
+  });
+
+  it("requires uniform negotiated presence on run rows and run detail", () => {
+    const legacyPage = parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage(legacySummary),
+    );
+    const extendedPage = parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage({ ...legacySummary, identity: coordinationIdentity }),
+    );
+    const legacyRead = parseOperationResult(
+      FABRIC_OPERATIONS.projectionDetailRead,
+      detailRead(legacyDetail),
+    );
+    const extendedRead = parseOperationResult(
+      FABRIC_OPERATIONS.projectionDetailRead,
+      detailRead({ ...legacyDetail, identity: coordinationIdentity }),
+    );
+    for (const [operation, legacy, extended] of [
+      [FABRIC_OPERATIONS.projectionViewPage, legacyPage, extendedPage],
+      [FABRIC_OPERATIONS.projectionDetailRead, legacyRead, extendedRead],
+    ] as const) {
+      expect(assertOperationResultFeatureShape(operation, legacyFeatures, legacy as never)).toBe(legacy);
+      expect(assertOperationResultFeatureShape(operation, extendedFeatures, extended as never)).toBe(extended);
+      expect(() => assertOperationResultFeatureShape(operation, extendedFeatures, legacy as never))
+        .toThrow(expect.objectContaining({ reason: "missing-negotiated-field" }));
+      expect(() => assertOperationResultFeatureShape(operation, legacyFeatures, extended as never))
+        .toThrow(expect.objectContaining({ reason: "unnegotiated-field" }));
+    }
+  });
+});

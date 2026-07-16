@@ -1,6 +1,7 @@
 import type {
   ConsoleView as ProtocolConsoleView,
   DeclaredRunProgress,
+  RunIdentity,
   OperatorActionAvailability,
   NativeNotificationDeliverySummary,
   OperatorViewDetailRefMap,
@@ -129,12 +130,14 @@ export type ConsoleAttentionSummary = Readonly<
 
 /**
  * The Console maps rows only from a peer that negotiated
- * `declared-run-progress.v1`, so past the mapping boundary the declared
- * progress fact is an invariant, never an optional field.
+ * `declared-run-progress.v1` and `run-identity-projection.v1`, so past the
+ * mapping boundary the declared progress and run identity facts are
+ * invariants, never optional fields.
  */
 export type ConsoleRunSummary = Readonly<
-  Omit<OperatorViewSummaryMap["runs"], "declaredProgress"> & {
+  Omit<OperatorViewSummaryMap["runs"], "declaredProgress" | "identity"> & {
     declaredProgress: DeclaredRunProgress;
+    identity: RunIdentity;
   }
 >;
 
@@ -225,6 +228,12 @@ function consoleSummary<View extends FabricView>(
     (summary as OperatorViewSummaryMap["runs"]).declaredProgress === undefined
   ) {
     throw new TypeError("exact run projection has no declared progress");
+  }
+  if (
+    view === "runs" &&
+    (summary as OperatorViewSummaryMap["runs"]).identity === undefined
+  ) {
+    throw new TypeError("exact run projection has no run identity");
   }
   if (view !== "attention") return summary as ConsoleViewSummaryMap[View];
   const attention = summary as OperatorViewSummaryMap["attention"];

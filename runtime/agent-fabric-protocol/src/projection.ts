@@ -4,6 +4,7 @@ import type {
   AgentId,
   ArtifactRef,
   CoordinationRunId,
+  DeliveryRunId,
   GateId,
   JsonValue,
   MessageId,
@@ -97,6 +98,36 @@ export type DeclaredRunTaskStateCounts = {
 export type DeclaredRunProgress =
   | { plan: "open"; counts: DeclaredRunTaskStateCounts }
   | { plan: "unknown"; reason: string };
+
+/**
+ * One delivery workstream inside its coordination run's explicit parent/child
+ * identity group. Every field is a Fabric-owned workstream fact; state is the
+ * closed stored workstream state, never inferred from panes or processes.
+ */
+export type RunWorkstreamIdentity = {
+  workstreamId: WorkstreamId;
+  deliveryRunId: DeliveryRunId;
+  leadAgentId: AgentId;
+  state: "active" | "complete" | "cancelled" | "degraded" | "abandoned";
+  lastEventAt: Timestamp;
+};
+
+/**
+ * Fabric-declared run identity. The current cut carries the coordination arm
+ * only: the run kind, the chair as the coordination lead, the explicit
+ * delivery-workstream parent/child group and the run's last-event time.
+ *
+ * Accepted-scope and current-plan refs are deliberately deferred: no
+ * run-level scope or plan binding authority exists in Fabric yet, so they
+ * land with the plan-declaration package as their own result-shape cutover.
+ * A premature field on the wire is rejected, never translated.
+ */
+export type RunIdentity = {
+  runKind: "coordination";
+  chairAgentId: AgentId;
+  workstreams: readonly RunWorkstreamIdentity[];
+  lastEventAt: Timestamp;
+};
 
 export type OperatorProjectionSnapshot = {
   schemaVersion: 1;
@@ -484,6 +515,7 @@ export type OperatorViewSummaryMap = {
     health: RunProjection["health"];
     nextMilestone: string;
     declaredProgress?: DeclaredRunProgress;
+    identity?: RunIdentity;
   };
   work: { kind: "work"; state: string; checkState: WorkViewItem["checkState"] };
   agents: {
@@ -582,6 +614,7 @@ export type OperatorDetail =
       chairGeneration: number;
       health: RunProjection["health"];
       declaredProgress?: DeclaredRunProgress;
+      identity?: RunIdentity;
     }
   | { kind: "task"; taskId: TaskId; objective: string; state: string; ownerAgentId: AgentId | null }
   | {

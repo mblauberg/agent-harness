@@ -33,7 +33,9 @@ import type {
   ProjectionEventsResult,
   ProjectionEvent,
   DeclaredRunProgress,
+  RunIdentity,
   RunProjection,
+  RunWorkstreamIdentity,
   Timestamp,
 } from "@local/agent-fabric-protocol";
 import {
@@ -61,6 +63,7 @@ export type OperatorProjectionStoreOptions = CoreServiceOptions & {
 export type NativeNotificationProjection = "include" | "omit";
 export type RunSessionProjection = "include" | "omit";
 export type DeclaredRunProgressProjection = "include" | "omit";
+export type RunIdentityProjection = "include" | "omit";
 
 type LoadedOperatorDetail = {
   revision: number;
@@ -211,6 +214,7 @@ export class OperatorProjectionStore {
     nativeNotificationProjection: NativeNotificationProjection,
     runSessionProjection: RunSessionProjection = "include",
     declaredRunProgressProjection: DeclaredRunProgressProjection = "include",
+    runIdentityProjection: RunIdentityProjection = "include",
   ): OperatorViewPageResult {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
@@ -235,6 +239,7 @@ export class OperatorProjectionStore {
           authenticated,
           runSessionProjection,
           declaredRunProgressProjection,
+          runIdentityProjection,
         )
       ), selectedSessionId);
       case "work": return this.#viewPage(request, "work", () => (
@@ -326,6 +331,7 @@ export class OperatorProjectionStore {
     request: OperatorDetailReadRequest,
     runSessionProjection: RunSessionProjection = "include",
     declaredRunProgressProjection: DeclaredRunProgressProjection = "include",
+    runIdentityProjection: RunIdentityProjection = "include",
   ): OperatorDetailReadResult {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
@@ -340,6 +346,7 @@ export class OperatorProjectionStore {
         selectedSessionId,
         runSessionProjection,
         declaredRunProgressProjection,
+        runIdentityProjection,
       );
       if (request.detailRef.expectedRevision !== loaded.revision) {
         return {
@@ -1219,6 +1226,7 @@ export class OperatorProjectionStore {
     authenticated: AuthenticatedOperatorCredential,
     runSessionProjection: RunSessionProjection,
     declaredRunProgressProjection: DeclaredRunProgressProjection,
+    runIdentityProjection: RunIdentityProjection,
   ): OperatorViewRow<"runs">[] {
     return this.#rowsForRuns(projectId, projectSessionId).map((run): OperatorViewRow<"runs"> => {
       const phase = text(run, "lifecycle_state");
@@ -1248,6 +1256,9 @@ export class OperatorProjectionStore {
             nextMilestone: nextMilestone(phase),
             ...(declaredRunProgressProjection === "include"
               ? { declaredProgress: this.#declaredRunProgress(runId) }
+              : {}),
+            ...(runIdentityProjection === "include"
+              ? { identity: this.#runIdentity(run) }
               : {}),
           },
           detailRef: {
@@ -1528,6 +1539,7 @@ export class OperatorProjectionStore {
     projectSessionId: ProjectSessionId | undefined,
     runSessionProjection: RunSessionProjection,
     declaredRunProgressProjection: DeclaredRunProgressProjection,
+    runIdentityProjection: RunIdentityProjection,
   ): LoadedOperatorDetail {
     switch (detailRef.kind) {
       case "project": return this.#loadProjectDetail(detailRef, projectId);
@@ -1538,6 +1550,7 @@ export class OperatorProjectionStore {
         projectSessionId,
         runSessionProjection,
         declaredRunProgressProjection,
+        runIdentityProjection,
       );
       case "task": return this.#loadTaskDetail(detailRef, projectId, projectSessionId);
       case "agent": return this.#loadAgentDetail(detailRef, projectId, projectSessionId);
@@ -1602,6 +1615,7 @@ export class OperatorProjectionStore {
     projectSessionId: ProjectSessionId | undefined,
     runSessionProjection: RunSessionProjection,
     declaredRunProgressProjection: DeclaredRunProgressProjection,
+    runIdentityProjection: RunIdentityProjection,
   ): LoadedOperatorDetail {
     const stored = row(this.#database.prepare(`
       SELECT r.* FROM runs r
@@ -1640,7 +1654,70 @@ export class OperatorProjectionStore {
         ...(declaredRunProgressProjection === "include"
           ? { declaredProgress: this.#declaredRunProgress(detailRef.coordinationRunId) }
           : {}),
+        ...(runIdentityProjection === "include"
+          ? { identity: this.#runIdentity(stored) }
+          : {}),
       },
+    };
+  }
+
+  /**
+   * Fabric-declared run identity for one coordination run row: the run kind,
+   * the chair as coordination lead, the explicit delivery-workstream
+   * parent/child group and the run's last committed event time. Every field
+   * is read from the runs/workstreams/events tables in the caller's open
+   * transaction; a stored workstream state outside the closed contract fails
+   * the read rather than projecting a fabricated state. Accepted-scope and
+   * current-plan refs are deferred to the plan-declaration package.
+   */
+  #runIdentity(run: Row): RunIdentity {
+    const runId = text(run, "run_id");
+    const workstreams = this.#database.prepare(`
+      SELECT workstream_id, delivery_run_id, lead_agent_id, state, updated_at
+        FROM workstreams WHERE coordination_run_id=?
+       ORDER BY workstream_id
+    `).all(runId).map((value): RunWorkstreamIdentity => {
+      const workstream = row(value, "run workstream identity");
+      const state = text(workstream, "state");
+      if (
+        state !== "active" && state !== "complete" && state !== "cancelled" &&
+        state !== "degraded" && state !== "abandoned"
+      ) {
+        throw new ProjectFabricCoreError(
+          "RECOVERY_REQUIRED",
+          `stored workstream state is outside the closed contract: ${state}`,
+        );
+      }
+      return {
+        workstreamId: parseIdentifier<"WorkstreamId">(
+          text(workstream, "workstream_id"),
+          "runIdentity.workstreamId",
+        ),
+        deliveryRunId: parseIdentifier<"DeliveryRunId">(
+          text(workstream, "delivery_run_id"),
+          "runIdentity.deliveryRunId",
+        ),
+        leadAgentId: parseIdentifier<"AgentId">(
+          text(workstream, "lead_agent_id"),
+          "runIdentity.leadAgentId",
+        ),
+        state,
+        lastEventAt: toTimestamp(integer(workstream, "updated_at"), "runIdentity.workstreamLastEventAt"),
+      };
+    });
+    const lastEvent = this.#database.prepare(`
+      SELECT MAX(created_at) AS last_event_at FROM events WHERE run_id=?
+    `).get(runId);
+    const lastEventAt = isRow(lastEvent) &&
+        typeof lastEvent.last_event_at === "number" &&
+        Number.isSafeInteger(lastEvent.last_event_at)
+      ? lastEvent.last_event_at
+      : integer(run, "created_at");
+    return {
+      runKind: "coordination",
+      chairAgentId: parseIdentifier<"AgentId">(text(run, "chair_agent_id"), "runIdentity.chairAgentId"),
+      workstreams,
+      lastEventAt: toTimestamp(lastEventAt, "runIdentity.lastEventAt"),
     };
   }
 
