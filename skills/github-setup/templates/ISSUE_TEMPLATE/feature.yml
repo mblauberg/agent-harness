@@ -1,0 +1,61 @@
+name: Feature request
+description: Something the project should handle and does not. Describe the problem.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        This form asks for the problem, not the solution. A well-described
+        problem with no proposed fix is a good issue. A fix with no evidenced
+        problem is not.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >-
+        What went wrong in real work? Give the task you were doing, what the
+        project did, and what it cost you: a wrong result, a wasted run, a
+        gate that missed something, a review that should not have been
+        needed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: >-
+        Where this happened: sessions, receipts, repositories, transcripts. How
+        often. Redact secrets, personal data and private project names.
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do today
+      description: The workaround you currently use, and why it falls short.
+    validations:
+      required: true
+
+  - type: textarea
+    id: direction
+    attributes:
+      label: Possible direction
+      description: >-
+        Optional, and only if you have one. If you already know it changes
+        authority, a gate or a contract, say so: those need an approved spec
+        before any code.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before you file
+      options:
+        - label: I understand that changes to authority, gates or contracts need an approved spec first.
+          required: true
+        - label: This is not a security vulnerability. Those go through SECURITY.md.
+          required: true

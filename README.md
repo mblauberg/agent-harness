@@ -24,7 +24,7 @@ It is built from three parts:
 
 - **Harness:** [`HARNESS.md`](HARNESS.md) defines authority, the delivery
   lifecycle and how much review pressure each risk tier owes.
-- **Skills:** the <!--skills-->31<!--/skills--> Agent Skills are task-specific
+- **Skills:** the <!--skills-->32<!--/skills--> Agent Skills are task-specific
   procedures, one folder with a `SKILL.md` each. Only the one-line descriptions
   sit in permanent context; a body loads when the task matches.
 - **Agent Fabric:** cross-provider execution and durable coordination for
@@ -181,15 +181,15 @@ direct command-line calls are a preflight or a recorded degraded fallback.
 
 ## Skill library
 
-The full <!--skills-->31<!--/skills-->-skill catalogue, grouped by area:
+The full <!--skills-->32<!--/skills-->-skill catalogue, grouped by area:
 
 <!-- skill-catalogue:start -->
 <details>
-<summary>All 31 skills</summary>
+<summary>All 32 skills</summary>
 
 | Area | Skills |
 |---|---|
-| Delivery | [`session`](skills/session/SKILL.md), [`scope`](skills/scope/SKILL.md), [`deliver`](skills/deliver/SKILL.md), [`implement`](skills/implement/SKILL.md), [`tdd`](skills/tdd/SKILL.md), [`refactor`](skills/refactor/SKILL.md), [`diagnose`](skills/diagnose/SKILL.md), [`code-review`](skills/code-review/SKILL.md), [`evaluate`](skills/evaluate/SKILL.md), [`release`](skills/release/SKILL.md), [`retrospect`](skills/retrospect/SKILL.md), [`work-map`](skills/work-map/SKILL.md) |
+| Delivery | [`session`](skills/session/SKILL.md), [`scope`](skills/scope/SKILL.md), [`deliver`](skills/deliver/SKILL.md), [`implement`](skills/implement/SKILL.md), [`tdd`](skills/tdd/SKILL.md), [`refactor`](skills/refactor/SKILL.md), [`diagnose`](skills/diagnose/SKILL.md), [`code-review`](skills/code-review/SKILL.md), [`evaluate`](skills/evaluate/SKILL.md), [`release`](skills/release/SKILL.md), [`retrospect`](skills/retrospect/SKILL.md), [`work-map`](skills/work-map/SKILL.md), [`github-setup`](skills/github-setup/SKILL.md) |
 | Orchestration | [`orchestrate`](skills/orchestrate/SKILL.md), [`autopilot`](skills/autopilot/SKILL.md) |
 | Writing and documentation | [`engineering-docs`](skills/engineering-docs/SKILL.md), [`engineering-writing`](skills/engineering-writing/SKILL.md), [`academic-writing`](skills/academic-writing/SKILL.md), [`legal-writing`](skills/legal-writing/SKILL.md), [`natural-writing`](skills/natural-writing/SKILL.md) |
 | Design and diagrams | [`ui-ux-design`](skills/ui-ux-design/SKILL.md), [`prototype`](skills/prototype/SKILL.md), [`d2-diagrams`](skills/d2-diagrams/SKILL.md), [`uml-diagrams`](skills/uml-diagrams/SKILL.md) |
