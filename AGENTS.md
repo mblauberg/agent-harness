@@ -1,9 +1,9 @@
 # Provenant: global agent instructions (all harnesses)
 
-Depth lives in `HARNESS.md` beside this file at the harness root
-`~/.agents`; both are symlinked into `~/.claude` (constitution: objective,
-topology, model routing, memory policy, execution/pane policy). Read it
-before any decision about orchestration, model choice, delegation, or memory.
+Depth lives in `HARNESS.md` beside this file in `~/.agents`, both
+symlinked into `~/.claude` (constitution: objective, topology, model
+routing, memory policy, execution/pane policy). Read it before
+orchestration, model-choice, delegation, or memory decisions.
 
 - **Objective:** quality per the user's attention-hour. Verify before it
   reaches the user; delegate aggressively; curated docs over raw logs.
