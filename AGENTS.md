@@ -17,6 +17,9 @@ before any decision about orchestration, model choice, delegation, or memory.
   at the owning repository's `.worktrees/<task-agent>` path, one writer each;
   see `docs/worktrees.md`. Branch deletion, force-removal, history rewrites and
   integration or pushes to shared branches still need explicit user authority.
+- **GitHub (this repo only):** issue, branch, PR and Project-status mechanics
+  live in `docs/runbooks/github-workflow.md`; provenant-local process, not
+  harness doctrine.
 - **Style:** terse for inter-agent, mechanical, and status traffic; use
   domain-appropriate user prose. Load `$caveman` only on explicit request.
 

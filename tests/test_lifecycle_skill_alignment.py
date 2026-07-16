@@ -30,7 +30,7 @@ REQUIRED_DOCTRINE = {
     ),
     "session": ("fresh session", "provider session", "compaction"),
     "deliver": ("project session", "coordination run", "workstream"),
-    "work-map": ("project/run/lead", "not live task truth"),
+    "work-map": ("project status", "never restates current status"),
     "release": ("exact accepted-artifact", "target-bound", "project/session authority"),
     "retrospect": ("gate latency", "unnecessary interruption", "next scope cycle"),
 }

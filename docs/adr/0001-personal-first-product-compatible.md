@@ -26,10 +26,9 @@ is actually pursued.
   and `package-lock.json`, landed through [PR
   #7](https://github.com/mblauberg/provenant/pull/7). Earlier roadmap labels and
   rationale remain in Git history rather than a live roadmap dependency.
-- Branch protection remains an unresolved human decision in [issue
-  #97](https://github.com/mblauberg/provenant/issues/97). Live verification on
-  15 July 2026 found `main` unprotected and no repository rulesets. This ADR
-  authorises no repository-setting mutation.
+- [Issue #97](https://github.com/mblauberg/provenant/issues/97) and its Project
+  Status field own the branch-protection decision, repository-setting state and
+  user gate. This ADR authorises no repository-setting mutation.
 
 ## Clarification — 14 July 2026
 

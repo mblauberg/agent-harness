@@ -1,14 +1,17 @@
 # Specifications
 
-Current specifications use semantic domain/topic paths. Each linked file is an
-independent normative owner; directories exist only for discovery. Git owns
-content integrity and history. Requirements and acceptance stay with the spec
-that owns the behaviour.
+This directory is Provenant requirements doctrine, not a live work tracker or
+globally applied cross-project harness policy. Current specifications use
+semantic domain/topic paths. Each linked file is an independent normative
+owner; directories exist only for discovery. Git owns content integrity and
+history. Requirements and acceptance stay with the spec that owns the
+behaviour. GitHub issues and their Project Status fields own current delivery
+state, owner, dependencies and user gates.
 
 ## Agent Fabric
 
-The protocol and operational contracts are frozen designs; implementation and
-final verification remain pending where their owning issues say so.
+The protocol and operational requirements are owned by the specifications
+below. Follow their linked GitHub issues for delivery state.
 
 - [Scope and invariants](agent-fabric/scope-and-invariants.md)
 - [Authority](agent-fabric/authority.md)
@@ -32,8 +35,9 @@ final verification remain pending where their owning issues say so.
 
 ## Project Fabric Console
 
-The Console contract is under final implementation verification and user
-acceptance.
+The Console requirements are owned by the specifications below. [Issue
+#23](https://github.com/mblauberg/provenant/issues/23), its linked pull requests
+and its Project Status field own delivery state and user gates.
 
 - [Scope and projections](console/scope-and-projections.md)
 - [Sessions and chair](console/sessions-and-chair.md)

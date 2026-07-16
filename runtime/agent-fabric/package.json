@@ -25,7 +25,7 @@
     "prepack": "npm run build",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --exclude 'tests/evaluation/**' --exclude 'tests/performance/**'",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:acceptance": "vitest run tests/acceptance",

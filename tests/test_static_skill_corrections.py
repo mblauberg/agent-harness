@@ -85,11 +85,11 @@ def test_session_records_a_friction_pointer_but_retrospect_owns_process_change()
     assert "`retrospect` owns analysis and process changes" in skill
 
 
-def test_work_map_trail_records_route_transitions_not_every_session():
+def test_work_map_links_live_work_state_instead_of_repeating_it():
     skill = compact("skills/work-map/SKILL.md")
 
-    assert "Trail (one line per route transition" in skill
-    assert "one line per session" not in skill
+    assert "Project Status" in skill
+    assert "never restates current status, owner, dependencies or user gates" in skill
     assert "validate_work_map.py" in skill
 
 
