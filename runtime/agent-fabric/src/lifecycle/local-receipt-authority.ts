@@ -122,31 +122,103 @@ function scopeKey(projectSessionId: string, runId: string): string {
   return `${projectSessionId}\0${runId}`;
 }
 
-function receiptOwner(subject: JsonRow): Readonly<{ digest: LifecycleDigest; revision: number }> {
-  const owner = object(subject.ownerRef, "receipt owner");
-  if (owner.kind === "custody") {
-    return {
-      digest: lifecycleDigest("receipt-owner-ref", owner),
-      revision: positiveInteger(object(owner.custodyRef, "custody owner"), "custodyRevision"),
-    };
-  }
-  if (owner.kind === "generation-loss") {
-    return {
-      digest: lifecycleDigest("receipt-owner-ref", owner),
-      revision: positiveInteger(object(owner.generationLossRef, "generation-loss owner"), "generationLossRevision"),
-    };
-  }
-  if (owner.kind === "recovery-retirement") {
-    const revision = Number(text(object(owner.retirementRef, "retirement owner"), "revisionDec"));
-    if (!Number.isSafeInteger(revision) || revision < 1) throw new Error("receipt owner revision is invalid");
-    return { digest: lifecycleDigest("receipt-owner-ref", owner), revision };
-  }
+type OwnerVariant = "custody" | "generation-loss" | "recovery-retirement";
+
+/**
+ * Subject-kind to ownerRef-variant binding table (fail-closed).
+ *
+ * `appendReceipt` is a documented external append-only trust boundary
+ * (`receipt-authority.ts`) exported via `src/index.ts`; a caller may relabel a
+ * subject to any kind, so a subject's kind cannot be assumed producer-authored.
+ * Every kind that is authenticated MUST therefore have an enforced binding row
+ * here: presence = enforced, absence = admission refused. For a bound kind,
+ * `receiptOwner` asserts that (1) the subject kind is bound to the ownerRef
+ * variant, (2) the owner carries exactly one variant payload, and (3) the
+ * variant's embedded runId/agentId match the subject's top-level identity.
+ *
+ * Producer census (subjects that reach `appendReceipt` — sole production caller
+ * is `terminal-receipt-authority.ts:69`, gated by the `candidateKind` allowlist
+ * at `terminal-receipt-authority.ts:33-40`):
+ *   - custody-terminal          -> custody variant. Authored at
+ *     `terminal-owner-receipt.ts:205-216` (custody branch `:278-293`); ownerRef
+ *     is the custody afterRef, custodyRef embeds runId/agentId.
+ *   - generation-loss-terminal  -> generation-loss variant. Authored at
+ *     `terminal-owner-receipt.ts:205-216` (loss branch `:294-310`) with afterRef
+ *     `terminal-owner-receipt.ts:540-548` built by `generationLossRef`
+ *     (`generation-loss-repository.ts:185-198`); generationLossRef embeds
+ *     runId/agentId. Re-materialised at `terminal-owner-receipt.ts:463` and
+ *     `receipt-repository.ts:498`. (The prior lane wrongly deferred this kind as
+ *     producerless; it has live producers today.)
+ *   - review-adoption-decision  -> custody variant. Authored at
+ *     `review-adoption.ts:166-185`; ownerRef is the paired custody afterRef.
+ *   - custody-recovery-retirement, fresh-origin -> NO producer. Neither kind is
+ *     in the `candidateKind` allowlist and no subject of either kind is
+ *     constructed anywhere in src; both are refused at admission (fail closed).
+ */
+const OWNER_BINDINGS: Readonly<Partial<Record<
+  LifecycleReceiptLookup["kind"],
+  OwnerVariant
+>>> = {
+  "custody-terminal": "custody",
+  "review-adoption-decision": "custody",
+  "generation-loss-terminal": "generation-loss",
+};
+
+const OWNER_VARIANT_REF_KEYS: Readonly<Record<OwnerVariant, string>> = {
+  custody: "custodyRef",
+  "generation-loss": "generationLossRef",
+  "recovery-retirement": "retirementRef",
+};
+
+function ownerVariant(kind: unknown): OwnerVariant {
+  if (kind === "custody" || kind === "generation-loss" || kind === "recovery-retirement") return kind;
   throw new Error("receipt owner kind is invalid");
 }
 
+function assertSingleOwnerVariant(owner: Record<string, unknown>, variant: OwnerVariant): void {
+  for (const [candidate, refKey] of Object.entries(OWNER_VARIANT_REF_KEYS)) {
+    if (candidate !== variant && refKey in owner) throw new Error("receipt owner carries a crossed variant");
+  }
+}
+
+function assertEmbeddedOwnerIdentity(subject: JsonRow, owner: Record<string, unknown>, variant: OwnerVariant): void {
+  // Every bound variant (custody, generation-loss) embeds the owning
+  // runId/agentId; the guard keeps the check defensive if an unbound variant
+  // is ever reached.
+  if (variant !== "custody" && variant !== "generation-loss") return;
+  const ref = object(owner[OWNER_VARIANT_REF_KEYS[variant]], `${variant} owner`);
+  if (text(ref, "runId") !== text(subject, "runId") || text(ref, "agentId") !== text(subject, "agentId")) {
+    throw new Error("receipt owner identity is crossed");
+  }
+}
+
+function ownerRevision(owner: Record<string, unknown>, variant: OwnerVariant): number {
+  if (variant === "custody") return positiveInteger(object(owner.custodyRef, "custody owner"), "custodyRevision");
+  if (variant === "generation-loss") {
+    return positiveInteger(object(owner.generationLossRef, "generation-loss owner"), "generationLossRevision");
+  }
+  const revision = Number(text(object(owner.retirementRef, "retirement owner"), "revisionDec"));
+  if (!Number.isSafeInteger(revision) || revision < 1) throw new Error("receipt owner revision is invalid");
+  return revision;
+}
+
+function receiptOwner(
+  subject: JsonRow,
+  kind: LifecycleReceiptLookup["kind"],
+): Readonly<{ digest: LifecycleDigest; revision: number }> {
+  const owner = object(subject.ownerRef, "receipt owner");
+  const variant = ownerVariant(owner.kind);
+  const bound = OWNER_BINDINGS[kind];
+  if (bound === undefined) throw new Error(`no enforced binding for kind ${kind}; admission refused`);
+  if (variant !== bound) throw new Error("receipt owner binding is invalid");
+  assertSingleOwnerVariant(owner, variant);
+  assertEmbeddedOwnerIdentity(subject, owner, variant);
+  return { digest: lifecycleDigest("receipt-owner-ref", owner), revision: ownerRevision(owner, variant) };
+}
+
 function receiptLookup(subject: JsonRow): LifecycleReceiptLookup {
-  const owner = receiptOwner(subject);
   const kind = receiptKind(text(subject, "kind"));
+  const owner = receiptOwner(subject, kind);
   return {
     kind,
     projectSessionId: text(subject, "projectSessionId"),
