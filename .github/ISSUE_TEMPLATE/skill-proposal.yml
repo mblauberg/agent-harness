@@ -1,6 +1,5 @@
 name: Skill proposal
 description: Propose a new Agent Skill, or a material revision to an existing one.
-title: "[skill]: "
 labels: ["enhancement"]
 body:
   - type: markdown

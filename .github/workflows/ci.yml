@@ -78,6 +78,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Build workspace in dependency order
         run: npm run build
+      - name: Run protocol tests
+        run: npm run test --workspace=@local/agent-fabric-protocol
       - name: Run fabric typecheck, build and tests
         env:
           AGENT_FABRIC_PORTABLE_TESTS: "1"

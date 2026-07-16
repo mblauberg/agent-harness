@@ -23,7 +23,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --exclude 'tests/evaluation.test.ts' --exclude 'tests/load.test.ts'",
     "test:evaluation": "vitest run tests/evaluation.test.ts",
     "test:load": "vitest run tests/load.test.ts",
     "precheck": "npm run build --include-workspace-root",
