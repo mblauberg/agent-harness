@@ -38,7 +38,10 @@ Requirements:
 - Claude Code, Codex, or both;
 - Node.js `>=24.15.0 <25` and npm `>=11.12.1 <12` to run repository
   verification (the suite shells out to `node`); and
-- PyYAML and pytest for the harness checks.
+- PyYAML and pytest for the harness checks. CI installs the versions pinned
+  in `uv.lock`; locally, `uv sync --only-group test` reproduces them, or any
+  interpreter with both packages works (`scripts/check-harness` honours
+  `HARNESS_PYTHON`).
 
 Install either platform independently, or both:
 
