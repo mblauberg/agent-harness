@@ -8,8 +8,11 @@ import {
   type GenerationLossSource,
   type RecordGenerationLossObservationInput,
 } from "../../../src/lifecycle/generation-loss-repository.ts";
+import { LifecycleReceiptRepository } from "../../../src/lifecycle/receipt-repository.ts";
 import { LifecycleRotationRepository } from "../../../src/lifecycle/rotation-repository.ts";
+import { recoverTerminalAuthorityReceipt } from "../../../src/lifecycle/terminal-receipt-authority.ts";
 import { admitProviderActionFixture } from "../../support/provider-action-fixture.ts";
+import { TestLifecycleReceiptAuthority } from "../../support/lifecycle-receipt-authority-fake.ts";
 import { createStage1Fixture } from "../../support/stage1-fixture.ts";
 
 function canonical(value: unknown): string {
@@ -35,6 +38,92 @@ function digest(value: string): string {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
+function seedLifecycleScope(database: Database.Database, input: Readonly<{
+  projectId: string;
+  projectSessionId: string;
+  runId: string;
+  authorityId: string;
+}>): Readonly<{ checkpointDigest: string }> {
+  const scope = { schemaVersion: 1, ...input };
+  const admissionDigest = lifecycleDigest("admission", scope);
+  const scopeDigest = lifecycleDigest("admitted-scope", scope);
+  const requestId = lifecycleDigest("scope-admission-outbox", scope);
+  const orderedRecordSetDigest = lifecycleDigest("scope-record-set", []);
+  const checkpointBody = {
+    schemaVersion: 1,
+    authorityId: input.authorityId,
+    projectSessionId: input.projectSessionId,
+    runId: input.runId,
+    receiptCountDec: "0",
+    headAuthoritySequenceDec: "0",
+    headReceiptDigest: null,
+    orderedRecordSetDigest,
+  };
+  const checkpointDigest = lifecycleDigest("scope-checkpoint", checkpointBody);
+  const namespaceMember = {
+    projectSessionId: input.projectSessionId,
+    runId: input.runId,
+    authorityId: input.authorityId,
+    scopeCheckpointDigest: checkpointDigest,
+    receiptCountDec: "0",
+    headReceiptDigest: null,
+  };
+  const orderedScopeHeadSetDigest = lifecycleDigest("namespace-scope-head-set", [namespaceMember]);
+  const namespaceBody = {
+    schemaVersion: 1,
+    authorityId: input.authorityId,
+    projectId: input.projectId,
+    scopeCountDec: "1",
+    orderedScopeHeadSetDigest,
+  };
+  const namespaceDigest = lifecycleDigest("namespace-checkpoint", namespaceBody);
+  const resolutionBody = {
+    schemaVersion: 1,
+    admissionRequestId: requestId,
+    scopeDigest,
+    initialScopeCheckpointDigest: checkpointDigest,
+    namespaceCheckpointDigest: namespaceDigest,
+  };
+  const resolutionDigest = lifecycleDigest("scope-admission-resolution", resolutionBody);
+  database.transaction(() => {
+    database.prepare("INSERT INTO lifecycle_receipt_projects VALUES (?,?,?)")
+      .run(input.projectId, input.authorityId, 1);
+    database.prepare("INSERT INTO lifecycle_scope_admission_outbox VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+      requestId, input.projectId, input.projectSessionId, input.runId, input.authorityId,
+      admissionDigest, 1, canonical(scope), scopeDigest, 1,
+    );
+    database.prepare("INSERT INTO lifecycle_admitted_run_scopes VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+      input.projectId, input.projectSessionId, input.runId, input.authorityId,
+      admissionDigest, 1, requestId, scopeDigest, checkpointDigest, resolutionDigest,
+    );
+    database.prepare("INSERT INTO lifecycle_receipt_scope_checkpoints VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(
+      input.projectSessionId, input.runId, input.authorityId, 0, 0, null,
+      orderedRecordSetDigest, canonical(checkpointBody), checkpointDigest, "scope-attestation-0", 1,
+    );
+    database.prepare("INSERT INTO lifecycle_receipt_scope_heads VALUES (?,?,?,1)").run(
+      input.projectSessionId, input.runId, checkpointDigest,
+    );
+    database.prepare("INSERT INTO lifecycle_receipt_namespace_checkpoints VALUES (?,?,?,?,?,?,?,?)").run(
+      input.projectId, input.authorityId, 1, orderedScopeHeadSetDigest,
+      canonical(namespaceBody), namespaceDigest, "namespace-attestation-0", 1,
+    );
+    database.prepare("INSERT INTO lifecycle_receipt_namespace_members VALUES (?,?,?,?,?,?,?,?,?)").run(
+      input.projectId, namespaceDigest, 1, input.projectSessionId, input.runId,
+      input.authorityId, checkpointDigest, 0, null,
+    );
+    database.prepare("INSERT INTO lifecycle_receipt_namespace_heads VALUES (?,?,?,?,?,1)").run(
+      input.projectId, input.authorityId, 1, orderedScopeHeadSetDigest, namespaceDigest,
+    );
+    database.prepare("INSERT INTO lifecycle_scope_admission_resolutions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+      requestId, input.projectId, input.projectSessionId, input.runId, input.authorityId,
+      admissionDigest, 1, scopeDigest, 0, 0, orderedRecordSetDigest,
+      canonical(checkpointBody), checkpointDigest, 1, namespaceDigest,
+      canonical(namespaceMember), 1, canonical(resolutionBody), resolutionDigest,
+    );
+  }).immediate();
+  return { checkpointDigest };
+}
+
 type RepositoryFixture = Readonly<{
   database: Database.Database;
   repository: GenerationLossRepository;
@@ -42,6 +131,7 @@ type RepositoryFixture = Readonly<{
   principalGeneration: number;
   source: GenerationLossSource;
   directory: string;
+  databasePath: string;
 }>;
 
 async function createRepositoryFixture(): Promise<RepositoryFixture> {
@@ -110,6 +200,7 @@ async function createRepositoryFixture(): Promise<RepositoryFixture> {
     projectSessionId,
     principalGeneration,
     directory: stage1.directory,
+    databasePath: stage1.databasePath,
     source: {
       oldProviderSessionRef: "provider-session:g2",
       newProviderSessionRef: "provider-session:observed",
@@ -155,7 +246,7 @@ function observation(
 }
 
 async function closeFixture(fixture: RepositoryFixture): Promise<void> {
-  fixture.database.close();
+  if (fixture.database.open) fixture.database.close();
   await rm(fixture.directory, { recursive: true, force: true });
 }
 
@@ -207,6 +298,234 @@ function seedNonterminalCustody(fixture: RepositoryFixture): void {
 }
 
 describe("generation-loss persistence repository", () => {
+  it("rejects crossed generation-loss identity and stale source revision before receipt mutation", async () => {
+    const fixture = await createRepositoryFixture();
+    try {
+      const observed = fixture.database.transaction(() =>
+        fixture.repository.recordObservationInCurrentTransaction(observation(fixture)))();
+      const generationLossId = observed.generationLossId!;
+      const receiptRepository = new LifecycleReceiptRepository(
+        fixture.database,
+        new LifecycleRotationRepository(fixture.database),
+      );
+      const base = {
+        runId: "run-stage1",
+        agentId: "chair",
+        generationLossId,
+        expectedRevision: 1,
+        applyId: "generation-loss-rejected-apply",
+        admissionDigest: digest("generation-loss-rejected-admission"),
+        operatorDecisionDigest: digest("generation-loss-rejected-decision"),
+        transitionProof: { schemaVersion: 1, kind: "direct-open" },
+        mutationPlan: {
+          schemaVersion: 1,
+          writes: [],
+          writeSetDigest: lifecycleDigest("mutation-plan", { schemaVersion: 1, writes: [] }),
+        },
+        terminalEvidenceDigest: digest("generation-loss-rejected-evidence"),
+        recordedAt: 21,
+      } as const;
+      expect(() => fixture.database.transaction(() =>
+        receiptRepository.prepareGenerationLossTerminalInCurrentTransaction({
+          ...base,
+          agentId: "crossed-agent",
+        }))()).toThrow("generation-loss head");
+      expect(() => fixture.database.transaction(() =>
+        receiptRepository.prepareGenerationLossTerminalInCurrentTransaction({
+          ...base,
+          expectedRevision: 2,
+        }))()).toThrow("generation-loss is not the expected terminal source head");
+      expect(fixture.database.prepare(`
+        SELECT
+          (SELECT count(*) FROM lifecycle_receipt_batches) AS batches,
+          (SELECT count(*) FROM lifecycle_receipt_generation_loss_effects) AS effects,
+          (SELECT count(*) FROM lifecycle_receipt_intents) AS intents,
+          (SELECT count(*) FROM lifecycle_generation_loss_revisions
+            WHERE generation_loss_id=?) AS revisions
+      `).get(generationLossId)).toEqual({ batches: 0, effects: 0, intents: 0, revisions: 1 });
+    } finally {
+      await closeFixture(fixture);
+    }
+  });
+
+  it("prepares an exact open generation-loss head for authenticated direct-open abandonment", async () => {
+    const fixture = await createRepositoryFixture();
+    try {
+      const observed = fixture.database.transaction(() =>
+        fixture.repository.recordObservationInCurrentTransaction(observation(fixture)))();
+      const generationLossId = observed.generationLossId!;
+      const receiptRepository = new LifecycleReceiptRepository(
+        fixture.database,
+        new LifecycleRotationRepository(fixture.database),
+      );
+      const mutationPlan = {
+        schemaVersion: 1,
+        writes: [],
+        writeSetDigest: lifecycleDigest("mutation-plan", { schemaVersion: 1, writes: [] }),
+      };
+      const prepared = fixture.database.transaction(() =>
+        receiptRepository.prepareGenerationLossTerminalInCurrentTransaction({
+          runId: "run-stage1",
+          agentId: "chair",
+          generationLossId,
+          expectedRevision: 1,
+          applyId: "generation-loss-direct-open-apply",
+          admissionDigest: digest("generation-loss-direct-open-admission"),
+          operatorDecisionDigest: digest("generation-loss-direct-open-decision"),
+          transitionProof: { schemaVersion: 1, kind: "direct-open" },
+          mutationPlan,
+          terminalEvidenceDigest: digest("generation-loss-direct-open-evidence"),
+          recordedAt: 21,
+        }))();
+
+      expect(prepared).toMatchObject({
+        generationLossId,
+        preRevision: 1,
+        finalRevision: 2,
+        fromState: "open",
+        finalState: "abandoned",
+        abandonKind: "direct-open",
+        recoveryActionRef: null,
+      });
+      expect(prepared.subject).toMatchObject({
+        kind: "generation-loss-terminal",
+        fromState: "open",
+        terminalState: "abandoned",
+        abandonKind: "direct-open",
+        recoveryActionRef: null,
+      });
+      expect(fixture.database.prepare(`
+        SELECT role,batch_transition_kind,generation_loss_id,pre_revision,final_revision,effect_digest
+          FROM lifecycle_receipt_generation_loss_effects
+      `).get()).toEqual({
+        role: "primary",
+        batch_transition_kind: "generation-loss-terminal",
+        generation_loss_id: generationLossId,
+        pre_revision: 1,
+        final_revision: 2,
+        effect_digest: prepared.effectDigest,
+      });
+      expect(fixture.repository.readHead("run-stage1", "chair", generationLossId))
+        .toMatchObject({ revision: 1, state: "open", abandonKind: "none", terminal: false });
+      const recoveredPrepared = new LifecycleReceiptRepository(
+        fixture.database,
+        new LifecycleRotationRepository(fixture.database),
+      ).readPreparedGenerationLossTerminal(
+        "run-stage1",
+        "chair",
+        generationLossId,
+        "generation-loss-direct-open-apply",
+      );
+      expect(recoveredPrepared).toEqual(prepared);
+
+      const project = fixture.database.prepare(`
+        SELECT session.project_id FROM runs run
+        JOIN project_sessions session ON session.project_session_id=run.project_session_id
+        WHERE run.run_id='run-stage1'
+      `).get() as { project_id: string };
+      const authority = new TestLifecycleReceiptAuthority("generation-loss-test-authority");
+      const authorityId = authority.authorityId;
+      await authority.admitScope({
+        schemaVersion: 1,
+        projectId: project.project_id,
+        projectSessionId: fixture.projectSessionId,
+        runId: "run-stage1",
+        authorityId,
+        admissionDigest: digest("generation-loss-authority-admission") as `sha256:${string}`,
+        admittedAt: 1,
+      });
+      const initialScope = seedLifecycleScope(fixture.database, {
+        projectId: project.project_id,
+        projectSessionId: fixture.projectSessionId,
+        runId: "run-stage1",
+        authorityId,
+      });
+      authority.appendSuccessThenThrowOnce = true;
+      const recoveredAuthority = await recoverTerminalAuthorityReceipt(authority, recoveredPrepared!);
+      expect(authority).toMatchObject({ appendCalls: 1, appendThrowCount: 1 });
+      const applyWith = (database: Database.Database, repository: LifecycleReceiptRepository) =>
+        database.transaction(() => repository.applyAuthorizedGenerationLossTerminalInCurrentTransaction({
+          prepared: recoveredPrepared!,
+          expectedRevision: 1,
+          expectedScopeHead: { checkpointDigest: initialScope.checkpointDigest, revision: 1 },
+          receipt: {
+            authorityId: recoveredAuthority.record.receipt.authorityId,
+            authoritySequence: recoveredAuthority.record.receipt.authoritySequence,
+            previousReceiptDigest: recoveredAuthority.record.receipt.previousReceiptDigest,
+            receiptDigest: recoveredAuthority.record.receipt.receiptDigest,
+            attestation: recoveredAuthority.record.receipt.attestation,
+            verifiedAt: 22,
+          },
+          scopeCheckpoint: {
+            receiptCount: recoveredAuthority.checkpoint.receiptCount,
+            headAuthoritySequence: recoveredAuthority.checkpoint.headAuthoritySequence,
+            headReceiptDigest: recoveredAuthority.checkpoint.headReceiptDigest!,
+            orderedRecordSetDigest: recoveredAuthority.checkpoint.orderedRecordSetDigest,
+            checkpointDigest: recoveredAuthority.checkpoint.checkpointDigest,
+            attestation: recoveredAuthority.checkpoint.attestation,
+            verifiedAt: 22,
+          },
+          authorizedAt: 22,
+          appliedAt: 23,
+          localWrites: [],
+          revalidateAdoptionWrites: () => undefined,
+          performAdoptionWrites: () => undefined,
+        }))();
+      expect(applyWith(fixture.database, receiptRepository)).toMatchObject({
+        revision: 2,
+        state: "abandoned",
+        abandonKind: "direct-open",
+        terminal: true,
+      });
+      expect(fixture.database.prepare(`
+        SELECT recovery_action_adapter_id,recovery_action_id,active_recovery_custody_id,
+               receipt_batch_id,receipt_apply_id
+          FROM lifecycle_generation_loss_revisions
+         WHERE run_id='run-stage1' AND agent_id='chair' AND generation_loss_id=? AND revision=2
+      `).get(generationLossId)).toEqual({
+        recovery_action_adapter_id: null,
+        recovery_action_id: null,
+        active_recovery_custody_id: null,
+        receipt_batch_id: prepared.batchId,
+        receipt_apply_id: prepared.applyId,
+      });
+      fixture.database.close();
+      const restartedDatabase = new Database(fixture.databasePath);
+      restartedDatabase.pragma("foreign_keys = ON");
+      try {
+        const restartedReceipts = new LifecycleReceiptRepository(
+          restartedDatabase,
+          new LifecycleRotationRepository(restartedDatabase),
+        );
+        const afterRestart = restartedReceipts.readPreparedGenerationLossTerminal(
+          "run-stage1",
+          "chair",
+          generationLossId,
+          prepared.applyId,
+        );
+        expect(afterRestart).toEqual(prepared);
+        const recoveredAfterRestart = await recoverTerminalAuthorityReceipt(authority, afterRestart!);
+        expect(recoveredAfterRestart.record.receipt.receiptDigest)
+          .toBe(recoveredAuthority.record.receipt.receiptDigest);
+        expect(authority.appendCalls).toBe(1);
+        expect(() => applyWith(restartedDatabase, restartedReceipts))
+          .toThrow("generation-loss is not the expected terminal source head");
+        expect(restartedDatabase.prepare(`
+        SELECT
+          (SELECT count(*) FROM lifecycle_authority_receipts) AS receipts,
+          (SELECT count(*) FROM lifecycle_receipt_generation_loss_effects) AS effects,
+          (SELECT count(*) FROM lifecycle_generation_loss_revisions
+            WHERE generation_loss_id=?) AS revisions,
+          (SELECT count(*) FROM lifecycle_transition_applies) AS applies
+      `).get(generationLossId)).toEqual({ receipts: 1, effects: 1, revisions: 2, applies: 1 });
+      } finally {
+        restartedDatabase.close();
+      }
+    } finally {
+      await closeFixture(fixture);
+    }
+  });
+
   it("classifies a provider-generation advance and durably replays its revision-one loss", async () => {
     const fixture = await createRepositoryFixture();
     try {

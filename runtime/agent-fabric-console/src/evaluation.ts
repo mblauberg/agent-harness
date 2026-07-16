@@ -721,6 +721,17 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
       phase: run.phase,
       health: run.health,
       nextMilestone: run.nextMilestone,
+      declaredProgress: {
+        plan: "open",
+        counts: {
+          blocked: 0,
+          ready: 0,
+          active: controlState === "terminal" ? 0 : 1,
+          complete: controlState === "terminal" ? 1 : 0,
+          cancelled: 0,
+          degraded: 0,
+        },
+      },
     },
     detailRef: {
       kind: "run",
