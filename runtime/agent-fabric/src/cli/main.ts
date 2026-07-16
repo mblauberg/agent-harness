@@ -1,31 +1,8 @@
 #!/usr/bin/env node
-import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
 import { dirname } from "node:path";
-import {
-  FABRIC_OPERATIONS,
-  NdjsonRpcTransport,
-  ProtocolTransportError,
-  type HerdrSteerDispatchResult,
-} from "@local/agent-fabric-protocol";
-
-import { verifyFabricReceiptLink } from "../exports/receipt.js";
-import { runForegroundDaemon } from "./daemon-run.js";
-import { runEventObserver } from "./event-observer.js";
-import { HERDR_STEER_USAGE, parseHerdrSteerArguments } from "./herdr-steer.js";
-import { mcpSeatPath, provisionMcpSeats } from "./mcp-provision.js";
-import { provisionObserverCredential } from "./observer-provision.js";
-import { resolveFabricPaths } from "./paths.js";
-import { runRetentionCli } from "./retention.js";
-import { fabricDoctor, fabricStatus } from "./status.js";
-import { runWorkspaceTrust } from "./workspace-trust.js";
-import { resolveMcpCapability } from "../mcp/credentials.js";
-import {
-  privateDiscoveryPaths,
-  readPrivateDiscovery,
-  readPrivateDiscoveryOwner,
-} from "../daemon/private-discovery.js";
+import type { HerdrSteerDispatchResult } from "@local/agent-fabric-protocol";
 
 function option(arguments_: string[], name: string): string | undefined {
   const index = arguments_.indexOf(name);
@@ -34,6 +11,8 @@ function option(arguments_: string[], name: string): string | undefined {
 
 async function servingSocketPath(runtimeDirectory: string, fallback: string): Promise<string> {
   try {
+    const { privateDiscoveryPaths, readPrivateDiscovery, readPrivateDiscoveryOwner } =
+      await import("../daemon/private-discovery.js");
     const discoveryPaths = privateDiscoveryPaths(runtimeDirectory);
     const owner = await readPrivateDiscoveryOwner(discoveryPaths);
     if (owner === undefined || owner.state !== "active") return fallback;
@@ -47,6 +26,10 @@ async function servingSocketPath(runtimeDirectory: string, fallback: string): Pr
 }
 
 async function inspect(arguments_: string[]): Promise<void> {
+  const [{ default: Database }, { resolveFabricPaths }] = await Promise.all([
+    import("better-sqlite3"),
+    import("./paths.js"),
+  ]);
   const paths = resolveFabricPaths();
   const databasePath = option(arguments_, "--database") ?? paths.databasePath;
   const runtimeDirectory = option(arguments_, "--runtime-directory") ?? paths.runtimeDirectory;
@@ -87,11 +70,23 @@ async function verifyReceipt(arguments_: string[]): Promise<void> {
   if (runReceiptPath === undefined) {
     throw new Error("receipt verify requires --run-receipt <path>");
   }
+  const { verifyFabricReceiptLink } = await import("../exports/receipt.js");
   const result = await verifyFabricReceiptLink({ runReceiptPath });
   process.stdout.write(`verified ${result.relativePath} sha256 ${result.sha256}\n`);
 }
 
 async function herdrSteer(arguments_: string[]): Promise<void> {
+  const [
+    { FABRIC_OPERATIONS, NdjsonRpcTransport, ProtocolTransportError },
+    { parseHerdrSteerArguments },
+    { resolveFabricPaths },
+    { resolveMcpCapability },
+  ] = await Promise.all([
+    import("@local/agent-fabric-protocol"),
+    import("./herdr-steer.js"),
+    import("./paths.js"),
+    import("../mcp/credentials.js"),
+  ]);
   const request = await parseHerdrSteerArguments(arguments_);
   const paths = resolveFabricPaths();
   const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH ??
@@ -139,10 +134,18 @@ function isConnectionFailure(error: unknown): boolean {
 
 async function main(arguments_: string[]): Promise<void> {
   if (arguments_[0] === "status") {
+    const [{ fabricStatus }, { resolveFabricPaths }] = await Promise.all([
+      import("./status.js"),
+      import("./paths.js"),
+    ]);
     process.stdout.write(`${JSON.stringify(await fabricStatus(arguments_.slice(1), resolveFabricPaths()), null, 2)}\n`);
     return;
   }
   if (arguments_[0] === "doctor") {
+    const [{ fabricDoctor }, { resolveFabricPaths }] = await Promise.all([
+      import("./status.js"),
+      import("./paths.js"),
+    ]);
     const output = await fabricDoctor(arguments_.slice(1), resolveFabricPaths());
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     if (output.healthy !== true) process.exitCode = 1;
@@ -157,15 +160,18 @@ async function main(arguments_: string[]): Promise<void> {
     return;
   }
   if (arguments_[0] === "daemon" && arguments_[1] === "run") {
+    const { runForegroundDaemon } = await import("./daemon-run.js");
     await runForegroundDaemon(arguments_.slice(2));
     return;
   }
   if (arguments_[0] === "observe") {
+    const { runEventObserver } = await import("./event-observer.js");
     await runEventObserver(arguments_.slice(1));
     return;
   }
   if (arguments_[0] === "herdr" && arguments_[1] === "steer") {
     if (arguments_.length === 3 && ["--help", "-h"].includes(arguments_[2] ?? "")) {
+      const { HERDR_STEER_USAGE } = await import("./herdr-steer.js");
       process.stdout.write(`${HERDR_STEER_USAGE}\n`);
       return;
     }
@@ -173,11 +179,19 @@ async function main(arguments_: string[]): Promise<void> {
     return;
   }
   if (arguments_[0] === "mcp" && arguments_[1] === "provision") {
+    const [{ provisionMcpSeats }, { resolveFabricPaths }] = await Promise.all([
+      import("./mcp-provision.js"),
+      import("./paths.js"),
+    ]);
     const output = await provisionMcpSeats(arguments_.slice(2), resolveFabricPaths());
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return;
   }
   if (arguments_[0] === "mcp" && arguments_[1] === "seat-path") {
+    const [{ mcpSeatPath }, { resolveFabricPaths }] = await Promise.all([
+      import("./mcp-provision.js"),
+      import("./paths.js"),
+    ]);
     const output = await mcpSeatPath(arguments_.slice(2), resolveFabricPaths());
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return;
@@ -186,16 +200,28 @@ async function main(arguments_: string[]): Promise<void> {
     const projectIndex = arguments_.indexOf("--project");
     const project = projectIndex === -1 ? undefined : arguments_[projectIndex + 1];
     if (project === undefined || arguments_.length !== 4) throw new Error("mcp observer-provision requires --project <path>");
+    const [{ provisionObserverCredential }, { resolveFabricPaths }] = await Promise.all([
+      import("./observer-provision.js"),
+      import("./paths.js"),
+    ]);
     const output = await provisionObserverCredential({ project, paths: resolveFabricPaths() });
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return;
   }
   if (arguments_[0] === "workspace") {
+    const [{ runWorkspaceTrust }, { resolveFabricPaths }] = await Promise.all([
+      import("./workspace-trust.js"),
+      import("./paths.js"),
+    ]);
     const output = await runWorkspaceTrust(arguments_.slice(1), resolveFabricPaths());
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return;
   }
   if (arguments_[0] === "retention") {
+    const [{ runRetentionCli }, { resolveFabricPaths }] = await Promise.all([
+      import("./retention.js"),
+      import("./paths.js"),
+    ]);
     const output = await runRetentionCli(arguments_.slice(1), resolveFabricPaths().databasePath);
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return;
