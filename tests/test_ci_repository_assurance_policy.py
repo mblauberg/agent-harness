@@ -41,6 +41,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -397,6 +398,10 @@ def test_ci_gates_build_jobs_behind_path_filters_and_one_aggregate_check() -> No
         "NOTICE",
         "SECURITY.md",
         "THIRD_PARTY_NOTICES.md",
+        # Issue #200: the locked Python test tooling gates the harness job
+        # itself, so a lock or manifest change must re-run that job.
+        "pyproject.toml",
+        "uv.lock",
     ):
         assert required in flattened["harness"], required
     # Non-harness jobs must not path-trigger on docs/ or skills/ broadly.
@@ -704,6 +709,51 @@ def test_ci_runs_complete_harness_and_fabric_gates() -> None:
         assert required in fabric_commands
     run_steps = [step for step in fabric_steps if "run" in step]
     assert all("working-directory" not in step for step in run_steps)
+
+
+def test_harness_python_test_dependencies_install_locked_and_cached() -> None:
+    # Issue #200: the harness job's Python test tooling (pytest, PyYAML)
+    # installs from the committed uv.lock — never from an unconstrained
+    # `pip install` — and the setup-uv cache is keyed on that lock so a
+    # lock change invalidates the cache. The lock is the pin: pyproject
+    # declares the `test` dependency group, uv.lock pins it transitively.
+    document = _workflow()
+    harness_steps = _steps(_job(document, "harness"))
+
+    setup_uv = next(
+        step for step in harness_steps if str(step.get("uses", "")).startswith("astral-sh/setup-uv@")
+    )
+    options = setup_uv.get("with")
+    assert isinstance(options, dict)
+    assert options.get("python-version") == "3.12"
+    assert options.get("enable-cache") is True
+    assert options.get("cache-dependency-glob") == "uv.lock"
+
+    run_commands = [str(step.get("run", "")).strip() for step in harness_steps if "run" in step]
+    assert not any("pip install" in command for command in run_commands)
+    sync_index = run_commands.index("uv sync --locked --only-group test")
+    gate_index = run_commands.index("scripts/check-harness")
+    assert sync_index < gate_index
+
+    # The gate runs against the synced environment: scripts/check-harness
+    # honours HARNESS_PYTHON before any interpreter fallback.
+    gate_step = next(
+        step for step in harness_steps if str(step.get("run", "")).strip() == "scripts/check-harness"
+    )
+    assert gate_step.get("env") == {"HARNESS_PYTHON": "${{ github.workspace }}/.venv/bin/python"}
+
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    # Not a Python package: uv must never build or install the repo itself.
+    assert pyproject["tool"]["uv"]["package"] is False
+    declared = {
+        re.split(r"[<>=~!\[; ]", requirement, maxsplit=1)[0]
+        for requirement in pyproject["dependency-groups"]["test"]
+    }
+    assert declared == {"pytest", "pyyaml"}
+
+    lock_text = (ROOT / "uv.lock").read_text(encoding="utf-8")
+    locked = set(re.findall(r'(?m)^name = "([^"]+)"$', lock_text))
+    assert {"pytest", "pyyaml"} <= locked
 
 
 def test_clean_ci_builds_locked_protocol_before_daemon_typecheck() -> None:
