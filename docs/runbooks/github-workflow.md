@@ -162,8 +162,16 @@ production: by user directive (2026-07-16), repository auto-merge is enabled
 and agents merge directly. An agent merges a pull request once it has passed
 its tier's review pressure (routine: chair plus native checks; substantial:
 fresh native plus the cross-family leg on the exact head; crucial: both) and
-CI is green on the exact head, without waiting for the user. `gh pr merge
---auto` may be queued once those gates are met.
+`ci-status` is green on the exact head, without waiting for the user. `gh pr
+merge --auto` may be queued once those gates are met.
+
+`ci-status` is the single required check on branch protection. It is the
+aggregate job at the end of [`ci.yml`](../../.github/workflows/ci.yml): it
+runs on `if: always()`, succeeds only when every needed job (`detect-changes`,
+`harness`, `fabric`, `review-portal-supervisor`, `console`, `herdr`, `zizmor`)
+either succeeded or was skipped by the path filter, and fails closed on any
+failure or cancellation, including `detect-changes` itself. "CI is green"
+means exactly this one context; no other check is required.
 
 The user review/merge gate applies only when the agent is stuck: split review
 verdicts it cannot settle with primary-source evidence, an exhausted repair
@@ -176,6 +184,28 @@ concurrent pull requests still integrate as a serialised merge train: merge
 one, update the next onto the new `main`, rerun the exact-head checks and
 independent review (an update-merge is a new commit and invalidates prior
 exact-head evidence), then merge it.
+
+### Dependabot patch-only auto-merge
+
+One standing exception to tier review pressure:
+[`dependabot-automerge.yml`](../../.github/workflows/dependabot-automerge.yml)
+(issue #155) queues `gh pr merge --auto` unattended for Dependabot updates
+when all of the following hold:
+
+- the PR author is `dependabot[bot]` and the head branch lives in this
+  repository (not a fork);
+- `dependabot/fetch-metadata` reports the update type as
+  `version-update:semver-patch` (minor and major updates wait for maintainer
+  review); and
+- the dependency list does not include `@anthropic-ai/claude-agent-sdk`.
+
+The SDK is excluded even at patch level (issue #195):
+[`config/adapter-compatibility.yaml`](../../config/adapter-compatibility.yaml)
+pins it by version, artifact, lock integrity, entrypoint and schema, and CI's
+portable-fixtures mode bypasses those pins, so a green SDK bump can still
+leave enabled Claude activation fail-closed until the pins are refreshed
+alongside it. The queued merge still lands only after `ci-status` reports
+green; that gate is the whole review pressure for these PRs.
 
 ### After merge
 
@@ -206,9 +236,12 @@ Afterwards:
 
 [`.github/workflows/agent-go-trigger.yml`](../../.github/workflows/agent-go-trigger.yml)
 (issue #152) is a thin dispatch workflow: adding the `agent-go` label to an
-accepted issue starts an agent run that is expected to end at a linked pull
-request awaiting user review, the same way manually starting `implement` on a
-`Ready` issue does. It only dispatches; it never runs the implementation
+accepted issue starts an agent run with the same stop condition as manually
+starting `implement` on a `Ready` issue: the run follows the repository
+[merge policy](#merge) and stops at a linked pull request awaiting the user
+only when an unresolved user gate remains (split verdicts, exhausted repair
+budget, or a decision outside granted authority). It only dispatches; it
+never runs the implementation
 itself, and it never installs or contacts anything beyond the one endpoint
 its config selects.
 
