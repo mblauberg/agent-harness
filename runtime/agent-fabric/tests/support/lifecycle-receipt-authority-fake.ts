@@ -87,6 +87,24 @@ function scopeKey(projectSessionId: string, runId: string): string {
   return `${projectSessionId}\0${runId}`;
 }
 
+// Mirrors the production fail-closed OWNER_BINDINGS table in
+// src/lifecycle/local-receipt-authority.ts: presence = enforced binding,
+// absence = admission refused, so the fake cannot admit an authority history
+// the landed production adapter would refuse.
+const OWNER_BINDINGS: Readonly<Partial<Record<string, string>>> = {
+  "custody-terminal": "custody",
+  "review-adoption-decision": "custody",
+  "generation-loss-terminal": "generation-loss",
+};
+
+function assertOwnerBinding(subject: Readonly<Record<string, unknown>>): void {
+  const kind = text(subject as Record<string, unknown>, "kind");
+  const ownerRef = row(subject.ownerRef, "ownerRef");
+  const bound = OWNER_BINDINGS[kind];
+  if (bound === undefined) throw new Error(`no enforced binding for kind ${kind}; admission refused`);
+  if (ownerRef.kind !== bound) throw new Error("receipt owner binding is invalid");
+}
+
 function receiptOwner(subject: Readonly<Record<string, unknown>>): {
   ownerRefDigest: LifecycleDigest;
   ownerRevision: number;
@@ -158,6 +176,7 @@ function receiptLookupKey(lookup: LifecycleReceiptLookup): string {
 }
 
 function lookupForSubject(subject: Readonly<Record<string, unknown>>): LifecycleReceiptLookup {
+  assertOwnerBinding(subject);
   const owner = receiptOwner(subject);
   return {
     kind: text(subject as Record<string, unknown>, "kind") as LifecycleReceiptLookup["kind"],

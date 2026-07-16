@@ -93,8 +93,8 @@ describe("negotiated operator client", () => {
     if (projectSessions === undefined) throw new Error("expected project-session core surface");
     expect(Object.keys(projectSessions).sort()).toStrictEqual(["create", "get", "prepareLaunch"]);
 
-    await expect(projectSessions.create({} as never)).resolves.toBe(result);
-    await expect(projectSessions.get({} as never)).resolves.toBe(result);
+    await expect(projectSessions.create?.({} as never)).resolves.toBe(result);
+    await expect(projectSessions.get?.({} as never)).resolves.toBe(result);
     await expect(projectSessions?.prepareLaunch?.({} as never)).resolves.toBe(result);
     expect(transport.calls.map(({ operation }) => operation)).toStrictEqual([
       FABRIC_OPERATIONS.projectSessionCreate,
@@ -160,7 +160,7 @@ describe("negotiated operator client", () => {
     ]);
   });
 
-  it("omits the project-session group when launch custody lacks the core session operations", () => {
+  it("exposes only prepareLaunch when a credential holds only the launch-prepare grant", () => {
     const client = createOperatorClient(new RecordingTransport(
       ["launch-custody.v1"],
       {},
@@ -168,10 +168,26 @@ describe("negotiated operator client", () => {
       [FABRIC_OPERATIONS.projectSessionLaunchPrepare],
     ));
 
-    expect(client.projectSessions).toBeUndefined();
+    expect(client.projectSessions).toBeDefined();
+    expect(Object.keys(client.projectSessions ?? {})).toStrictEqual(["prepareLaunch"]);
+    expect(client.projectSessions?.create).toBeUndefined();
+    expect(client.projectSessions?.get).toBeUndefined();
   });
 
-  it("omits the project-session group when either core session operation is not granted", () => {
+  it("exposes only get when a credential holds only the get grant", () => {
+    const client = createOperatorClient(new RecordingTransport(
+      ["project-sessions.v1"],
+      {},
+      "operator",
+      [FABRIC_OPERATIONS.projectSessionGet],
+    ));
+
+    expect(client.projectSessions).toBeDefined();
+    expect(Object.keys(client.projectSessions ?? {})).toStrictEqual(["get"]);
+    expect(client.projectSessions?.create).toBeUndefined();
+  });
+
+  it("exposes only the granted core session operation when its sibling is not granted", () => {
     const client = createOperatorClient(new RecordingTransport(
       ["project-sessions.v1", "launch-custody.v1"],
       {},
@@ -180,6 +196,18 @@ describe("negotiated operator client", () => {
         FABRIC_OPERATIONS.projectSessionCreate,
         FABRIC_OPERATIONS.projectSessionLaunchPrepare,
       ],
+    ));
+
+    expect(Object.keys(client.projectSessions ?? {}).sort()).toStrictEqual(["create", "prepareLaunch"]);
+    expect(client.projectSessions?.get).toBeUndefined();
+  });
+
+  it("omits the project-session group entirely when no project-session operation is granted", () => {
+    const client = createOperatorClient(new RecordingTransport(
+      ["project-sessions.v1", "launch-custody.v1"],
+      {},
+      "operator",
+      [],
     ));
 
     expect(client.projectSessions).toBeUndefined();

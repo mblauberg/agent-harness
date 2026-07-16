@@ -763,7 +763,7 @@ describe("launch custody", () => {
       command,
       projectId: "project_01",
       intent: fixture.intent,
-    } as unknown as OperatorActionPreviewRequest);
+    } as unknown as OperatorActionPreviewRequest, { allowLaunchIntent: true });
     expect(actions.replayLaunchPreview(context, {
       command,
       projectId: "project_01" as never,
@@ -894,7 +894,7 @@ describe("launch custody", () => {
       command,
       projectId: "project_01",
       intent: fixture.intent,
-    } as unknown as OperatorActionPreviewRequest);
+    } as unknown as OperatorActionPreviewRequest, { allowLaunchIntent: true });
     const commit = {
       command: {
         ...command,

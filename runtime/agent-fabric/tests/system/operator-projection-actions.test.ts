@@ -1477,6 +1477,88 @@ describe("operator action store", () => {
     })).toMatchObject({ status: "committed", commandId: committed.commandId });
   });
 
+  it("rejects a commit whose committing operator differs from the preview's creating operator", async () => {
+    const control = setupControlAction();
+    const preview = await control.actions.preview(control.fixture.context, control.previewRequest);
+
+    control.fixture.operatorStore.registerPrincipal({
+      operatorId: "operator_02",
+      projectId: "project_01",
+      authenticatedSubjectHash: "subject-hash-02",
+      projectAuthorityGeneration: 1,
+    });
+    const otherCredential: OperatorCapabilityCredential = {
+      capabilityId: identifier<"CapabilityId">("cap_session_other_operator_01"),
+      token: "session-secret-other-operator-01",
+    };
+    control.fixture.operatorStore.issueCapability(parseOperatorCapabilityGrant({
+      capabilityId: otherCredential.capabilityId,
+      operatorId: "operator_02",
+      projectId: "project_01",
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+      issuedAt: "2026-01-01T00:00:00Z",
+      expiresAt: "2099-01-01T00:00:00Z",
+      status: "active",
+      kind: "session",
+      projectSessionId: "session_01",
+      sessionGeneration: 1,
+      actions: ["read", "pause"],
+    }), otherCredential.token);
+    const otherContext: AuthenticatedOperatorContext = {
+      operatorId: identifier<"OperatorId">("operator_02"),
+      projectId: identifier<"ProjectId">("project_01"),
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+    };
+    const commitRequest = control.commitRequest(preview, "commit_cross_operator_01");
+    const crossOperatorCommit: OperatorActionCommitRequest = {
+      ...commitRequest,
+      command: {
+        ...commitRequest.command,
+        credential: otherCredential,
+        actor: identifier<"OperatorId">("operator_02"),
+      },
+    };
+
+    await expect(control.actions.commit(otherContext, crossOperatorCommit)).rejects.toMatchObject({
+      code: "CAPABILITY_FORBIDDEN",
+    });
+    expect(control.dispatches()).toBe(0);
+  });
+
+  it("rejects a launch-only credential polling the status of a non-launch operation", async () => {
+    const control = setupControlAction();
+    const preview = await control.actions.preview(control.fixture.context, control.previewRequest);
+    const commitRequest = control.commitRequest(preview, "commit_pause_for_launch_grant_01");
+    const receipt = await control.actions.commit(control.fixture.context, commitRequest);
+
+    const launchOnlyCredential: OperatorCapabilityCredential = {
+      capabilityId: identifier<"CapabilityId">("cap_launch_only_01"),
+      token: "launch-only-secret-01",
+    };
+    control.fixture.operatorStore.issueCapability(parseOperatorCapabilityGrant({
+      capabilityId: launchOnlyCredential.capabilityId,
+      operatorId: "operator_01",
+      projectId: "project_01",
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+      issuedAt: "2026-01-01T00:00:00Z",
+      expiresAt: "2099-01-01T00:00:00Z",
+      status: "active",
+      kind: "session",
+      projectSessionId: "session_01",
+      sessionGeneration: 1,
+      actions: ["launch"],
+    }), launchOnlyCredential.token);
+
+    expect(() => control.actions.status({
+      credential: launchOnlyCredential,
+      projectId: control.previewRequest.projectId,
+      commandId: receipt.commandId,
+    })).toThrow(expect.objectContaining({ code: "CAPABILITY_FORBIDDEN" }));
+  });
+
   it("validates lifecycle, Git, registered-external and promotion bindings before persisting previews", async () => {
     const projectSessionId = identifier<"ProjectSessionId">("session_01");
     const coordinationRunId = identifier<"CoordinationRunId">("run_01");
@@ -1887,9 +1969,9 @@ describe("operator action store", () => {
         credential: projectLaunchCredential,
         commandId: identifier<"CommandId">("preview_launch_project_capability_01"),
       },
-    })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    }, { allowLaunchIntent: true })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
 
-    const preview = await actions.preview(fixture.context, request);
+    const preview = await actions.preview(fixture.context, request, { allowLaunchIntent: true });
     expect(preview).toMatchObject({
       intent,
       consequenceClass: "consequential",
@@ -1914,6 +1996,30 @@ describe("operator action store", () => {
     });
     expect(actions.status({
       credential: launchCredential,
+      projectId,
+      commandId: receipt.commandId,
+    })).toEqual({ status: "committed", commandId: receipt.commandId, receipt });
+
+    const launchOnlyCredential: OperatorCapabilityCredential = {
+      capabilityId: identifier<"CapabilityId">("cap_session_launch_only_01"),
+      token: "session-launch-only-secret-01",
+    };
+    fixture.operatorStore.issueCapability(parseOperatorCapabilityGrant({
+      capabilityId: launchOnlyCredential.capabilityId,
+      operatorId: "operator_01",
+      projectId: "project_01",
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+      issuedAt: "2026-01-01T00:00:00Z",
+      expiresAt: "2099-01-01T00:00:00Z",
+      status: "active",
+      kind: "session",
+      projectSessionId: "session_launch_01",
+      sessionGeneration: 1,
+      actions: ["launch"],
+    }), launchOnlyCredential.token);
+    expect(actions.status({
+      credential: launchOnlyCredential,
       projectId,
       commandId: receipt.commandId,
     })).toEqual({ status: "committed", commandId: receipt.commandId, receipt });
@@ -1945,7 +2051,7 @@ describe("operator action store", () => {
         ...request.command,
         commandId: identifier<"CommandId">("preview_launch_changed_01"),
       },
-    })).rejects.toMatchObject({ code: "STALE_REVISION" });
+    }, { allowLaunchIntent: true })).rejects.toMatchObject({ code: "STALE_REVISION" });
 
     fixture.database.exec(`
       INSERT INTO projects(project_id, canonical_root, revision, authority_generation, created_at, updated_at)
@@ -1972,7 +2078,92 @@ describe("operator action store", () => {
         commandId: identifier<"CommandId">("preview_launch_foreign_session_01"),
       },
       intent: { ...intent, projectSessionId: foreignSessionId },
-    })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    }, { allowLaunchIntent: true })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+  });
+
+  it("refuses a project-session-launch preview on the generic operator-authored surface", async () => {
+    const fixture = setupProjection();
+    fixture.database.exec(`
+      INSERT INTO project_sessions(
+        project_session_id, project_id, mode, state, revision, generation, authority_ref,
+        budget_ref, launch_packet_path, launch_packet_digest, membership_revision,
+        origin_kind, origin_operator_id, created_at, updated_at
+      ) VALUES (
+        'session_generic_launch_01', 'project_01', 'coordinated', 'awaiting_launch', 1, 1, '${digest}',
+        'budget_01', 'launch/packet.json', '${digest}', 1,
+        'operator-launch', 'operator_01', ${now - 200}, ${now - 100}
+      );
+    `);
+    const launchCredential: OperatorCapabilityCredential = {
+      capabilityId: identifier<"CapabilityId">("cap_generic_launch_01"),
+      token: "generic-launch-secret-01",
+    };
+    fixture.operatorStore.issueCapability(parseOperatorCapabilityGrant({
+      capabilityId: launchCredential.capabilityId,
+      operatorId: "operator_01",
+      projectId: "project_01",
+      projectAuthorityGeneration: 1,
+      principalGeneration: 1,
+      issuedAt: "2026-01-01T00:00:00Z",
+      expiresAt: "2099-01-01T00:00:00Z",
+      status: "active",
+      kind: "session",
+      projectSessionId: "session_generic_launch_01",
+      sessionGeneration: 1,
+      actions: ["read", "launch"],
+    }), launchCredential.token);
+    let stateReads = 0;
+    const actions = new OperatorActionStore({
+      database: fixture.database,
+      operatorStore: fixture.operatorStore,
+      statePort: { read: async () => { stateReads += 1; throw new Error("must not read state before rejecting"); } },
+      effectPort: {
+        dispatch: async () => { throw new Error("must not dispatch a refused launch preview"); },
+        observe: async () => { throw new Error("not expected"); },
+      },
+      clock: () => now,
+    });
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_generic_launch_01");
+    const launchPacketRef = parseArtifactRef({ path: "launch/packet.json", digest }, "test.genericLaunchPacketRef");
+    const resourcePlanRef = parseArtifactRef({ path: "launch/resources.json", digest }, "test.genericResourcePlanRef");
+    const authorityRef = parseSha256Digest(digest, "test.genericLaunchAuthorityRef");
+    const intent: Extract<OperatorActionIntent, { kind: "project-session-launch" }> = {
+      kind: "project-session-launch",
+      projectId,
+      projectSessionId,
+      expectedProjectRevision: 3,
+      expectedSessionRevision: 1,
+      expectedSessionGeneration: 1,
+      trustRecordDigest: authorityRef,
+      launchPacketRef,
+      authorityRef,
+      budgetRef: "budget_01",
+      resourcePlanRef,
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: identifier<"ProviderActionId">("provider_action_generic_launch_01"),
+      providerContractDigest: authorityRef,
+      resourceStateDigest: authorityRef,
+    };
+    const request: OperatorActionPreviewRequest = {
+      command: {
+        credential: launchCredential,
+        commandId: identifier<"CommandId">("preview_generic_launch_01"),
+        expectedRevision: 1,
+        actor: identifier<"OperatorId">("operator_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_generic_launch_01"),
+          inputEventId: "input_preview_generic_launch_01",
+        },
+        evidenceRefs: [],
+      },
+      projectId,
+      intent,
+    };
+
+    await expect(actions.preview(fixture.context, request)).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    expect(stateReads).toBe(0);
   });
 });
 

@@ -117,6 +117,7 @@ import {
   type OperatorActionEffectPort,
   type OperatorActionStatePort,
 } from "../operator/action-store.js";
+import { LifecycleRecoveryCustodyService } from "../operator/lifecycle-recovery-custody.js";
 import {
   assertRunAcceptingWork,
   assertTaskOperationAdmitted,
@@ -1123,6 +1124,14 @@ export class Fabric {
       ...(this.#launchCustody === undefined ? {} : { launchCustody: this.#launchCustody }),
       ...(this.#launchCustody === undefined ? {} : { chairRecoveryCustody: this.#launchCustody }),
       ...(this.#launchCustody === undefined ? {} : { chairLiveHandoffCustody: this.#launchCustody }),
+      ...(this.#lifecycleReceiptAuthority === undefined ? {} : {
+        lifecycleRecoveryCustody: new LifecycleRecoveryCustodyService({
+          database: this.#database,
+          receipts: this.#lifecycleReceipts,
+          authority: this.#lifecycleReceiptAuthority,
+          clock: this.#clock,
+        }),
+      }),
       clock: this.#clock,
     });
     this.#projectSessions = new ProjectSessionStore({
@@ -2714,11 +2723,15 @@ export class Fabric {
         const replayed = this.#operatorActions.replayLaunchPreview(credential.context, request);
         if (replayed !== undefined) return replayed;
         const intent = await this.#launchCustody.prepareLaunchIntent(request);
-        return await this.#operatorActions.preview(credential.context, {
-          command: request.command,
-          projectId: request.projectId,
-          intent,
-        });
+        return await this.#operatorActions.preview(
+          credential.context,
+          {
+            command: request.command,
+            projectId: request.projectId,
+            intent,
+          },
+          { allowLaunchIntent: true },
+        );
       }
       case FABRIC_OPERATIONS.membershipBind: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.membershipBind];
@@ -2913,6 +2926,12 @@ export class Fabric {
       }
       case FABRIC_OPERATIONS.operatorActionPreview: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.operatorActionPreview];
+        if (request.intent.kind === "project-session-launch") {
+          throw new FabricError(
+            "CAPABILITY_FORBIDDEN",
+            "project-session-launch previews are server-authored only; use projectSessionLaunchPrepare",
+          );
+        }
         const credential = operatorCredential();
         operatorCommand(credential, request.command);
         this.#assertChairLiveHandoffFeature(context, operation, request);

@@ -121,8 +121,8 @@ export interface ProtocolRpcTransport {
 }
 
 export interface ProjectSessionClient {
-  create(input: ProjectSessionCreateRequest): Promise<ProjectSession>;
-  get(input: ProjectSessionGetRequest): Promise<ProjectSession>;
+  create?(input: ProjectSessionCreateRequest): Promise<ProjectSession>;
+  get?(input: ProjectSessionGetRequest): Promise<ProjectSession>;
   transition?(input: ProjectSessionTransitionRequest): Promise<ProjectSession>;
   close?(input: ProjectSessionCloseRequest): Promise<ProjectSession>;
   prepareLaunch?(input: ProjectSessionLaunchPrepareRequest): Promise<OperatorActionPreview>;
@@ -310,10 +310,16 @@ function principalOperations<Principal extends OperationPrincipalKind>(
 
 function projectSessions(transport: ProtocolRpcTransport): ProjectSessionClient {
   return {
-    create: (input: ProjectSessionCreateRequest) =>
-      transport.call(FABRIC_OPERATIONS.projectSessionCreate, input),
-    get: (input: ProjectSessionGetRequest) =>
-      transport.call(FABRIC_OPERATIONS.projectSessionGet, input),
+    ...(hasFeature(transport, "project-sessions.v1") &&
+      hasOperation(transport, FABRIC_OPERATIONS.projectSessionCreate)
+      ? { create: (input: ProjectSessionCreateRequest) =>
+          transport.call(FABRIC_OPERATIONS.projectSessionCreate, input) }
+      : {}),
+    ...(hasFeature(transport, "project-sessions.v1") &&
+      hasOperation(transport, FABRIC_OPERATIONS.projectSessionGet)
+      ? { get: (input: ProjectSessionGetRequest) =>
+          transport.call(FABRIC_OPERATIONS.projectSessionGet, input) }
+      : {}),
     ...(hasFeature(transport, "project-sessions.v1") &&
       hasOperation(transport, FABRIC_OPERATIONS.projectSessionTransition)
       ? { transition: (input: ProjectSessionTransitionRequest) =>
@@ -400,10 +406,17 @@ export function createOperatorClient(transport: ProtocolRpcTransport): Negotiate
     kind: "operator",
     features: [...transport.features],
     operations: principalOperations("operator", transport),
-    ...(hasFeature(transport, "project-sessions.v1") && hasOperations(transport, [
-      FABRIC_OPERATIONS.projectSessionCreate,
-      FABRIC_OPERATIONS.projectSessionGet,
-    ]) ? { projectSessions: projectSessions(transport) } : {}),
+    ...((
+      (hasFeature(transport, "project-sessions.v1") && (
+        hasOperation(transport, FABRIC_OPERATIONS.projectSessionCreate) ||
+        hasOperation(transport, FABRIC_OPERATIONS.projectSessionGet) ||
+        hasOperation(transport, FABRIC_OPERATIONS.projectSessionTransition) ||
+        hasOperation(transport, FABRIC_OPERATIONS.projectSessionClose) ||
+        hasOperation(transport, FABRIC_OPERATIONS.membershipBind)
+      )) ||
+      (hasFeature(transport, "launch-custody.v1") &&
+        hasOperation(transport, FABRIC_OPERATIONS.projectSessionLaunchPrepare))
+    ) ? { projectSessions: projectSessions(transport) } : {}),
     ...(hasFeature(transport, "operator-control.v1") && hasOperations(transport, [
       FABRIC_OPERATIONS.operatorAttach,
       FABRIC_OPERATIONS.operatorDetach,
