@@ -1,0 +1,142 @@
+# Label-gated agent trigger (issue #152).
+#
+# Security model: this workflow subscribes to exactly one event/type pair
+# (`issues: labeled`), so removing a label can never fire it — there is no
+# `unlabeled` subscription to guard against. The gate job below adds three
+# more conditions that must all hold before anything is dispatched:
+#   - the label added is exactly `agent-go` (no other label, no @-mention,
+#     no third-party bot label can substitute for it);
+#   - the actor is the maintainer, read from `github.event.sender.login` —
+#     the webhook payload's own record of who performed the action, not
+#     `github.actor` (which can differ from the acting principal on other
+#     event shapes) and not a write-access check (a compromised or
+#     mis-scoped collaborator token must not fire this);
+#   - the issue is open (labelling a closed issue does nothing).
+# Issue title and body are untrusted input on a public repository (documented
+# prompt-injection incident class) and are only ever read into `env:` values
+# below, never interpolated into a `run:` script body — the dispatched
+# payload is built with `jq --arg` so they stay JSON string data, not code.
+name: Agent-go trigger
+
+on:
+  issues:
+    types: [labeled]
+
+# Least privilege: the workflow grants nothing by default; every job
+# declares exactly what it needs.
+permissions: {}
+
+# One label event should produce one dispatch; a rapid remove/re-add cannot
+# stack duplicate runs for the same issue.
+concurrency:
+  group: agent-go-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Validate agent-go trigger gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    # Defence in depth: `action == 'labeled'` is redundant with the `types:`
+    # subscription above (only `labeled` is subscribed), but keeping it here
+    # documents the invariant next to the actor and label checks it stands
+    # beside, and a policy test asserts this string directly.
+    if: >-
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'agent-go' &&
+      github.event.sender.login == 'mblauberg' &&
+      github.event.issue.state == 'open'
+    outputs:
+      provider: ${{ steps.config.outputs.provider }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Read provider lane from config
+        id: config
+        run: |
+          config=".github/agent-go.yml"
+          provider="$(grep -m1 '^provider:' "$config" | cut -d: -f2 | tr -d '[:space:]')"
+          case "$provider" in
+            codex|claude) ;;
+            *)
+              echo "::error::unsupported agent-go provider '$provider' in $config (expected codex or claude)" >&2
+              exit 1
+              ;;
+          esac
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
+
+  dispatch:
+    name: Dispatch agent-go run (${{ needs.gate.outputs.provider }})
+    needs: gate
+    if: needs.gate.outputs.provider != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # No repository or GITHUB_TOKEN access is needed to build and POST the
+    # dispatch payload; the provider endpoint is authenticated separately by
+    # the maintainer-configured secret below.
+    permissions: {}
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ISSUE_TITLE: ${{ github.event.issue.title }}
+      ISSUE_BODY: ${{ github.event.issue.body }}
+      ISSUE_URL: ${{ github.event.issue.html_url }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Build dispatch payload
+        id: payload
+        run: |
+          payload="$(jq -n \
+            --arg number "$ISSUE_NUMBER" \
+            --arg title "$ISSUE_TITLE" \
+            --arg body "$ISSUE_BODY" \
+            --arg url "$ISSUE_URL" \
+            --arg repository "$REPOSITORY" \
+            '{issue_number: ($number | tonumber), issue_title: $title, issue_body: $body, issue_url: $url, repository: $repository}')"
+          {
+            echo 'payload<<AGENT_GO_PAYLOAD_EOF'
+            echo "$payload"
+            echo 'AGENT_GO_PAYLOAD_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      # Codex lane (default): dispatches to the endpoint the maintainer's
+      # Codex Cloud GitHub connector exposes. See the runbook for the
+      # one-time connector install and secret setup.
+      - name: Dispatch to Codex Cloud lane
+        if: needs.gate.outputs.provider == 'codex'
+        env:
+          DISPATCH_URL: ${{ secrets.AGENT_GO_CODEX_DISPATCH_URL }}
+          PAYLOAD: ${{ steps.payload.outputs.payload }}
+        run: |
+          if [ -z "$DISPATCH_URL" ]; then
+            echo "::error::AGENT_GO_CODEX_DISPATCH_URL is not configured; see docs/runbooks/github-workflow.md#agent-go-trigger" >&2
+            exit 1
+          fi
+          curl --fail --silent --show-error \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data "$PAYLOAD" \
+            "$DISPATCH_URL"
+
+      # Claude lane (swap): dispatches to the maintainer's Claude Code
+      # GitHub-triggered Routine (RemoteTrigger). See the runbook for the
+      # one-time app install and secret setup.
+      - name: Dispatch to Claude lane
+        if: needs.gate.outputs.provider == 'claude'
+        env:
+          DISPATCH_URL: ${{ secrets.AGENT_GO_CLAUDE_DISPATCH_URL }}
+          PAYLOAD: ${{ steps.payload.outputs.payload }}
+        run: |
+          if [ -z "$DISPATCH_URL" ]; then
+            echo "::error::AGENT_GO_CLAUDE_DISPATCH_URL is not configured; see docs/runbooks/github-workflow.md#agent-go-trigger" >&2
+            exit 1
+          fi
+          curl --fail --silent --show-error \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data "$PAYLOAD" \
+            "$DISPATCH_URL"
