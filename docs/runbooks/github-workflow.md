@@ -48,3 +48,117 @@ progress.
 Use a text or Mermaid diagram only when several actors, dependencies or state
 transitions would otherwise be difficult to review. Simple issues and pull
 requests do not need one.
+
+## Mechanics
+
+This runbook is provenant-local repository process, not harness doctrine. The
+worktree authority it relies on (the standing envelope in `HARNESS.md` and the
+helper contract in [`docs/worktrees.md`](../worktrees.md)) is harness doctrine
+and applies wherever the harness is loaded.
+
+The loop below takes an accepted issue from `Ready` to `Done`. The examples use
+issue `148`; substitute the live issue number and a short kebab-case slug.
+
+### Branch and worktree
+
+Name the branch `issue-N-slug`, for example `issue-148-runbook-mechanics`.
+Create the linked branch, then a worktree on it. `gh issue develop` records the
+issue-to-branch link on GitHub; the helper enforces the shared-worktree
+contract, and its authorisation flags attest that the standing `HARNESS.md`
+envelope or a direct user instruction covers the operation:
+
+```sh
+gh issue develop 148 --name issue-148-runbook-mechanics --base main
+git fetch origin
+scripts/worktree create impl-148 --human-authorised \
+  --existing-branch issue-148-runbook-mechanics
+```
+
+When the GitHub-side branch link is not needed, create the branch and worktree
+in one step:
+
+```sh
+scripts/worktree create impl-148 --human-authorised \
+  --new-branch issue-148-runbook-mechanics --branch-authorised \
+  --start-point main
+```
+
+Then set the issue to `In progress` (commands under
+[Project status](#project-status)).
+
+### Commit and push
+
+Reference the issue from every commit body with `Refs #N`. Never put a closing
+keyword in a commit message; the pull request owns issue closure. Push with an
+upstream so `gh pr create` finds the branch:
+
+```sh
+git push -u origin issue-148-runbook-mechanics
+```
+
+### Pull request
+
+Open the pull request against `main` and link the issue per the rule in
+[Execute and review](#execute-and-review): `Closes #N` only when merge leaves
+no user or external-action gate, otherwise `References #N` with the issue left
+open:
+
+```sh
+gh pr create --base main \
+  --title "docs(runbooks): document agent GitHub mechanics" \
+  --body "Summary of the change.
+
+Closes #148"
+```
+
+Set the issue to `In review` while exact-head checks and independent review
+run, and `Awaiting user` once machine gates pass and only a user decision
+remains.
+
+### Project status
+
+Project Status (project `2`, owner `mblauberg`) is the sole workflow state; no
+effort or session document owns it. Ownership of each transition:
+
+| Transition | Owner | When |
+|---|---|---|
+| `Backlog` to `Ready`, `Done` or unchanged | Triage: user, or an agent inside granted authority | The triage result is recorded in an issue comment |
+| `Ready` to `In progress` | Implementing agent | Work on the accepted scope starts |
+| `In progress` to `In review` | Implementing agent | The pull request, exact-head checks or independent review is active |
+| `In review` to `Awaiting user` | Implementing agent | Machine gates pass; a user decision or acceptance remains |
+| Any later state to `Done` | User; merge auto-closes a `Closes #N` issue and the user confirms | No gate remains; the terminal reason or integrated pull request is recorded |
+
+Move an item with the project CLI. The Status field id is stable for this
+project:
+
+```sh
+item=$(gh project item-list 2 --owner mblauberg --limit 200 --format json \
+  --jq '.items[] | select(.content.number == 148) | .id')
+gh project item-edit --project-id PVT_kwHOBiwkrc4BdU1c --id "$item" \
+  --field-id PVTSSF_lAHOBiwkrc4BdU1czhX3Kn4 --single-select-option-id 5c9ddb06
+```
+
+Status option ids: `Backlog` `c764d63a`, `Ready` `a5ebd55b`, `In progress`
+`5c9ddb06`, `In review` `27873f75`, `Awaiting user` `129da224`, `Done`
+`93d6cd26`. If an id stops matching, re-derive it:
+
+```sh
+gh project field-list 2 --owner mblauberg --format json \
+  --jq '.fields[] | select(.name == "Status")'
+```
+
+### After merge
+
+Integration to `main` is a user gate; the user merges. Afterwards:
+
+1. Confirm the issue closed (`Closes #N`) or close it with its terminal reason
+   recorded, and confirm Status is `Done`.
+2. Remove the worktree once `git status` in it is clean and no live agent,
+   pane or unconsumed handoff remains:
+
+   ```sh
+   scripts/worktree remove impl-148 --human-authorised
+   ```
+
+3. Branch deletion, local or remote, needs separate explicit user authority.
+   After an authorised remote deletion, run `git fetch --prune`.
