@@ -1,0 +1,35 @@
+# Declarative source of truth for this repository's labels.
+#
+# Synced by .github/workflows/labels.yml (crazy-max/ghaction-github-labeler)
+# with pruning enabled: a label that is not in this file is deleted from the
+# live repository on the next sync. Native issue types say what an item is,
+# Project Status carries progress; labels carry only signal and automation
+# switches. Do not add status labels here.
+
+- name: bug
+  color: "d73a4a"
+  description: Something isn't working
+
+- name: enhancement
+  color: "a2eeef"
+  description: New feature or request
+
+- name: documentation
+  color: "0075ca"
+  description: Improvements or additions to documentation
+
+- name: dependencies
+  color: "0366d6"
+  description: Dependency updates, including Dependabot pull requests
+
+- name: governance
+  color: "5319e7"
+  description: Repository policy, process, or architecture governance
+
+- name: user-gate
+  color: "d93f0b"
+  description: Merge leaves a decision or action only the user can take
+
+- name: agent-go
+  color: "0e8a16"
+  description: Triaged and ready; an agent lane is authorised to implement without further user input
