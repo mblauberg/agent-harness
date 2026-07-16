@@ -26,10 +26,36 @@ gh project field-list <number> --owner <owner> --format json \
 `gh project field-list`/`field-edit` do not expose a clean "replace options"
 verb; the reliable path is the GitHub UI (Project → ⋯ → Settings → Status
 field → edit each option's name, add/remove until exactly six remain: Backlog,
-Ready, In progress, In review, Awaiting user, Done) or the GraphQL
-`updateProjectV2SingleSelectField` mutation via `gh api graphql` if the UI is
-not available. Either way, re-run `field-list` afterward and record the
-resulting option ids — the runbook's day-to-day commands need them.
+Ready, In progress, In review, Awaiting user, Done) or the `updateProjectV2Field`
+GraphQL mutation via `gh api graphql` if the UI is not available — note the
+mutation is `updateProjectV2Field` with a `singleSelectOptions` argument, not
+`updateProjectV2SingleSelectField` (that type name exists only as the option
+input, not as a mutation field):
+
+```sh
+gh api graphql -f query='
+mutation {
+  updateProjectV2Field(input: {
+    fieldId: "<status_field_id>",
+    singleSelectOptions: [
+      {name: "Backlog", color: GRAY, description: "Untriaged or explicitly deferred."},
+      {name: "Ready", color: BLUE, description: "Accepted with bounded scope, authority and acceptance evidence."},
+      {name: "In progress", color: YELLOW, description: "An owner is executing the accepted work."},
+      {name: "In review", color: ORANGE, description: "The pull request, checks or independent review is active."},
+      {name: "Awaiting user", color: PURPLE, description: "Machine work is ready but a user decision or acceptance remains."},
+      {name: "Done", color: GREEN, description: "The item is integrated, or closed with its terminal reason recorded."}
+    ]
+  }) {
+    projectV2Field {
+      ... on ProjectV2SingleSelectField { id name options { id name } }
+    }
+  }
+}'
+```
+
+`description` is a required (non-empty-allowed) string on each option; omitting
+it errors. Either way, re-run `field-list` afterward and record the resulting
+option ids — the runbook's day-to-day commands need them.
 
 ## Moving an item (for the copied runbook)
 
