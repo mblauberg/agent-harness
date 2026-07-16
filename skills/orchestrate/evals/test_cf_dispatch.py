@@ -556,7 +556,11 @@ def test_resolved_role_effort_reaches_codex_adapter_and_receipt():
         assert record["requested_effort"] == "max"
         assert record["effort"] == "xhigh"
         assert record["effort_capability_source"] == "runtime-model-catalog"
+        assert record["resolved_model"] == ""
+        assert record["catalog_model"] == "gpt-5.6-sol"
+        assert record["model_selection"] == "account-default"
         args = args_file.read_text(encoding="utf-8").splitlines()
+        assert "-m" not in args
         assert "model_reasoning_effort=xhigh" in args
 
 

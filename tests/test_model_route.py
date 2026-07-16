@@ -84,6 +84,17 @@ def test_openai_aliases_resolve_to_account_default_dispatch():
         assert route["model_family"] == "openai"
 
 
+def test_account_default_codex_ignores_runtime_selectable_model_list():
+    result, route = resolve(
+        "--adapter", "codex", "--alias", "flagship", "--role", "worker",
+        "--available-model", "gpt-5.6-terra",
+    )
+    assert result.returncode == 0
+    assert route["resolved_model"] == ""
+    assert route["catalog_model"] == "gpt-5.6-sol"
+    assert route["model_selection"] == "account-default"
+
+
 def test_aliases_supply_proportionate_default_effort():
     expected = {"flagship": "high", "workhorse": "medium", "scout": "low"}
     for alias, effort in expected.items():
@@ -183,6 +194,26 @@ def test_capability_snapshot_controls_default_fallback(tmp_path):
     assert route["requested_effort"] == "ultra"
     assert route["effort"] == "max"
     assert route["effort_capability_source"] == "runtime-model-catalog"
+
+
+def test_account_default_missing_catalog_model_uses_audited_dated_efforts(tmp_path):
+    snapshot = tmp_path / "caps.json"
+    snapshot.write_text(json.dumps(capability_snapshot({
+            "gpt-5.6-terra": {
+                "resolved_model": "gpt-5.6-terra",
+                "supported_efforts": ["high", "xhigh", "max"],
+            }
+        })))
+    result, route = resolve(
+        "--adapter", "codex", "--alias", "flagship", "--role", "lead",
+        "--capabilities-file", str(snapshot),
+    )
+    assert result.returncode == 0
+    assert route["catalog_model"] == "gpt-5.6-sol"
+    assert route["resolved_model"] == ""
+    assert route["effort"] == "ultra"
+    assert route["effort_capability_source"] == "dated-catalog"
+    assert "catalog model absent from runtime snapshot" in route["effort_substitution"]
 
 
 def test_explicit_unsupported_effort_fails_against_runtime_snapshot(tmp_path):
