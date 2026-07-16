@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { parse, stringify } from "yaml";
 
-import { commitFixtureRepository } from "./fixture-repository.ts";
+import { commitFixtureRepository, writeWrapperPackageScaffold } from "./fixture-repository.ts";
 
 type Stage4AdapterId = "pi-rpc" | "agy";
 
@@ -50,6 +50,7 @@ export async function createResolvedStage4Compatibility(adapterId: Stage4Adapter
   const schemaBytes = `${JSON.stringify({ schemaVersion: 1, protocolVersion: 1 })}\n`;
   await writeFile(executablePath, executableBytes, { mode: 0o700 });
   await writeFile(protocolSchemaPath, schemaBytes, { mode: 0o600 });
+  await writeWrapperPackageScaffold(directory);
   await commitFixtureRepository(directory);
   const compatibilityPath = join(directory, "adapter-compatibility.yaml");
   await writeFile(

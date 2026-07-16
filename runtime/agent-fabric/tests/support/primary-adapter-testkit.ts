@@ -10,7 +10,7 @@ import * as publicApi from "../../src/index.ts";
 import { openFabric } from "../../src/index.ts";
 
 import { ROOT_AUTHORITY } from "./stage1-fixture.ts";
-import { commitFixtureRepository } from "./fixture-repository.ts";
+import { commitFixtureRepository, writeWrapperPackageScaffold } from "./fixture-repository.ts";
 import { createCurrentSessionRun } from "./current-session-testkit.ts";
 
 export type PublicFunction = (...args: unknown[]) => unknown;
@@ -132,6 +132,7 @@ export async function createPortableActivatedPrimaryFixture(): Promise<{
   const wrapperPath = join(fixture.directory, "fixture-wrapper.js");
   const wrapperBytes = "export const portableFixtureWrapper = true;\n";
   await writeFile(wrapperPath, wrapperBytes, { mode: 0o600 });
+  await writeWrapperPackageScaffold(fixture.directory);
   await commitFixtureRepository(fixture.directory);
 
   const value: unknown = parse(await readFile(fixture.compatibilityPath, "utf8"));

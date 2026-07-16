@@ -7,7 +7,7 @@ import { parse, stringify } from "yaml";
 
 import { composeDaemonAdapters, composeDaemonConfiguration } from "../../src/daemon/composition.ts";
 import { runWorkspaceTrust } from "../../src/cli/workspace-trust.ts";
-import { commitFixtureRepository } from "../support/fixture-repository.ts";
+import { commitFixtureRepository, writeWrapperPackageScaffold } from "../support/fixture-repository.ts";
 import {
   createPortableActivatedPrimaryFixture,
   createPrimaryCompatibilityFixture,
@@ -80,6 +80,7 @@ describe("daemon trusted adapter composition", () => {
     if (executable === undefined || executableHash === undefined) throw new TypeError("Codex fixture executable is unpinned");
     codex.enabled = true;
     codex.implementation.wrapper_entrypoint = executable;
+    await writeWrapperPackageScaffold(fixture.directory);
     const fixtureCommit = await commitFixtureRepository(fixture.directory);
     codex.model_family_constraints = {
       allowed: ["openai"],

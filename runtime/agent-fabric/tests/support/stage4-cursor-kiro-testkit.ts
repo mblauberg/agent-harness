@@ -9,7 +9,7 @@ import { stringify } from "yaml";
 import * as publicApi from "../../src/index.ts";
 import { runAdapterConformance } from "../../src/index.ts";
 
-import { commitFixtureRepository } from "./fixture-repository.ts";
+import { commitFixtureRepository, writeWrapperPackageScaffold } from "./fixture-repository.ts";
 
 export type Stage4AdapterId = "cursor-agent" | "kiro-acp";
 export type PublicFunction = (...arguments_: unknown[]) => unknown;
@@ -91,6 +91,7 @@ export async function createCursorKiroCompatibilityFixture(options: {
   const wrapper = "export const fixtureWrapper = true;\n";
   await writeFile(protocolSchemaPath, protocolSchema, { mode: 0o600 });
   await writeFile(wrapperPath, wrapper, { mode: 0o600 });
+  await writeWrapperPackageScaffold(directory);
   await commitFixtureRepository(directory);
   const executableHash = digest(await readFile(fixtureAdapter));
   const schemaHash = digest(protocolSchema);

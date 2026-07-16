@@ -72,13 +72,44 @@ async function gitOutput(directory: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-async function readWorkspacePackage(path: string): Promise<Record<string, unknown> | undefined> {
+type WorkspaceManifest =
+  | { state: "missing" }
+  | { state: "invalid" }
+  | { state: "present"; document: Record<string, unknown> };
+
+async function readWorkspaceManifest(path: string): Promise<WorkspaceManifest> {
+  let raw: string;
   try {
-    const value: unknown = JSON.parse(await readFile(path, "utf8"));
-    return isRecord(value) ? value : undefined;
+    raw = await readFile(path, "utf8");
   } catch {
-    return undefined;
+    return { state: "missing" };
   }
+  try {
+    const value: unknown = JSON.parse(raw);
+    return isRecord(value) ? { state: "present", document: value } : { state: "invalid" };
+  } catch {
+    return { state: "invalid" };
+  }
+}
+
+async function isTrackedAtHead(repositoryRoot: string, portablePath: string): Promise<boolean> {
+  try {
+    await gitOutput(repositoryRoot, ["cat-file", "-e", `HEAD:${portablePath}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function portableRepositoryPath(repositoryRoot: string, path: string, adapterId: string): string {
+  const contained = relative(repositoryRoot, path);
+  if (contained.length === 0 || contained.startsWith("..") || isAbsolute(contained)) {
+    throw new FabricError(
+      "ADAPTER_COMPATIBILITY_INVALID",
+      `wrapper workspace path escapes its Git repository: ${path} (adapter ${adapterId})`,
+    );
+  }
+  return contained.split(sep).join("/");
 }
 
 function isWorkspaceDependency(name: string, specifier: unknown): boolean {
@@ -105,14 +136,37 @@ async function resolveWorkspaceDependencyRoot(packageRoot: string, repositoryRoo
  * its owning workspace package plus the src directories of every local
  * workspace dependency, recursively. This is the same first-party set the
  * removed manifests pinned. Third-party lockfile-pinned dependencies stay
- * outside the span, exactly as they were outside the manifests. Wrappers
- * without an owning package (test fixtures) have an empty span.
+ * outside the span, exactly as they were outside the manifests.
+ *
+ * Span discovery itself fails closed: every package manifest it consults
+ * must be tracked at the repository HEAD. An untracked manifest could
+ * hijack the owning-package search and truncate the span, and a tracked
+ * manifest deleted from the working tree could truncate the ancestor walk,
+ * so both are hard verification failures instead of a silent fallback to
+ * working-tree content. A wrapper with no owning workspace package at all
+ * yields no verifiable span and is likewise a hard failure at the caller.
+ * The consulted manifests are returned alongside the source spans so the
+ * caller also verifies them byte-for-byte against HEAD.
  */
-async function firstPartySourceSpans(wrapperPath: string, repositoryRoot: string): Promise<string[]> {
+async function firstPartySourceSpans(input: {
+  adapterId: string;
+  wrapperPath: string;
+  repositoryRoot: string;
+}): Promise<{ sourceSpans: string[]; manifestPaths: string[] }> {
+  const { adapterId, wrapperPath, repositoryRoot } = input;
   let packageRoot: string | undefined;
   let searchDirectory = dirname(wrapperPath);
   for (;;) {
-    if ((await readWorkspacePackage(join(searchDirectory, "package.json"))) !== undefined) {
+    const manifestPath = join(searchDirectory, "package.json");
+    if ((await readWorkspaceManifest(manifestPath)).state === "missing") {
+      const portableManifest = portableRepositoryPath(repositoryRoot, manifestPath, adapterId);
+      if (await isTrackedAtHead(repositoryRoot, portableManifest)) {
+        throw new FabricError(
+          "ADAPTER_COMPATIBILITY_INVALID",
+          `wrapper first-party span discovery truncated: package manifest is tracked at HEAD but missing from the working tree: ${portableManifest} (adapter ${adapterId})`,
+        );
+      }
+    } else {
       packageRoot = searchDirectory;
       break;
     }
@@ -121,18 +175,34 @@ async function firstPartySourceSpans(wrapperPath: string, repositoryRoot: string
     if (parent === searchDirectory) break;
     searchDirectory = parent;
   }
-  if (packageRoot === undefined) return [];
+  if (packageRoot === undefined) {
+    throw new FabricError(
+      "ADAPTER_COMPATIBILITY_INVALID",
+      `wrapper has no owning workspace package: ${adapterId} (no package.json exists between the wrapper and its repository root, so the executed first-party source span cannot be verified)`,
+    );
+  }
   const spans = new Set<string>();
+  const manifestPaths = new Set<string>();
   const visited = new Set<string>();
   const pending = [packageRoot];
   while (pending.length > 0) {
     const root = pending.pop();
     if (root === undefined || visited.has(root)) continue;
     visited.add(root);
-    const document = await readWorkspacePackage(join(root, "package.json"));
-    if (document === undefined) {
+    const manifestPath = join(root, "package.json");
+    const portableManifest = portableRepositoryPath(repositoryRoot, manifestPath, adapterId);
+    if (!(await isTrackedAtHead(repositoryRoot, portableManifest))) {
+      throw new FabricError(
+        "ADAPTER_COMPATIBILITY_INVALID",
+        `wrapper workspace package manifest is not tracked at the repository HEAD: ${portableManifest} (adapter ${adapterId})`,
+      );
+    }
+    const manifest = await readWorkspaceManifest(manifestPath);
+    if (manifest.state !== "present") {
       throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `local workspace package manifest is invalid: ${root}`);
     }
+    const document = manifest.document;
+    manifestPaths.add(portableManifest);
     let sourceDirectory: string | undefined;
     try {
       sourceDirectory = await realpath(join(root, "src"));
@@ -163,7 +233,7 @@ async function firstPartySourceSpans(wrapperPath: string, repositoryRoot: string
       pending.push(dependencyRoot);
     }
   }
-  return [...spans].sort();
+  return { sourceSpans: [...spans].sort(), manifestPaths: [...manifestPaths].sort() };
 }
 
 /**
@@ -172,9 +242,11 @@ async function firstPartySourceSpans(wrapperPath: string, repositoryRoot: string
  * relative to that repository's root. Git supplies the content identity, so
  * the wrapper must be tracked at HEAD and byte-identical to its committed
  * content, and the executed first-party source span (the owning workspace
- * package's src tree plus local workspace dependency src trees) must be
- * diff-clean against HEAD; untracked, ignored or locally modified wrapper
- * code fails closed. No repository-local hash pin exists for wrapper code.
+ * package's src tree plus local workspace dependency src trees, together
+ * with every consulted package manifest) must be diff-clean against HEAD;
+ * untracked, ignored or locally modified wrapper code fails closed. An
+ * empty or truncated span discovery is itself a hard verification failure,
+ * never a skip. No repository-local hash pin exists for wrapper code.
  */
 async function deriveWrapperProvenance(input: {
   adapterId: string;
@@ -236,17 +308,25 @@ async function deriveWrapperProvenance(input: {
       { cause: error },
     );
   }
-  const sourceSpans = await firstPartySourceSpans(wrapperPath, resolvedRepositoryRoot);
-  if (sourceSpans.length > 0) {
-    try {
-      await gitOutput(resolvedRepositoryRoot, ["diff", "--quiet", "HEAD", "--", ...sourceSpans]);
-    } catch (error: unknown) {
-      throw new FabricError(
-        "ADAPTER_COMPATIBILITY_INVALID",
-        `wrapper first-party source differs from its committed content: ${input.adapterId}`,
-        { cause: error },
-      );
-    }
+  const { sourceSpans, manifestPaths } = await firstPartySourceSpans({
+    adapterId: input.adapterId,
+    wrapperPath,
+    repositoryRoot: resolvedRepositoryRoot,
+  });
+  if (sourceSpans.length === 0) {
+    throw new FabricError(
+      "ADAPTER_COMPATIBILITY_INVALID",
+      `wrapper first-party source span is empty: ${input.adapterId} (its owning workspace package has no src tree, so the executed source cannot be verified against HEAD)`,
+    );
+  }
+  try {
+    await gitOutput(resolvedRepositoryRoot, ["diff", "--quiet", "HEAD", "--", ...sourceSpans, ...manifestPaths]);
+  } catch (error: unknown) {
+    throw new FabricError(
+      "ADAPTER_COMPATIBILITY_INVALID",
+      `wrapper first-party source differs from its committed content: ${input.adapterId}`,
+      { cause: error },
+    );
   }
   return {
     adapterId: input.adapterId,

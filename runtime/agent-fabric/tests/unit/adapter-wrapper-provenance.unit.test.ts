@@ -8,7 +8,7 @@ import { stringify } from "yaml";
 
 import { verifyAdapterCompatibility } from "../../src/adapters/compatibility.ts";
 import { AdapterSupervisor } from "../../src/adapters/supervisor.ts";
-import { commitFixtureRepository } from "../support/fixture-repository.ts";
+import { commitFixtureRepository, writeWrapperPackageScaffold } from "../support/fixture-repository.ts";
 import { repositoryPath } from "../support/primary-adapter-testkit.ts";
 
 function sha256(value: string): string {
@@ -75,6 +75,7 @@ async function createProvenanceFixture(): Promise<ProvenanceFixture> {
     writeFile(schemaPath, '{"schema_version":1}\n'),
     writeFile(executablePath, "provider executable\n"),
   ]);
+  await writeWrapperPackageScaffold(directory);
   const repositoryCommit = await commitFixtureRepository(directory);
   const fixture = {
     directory,
@@ -209,7 +210,7 @@ describe("adapter wrapper Git provenance", () => {
   it("fails closed when an executed first-party sibling differs while the entrypoint stays clean", async () => {
     const fixture = await createProvenanceFixture();
     await writeFile(join(fixture.directory, "package.json"), JSON.stringify({ name: "@local/fixture-wrapper", type: "module" }));
-    await mkdir(join(fixture.directory, "src"));
+    await mkdir(join(fixture.directory, "src"), { recursive: true });
     const packagedWrapper = join(fixture.directory, "src", "wrapper.js");
     const sibling = join(fixture.directory, "src", "sibling.js");
     await writeFile(packagedWrapper, 'export { execute } from "./sibling.js";\n');
@@ -263,6 +264,87 @@ describe("adapter wrapper Git provenance", () => {
     });
   });
 
+  it("fails closed when an untracked package manifest truncates span discovery", async () => {
+    const fixture = await createProvenanceFixture();
+    const packageRoot = join(fixture.directory, "wrapper-package");
+    await mkdir(join(packageRoot, "src"), { recursive: true });
+    await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "@local/hijack-target", type: "module" }));
+    const packagedWrapper = join(packageRoot, "src", "wrapper.js");
+    await writeFile(packagedWrapper, 'export const execute = () => "safe";\n');
+    await commitFixtureRepository(fixture.directory, "packaged wrapper");
+    await writeCompatibility(fixture, packagedWrapper);
+
+    await expect(verify(fixture)).resolves.toMatchObject({
+      wrapperProvenance: [{ adapterId: "fixture", wrapperPath: "wrapper-package/src/wrapper.js" }],
+    });
+
+    // An untracked manifest closer to the wrapper hijacks owning-package
+    // discovery and empties the span; before the repair this skipped the
+    // first-party diff entirely. It must fail closed naming the manifest.
+    await writeFile(join(packageRoot, "src", "package.json"), JSON.stringify({ name: "@local/hijacked", type: "module" }));
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("not tracked at the repository HEAD: wrapper-package/src/package.json"),
+    });
+  });
+
+  it("fails closed when a deleted tracked manifest truncates span discovery over tampered source", async () => {
+    const fixture = await createProvenanceFixture();
+    // Tamper first-party source, then delete the tracked manifest that
+    // anchors span discovery: before the repair the walk found no owning
+    // package, derived an empty span and verification silently passed.
+    await writeFile(join(fixture.directory, "src", "index.js"), 'export const fixtureFirstPartySource = "tampered";\n');
+    await rm(join(fixture.directory, "package.json"));
+
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("tracked at HEAD but missing from the working tree: package.json"),
+    });
+  });
+
+  it("fails closed when the wrapper has no owning workspace package", async () => {
+    const fixture = await createProvenanceFixture();
+    const bare = await mkdtemp(join(tmpdir(), "agent-fabric-bare-wrapper-"));
+    const bareWrapper = join(bare, "wrapper.js");
+    await writeFile(bareWrapper, 'export const execute = () => "bare";\n');
+    await commitFixtureRepository(bare);
+    await writeCompatibility(fixture, bareWrapper);
+
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("no owning workspace package"),
+    });
+  });
+
+  it("fails closed when the owning workspace package has no src span", async () => {
+    const fixture = await createProvenanceFixture();
+    const packageRoot = join(fixture.directory, "no-src-package");
+    await mkdir(packageRoot);
+    await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "@local/no-src", type: "module" }));
+    const wrapper = join(packageRoot, "wrapper.js");
+    await writeFile(wrapper, 'export const execute = () => "no span";\n');
+    await commitFixtureRepository(fixture.directory, "no-src package");
+    await writeCompatibility(fixture, wrapper);
+
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("first-party source span is empty"),
+    });
+  });
+
+  it("fails closed when a consulted package manifest is modified without commit", async () => {
+    const fixture = await createProvenanceFixture();
+    await writeFile(
+      join(fixture.directory, "package.json"),
+      JSON.stringify({ name: "@local/fixture-wrapper", type: "module", description: "locally modified" }),
+    );
+
+    await expect(verify(fixture)).rejects.toMatchObject({
+      code: "ADAPTER_COMPATIBILITY_INVALID",
+      message: expect.stringContaining("first-party source differs"),
+    });
+  });
+
   it("re-verifies provenance at spawn time and fails closed on a wrapper mutated after composition", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-spawn-provenance-"));
     const wrapperPath = join(directory, "wrapper.mjs");
@@ -276,6 +358,7 @@ describe("adapter wrapper Git provenance", () => {
       "",
     ].join("\n");
     await writeFile(wrapperPath, responder);
+    await writeWrapperPackageScaffold(directory);
     const repositoryCommit = await commitFixtureRepository(directory);
     const definition = {
       command: [process.execPath, wrapperPath],
@@ -315,6 +398,32 @@ describe("adapter wrapper Git provenance", () => {
       });
     } finally {
       await recommitted.close();
+    }
+  });
+
+  it("fails closed at spawn when a deleted tracked manifest truncates span discovery", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-spawn-span-"));
+    const wrapperPath = join(directory, "wrapper.mjs");
+    await writeFile(wrapperPath, "export const fixtureWrapper = true;\n");
+    await writeWrapperPackageScaffold(directory);
+    const repositoryCommit = await commitFixtureRepository(directory);
+    const definition = {
+      command: [process.execPath, wrapperPath],
+      environment: {},
+      wrapperProvenance: { repositoryCommit, wrapperPath: "wrapper.mjs" },
+    };
+
+    // The same truncation that must fail at composition must also fail at
+    // the spawn-time re-derivation, before any adapter process starts.
+    await rm(join(directory, "package.json"));
+    const supervisor = new AdapterSupervisor({ fixture: definition });
+    try {
+      await expect(supervisor.request("fixture", "capabilities", {})).rejects.toMatchObject({
+        code: "ADAPTER_COMPATIBILITY_INVALID",
+        message: expect.stringContaining("tracked at HEAD but missing from the working tree: package.json"),
+      });
+    } finally {
+      await supervisor.close();
     }
   });
 
