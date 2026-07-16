@@ -1,7 +1,4 @@
-import { createHash } from "node:crypto";
-
 import type {
-  CommandId,
   NegotiatedOperatorClient,
   OperatorCapabilityCredential,
   OperatorClientId,
@@ -11,6 +8,7 @@ import type {
   PromotionIntent,
 } from "@local/agent-fabric-protocol";
 
+import { consoleLaunchCommandId } from "./launch-command.js";
 import type { ConsoleInspectionBinding, FabricConsoleDataset } from "./protocol-adapter.js";
 import {
   ConsoleGuidedInputError,
@@ -31,13 +29,6 @@ export type ProductionConsoleTypedEntryPlannerFactory = (
 
 const GIT_PREPARATION_UNAVAILABLE =
   "daemon-git-intent-preparation-unavailable";
-
-function launchCommandId(clientId: OperatorClientId, eventId: string): CommandId {
-  return `console_${createHash("sha256")
-    .update(`${clientId}\0launch-preview\0${eventId}`)
-    .digest("hex")
-    .slice(0, 48)}` as CommandId;
-}
 
 function assertNoLaunchFields(fields: Readonly<Record<string, string>>): void {
   if (Object.keys(fields).length !== 0) {
@@ -142,16 +133,24 @@ ProductionConsoleTypedEntryPlannerFactory = (options) => {
         }
         assertNoLaunchFields(input.fields);
         const session = exactProjectBinding(input.dataset, input.binding, options.projectId);
+        const commandId = consoleLaunchCommandId({
+          phase: "prepare",
+          operatorId: options.operatorId,
+          projectId: options.projectId,
+          projectSessionId: session.projectSessionId,
+          sessionGeneration: session.generation,
+          launchPacketRef: session.launchPacketRef,
+        });
         const daemonPreview = await launchPrepare({
           command: {
             credential: options.credential,
-            commandId: launchCommandId(options.clientId, input.eventId),
+            commandId,
             expectedRevision: session.revision,
             actor: options.operatorId,
             provenance: {
               kind: "console-direct-input",
-              clientId: options.clientId,
-              inputEventId: input.eventId,
+              clientId: "console_launch_custody" as OperatorClientId,
+              inputEventId: commandId,
             },
             evidenceRefs: [],
           },

@@ -255,11 +255,14 @@ function projectWorkflowActions(
       row.actionAvailability.actions.includes(action)
       ? null
       : "authority-insufficient";
+  const launchRecovery = dataset.snapshot?.session?.freshness === "live" &&
+    (dataset.snapshot.session.value?.state === "launching" ||
+      dataset.snapshot.session.value?.state === "launch_ambiguous");
   return [
     guidedAction(
       "launch",
       mutationReason ?? capabilityReason(capabilities.launch) ??
-        authorityReason("project-session-launch"),
+        (launchRecovery ? null : authorityReason("project-session-launch")),
     ),
     guidedAction(
       "git",
@@ -716,7 +719,6 @@ function workflowReviewActions(
   if (review.stage === "pending" || review.stage === "ambiguous") {
     return [
       { id: "review:observe", label: "Observe launch status", enabled: true, availableAction: null },
-      { id: "review:close", label: "Close Review", enabled: true, availableAction: null },
     ];
   }
   return [

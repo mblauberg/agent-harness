@@ -544,11 +544,17 @@ export class ConsoleController {
         confirmation,
       });
       this.#assertReceipt(committed, command.commandId, review.preview);
-      const status: OperatorActionStatus = {
-        status: "committed",
-        commandId: command.commandId,
-        receipt: committed,
-      };
+      const status: OperatorActionStatus = committed.launchProviderActionJournalRef === undefined
+        ? {
+            status: "committed",
+            commandId: command.commandId,
+            receipt: committed,
+          }
+        : await this.#actions.status({
+            credential: this.#credential,
+            projectId: this.#projectId,
+            commandId: command.commandId,
+          });
       this.#applyStatus(status);
       return status;
     } catch (error) {

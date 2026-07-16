@@ -40,7 +40,7 @@ import {
 } from "./runtime.js";
 import type { FabricConsoleUiState, FabricViewport } from "./presenter.js";
 import type { FabricConsoleFrame } from "./index.js";
-import type { ConsoleWorkflowPlanner } from "./workflow.js";
+import type { ConsoleWorkflowPlanner, ConsoleWorkflowStage } from "./workflow.js";
 
 export type ConsoleBootstrapRequest = Readonly<{
   projectRoot: string;
@@ -293,6 +293,10 @@ export function sessionSwitchBlockReason(
   )
     ? "SESSION_SWITCH_BLOCKED_UNRESOLVED_ACTION"
     : null;
+}
+
+export function workflowSessionSwitchBlocked(stage: ConsoleWorkflowStage | null): boolean {
+  return stage === "pending" || stage === "ambiguous";
 }
 
 export class FabricConsoleApplication {
@@ -704,7 +708,7 @@ export class FabricConsoleApplication {
   async #switchProjectSession(projectSessionId: ProjectSessionId | null): Promise<void> {
     const actionState = this.#mutationController?.state;
     const blockReason = sessionSwitchBlockReason(actionState ?? null);
-    if (blockReason !== null || this.#runtime.ui.workflowReview?.stage === "pending") {
+    if (blockReason !== null || workflowSessionSwitchBlocked(this.#runtime.ui.workflowReview?.stage ?? null)) {
       throw Object.assign(new Error("session switch is blocked by unresolved action custody"), {
         code: blockReason ?? "SESSION_SWITCH_BLOCKED_UNRESOLVED_ACTION",
       });

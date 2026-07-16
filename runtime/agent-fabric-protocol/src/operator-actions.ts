@@ -443,7 +443,7 @@ export type OperatorActionStatus =
   | {
       status: "committed";
       commandId: string;
-      receipt: OperatorActionReceipt;
+      receipt: NonLaunchOperatorActionReceipt;
       launchProviderActionJournalRef?: never;
       seatProvisioning?: never;
     }

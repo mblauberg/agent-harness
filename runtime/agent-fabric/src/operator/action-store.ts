@@ -1054,7 +1054,7 @@ export class OperatorActionStore {
       return {
         status: "committed",
         commandId: request.commandId,
-        receipt: parseReceipt(text(command, "result_json")),
+        receipt: nonLaunchReceipt(parseReceipt(text(command, "result_json"))),
       };
     }
     const envelope = parseStoredPreview(text(previewValue, "preview_json"));
@@ -1109,7 +1109,7 @@ export class OperatorActionStore {
         ...parseStoredReceipt(envelope.action),
         afterStateDigest: digestValue(observed, "operatorChairRecoveryStatus.afterStateDigest"),
       };
-      return { status: "committed", commandId, receipt };
+      return { status: "committed", commandId, receipt: nonLaunchReceipt(receipt) };
     }
     if (observed.status === "no-effect") {
       return {
@@ -1147,7 +1147,7 @@ export class OperatorActionStore {
         ...parseStoredReceipt(envelope.action),
         afterStateDigest: digestValue(observed, "operatorChairLiveHandoffStatus.afterStateDigest"),
       };
-      return { status: "committed", commandId, receipt };
+      return { status: "committed", commandId, receipt: nonLaunchReceipt(receipt) };
     }
     if (observed.status === "no-effect") {
       return {
@@ -1621,7 +1621,11 @@ export class OperatorActionStore {
         UPDATE operator_commands SET result_json=?, after_json=?
          WHERE operator_id=? AND command_id=?
       `).run(canonicalJson(receipt), canonicalJson(observed), context.operatorId, request.targetCommandId);
-      result = { status: "committed", commandId: request.targetCommandId, receipt };
+      result = {
+        status: "committed",
+        commandId: request.targetCommandId,
+        receipt: nonLaunchReceipt(receipt),
+      };
     } else if (observed.status === "no-effect") {
       result = {
         status: "rejected",
@@ -1699,7 +1703,11 @@ export class OperatorActionStore {
         UPDATE operator_commands SET result_json=?, after_json=?
          WHERE operator_id=? AND command_id=?
       `).run(canonicalJson(receipt), canonicalJson(observed), context.operatorId, request.targetCommandId);
-      result = { status: "committed", commandId: request.targetCommandId, receipt };
+      result = {
+        status: "committed",
+        commandId: request.targetCommandId,
+        receipt: nonLaunchReceipt(receipt),
+      };
     } else if (observed.status === "no-effect") {
       result = {
         status: "rejected",
@@ -2188,8 +2196,23 @@ function parseReceipt(serialized: string): OperatorActionReceipt {
   return parseOperationResult(FABRIC_OPERATIONS.operatorActionCommit, JSON.parse(serialized));
 }
 
+type NonLaunchReceipt = Exclude<OperatorActionReceipt, { launchProviderActionJournalRef: unknown }>;
+
+function nonLaunchReceipt(receipt: OperatorActionReceipt): NonLaunchReceipt {
+  if (receipt.launchProviderActionJournalRef !== undefined) {
+    throw new Error("launch receipt requires launch custody settlement");
+  }
+  return receipt;
+}
+
 function statusFromAction(action: StoredAction, intentDigest: Sha256Digest): OperatorActionStatus {
-  if (action.status === "terminal") return { status: "committed", commandId: action.commandId, receipt: action.receipt };
+  if (action.status === "terminal") {
+    return {
+      status: "committed",
+      commandId: action.commandId,
+      receipt: nonLaunchReceipt(action.receipt),
+    };
+  }
   if (action.status === "pending") {
     return {
       status: "pending",
@@ -2229,7 +2252,7 @@ function lifecycleRecoveryStatusResult(
       ...parseStoredReceipt(envelope.action),
       afterStateDigest: digestValue(observed, "operatorLifecycleRecoveryStatus.afterStateDigest"),
     };
-    return { status: "committed", commandId, receipt };
+    return { status: "committed", commandId, receipt: nonLaunchReceipt(receipt) };
   }
   if (observed.status === "no-effect") {
     return {

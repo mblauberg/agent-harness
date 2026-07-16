@@ -2295,6 +2295,36 @@ describe("structured presenter and responsive Fabric renderer", () => {
       .toMatchObject({ enabled: true });
   });
 
+  it("keeps unresolved Launch custody observable and not closable", () => {
+    const workflow: ConsoleWorkflowReview = {
+      workflowId: "workflow-launch-unresolved",
+      kind: "operator-action",
+      source: "daemon-preview",
+      stage: "ambiguous",
+      previewDigest: "sha256:preview",
+      expectedRevision: revisionFromProtocol(11),
+      consequenceClass: "consequential",
+      confirmationMode: "explicit",
+      summary: "project-session-launch recovery",
+      details: [{ label: "commandId", value: "console_launch_command" }],
+      evidence: [],
+      openedByEventId: "event-launch-recovery",
+      armedByEventId: null,
+      result: "operator-action | console_launch_command | ambiguous",
+      failure: "LAUNCH_AMBIGUOUS",
+    };
+    const frame = renderFabricConsoleFrame(
+      richDataset(),
+      controllerState(),
+      createFabricUiState({ workflowReview: workflow }),
+      { columns: 200, rows: 18 },
+    );
+
+    expect(frame.hitRegions.find(({ id }) => id === "review:observe"))
+      .toMatchObject({ enabled: true });
+    expect(frame.hitRegions.some(({ id }) => id === "review:close")).toBe(false);
+  });
+
   it.each(["editor", "guided", "palette"] as const)(
     "renders honest %s modal help with explicit input focus and local Detach authority",
     (inputMode) => {

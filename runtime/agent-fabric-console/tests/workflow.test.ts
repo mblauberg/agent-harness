@@ -5,6 +5,7 @@ import {
   OPERATION_CONTRACT_FIXTURES,
   type NegotiatedOperatorClient,
   type OperatorCapabilityCredential,
+  type OperatorActionCommitRequest,
   type OperatorProjectionSnapshot,
   type Intake,
   type ProjectId,
@@ -101,6 +102,56 @@ function dataset(withSession = true): FabricConsoleDataset {
     pages: createEmptyViewPages(),
     loadedAtMs: Date.parse(observedAt),
     canMutate: true,
+  };
+}
+
+function launchRecoveryDataset(state: "launching" | "launch_ambiguous"): FabricConsoleDataset {
+  const base = dataset();
+  const snapshot = base.snapshot;
+  const session = snapshot?.session;
+  if (snapshot == null || session?.freshness !== "live" || session.value === null) {
+    throw new Error("launch recovery session fixture unavailable");
+  }
+  return {
+    ...base,
+    snapshot: {
+      ...snapshot,
+      session: {
+        ...session,
+        value: { ...session.value, state },
+      },
+    },
+    pages: {
+      ...base.pages,
+      project: {
+        view: "project",
+        rows: [{
+          view: "project",
+          stableId: projectId,
+          revision: revisionFromProtocol(3),
+          urgency: "normal",
+          freshness: {
+            state: "live",
+            source: "fabric",
+            revision: revisionFromProtocol(3),
+            observedAt,
+            ageMs: 0,
+          },
+          summary: {
+            kind: "project",
+            goal: "Recover launch custody",
+            acceptedScopeRef: null,
+            repositoryRevision: "abc123",
+          },
+          detailRef: { kind: "project", projectId, expectedRevision: 3 },
+          actionAvailability: { state: "read-only", reason: "state-ineligible" },
+        }],
+        nextCursor: 1,
+        hasMore: false,
+        snapshotRevision: revisionFromProtocol(11),
+        readTransactionId: "launch-recovery-project-page",
+      },
+    },
   };
 }
 
@@ -582,11 +633,14 @@ describe("typed Console workflow planner", () => {
       evidenceRefs: [],
       committedAt: observedAt,
     };
-    const commit = vi.fn(async () => receipt);
-    const status = vi.fn(async () => ({
+    const commit = vi.fn(async (request: OperatorActionCommitRequest) => ({
+      ...receipt,
+      commandId: request.command.commandId,
+    }));
+    const status = vi.fn(async (request: { commandId: string }) => ({
       status: "committed" as const,
-      commandId: receipt.commandId,
-      receipt,
+      commandId: request.commandId,
+      receipt: { ...receipt, commandId: request.commandId },
       launchProviderActionJournalRef: {
         ...preparedJournal,
         journalRevision: 2,
@@ -654,7 +708,9 @@ describe("typed Console workflow planner", () => {
       expectedPreviewRevision: daemonPreview.previewRevision,
       confirmation: expect.objectContaining({ kind: "explicit" }),
     }));
-    expect(status).toHaveBeenCalledWith(expect.objectContaining({ commandId: receipt.commandId }));
+    expect(status).toHaveBeenCalledWith(expect.objectContaining({
+      commandId: expect.stringMatching(/^console_/u),
+    }));
     expect(result.review.stage).toBe("committed");
   });
 
@@ -732,8 +788,18 @@ describe("typed Console workflow planner", () => {
         outcomeDigest: digest,
       },
     };
-    const status = vi.fn(async () => pendingStatus);
-    const reconcile = vi.fn(async () => noEffectStatus);
+    const status = vi.fn()
+      .mockImplementationOnce(async (request: { commandId: string }) => ({
+        ...pendingStatus,
+        commandId: request.commandId,
+      }))
+      .mockImplementationOnce(async (request: { commandId: string }) => ({
+        ...noEffectStatus,
+        commandId: request.commandId,
+        receipt: { ...receipt, commandId: request.commandId },
+      }));
+    const reconcile = vi.fn();
+    const commit = vi.fn(async (_request: OperatorActionCommitRequest) => receipt);
     const planner = createProductionConsoleWorkflowPlanner({
       client: client({
         console: {
@@ -741,7 +807,7 @@ describe("typed Console workflow planner", () => {
           launchAvailable: true,
           actions: {
             preview: vi.fn(),
-            commit: vi.fn(async () => receipt),
+            commit,
             status,
             reconcile,
           },
@@ -779,20 +845,140 @@ describe("typed Console workflow planner", () => {
       eventId: "launch-settlement-commit",
     });
     expect(pending.review).toMatchObject({ stage: "pending", failure: null });
+    const committedCommandId = commit.mock.calls[0]?.[0].command.commandId;
+    expect(committedCommandId).toMatch(/^console_launch_/u);
+    expect(status.mock.calls[0]?.[0].commandId).toBe(committedCommandId);
+
+    const reopenedStatus = vi.fn(async (request: { commandId: string }) => ({
+      ...pendingStatus,
+      commandId: request.commandId,
+    }));
+    const reopenedBuildIntent = vi.fn(async () => {
+      throw new Error("restart recovery must not prepare a second launch");
+    });
+    const reopenedPlanner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        console: {
+          readOnly: false,
+          launchAvailable: true,
+          actions: {
+            preview: vi.fn(),
+            commit: vi.fn(),
+            status: reopenedStatus,
+            reconcile: vi.fn(),
+          },
+          gates: { read: vi.fn() },
+          projection: { viewPage: vi.fn(), readDetail: vi.fn() },
+        },
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_after_restart" as never,
+      projectId,
+      typedEntryPlanner: {
+        capabilities: {
+          launch: { state: "available" },
+          git: { state: "unavailable", reason: "git-unavailable" },
+          promotion: { state: "unavailable", reason: "promotion-unavailable" },
+        },
+        buildIntent: reopenedBuildIntent,
+      },
+    });
+    const reopened = await reopenedPlanner.prepareGuided({
+      action: "launch",
+      binding: {
+        view: "project",
+        itemId: projectId,
+        itemRevision: revisionFromProtocol(3),
+        projectionRevision: revisionFromProtocol(11),
+      },
+      raw: "",
+      dataset: launchRecoveryDataset("launching"),
+      eventId: "launch-after-process-restart",
+    });
+    expect(reopened).toMatchObject({ stage: "pending", failure: null });
+    expect(reopenedStatus).toHaveBeenCalledWith(expect.objectContaining({
+      commandId: committedCommandId,
+    }));
+    expect(reopenedBuildIntent).not.toHaveBeenCalled();
 
     const settled = await planner.observe({
       review: pending.review,
       eventId: "launch-settlement-observe",
     });
-    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({
-      targetCommandId: receipt.commandId,
-      expectedStatus: "pending",
-      mode: "observe-only",
+    expect(status).toHaveBeenLastCalledWith(expect.objectContaining({
+      commandId: expect.stringMatching(/^console_/u),
     }));
+    expect(reconcile).not.toHaveBeenCalled();
     expect(settled).toMatchObject({
       stage: "conflict",
       failure: "LAUNCH_TERMINAL_NO_EFFECT",
     });
+
+    commit.mockRejectedValueOnce(new Error("commit response lost"));
+    status.mockImplementationOnce(async (request: { commandId: string }) => ({
+      ...noEffectStatus,
+      commandId: request.commandId,
+      receipt: { ...receipt, commandId: request.commandId },
+    }));
+    const lostResponseReview = await planner.prepareGuided({
+      action: "launch",
+      binding: {
+        view: "project",
+        itemId: projectId,
+        itemRevision: revisionFromProtocol(3),
+        projectionRevision: revisionFromProtocol(11),
+      },
+      raw: "",
+      dataset: dataset(),
+      eventId: "launch-lost-response-review",
+    });
+    const recoveredLostResponse = await planner.commit({
+      review: planner.arm(lostResponseReview, "launch-lost-response-arm"),
+      eventId: "launch-lost-response-commit",
+    });
+    expect(recoveredLostResponse.review).toMatchObject({
+      stage: "conflict",
+      failure: "LAUNCH_TERMINAL_NO_EFFECT",
+    });
+
+    status
+      .mockRejectedValueOnce(new Error("first status unavailable"))
+      .mockRejectedValueOnce(new Error("recovery status unavailable"))
+      .mockImplementationOnce(async (request: { commandId: string }) => ({
+        ...noEffectStatus,
+        commandId: request.commandId,
+        receipt: { ...receipt, commandId: request.commandId },
+      }));
+    const unavailableReview = await planner.prepareGuided({
+      action: "launch",
+      binding: {
+        view: "project",
+        itemId: projectId,
+        itemRevision: revisionFromProtocol(3),
+        projectionRevision: revisionFromProtocol(11),
+      },
+      raw: "",
+      dataset: dataset(),
+      eventId: "launch-status-unavailable-review",
+    });
+    const unavailable = await planner.commit({
+      review: planner.arm(unavailableReview, "launch-status-unavailable-arm"),
+      eventId: "launch-status-unavailable-commit",
+    });
+    expect(unavailable.review).toMatchObject({
+      stage: "pending",
+      failure: "LAUNCH_STATUS_UNAVAILABLE",
+    });
+    const recoveredUnavailable = await planner.observe({
+      review: unavailable.review,
+      eventId: "launch-status-recovered-observe",
+    });
+    expect(recoveredUnavailable).toMatchObject({
+      stage: "conflict",
+      failure: "LAUNCH_TERMINAL_NO_EFFECT",
+    });
+    expect(reconcile).not.toHaveBeenCalled();
   });
 
   it("previews and commits a revision-bound Attention request-changes decision", async () => {

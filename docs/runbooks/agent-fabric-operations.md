@@ -145,9 +145,14 @@ In production Console, Launch is available only when the dedicated
 `projectSessions.prepareLaunch` operation and explicit operator-action commit
 surface are negotiated. The selected live Project row supplies the session
 revision, generation and reviewed launch-packet reference; Launch accepts no
-caller-authored CAS fields. Repeating the same input event replays the same
-dedicated preview, and provider dispatch still requires a separate explicit
-confirmation gesture.
+caller-authored CAS fields. Console derives separate prepare and commit command
+IDs from the operator, project, session, session generation and exact launch
+packet path/digest; input events and Console client instances are deliberately
+excluded. An exact reopen therefore polls the existing command, while a new
+generation or packet gets a new identity. Provider dispatch still requires a
+separate explicit confirmation gesture. Sessions projected as `launching` or
+`launch_ambiguous` rehydrate through status-only observation; Console never
+redispatches or invokes generic action reconciliation for launch custody.
 
 For visible pairing, Herdr attaches panes or observer renderers while messages still travel through the durable fabric mailbox. For headless orchestration, no pane is required. Both profiles can coexist in one run.
 

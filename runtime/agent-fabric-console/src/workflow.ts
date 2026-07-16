@@ -15,7 +15,6 @@ import {
   type OperatorActionIntent,
   type OperatorActionPreview,
   type OperatorActionPreviewRequest,
-  type OperatorActionReconcileRequest,
   type OperatorActionStatus,
   type OperatorCapabilityCredential,
   type OperatorClientId,
@@ -32,6 +31,7 @@ import {
 } from "@local/agent-fabric-protocol";
 
 import { operatorIntentRevision } from "./action-revision.js";
+import { consoleLaunchCommandId } from "./launch-command.js";
 import {
   revisionFromProtocol,
   type ConsoleWorkflowCapabilities,
@@ -941,6 +941,69 @@ export function createProductionConsoleWorkflowPlanner(
       ) {
         throw new Error(`${kind} must start from the selected Project row`);
       }
+      if (kind === "launch") {
+        const fields = guidedFields(input.raw);
+        if (Object.keys(fields).length !== 0) {
+          throw new ConsoleGuidedInputError(
+            "CONSOLE_GUIDED_LAUNCH_FIELDS_INVALID",
+            "guided Launch uses the reviewed session launch packet and accepts no fields",
+          );
+        }
+        const session = liveSession(input.dataset);
+        if (session.state === "launching" || session.state === "launch_ambiguous") {
+          exactGuidedRow(input.dataset, input.binding);
+          const actions = options.client.console?.actions;
+          if (actions === undefined) throw new Error("operator action status is unavailable");
+          const commandId = consoleLaunchCommandId({
+            phase: "commit",
+            operatorId: options.operatorId,
+            projectId: options.projectId,
+            projectSessionId: session.projectSessionId,
+            sessionGeneration: session.generation,
+            launchPacketRef: session.launchPacketRef,
+          });
+          const status = await actions.status({
+            credential: options.credential,
+            projectId: options.projectId,
+            commandId,
+          });
+          if (status.status === "not-found") {
+            throw new Error("launch recovery command was not found for the selected session binding");
+          }
+          const intentDigest = status.status === "committed"
+            ? status.receipt.intentDigest
+            : status.intentDigest;
+          const recoveryBase: ConsoleWorkflowReview = {
+            workflowId: stableId("launch_recovery", commandId),
+            kind: "operator-action",
+            source: "daemon-preview",
+            stage: "pending",
+            previewDigest: intentDigest,
+            expectedRevision: revisionFromProtocol(session.revision),
+            consequenceClass: "consequential",
+            confirmationMode: "explicit",
+            summary: "project-session-launch recovery",
+            details: [
+              { label: "projectSessionId", value: session.projectSessionId },
+              { label: "commandId", value: commandId },
+            ],
+            evidence: [],
+            openedByEventId: input.eventId,
+            armedByEventId: null,
+            result: null,
+            failure: null,
+          };
+          const recovered = launchSettlementReview(recoveryBase, status);
+          if (recovered.stage === "pending" || recovered.stage === "ambiguous") {
+            prepared.set(recovered.workflowId, {
+              review: recovered,
+              request: {},
+              commitCommandId: commandId,
+            });
+          }
+          return recovered;
+        }
+      }
       const built = await typedEntryPlanner.buildIntent({
         kind,
         fields: guidedFields(input.raw),
@@ -1090,6 +1153,7 @@ export function createProductionConsoleWorkflowPlanner(
     const pending = { ...stored.review, stage: "pending" as const, failure: null };
     let result: unknown;
     let launchStatus: OperatorActionStatus | undefined;
+    let launchCommandId: CommandId | undefined;
     let reconnectProjectSessionId: ProjectSessionId | null = null;
     try {
       switch (stored.review.kind) {
@@ -1172,13 +1236,46 @@ export function createProductionConsoleWorkflowPlanner(
           if (actions === undefined || preview === undefined) {
             throw new Error("operator action Preview is unavailable");
           }
+          if (preview.intent.kind === "project-session-launch") {
+            launchCommandId = consoleLaunchCommandId({
+              phase: "commit",
+              operatorId: options.operatorId,
+              projectId: preview.intent.projectId,
+              projectSessionId: preview.intent.projectSessionId,
+              sessionGeneration: preview.intent.expectedSessionGeneration,
+              launchPacketRef: preview.intent.launchPacketRef,
+            });
+            prepared.set(input.review.workflowId, {
+              ...stored,
+              review: pending,
+              commitCommandId: launchCommandId,
+            });
+          }
+          const effectiveCommand = launchCommandId === undefined
+            ? command
+            : {
+                ...command,
+                commandId: launchCommandId,
+                provenance: {
+                  kind: "console-direct-input" as const,
+                  clientId: "console_launch_custody" as OperatorClientId,
+                  inputEventId: launchCommandId,
+                },
+              };
           const confirmation = preview.confirmationMode === "echo"
             ? { kind: "echo" as const, echoedPreviewDigest: preview.previewDigest }
-            : { kind: "explicit" as const, confirmationId: stableId("confirmation", input.eventId, preview.previewDigest) };
+            : {
+                kind: "explicit" as const,
+                confirmationId: stableId(
+                  "confirmation",
+                  launchCommandId ?? input.eventId,
+                  preview.previewDigest,
+                ),
+              };
           const committed = await actions.commit(parseOperation<OperatorActionCommitRequest>(
             FABRIC_OPERATIONS.operatorActionCommit,
             {
-              command,
+              command: effectiveCommand,
               projectId: options.projectId,
               previewId: preview.previewId,
               expectedPreviewRevision: preview.previewRevision,
@@ -1192,23 +1289,49 @@ export function createProductionConsoleWorkflowPlanner(
             launchStatus = await actions.status({
               credential: options.credential,
               projectId: options.projectId,
-              commandId: committed.commandId,
+              commandId: launchCommandId ?? command.commandId,
             });
           }
           break;
         }
       }
     } catch (error: unknown) {
-      const failureCode = isRecord(error) && typeof error.code === "string" &&
-          /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u.test(error.code)
-        ? error.code
-        : "WORKFLOW_COMMIT_FAILED";
-      const failed: ConsoleWorkflowReview = {
-        ...pending,
-        stage: "conflict",
-        failure: failureCode,
-      };
-      return { review: failed, reconnectProjectSessionId: null };
+      if (launchCommandId !== undefined) {
+        const actions = options.client.console?.actions;
+        if (actions !== undefined) {
+          try {
+            launchStatus = await actions.status({
+              credential: options.credential,
+              projectId: options.projectId,
+              commandId: launchCommandId,
+            });
+          } catch {
+            const unresolved: ConsoleWorkflowReview = {
+              ...pending,
+              result: `operator-action | ${launchCommandId} | status-unavailable`,
+              failure: "LAUNCH_STATUS_UNAVAILABLE",
+            };
+            prepared.set(input.review.workflowId, {
+              ...stored,
+              review: unresolved,
+              commitCommandId: launchCommandId,
+            });
+            return { review: unresolved, reconnectProjectSessionId: null };
+          }
+        }
+      }
+      if (launchStatus === undefined) {
+        const failureCode = isRecord(error) && typeof error.code === "string" &&
+            /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u.test(error.code)
+          ? error.code
+          : "WORKFLOW_COMMIT_FAILED";
+        const failed: ConsoleWorkflowReview = {
+          ...pending,
+          stage: "conflict",
+          failure: failureCode,
+        };
+        return { review: failed, reconnectProjectSessionId: null };
+      }
     }
     if (launchStatus !== undefined) {
       const settled = launchSettlementReview(pending, launchStatus);
@@ -1250,30 +1373,11 @@ export function createProductionConsoleWorkflowPlanner(
     }
     const actions = options.client.console?.actions;
     if (actions === undefined) throw new Error("operator action status is unavailable");
-    let status = await actions.status({
+    const status = await actions.status({
       credential: options.credential,
       projectId: options.projectId,
       commandId: stored.commitCommandId,
     });
-    if (status.status === "pending" || status.status === "ambiguous") {
-      status = await actions.reconcile(parseOperation<OperatorActionReconcileRequest>(
-        FABRIC_OPERATIONS.operatorActionReconcile,
-        {
-          command: mutationContext(
-            options,
-            input.eventId,
-            "reconcile",
-            Number(input.review.expectedRevision),
-            input.review.previewDigest,
-          ),
-          projectId: options.projectId,
-          targetCommandId: stored.commitCommandId,
-          expectedAttemptGeneration: status.attemptGeneration,
-          expectedStatus: status.status,
-          mode: "observe-only",
-        },
-      ));
-    }
     const settled = launchSettlementReview(input.review, status);
     if (settled.stage === "pending" || settled.stage === "ambiguous") {
       prepared.set(input.review.workflowId, { ...stored, review: settled });
