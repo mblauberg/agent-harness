@@ -586,6 +586,8 @@ describe("production Console package-root bootstrap", () => {
       client,
       credential,
       projectId,
+      operatorId: "operator_console_production",
+      clientId: "console_client_production",
     });
   });
 

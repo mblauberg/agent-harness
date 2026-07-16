@@ -525,6 +525,276 @@ describe("typed Console workflow planner", () => {
     expect(buildIntent).toHaveBeenCalledTimes(1);
   });
 
+  it("commits a dedicated Launch preview without calling the forbidden generic preview API", async () => {
+    const intent = {
+      kind: "project-session-launch" as const,
+      projectId,
+      projectSessionId,
+      expectedProjectRevision: 3,
+      expectedSessionRevision: 8,
+      expectedSessionGeneration: 2,
+      trustRecordDigest: digest,
+      launchPacketRef: { path: "launch/packet.json" as never, digest },
+      authorityRef: digest,
+      budgetRef: "budget_workflow",
+      resourcePlanRef: { path: "launch/resource-plan.json" as never, digest },
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_workflow" as never,
+      providerContractDigest: digest,
+      resourceStateDigest: digest,
+    };
+    const daemonPreview = {
+      previewId: "preview_guided_launch",
+      previewRevision: 1,
+      previewDigest: digest,
+      intent,
+      intentDigest: digest,
+      beforeStateDigest: digest,
+      consequenceClass: "consequential" as const,
+      evidenceRefs: [],
+      gateIds: [],
+      confirmationMode: "explicit" as const,
+      expiresAt: "2099-01-01T00:00:00.000Z" as Timestamp,
+    };
+    const genericPreview = vi.fn(async () => {
+      throw new Error("project-session-launch previews are server-authored only");
+    });
+    const preparedJournal = {
+      schemaVersion: 1 as const,
+      projectSessionId,
+      coordinationRunId: "run_launch_workflow" as never,
+      actionRef: { adapterId: "claude-agent-sdk", actionId: intent.providerActionId },
+      providerContractDigest: digest,
+      custodyAttemptGeneration: 1,
+      journalRevision: 1,
+      journalState: "prepared" as const,
+      outcomeKind: null,
+      outcomeDigest: null,
+    };
+    const receipt = {
+      commandId: "command_launch_commit",
+      previewId: daemonPreview.previewId,
+      previewRevision: 1,
+      intentDigest: digest,
+      beforeStateDigest: digest,
+      afterStateDigest: digest,
+      launchProviderActionJournalRef: preparedJournal,
+      evidenceRefs: [],
+      committedAt: observedAt,
+    };
+    const commit = vi.fn(async () => receipt);
+    const status = vi.fn(async () => ({
+      status: "committed" as const,
+      commandId: receipt.commandId,
+      receipt,
+      launchProviderActionJournalRef: {
+        ...preparedJournal,
+        journalRevision: 2,
+        journalState: "terminal" as const,
+        outcomeKind: "terminal-success" as const,
+        outcomeDigest: digest,
+      },
+      seatProvisioning: {
+        schemaVersion: 1 as const,
+        projectSessionId,
+        sessionRevision: 9,
+        sessionGeneration: 2,
+        coordinationRunId: preparedJournal.coordinationRunId,
+        runRevision: 2,
+        chairAgentId: "chair_launch_workflow" as never,
+        chairGeneration: 1,
+        chairLeaseId: "chair:run_launch_workflow:1" as never,
+      },
+    }));
+    const planner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        console: {
+          readOnly: false,
+          launchAvailable: true,
+          actions: { preview: genericPreview, commit, status, reconcile: vi.fn() },
+          gates: { read: vi.fn() },
+          projection: { viewPage: vi.fn(), readDetail: vi.fn() },
+        },
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow" as never,
+      projectId,
+      typedEntryPlanner: {
+        capabilities: {
+          launch: { state: "available" },
+          git: { state: "unavailable", reason: "git-unavailable" },
+          promotion: { state: "unavailable", reason: "promotion-unavailable" },
+        },
+        buildIntent: vi.fn(async () => ({ intent, expectedRevision: 8, daemonPreview })),
+      },
+    });
+    const binding = {
+      view: "project" as const,
+      itemId: projectId,
+      itemRevision: revisionFromProtocol(3),
+      projectionRevision: revisionFromProtocol(11),
+    };
+
+    const review = await planner.prepareGuided({
+      action: "launch",
+      binding,
+      raw: "",
+      dataset: dataset(),
+      eventId: "guided-launch",
+    });
+    expect(genericPreview).not.toHaveBeenCalled();
+
+    const result = await planner.commit({
+      review: planner.arm(review, "guided-launch-arm"),
+      eventId: "guided-launch-confirm",
+    });
+    expect(commit).toHaveBeenCalledWith(expect.objectContaining({
+      previewId: daemonPreview.previewId,
+      expectedPreviewRevision: daemonPreview.previewRevision,
+      confirmation: expect.objectContaining({ kind: "explicit" }),
+    }));
+    expect(status).toHaveBeenCalledWith(expect.objectContaining({ commandId: receipt.commandId }));
+    expect(result.review.stage).toBe("committed");
+  });
+
+  it("keeps pending Launch custody observable and treats terminal no-effect as failure", async () => {
+    const intent = {
+      kind: "project-session-launch" as const,
+      projectId,
+      projectSessionId,
+      expectedProjectRevision: 3,
+      expectedSessionRevision: 8,
+      expectedSessionGeneration: 2,
+      trustRecordDigest: digest,
+      launchPacketRef: { path: "launch/packet.json" as never, digest },
+      authorityRef: digest,
+      budgetRef: "budget_workflow",
+      resourcePlanRef: { path: "launch/resource-plan.json" as never, digest },
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_settlement" as never,
+      providerContractDigest: digest,
+      resourceStateDigest: digest,
+    };
+    const preparedJournal = {
+      schemaVersion: 1 as const,
+      projectSessionId,
+      coordinationRunId: "run_launch_settlement" as never,
+      actionRef: { adapterId: "claude-agent-sdk", actionId: intent.providerActionId },
+      providerContractDigest: digest,
+      custodyAttemptGeneration: 1,
+      journalRevision: 1,
+      journalState: "prepared" as const,
+      outcomeKind: null,
+      outcomeDigest: null,
+    };
+    const daemonPreview = {
+      previewId: "preview_launch_settlement",
+      previewRevision: 1,
+      previewDigest: digest,
+      intent,
+      intentDigest: digest,
+      beforeStateDigest: digest,
+      consequenceClass: "consequential" as const,
+      evidenceRefs: [],
+      gateIds: [],
+      confirmationMode: "explicit" as const,
+      expiresAt: "2099-01-01T00:00:00.000Z" as Timestamp,
+    };
+    const receipt = {
+      commandId: "command_launch_settlement",
+      previewId: daemonPreview.previewId,
+      previewRevision: 1,
+      intentDigest: digest,
+      beforeStateDigest: digest,
+      afterStateDigest: digest,
+      launchProviderActionJournalRef: preparedJournal,
+      evidenceRefs: [],
+      committedAt: observedAt,
+    };
+    const pendingStatus = {
+      status: "pending" as const,
+      commandId: receipt.commandId,
+      intentDigest: digest,
+      phase: "observing" as const,
+      attemptGeneration: 1,
+      launchProviderActionJournalRef: { ...preparedJournal, journalState: "accepted" as const },
+    };
+    const noEffectStatus = {
+      status: "committed" as const,
+      commandId: receipt.commandId,
+      receipt,
+      launchProviderActionJournalRef: {
+        ...preparedJournal,
+        journalRevision: 2,
+        journalState: "terminal" as const,
+        outcomeKind: "terminal-no-effect" as const,
+        outcomeDigest: digest,
+      },
+    };
+    const status = vi.fn(async () => pendingStatus);
+    const reconcile = vi.fn(async () => noEffectStatus);
+    const planner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        console: {
+          readOnly: false,
+          launchAvailable: true,
+          actions: {
+            preview: vi.fn(),
+            commit: vi.fn(async () => receipt),
+            status,
+            reconcile,
+          },
+          gates: { read: vi.fn() },
+          projection: { viewPage: vi.fn(), readDetail: vi.fn() },
+        },
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow" as never,
+      projectId,
+      typedEntryPlanner: {
+        capabilities: {
+          launch: { state: "available" },
+          git: { state: "unavailable", reason: "git-unavailable" },
+          promotion: { state: "unavailable", reason: "promotion-unavailable" },
+        },
+        buildIntent: vi.fn(async () => ({ intent, expectedRevision: 8, daemonPreview })),
+      },
+    });
+    const review = await planner.prepareGuided({
+      action: "launch",
+      binding: {
+        view: "project",
+        itemId: projectId,
+        itemRevision: revisionFromProtocol(3),
+        projectionRevision: revisionFromProtocol(11),
+      },
+      raw: "",
+      dataset: dataset(),
+      eventId: "launch-settlement-review",
+    });
+    const pending = await planner.commit({
+      review: planner.arm(review, "launch-settlement-arm"),
+      eventId: "launch-settlement-commit",
+    });
+    expect(pending.review).toMatchObject({ stage: "pending", failure: null });
+
+    const settled = await planner.observe({
+      review: pending.review,
+      eventId: "launch-settlement-observe",
+    });
+    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({
+      targetCommandId: receipt.commandId,
+      expectedStatus: "pending",
+      mode: "observe-only",
+    }));
+    expect(settled).toMatchObject({
+      stage: "conflict",
+      failure: "LAUNCH_TERMINAL_NO_EFFECT",
+    });
+  });
+
   it("previews and commits a revision-bound Attention request-changes decision", async () => {
     const gate = sessionBoundFixture(
       OPERATION_CONTRACT_FIXTURES[FABRIC_OPERATIONS.scopedGateResolve].result,

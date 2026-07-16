@@ -15,6 +15,8 @@ import {
   type OperatorActionIntent,
   type OperatorActionPreview,
   type OperatorActionPreviewRequest,
+  type OperatorActionReconcileRequest,
+  type OperatorActionStatus,
   type OperatorCapabilityCredential,
   type OperatorClientId,
   type OperatorId,
@@ -57,6 +59,7 @@ export type ConsoleWorkflowStage =
   | "review"
   | "confirm"
   | "pending"
+  | "ambiguous"
   | "committed"
   | "conflict";
 
@@ -94,6 +97,10 @@ export type ConsoleWorkflowPlanner = Readonly<{
     review: ConsoleWorkflowReview;
     reconnectProjectSessionId: ProjectSessionId | null;
   }>>;
+  observe(input: Readonly<{
+    review: ConsoleWorkflowReview;
+    eventId: string;
+  }>): Promise<ConsoleWorkflowReview>;
   prepareGuided(input: Readonly<{
     action: GuidedWorkflowAction;
     binding: ConsoleInspectionBinding;
@@ -130,11 +137,13 @@ export type ConsoleTypedEntryPlanner = Readonly<{
   buildIntent(input: Readonly<{
     kind: ConsoleTypedEntryKind;
     fields: Readonly<Record<string, string>>;
+    eventId: string;
     binding: ConsoleInspectionBinding;
     dataset: FabricConsoleDataset;
   }>): Promise<Readonly<{
     intent: OperatorActionIntent;
     expectedRevision: number;
+    daemonPreview?: OperatorActionPreview;
   }>>;
 }>;
 
@@ -147,6 +156,7 @@ type PreparedWorkflow = Readonly<{
   review: ConsoleWorkflowReview;
   request: Record<string, unknown>;
   daemonPreview?: OperatorActionPreview;
+  commitCommandId?: CommandId;
 }>;
 
 const MAX_WORKFLOW_BYTES = 65_536;
@@ -497,7 +507,7 @@ function expectedRevision(
 function mutationContext(
   options: ProductionConsoleWorkflowPlannerOptions,
   eventId: string,
-  phase: "preview" | "commit",
+  phase: "preview" | "commit" | "reconcile",
   revision: number,
   workflowDigest: string,
 ): OperatorMutationContext {
@@ -639,6 +649,36 @@ function resultSummary(kind: ConsoleWorkflowKind, result: unknown): string {
     .join(" | ");
 }
 
+function launchSettlementReview(
+  review: ConsoleWorkflowReview,
+  status: OperatorActionStatus,
+): ConsoleWorkflowReview {
+  const common = {
+    ...review,
+    result: `operator-action | ${status.commandId} | ${status.status}`,
+  };
+  if (status.status === "pending") return { ...common, stage: "pending", failure: null };
+  if (status.status === "ambiguous") {
+    return { ...common, stage: "ambiguous", failure: "LAUNCH_AMBIGUOUS" };
+  }
+  if (status.status === "committed") {
+    const journal = status.launchProviderActionJournalRef;
+    if (
+      journal?.journalState === "terminal" &&
+      journal.outcomeKind === "terminal-success" &&
+      status.seatProvisioning !== undefined
+    ) return { ...common, stage: "committed", failure: null };
+    if (journal?.journalState === "terminal" && journal.outcomeKind === "terminal-no-effect") {
+      return { ...common, stage: "conflict", failure: "LAUNCH_TERMINAL_NO_EFFECT" };
+    }
+    return { ...common, stage: "conflict", failure: "LAUNCH_SETTLEMENT_INVALID" };
+  }
+  if (status.status === "rejected") {
+    return { ...common, stage: "conflict", failure: status.code };
+  }
+  return { ...common, stage: "conflict", failure: `LAUNCH_${status.status.toUpperCase()}` };
+}
+
 function directPreview(
   envelope: WorkflowEnvelope,
   revision: number,
@@ -669,6 +709,7 @@ export function createProductionConsoleWorkflowPlanner(
 ): ConsoleWorkflowPlanner {
   const prepared = new Map<string, PreparedWorkflow>();
   const typedRevisionOverrides = new Map<string, number>();
+  const typedPreviewOverrides = new Map<string, OperatorActionPreview>();
   const gateBindingOverrides = new Map<string, Readonly<{
     revision: number;
     coordinationRunId: string;
@@ -774,7 +815,8 @@ export function createProductionConsoleWorkflowPlanner(
           intent: envelope.request.intent,
         },
       );
-      daemonPreview = await actions.preview(request);
+      daemonPreview = typedPreviewOverrides.get(`${input.eventId}\0${sha256(request.intent)}`) ??
+        await actions.preview(request);
       if (canonical(daemonPreview.intent) !== canonical(request.intent)) {
         throw new Error("operator action Preview changed the requested intent");
       }
@@ -884,9 +926,10 @@ export function createProductionConsoleWorkflowPlanner(
       input.action === "implement" || input.action === "launch" ||
       input.action === "git" || input.action === "promotion"
     ) {
-      const kind: ConsoleTypedEntryKind = input.action === "implement"
-        ? "launch"
-        : input.action;
+      if (input.action === "implement") {
+        throw new Error("implementation-planning-unavailable");
+      }
+      const kind: ConsoleTypedEntryKind = input.action;
       const capability = capabilities[kind];
       if (capability.state === "unavailable") throw new Error(capability.reason);
       const typedEntryPlanner = options.typedEntryPlanner;
@@ -894,21 +937,14 @@ export function createProductionConsoleWorkflowPlanner(
         throw new Error("typed entry planner is unavailable");
       }
       if (
-        (kind === "launch" || kind === "git") &&
-        input.binding.view !== "project" && input.action !== "implement"
+        (kind === "launch" || kind === "git") && input.binding.view !== "project"
       ) {
         throw new Error(`${kind} must start from the selected Project row`);
-      }
-      if (input.action === "implement") {
-        exactArtifactInspection(
-          input.dataset,
-          input.binding,
-          input.artifactConfirmation,
-        );
       }
       const built = await typedEntryPlanner.buildIntent({
         kind,
         fields: guidedFields(input.raw),
+        eventId: input.eventId,
         binding: input.binding,
         dataset: input.dataset,
       });
@@ -922,6 +958,9 @@ export function createProductionConsoleWorkflowPlanner(
       }
       const overrideKey = `${input.eventId}\0${sha256(intent)}`;
       typedRevisionOverrides.set(overrideKey, built.expectedRevision);
+      if (built.daemonPreview !== undefined) {
+        typedPreviewOverrides.set(overrideKey, built.daemonPreview);
+      }
       try {
         return await prepare({
           raw: JSON.stringify({ kind: "operator-action", request: { intent } }),
@@ -930,6 +969,7 @@ export function createProductionConsoleWorkflowPlanner(
         });
       } finally {
         typedRevisionOverrides.delete(overrideKey);
+        typedPreviewOverrides.delete(overrideKey);
       }
     }
     if (
@@ -1049,6 +1089,7 @@ export function createProductionConsoleWorkflowPlanner(
     );
     const pending = { ...stored.review, stage: "pending" as const, failure: null };
     let result: unknown;
+    let launchStatus: OperatorActionStatus | undefined;
     let reconnectProjectSessionId: ProjectSessionId | null = null;
     try {
       switch (stored.review.kind) {
@@ -1134,7 +1175,7 @@ export function createProductionConsoleWorkflowPlanner(
           const confirmation = preview.confirmationMode === "echo"
             ? { kind: "echo" as const, echoedPreviewDigest: preview.previewDigest }
             : { kind: "explicit" as const, confirmationId: stableId("confirmation", input.eventId, preview.previewDigest) };
-          result = await actions.commit(parseOperation<OperatorActionCommitRequest>(
+          const committed = await actions.commit(parseOperation<OperatorActionCommitRequest>(
             FABRIC_OPERATIONS.operatorActionCommit,
             {
               command,
@@ -1146,6 +1187,14 @@ export function createProductionConsoleWorkflowPlanner(
               confirmation,
             },
           ));
+          result = committed;
+          if (preview.intent.kind === "project-session-launch") {
+            launchStatus = await actions.status({
+              credential: options.credential,
+              projectId: options.projectId,
+              commandId: committed.commandId,
+            });
+          }
           break;
         }
       }
@@ -1161,6 +1210,19 @@ export function createProductionConsoleWorkflowPlanner(
       };
       return { review: failed, reconnectProjectSessionId: null };
     }
+    if (launchStatus !== undefined) {
+      const settled = launchSettlementReview(pending, launchStatus);
+      if (settled.stage === "pending" || settled.stage === "ambiguous") {
+        prepared.set(input.review.workflowId, {
+          ...stored,
+          review: settled,
+          commitCommandId: launchStatus.commandId as CommandId,
+        });
+      } else {
+        prepared.delete(input.review.workflowId);
+      }
+      return { review: settled, reconnectProjectSessionId: null };
+    }
     prepared.delete(input.review.workflowId);
     const completed: ConsoleWorkflowReview = {
       ...pending,
@@ -1173,5 +1235,53 @@ export function createProductionConsoleWorkflowPlanner(
     };
   };
 
-  return { capabilities, prepare, prepareGuided, arm, commit };
+  const observe = async (input: Readonly<{
+    review: ConsoleWorkflowReview;
+    eventId: string;
+  }>): Promise<ConsoleWorkflowReview> => {
+    const stored = prepared.get(input.review.workflowId);
+    if (
+      stored === undefined ||
+      canonical(stored.review) !== canonical(input.review) ||
+      (input.review.stage !== "pending" && input.review.stage !== "ambiguous") ||
+      stored.commitCommandId === undefined
+    ) {
+      throw new Error("Console workflow settlement is stale or unavailable");
+    }
+    const actions = options.client.console?.actions;
+    if (actions === undefined) throw new Error("operator action status is unavailable");
+    let status = await actions.status({
+      credential: options.credential,
+      projectId: options.projectId,
+      commandId: stored.commitCommandId,
+    });
+    if (status.status === "pending" || status.status === "ambiguous") {
+      status = await actions.reconcile(parseOperation<OperatorActionReconcileRequest>(
+        FABRIC_OPERATIONS.operatorActionReconcile,
+        {
+          command: mutationContext(
+            options,
+            input.eventId,
+            "reconcile",
+            Number(input.review.expectedRevision),
+            input.review.previewDigest,
+          ),
+          projectId: options.projectId,
+          targetCommandId: stored.commitCommandId,
+          expectedAttemptGeneration: status.attemptGeneration,
+          expectedStatus: status.status,
+          mode: "observe-only",
+        },
+      ));
+    }
+    const settled = launchSettlementReview(input.review, status);
+    if (settled.stage === "pending" || settled.stage === "ambiguous") {
+      prepared.set(input.review.workflowId, { ...stored, review: settled });
+    } else {
+      prepared.delete(input.review.workflowId);
+    }
+    return settled;
+  };
+
+  return { capabilities, prepare, prepareGuided, arm, commit, observe };
 }

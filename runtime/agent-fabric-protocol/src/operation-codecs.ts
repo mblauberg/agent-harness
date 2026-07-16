@@ -404,8 +404,8 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.operatorActionPreview]: object(["previewId", "previewRevision", "previewDigest", "intent", "intentDigest", "beforeStateDigest", "consequenceClass", "evidenceRefs", "gateIds", "confirmationMode", "expiresAt"]),
   [FABRIC_OPERATIONS.projectSessionLaunchPrepare]: object(["previewId", "previewRevision", "previewDigest", "intent", "intentDigest", "beforeStateDigest", "consequenceClass", "evidenceRefs", "gateIds", "confirmationMode", "expiresAt"]),
   [FABRIC_OPERATIONS.operatorActionCommit]: object(["commandId", "previewId", "previewRevision", "intentDigest", "beforeStateDigest", "afterStateDigest", "evidenceRefs", "committedAt"], ["effectRef", "launchProviderActionJournalRef"]),
-  [FABRIC_OPERATIONS.operatorActionStatus]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "launchProviderActionJournalRef", "receipt", "code", "evidenceRefs"]),
-  [FABRIC_OPERATIONS.operatorActionReconcile]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "launchProviderActionJournalRef", "receipt", "code", "evidenceRefs"]),
+  [FABRIC_OPERATIONS.operatorActionStatus]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "launchProviderActionJournalRef", "receipt", "seatProvisioning", "code", "evidenceRefs"]),
+  [FABRIC_OPERATIONS.operatorActionReconcile]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "launchProviderActionJournalRef", "receipt", "seatProvisioning", "code", "evidenceRefs"]),
   [FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate]: object(["schemaVersion", "status"], ["source", "checkpointRef", "checkpointDigest", "checkpointVectorDigest", "validationReceiptDigest", "reason", "evidenceDigest"]),
   [FABRIC_OPERATIONS.messageBodyRead]: object(["available", "messageId", "revision"], ["body", "terminalNeutralised", "capabilityValuesRedacted", "artifactRefs", "reason"]),
   [FABRIC_OPERATIONS.operatorRepositoryRead]: object(
@@ -2058,6 +2058,17 @@ const operatorActionReceiptFields = {
   evidenceRefs: artifactRefsCodec,
   committedAt: timestamp,
 };
+const mcpSeatProvisioningDescriptorV1Codec = objectCodec({
+  schemaVersion: literal(1),
+  projectSessionId: identifier,
+  sessionRevision: positiveInteger,
+  sessionGeneration: positiveInteger,
+  coordinationRunId: identifier,
+  runRevision: positiveInteger,
+  chairAgentId: identifier,
+  chairGeneration: positiveInteger,
+  chairLeaseId: identifier,
+});
 const operatorActionReceiptCodec = unionOf([
   objectCodec(operatorActionReceiptFields, { effectRef: artifactRefCodec }),
   objectCodec({ ...operatorActionReceiptFields, launchProviderActionJournalRef: LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC }, {
@@ -2267,7 +2278,42 @@ const operatorActionStatusBaseCodec = unionOf([
     attemptGeneration: positiveInteger,
     gitCustody: gitCustodyStatusCodec,
   }),
-  objectCodec({ status: literal("committed"), commandId: identifier, receipt: operatorActionReceiptCodec }),
+  parserBacked(objectCodec({ status: literal("committed"), commandId: identifier, receipt: operatorActionReceiptCodec }, {
+    launchProviderActionJournalRef: LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC,
+    seatProvisioning: mcpSeatProvisioningDescriptorV1Codec,
+  }), (value) => {
+    const status = value as Record<string, unknown>;
+    const journal = status.launchProviderActionJournalRef as Record<string, unknown> | undefined;
+    const seatProvisioning = status.seatProvisioning;
+    const receipt = status.receipt as Record<string, unknown>;
+    if (journal === undefined) {
+      if (seatProvisioning !== undefined) {
+        throw new TypeError("operatorActionStatus seatProvisioning requires a terminal-success launch");
+      }
+      if (receipt.launchProviderActionJournalRef !== undefined) {
+        throw new TypeError("operatorActionStatus launch receipt requires terminal settlement");
+      }
+      return value;
+    }
+    if (receipt.launchProviderActionJournalRef === undefined) {
+      throw new TypeError("operatorActionStatus launch settlement requires a launch receipt");
+    }
+    if (journal.journalState !== "terminal") {
+      throw new TypeError("operatorActionStatus committed launch journal must be terminal");
+    }
+    if (journal.outcomeKind === "terminal-success") {
+      if (seatProvisioning === undefined) {
+        throw new TypeError("operatorActionStatus terminal-success launch requires seatProvisioning");
+      }
+      return value;
+    }
+    if (journal.outcomeKind === "terminal-no-effect" && seatProvisioning === undefined) return value;
+    throw new TypeError("operatorActionStatus seatProvisioning requires a terminal-success launch");
+  }, {
+    status: "committed",
+    commandId: "command_launch_01",
+    receipt: operatorActionReceiptCodec.example,
+  }),
   objectCodec({
     status: literal("rejected"),
     commandId: identifier,

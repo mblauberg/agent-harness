@@ -452,6 +452,8 @@ export function createProductionConsoleBootstrap(
         client: session.client,
         credential: session.credential,
         projectId: session.projectId,
+        operatorId: session.operatorId,
+        clientId: session.clientId,
       });
     const selection =
       session.attachableProjectSessions !== undefined &&

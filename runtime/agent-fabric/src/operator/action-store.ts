@@ -15,6 +15,7 @@ import type {
   ProjectSessionLaunchPrepareRequest,
   ProjectSessionLaunchCurrentState,
   LaunchProviderActionJournalRefV1,
+  McpSeatProvisioningDescriptorV1,
   RegisteredExternalEffectState,
   ScopedGate,
   Sha256Digest,
@@ -145,6 +146,10 @@ export interface OperatorLaunchCustodyPort {
     operatorId: string,
     commandId: string,
   ): LaunchProviderActionJournalRefV1;
+  seatProvisioningDescriptorForCommand(
+    operatorId: string,
+    commandId: string,
+  ): McpSeatProvisioningDescriptorV1;
 }
 
 export interface OperatorChairRecoveryCustodyPort {
@@ -714,13 +719,7 @@ export class OperatorActionStore {
     const prepared = prepare.immediate();
     if (prepared.kind === "replay") return prepared.receipt;
     await launchCustody.dispatchPrepared(prepared.handle);
-    return {
-      ...prepared.receipt,
-      launchProviderActionJournalRef: launchCustody.launchProviderActionJournalRefForCommand(
-        context.operatorId,
-        request.command.commandId,
-      ),
-    };
+    return prepared.receipt;
   }
 
   async #commitChairRecovery(
@@ -1210,12 +1209,26 @@ export class OperatorActionStore {
       operatorId,
       commandId,
     );
-    const receipt: OperatorActionReceipt = {
-      ...parseStoredReceipt(envelope.action),
-      launchProviderActionJournalRef,
-    };
+    const receipt = parseStoredReceipt(envelope.action);
+    if (receipt.launchProviderActionJournalRef === undefined) {
+      throw new Error("stored launch action has no launch receipt");
+    }
     if (launchProviderActionJournalRef.journalState === "terminal") {
-      return { status: "committed", commandId, receipt };
+      if (launchProviderActionJournalRef.outcomeKind === "terminal-success") {
+        return {
+          status: "committed",
+          commandId,
+          receipt,
+          launchProviderActionJournalRef,
+          seatProvisioning: launchCustody.seatProvisioningDescriptorForCommand(operatorId, commandId),
+        };
+      }
+      return {
+        status: "committed",
+        commandId,
+        receipt,
+        launchProviderActionJournalRef,
+      };
     }
     if (launchProviderActionJournalRef.journalState === "ambiguous") {
       return {

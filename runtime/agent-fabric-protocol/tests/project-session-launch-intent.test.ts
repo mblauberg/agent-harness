@@ -379,6 +379,17 @@ describe("launch adapter outcome and provider-action reference", () => {
   });
 
   it("carries the typed reference through launch pending, ambiguous and terminal status", () => {
+    const seatProvisioning = {
+      schemaVersion: 1,
+      projectSessionId: "ps_01",
+      sessionRevision: 3,
+      sessionGeneration: 1,
+      coordinationRunId: "run_01",
+      runRevision: 1,
+      chairAgentId: "agent_chair_01",
+      chairGeneration: 1,
+      chairLeaseId: "chair:run_01:1",
+    } as const;
     const pendingRef = {
       ...providerActionRef,
       journalState: "dispatched",
@@ -419,6 +430,44 @@ describe("launch adapter outcome and provider-action reference", () => {
         evidenceRefs: [],
         committedAt: "2026-07-12T11:00:00Z",
       },
-    })).toMatchObject({ status: "committed", receipt: { launchProviderActionJournalRef: providerActionRef } });
+      launchProviderActionJournalRef: providerActionRef,
+      seatProvisioning,
+    })).toMatchObject({
+      status: "committed",
+      receipt: { launchProviderActionJournalRef: providerActionRef },
+      launchProviderActionJournalRef: providerActionRef,
+      seatProvisioning,
+    });
+    const committed = {
+      status: "committed",
+      commandId: "command_launch_commit_01",
+      receipt: {
+        commandId: "command_launch_commit_01",
+        previewId: "preview_launch_01",
+        previewRevision: 1,
+        intentDigest: digest,
+        beforeStateDigest: digest,
+        afterStateDigest: digest,
+        launchProviderActionJournalRef: providerActionRef,
+        evidenceRefs: [],
+        committedAt: "2026-07-12T11:00:00Z",
+      },
+    } as const;
+    expect(() => parseOperationResult(FABRIC_OPERATIONS.operatorActionStatus, {
+      ...committed,
+      seatProvisioning,
+    })).toThrow(/terminal-success launch/iu);
+    expect(() => parseOperationResult(FABRIC_OPERATIONS.operatorActionStatus, {
+      ...committed,
+      launchProviderActionJournalRef: {
+        ...providerActionRef,
+        outcomeKind: "terminal-no-effect",
+      },
+      seatProvisioning,
+    })).toThrow(/terminal-success launch/iu);
+    expect(() => parseOperationResult(FABRIC_OPERATIONS.operatorActionStatus, {
+      ...committed,
+      launchProviderActionJournalRef: providerActionRef,
+    })).toThrow(/seatProvisioning/iu);
   });
 });

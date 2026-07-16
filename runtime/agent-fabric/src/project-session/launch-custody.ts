@@ -9,6 +9,7 @@ import {
   parseProjectSessionLaunchIntent,
   parseArtifactRef,
   parseLaunchProviderActionJournalRefV1,
+  parseIdentifier,
   parseOperationResult,
   parseAuthorityEnvelopeV2,
   FABRIC_OPERATIONS,
@@ -19,6 +20,7 @@ import {
   type ProjectSessionLaunchCurrentState,
   type ProjectSessionLaunchIntent,
   type LaunchProviderActionJournalRefV1,
+  type McpSeatProvisioningDescriptorV1,
   type ArtifactRef,
   type Sha256Digest,
 } from "@local/agent-fabric-protocol";
@@ -4400,6 +4402,48 @@ export class LaunchCustodyService {
       });
     }
     throw new Error(`launch provider action has invalid status ${status}`);
+  }
+
+  seatProvisioningDescriptorForCommand(
+    operatorId: string,
+    commandId: string,
+  ): McpSeatProvisioningDescriptorV1 {
+    const value = row(this.#database.prepare(`
+      SELECT session.project_session_id, session.revision AS session_revision,
+             session.generation AS session_generation, custody.coordination_run_id,
+             run.revision AS run_revision, run.chair_agent_id,
+             run.chair_generation, run.chair_lease_id
+        FROM project_session_launch_custody custody
+        JOIN project_sessions session
+          ON session.project_session_id=custody.project_session_id
+        JOIN runs run
+          ON run.project_session_id=custody.project_session_id
+         AND run.run_id=custody.coordination_run_id
+       WHERE custody.operator_id=? AND custody.operator_command_id=?
+    `).get(operatorId, commandId), "launch MCP seat provisioning descriptor");
+    return {
+      schemaVersion: 1,
+      projectSessionId: parseIdentifier<"ProjectSessionId">(
+        text(value, "project_session_id"),
+        "launchSeatProvisioning.projectSessionId",
+      ),
+      sessionRevision: integer(value, "session_revision"),
+      sessionGeneration: integer(value, "session_generation"),
+      coordinationRunId: parseIdentifier<"CoordinationRunId">(
+        text(value, "coordination_run_id"),
+        "launchSeatProvisioning.coordinationRunId",
+      ),
+      runRevision: integer(value, "run_revision"),
+      chairAgentId: parseIdentifier<"AgentId">(
+        text(value, "chair_agent_id"),
+        "launchSeatProvisioning.chairAgentId",
+      ),
+      chairGeneration: integer(value, "chair_generation"),
+      chairLeaseId: parseIdentifier<"LeaseId">(
+        text(value, "chair_lease_id"),
+        "launchSeatProvisioning.chairLeaseId",
+      ),
+    };
   }
 
   #agentDispatchHandle(custody: Row): AgentDispatchHandle {

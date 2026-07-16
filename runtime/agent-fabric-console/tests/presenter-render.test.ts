@@ -1048,7 +1048,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
       workflowCapabilities: {
         intake: { state: "available" },
         gate: { state: "available" },
-        launch: { state: "unavailable", reason: "typed-planner-unregistered" },
+        launch: { state: "available" },
         git: { state: "unavailable", reason: "typed-planner-unregistered" },
         promotion: { state: "unavailable", reason: "typed-planner-unregistered" },
       },
@@ -1138,7 +1138,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
         id: "workflow:implement",
         label: "Implement...",
         enabled: false,
-        reason: "typed-planner-unregistered",
+        reason: "implementation-planning-unavailable",
       }),
     ]));
   });

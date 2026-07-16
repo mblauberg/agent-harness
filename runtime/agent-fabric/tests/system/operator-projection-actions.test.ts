@@ -1891,6 +1891,10 @@ describe("operator action store", () => {
       },
     };
     let launchTerminal = false;
+    let launchOutcomeKind: "terminal-success" | "terminal-no-effect" = "terminal-success";
+    let seatSessionRevision = 2;
+    let seatRunRevision = 1;
+    let seatDescriptorCalls = 0;
     const launchCustody: OperatorLaunchCustodyPort = {
       readCurrentState: async () => {
         if (current.kind !== "project-session-launch") throw new Error("launch state changed family");
@@ -1930,9 +1934,23 @@ describe("operator action store", () => {
         custodyAttemptGeneration: 1,
         journalRevision: launchTerminal ? 2 : 1,
         journalState: launchTerminal ? "terminal" : "prepared",
-        outcomeKind: launchTerminal ? "terminal-success" : null,
+        outcomeKind: launchTerminal ? launchOutcomeKind : null,
         outcomeDigest: launchTerminal ? authorityRef : null,
       }),
+      seatProvisioningDescriptorForCommand: () => {
+        seatDescriptorCalls += 1;
+        return {
+        schemaVersion: 1,
+        projectSessionId,
+        sessionRevision: seatSessionRevision,
+        sessionGeneration: 1,
+        coordinationRunId: identifier<"CoordinationRunId">("run_launch_01"),
+        runRevision: seatRunRevision,
+        chairAgentId: identifier<"AgentId">("chair"),
+        chairGeneration: 1,
+          chairLeaseId: identifier<"LeaseId">("chair:run_launch_01:1"),
+        };
+      },
     };
     const actions = new OperatorActionStore({
       database: fixture.database,
@@ -1977,7 +1995,7 @@ describe("operator action store", () => {
       consequenceClass: "consequential",
       evidenceRefs: [launchPacketRef, resourcePlanRef],
     });
-    const receipt = await actions.commit(fixture.context, {
+    const commitRequest = {
       command: {
         ...request.command,
         commandId: identifier<"CommandId">("commit_launch_01"),
@@ -1993,12 +2011,59 @@ describe("operator action store", () => {
       previewDigest: preview.previewDigest,
       expectedIntentDigest: preview.intentDigest,
       confirmation: { kind: "explicit", confirmationId: "confirm_launch_01" },
-    });
+    } as const;
+    const receipt = await actions.commit(fixture.context, commitRequest);
+    expect(receipt).not.toHaveProperty("seatProvisioning");
     expect(actions.status({
       credential: launchCredential,
       projectId,
       commandId: receipt.commandId,
-    })).toEqual({ status: "committed", commandId: receipt.commandId, receipt });
+    })).toMatchObject({
+      status: "committed",
+      commandId: receipt.commandId,
+      receipt,
+      seatProvisioning: {
+        sessionRevision: 2,
+        runRevision: 1,
+      },
+    });
+
+    seatSessionRevision = 3;
+    seatRunRevision = 2;
+    expect(actions.status({
+      credential: launchCredential,
+      projectId,
+      commandId: receipt.commandId,
+    })).toMatchObject({
+      status: "committed",
+      receipt,
+      seatProvisioning: {
+        sessionRevision: 3,
+        runRevision: 2,
+      },
+    });
+    await expect(actions.commit(fixture.context, commitRequest)).resolves.toStrictEqual(receipt);
+    expect(receipt).not.toHaveProperty("seatProvisioning");
+    expect(actions.status({
+      credential: launchCredential,
+      projectId,
+      commandId: receipt.commandId,
+    })).toMatchObject({
+      seatProvisioning: { projectSessionId, sessionRevision: 3, runRevision: 2 },
+    });
+    const descriptorCallsBeforeNoEffect = seatDescriptorCalls;
+    launchOutcomeKind = "terminal-no-effect";
+    const noEffectStatus = actions.status({
+      credential: launchCredential,
+      projectId,
+      commandId: receipt.commandId,
+    });
+    expect(noEffectStatus).toMatchObject({
+      status: "committed",
+      launchProviderActionJournalRef: { outcomeKind: "terminal-no-effect" },
+    });
+    expect(noEffectStatus).not.toHaveProperty("seatProvisioning");
+    expect(seatDescriptorCalls).toBe(descriptorCallsBeforeNoEffect);
 
     const launchOnlyCredential: OperatorCapabilityCredential = {
       capabilityId: identifier<"CapabilityId">("cap_session_launch_only_01"),
@@ -2022,7 +2087,7 @@ describe("operator action store", () => {
       credential: launchOnlyCredential,
       projectId,
       commandId: receipt.commandId,
-    })).toEqual({ status: "committed", commandId: receipt.commandId, receipt });
+    })).toMatchObject({ status: "committed", commandId: receipt.commandId, receipt });
 
     await expect(actions.reconcile(fixture.context, {
       command: {

@@ -722,6 +722,18 @@ describe("launch custody", () => {
       outcomeKind: null,
       outcomeDigest: null,
     });
+    expect(fixture.service.seatProvisioningDescriptorForCommand("operator_01", "commit_launch_01"))
+      .toStrictEqual({
+        schemaVersion: 1,
+        projectSessionId: "session_launch_01",
+        sessionRevision: 3,
+        sessionGeneration: 1,
+        coordinationRunId: "run_launch_01",
+        runRevision: 1,
+        chairAgentId: "chair_launch_01",
+        chairGeneration: 1,
+        chairLeaseId: "chair:run_launch_01:1",
+      });
     expect(databaseContains(fixture.database, "chair-secret-canary-01")).toBe(false);
     expect(databaseContains(fixture.database, attestationChallenge)).toBe(false);
   });
@@ -793,7 +805,7 @@ describe("launch custody", () => {
     } as unknown as OperatorActionCommitRequest);
 
     expect(genericEffects).toBe(0);
-    expect(receipt.launchProviderActionJournalRef).toMatchObject({ journalState: "ambiguous", outcomeKind: "ambiguous" });
+    expect(receipt.launchProviderActionJournalRef).toMatchObject({ journalState: "prepared", outcomeKind: null });
     expect(actions.status({
       credential: command.credential,
       projectId: "project_01",
@@ -874,6 +886,8 @@ describe("launch custody", () => {
         dispatchPrepared: fixture.service.dispatchPrepared.bind(fixture.service),
         launchProviderActionJournalRefForCommand:
           fixture.service.launchProviderActionJournalRefForCommand.bind(fixture.service),
+        seatProvisioningDescriptorForCommand:
+          fixture.service.seatProvisioningDescriptorForCommand.bind(fixture.service),
       },
       clock: () => now,
     });

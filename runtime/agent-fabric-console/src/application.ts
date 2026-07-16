@@ -603,6 +603,14 @@ export class FabricConsoleApplication {
         );
         return;
       }
+      if (activation.regionId === "review:observe") {
+        this.#runtime.settleWorkflowReview(await workflowPlanner.observe({
+          review: workflowReview,
+          eventId: activation.eventId,
+        }));
+        await this.refresh();
+        return;
+      }
       if (activation.regionId === "review:confirm") {
         const committed = await workflowPlanner.commit({
           review: workflowReview,

@@ -900,6 +900,7 @@ describe("typed Console application bootstrap boundary", () => {
             prepareGuided: vi.fn(async () => review),
             arm,
             commit,
+            observe: vi.fn(async ({ review: current }: { review: ConsoleWorkflowReview }) => current),
           },
           detach: async () => {},
           close: async () => {},
@@ -998,6 +999,7 @@ describe("typed Console application bootstrap boundary", () => {
               armedByEventId: eventId,
             })),
             commit,
+            observe: vi.fn(async ({ review: current }: { review: ConsoleWorkflowReview }) => current),
           },
           detach: async () => {},
           close: async () => {},
@@ -1069,6 +1071,7 @@ describe("typed Console application bootstrap boundary", () => {
         review: input.review,
         reconnectProjectSessionId: null,
       })),
+      observe: vi.fn(async (input: { review: ConsoleWorkflowReview }) => input.review),
     };
     let event = 0;
     const application = await startFabricConsoleApplication({
