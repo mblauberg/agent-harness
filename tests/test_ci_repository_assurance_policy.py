@@ -110,6 +110,7 @@ def test_ci_runs_complete_harness_and_fabric_gates() -> None:
     for required in (
         "npm ci --no-audit --no-fund",
         "npm run build",
+        "npm run test --workspace=@local/agent-fabric-protocol",
         "npm run schema:check --workspace=@local/agent-fabric",
         "npm run typecheck --workspace=@local/agent-fabric",
         "npm run test --workspace=@local/agent-fabric",
@@ -176,8 +177,10 @@ def test_clean_ci_builds_locked_protocol_before_daemon_typecheck() -> None:
 
     fabric_commands = "\n".join(str(step.get("run", "")) for step in fabric_steps)
     assert "test ! -e runtime/agent-fabric-protocol/dist" in fabric_commands
-    assert fabric_commands.index("npm run build") < fabric_commands.index(
-        "npm run typecheck --workspace=@local/agent-fabric"
+    assert (
+        fabric_commands.index("npm run build")
+        < fabric_commands.index("npm run test --workspace=@local/agent-fabric-protocol")
+        < fabric_commands.index("npm run typecheck --workspace=@local/agent-fabric")
     )
     assert "test -f runtime/agent-fabric-protocol/dist/index.d.ts" in fabric_commands
 
@@ -273,7 +276,7 @@ def test_repository_policy_covers_sensitive_fabric_surfaces() -> None:
         "exact head",
         "reviewer role",
         "model family",
-        "human gates still pending",
+        "user gates still pending",
         "later commit invalidates",
     ):
         assert evidence in template
@@ -302,7 +305,7 @@ def test_github_work_item_and_runbook_cover_the_intake_contract() -> None:
         "ready",
         "in progress",
         "in review",
-        "awaiting human",
+        "awaiting user",
         "done",
     ):
         assert status in runbook

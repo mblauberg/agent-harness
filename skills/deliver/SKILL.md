@@ -1,6 +1,6 @@
 ---
 name: deliver
-description: "Use for taking an approved research, analysis, document, or agent-product outcome through evidence, review, and human acceptance. Not for software-only work, unsettled scope, or release; use implement, scope, or release."
+description: "Use for taking an approved research, analysis, document, or agent-product outcome through evidence, review, and user acceptance. Not for software-only work, unsettled scope, or release; use implement, scope, or release."
 ---
 
 # Deliver
@@ -12,7 +12,7 @@ capabilities; domain skills still own domain methods.
 
 Require an approved intent, acceptance criteria, minimum risk tier and bounded
 authority. Consequential scope/design, disclosure, one-way doors and risk
-downgrades need explicit human approval. If intent is unsettled, use `scope`.
+downgrades need explicit user approval. If intent is unsettled, use `scope`.
 
 Select one base profile from `config/delivery-profiles.json`: `software`,
 `research`, `analysis`, `document` or `agent-product`. Add the high-stakes
@@ -40,13 +40,13 @@ may strengthen a profile, never weaken kernel gates silently.
 5. Review independently with lenses selected from the dependency cone.
    Substantial+ requires a fresh native reviewer and the other primary family.
    Bonus-family failures are recorded and non-blocking.
-6. Repair at most twice. Scope/design drift returns to the human gate.
+6. Repair at most twice. Scope/design drift returns to the user gate.
 7. Validate from the project root with
    `"${AGENTS_HOME:-$HOME/.agents}/skills/deliver/scripts/validate_delivery.py"
    .agent-run/<id>/RUN.json --workspace-root "$PWD" --verify-hashes` (plus a
    digest-bound `--project-policy` when used).
    `awaiting_acceptance` is machine-ready, not complete.
-8. Human acceptance and external release are separate. Define observation
+8. User acceptance and external release are separate. Define observation
    before release; close only after its evidence window passes. Feed incidents
    and recurrence into `retrospect` and the next scoped cycle.
 

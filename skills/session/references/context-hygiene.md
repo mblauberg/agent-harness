@@ -7,8 +7,8 @@ remove only ephemeral material whose ownership is proven.
 ## Three tiers
 
 1. **Current routing context** — project instructions, approved spec/design,
-   open decisions, rolling state and the active effort map. Keep it short and
-   current.
+   open decisions, canonical work-tracker links and the stable effort route
+   map. Keep it short; follow the linked owners for current state.
 2. **Recoverable run evidence** — manifests, synthesis, receipts, accepted
    findings and verification records. Preserve paths and provenance; a fresh
    agent should not need raw logs to resume.
@@ -96,7 +96,7 @@ index at the old routing surface and make the canonical owner explicit.
 
 Merge files when they duplicate the same truth, are always changed together,
 or force an agent through several tiny hops without adding an authority
-boundary. Preserve redirects/tombstones for live links. A human should reach
+boundary. Preserve redirects/tombstones for live links. A user should reach
 current claim -> owner -> evidence in at most three hops.
 
 ## Cleanup and retention

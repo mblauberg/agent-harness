@@ -178,7 +178,7 @@ Changelog (per keepachangelog.com):
 
 1. One section per release, newest first, with version and date (ISO).
 2. Group entries: Added, Changed, Deprecated, Removed, Fixed, Security.
-3. One line per change, written for a human, not a copied commit subject.
+3. One line per change, written for a user, not a copied commit subject.
 4. Keep an Unreleased section at the top.
 
 Release notes: lead with the change that matters most to the user, state what changed in their terms, then any action required (migration, config, re-auth). Breaking changes and deprecations first, never buried. Do not list internal refactors.

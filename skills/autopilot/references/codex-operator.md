@@ -38,7 +38,7 @@ The Codex equivalent of Stop-hook-plus-`/loop`. Run it from the mission root
 
 ```sh
 #!/bin/sh
-# autopilot-driver.sh — re-invoke active iterations; exit on valid PAUSED or human STOP.
+# autopilot-driver.sh — re-invoke active iterations; exit on valid PAUSED or user STOP.
 MISSION_DIR="${1:?usage: autopilot-driver.sh <MISSION_DIR>}"
 LEASE_TOOL="${AGENTS_HOME:-$HOME/.agents}/skills/orchestrate/scripts/lease.py"
 PAUSE_VALIDATOR="${AGENTS_HOME:-$HOME/.agents}/skills/autopilot/scripts/validate_idle_pause.py"
@@ -98,7 +98,7 @@ Driver notes:
   The validator also proves `QUEUE.md` has no `LEASED` row, no `PENDING`
   selectable work, and the resume trigger uses that enum; it rejects
   premature pauses before the driver releases its lease and exits. A
-  material change or explicit restart launches it again; only human
+  material change or explicit restart launches it again; only user
   `STATUS: STOP` closes the mission.
 - **Crash-safety is unchanged**: record-before-launch + RECONCILE make a killed `codex exec`
   recoverable — the next invocation re-attaches from `QUEUE.md`. Session continuity is a

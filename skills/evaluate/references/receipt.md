@@ -2,7 +2,7 @@
 
 `EVALUATION.json` is evidence, not a second delivery lifecycle. It records a
 machine evaluation from frozen plan to result. The enclosing `delivery-run`
-owns final human acceptance and release.
+owns final user acceptance and release.
 
 ## Status
 

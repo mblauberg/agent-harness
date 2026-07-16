@@ -32,7 +32,7 @@ cross-run authority. Coordinated mode is the recommendation, not a hard
 default.
 
 Pressing `Start project session`, or launching an independent-mode run, is the
-human starting that coordination chair. In coordinated mode, `Launch run`
+user starting that coordination chair. In coordinated mode, `Launch run`
 creates a delivery run/workstream with a lead under the existing chair; it does
 not create another chair. The Console submits the reviewed launch packet,
 Fabric records and validates authority, and Herdr or a provider adapter performs
@@ -41,7 +41,7 @@ or broaden its authority.
 
 Parallel source writers shall use non-overlapping write scopes and separate
 repository-owned `.worktrees/<task-agent>` worktrees when the project/session
-launch packet grants worktree creation. This spec's human acceptance approves
+launch packet grants worktree creation. This spec's user acceptance approves
 that capability as an available envelope field; each active project/session
 still records its chosen grant. Without it, the chair shall serialise
 application or exchange immutable patch artifacts. Read-only workers do not
@@ -51,7 +51,7 @@ launch.
 
 ## Chair autonomy
 
-Within the project/session authority envelope, the chair may without human
+Within the project/session authority envelope, the chair may without user
 approval:
 
 - work solo or enable/disable paired-primary collaboration;
@@ -74,16 +74,16 @@ may reach its bounded terminal state. The Console shows used, reserved,
 remaining and unknown capacity at each level.
 
 Paired programming is chair-selectable within authority and is not a default
-requirement. The human may pin or prohibit a pair, chair family, model family,
+requirement. The user may pin or prohibit a pair, chair family, model family,
 visibility mode or resource ceiling at project, session, run or task level.
 Preference precedence is `task > run > session > project > harness`; lower
 levels may narrow authority automatically. Resolution is
 intersection/minimum/earliest-expiry only; no lower layer overrides platform
-policy, explicit human authority or a mandatory safety gate.
+policy, explicit user authority or a mandatory safety gate.
 
-Human acceptance of this spec is the constitutional decision to amend the
+User acceptance of this spec is the constitutional decision to amend the
 harness so that `paired-primary` is chair-selectable inside an approved
-project/session authority envelope rather than separately human-opt-in for each
+project/session authority envelope rather than separately user-opt-in for each
 use. Risk-required other-primary review remains distinct from live paired
 programming.
 
@@ -111,5 +111,5 @@ The [fresh implementation context](intake-and-continuation.md#fresh-implementati
 fresh provider context from the accepted digest-bound scope/handoff. Resuming
 the same full history is crash recovery, not fresh implementation or policy
 rotation. Parent compact/rotate never implies child completion or continuity,
-and no deep/native workflow may become a second chair, own a human gate or hold
+and no deep/native workflow may become a second chair, own a user gate or hold
 an unpartitioned shared write scope.

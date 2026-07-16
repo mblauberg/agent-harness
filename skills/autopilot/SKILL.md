@@ -1,20 +1,20 @@
 ---
 name: autopilot
-description: "Use for a large, open-ended mission that must survive sessions/crashes and run human-out-of-loop until STOP; delegates lifecycle work to other skills. Not for pre-scoped delivery that stops at a PR gate; use orchestrate's autonomous mode or deliver."
+description: "Use for a large, open-ended mission that must survive sessions/crashes and run user-out-of-loop until STOP; delegates lifecycle work to other skills. Not for pre-scoped delivery that stops at a PR gate; use orchestrate's autonomous mode or deliver."
 ---
 
 # Autopilot
 
 A thin autonomous **conductor** for large missions: autonomous scoping,
-self-drive, durable cross-session state/recovery, and a hard human `STOP`
+self-drive, durable cross-session state/recovery, and a hard user `STOP`
 gate. It owns no lifecycle machinery itself; it delegates every bounded wave
 to `orchestrate` and every decision/software change to `implement`/`deliver`,
 then records the durable pointers. See Entry gate below for when to use this
 tier instead of `orchestrate`, `implement` or `diagnose`.
 
 It is **higher-authority** than `orchestrate`'s pre-scoped
-autonomous-implementation mode, which stops at a human PR gate; autopilot
-keeps going until a human writes `STATUS: STOP`.
+autonomous-implementation mode, which stops at a user PR gate; autopilot
+keeps going until a user writes `STATUS: STOP`.
 
 Claude Code and Codex are equal operators; Codex operators read
 [codex-operator.md](references/codex-operator.md) first.
@@ -22,7 +22,7 @@ Claude Code and Codex are equal operators; Codex operators read
 ## Entry gate
 
 Needs all of: an open-ended mission too large for one bounded wave, a
-survivable-crash requirement, and an explicit human STOP gate as the only
+survivable-crash requirement, and an explicit user STOP gate as the only
 clean exit; otherwise use a lighter-weight skill.
 
 ## Bootstrap
@@ -46,7 +46,7 @@ clean exit; otherwise use a lighter-weight skill.
 Bootstrap authorises only mission-declared isolation. The constitution
 pre-authorises source-repo implementation branches and worktrees, created via
 `${AGENTS_HOME:-$HOME/.agents}/scripts/worktree`; deletion, integration and
-shared-branch pushes still need separate human authority.
+shared-branch pushes still need separate user authority.
 
 ## Operating loop
 
@@ -55,7 +55,7 @@ REORG-if-due -> STATE -> WAKE/STOP`. Flip a `QUEUE.md` row to `LEASED` before
 launch. Delegate deep work; fan out independent contexts and serialise shared
 state. Bound retries; escalate stalls with evidence. An empty queue triggers
 one bounded re-enumeration pass, then an idle checkpoint and paused dispatch;
-only human STOP closes the mission. See
+only user STOP closes the mission. See
 [operating-loop.md](references/operating-loop.md) and
 [recovery-and-cadence.md](references/recovery-and-cadence.md) for detail.
 
