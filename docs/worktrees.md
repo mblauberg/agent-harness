@@ -3,8 +3,9 @@
 The project constitution (`HARNESS.md`) is a standing user-approved envelope:
 creating linked worktrees for implementation work needs no per-instance
 approval. That authority still does not imply authority to delete a branch,
-force-remove state, integrate changes or let agents write overlapping scopes —
-each of those remains separately gated.
+force-remove state or let agents write overlapping scopes — each of those
+remains separately gated. Merge authority is repo-based; see the repository's
+workflow runbook (for this repo, `docs/runbooks/github-workflow.md`).
 
 ## Canonical location
 

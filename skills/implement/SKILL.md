@@ -41,9 +41,10 @@ name a reconciliation run.
 4. Invoke read-only `code-review` under the `HARNESS.md` risk ladder. Fresh
    native and other-primary reviews load-bear; bonus families are
    opportunistic. Record adapter and actual family.
-5. Repair blockers, then repeat verification and independent review. Stop after
-   two repair cycles or scope/design drift; return evidence to the user or
-   `scope`.
+5. Repair blockers, then repeat verification and independent review. Stop at
+   the scaled repair budget (guardrail-not-target: 1-2 routine, up to ~5
+   complex; see `references/run-contract.md`) or on scope/design drift;
+   return evidence to the user or `scope`.
 6. Update owned docs for behavioural, architectural, operational or decision
    change. For substantial+ apply `session`: refresh the recovery checkpoint,
    audit context, graduate durable findings and classify retained/ephemeral
