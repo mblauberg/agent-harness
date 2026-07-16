@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fileURLToPath } from "node:url";
 import { parse, stringify } from "yaml";
 
 import { composeDaemonAdapters, composeDaemonConfiguration } from "../../src/daemon/composition.ts";
@@ -13,30 +12,21 @@ import {
   createPrimaryCompatibilityFixture,
 } from "../support/primary-adapter-testkit.ts";
 
-const repositoryRoot = fileURLToPath(new URL("../../../../", import.meta.url));
-
 describe("daemon trusted adapter composition", () => {
   it("composes only the explicitly activated and pinned adapters", async () => {
-    const fixture = process.env.AGENT_FABRIC_PORTABLE_TESTS === "1"
-      ? await createPortableActivatedPrimaryFixture()
-      : undefined;
+    const fixture = await createPortableActivatedPrimaryFixture();
     try {
       const adapters = await composeDaemonAdapters({
-        globalConfigPath: fixture?.configPath ?? `${repositoryRoot}/config/agent-fabric.yaml`,
-        compatibilityPath: fixture?.compatibilityPath
-          ?? `${repositoryRoot}/config/adapter-compatibility.yaml`,
-        compatibilitySchemaPath: fixture?.schemaPath
-          ?? `${repositoryRoot}/runtime/agent-fabric/schemas/adapter-compatibility.schema.json`,
-        agentsHome: fixture?.directory ?? repositoryRoot,
-        ...(fixture === undefined
-          ? { stateDirectory: join(repositoryRoot, ".agent-run", "adapter-composition-test") }
-          : {}),
+        globalConfigPath: fixture.configPath,
+        compatibilityPath: fixture.compatibilityPath,
+        compatibilitySchemaPath: fixture.schemaPath,
+        agentsHome: fixture.directory,
       });
       expect(Object.keys(adapters).sort()).toEqual(
         ["claude-agent-sdk", "codex-app-server"],
       );
     } finally {
-      if (fixture !== undefined) await rm(fixture.directory, { recursive: true, force: true });
+      await rm(fixture.directory, { recursive: true, force: true });
     }
   });
 
@@ -116,6 +106,7 @@ describe("daemon trusted adapter composition", () => {
   });
 
   it("admits a machine-only root before project profile and path narrowing", async () => {
+    const compatibilityFixture = await createPortableActivatedPrimaryFixture();
     const directory = await mkdtemp(join(tmpdir(), "fabric-machine-composition-"));
     const portableRoot = join(directory, "portable");
     const machineRoot = join(directory, "machine");
@@ -144,10 +135,15 @@ describe("daemon trusted adapter composition", () => {
       await runWorkspaceTrust(["trust", machineRoot, "--profiles", "paired-visible"], paths);
       await expect(composeDaemonConfiguration({
         globalConfigPath, projectConfigPath,
-        compatibilityPath: `${repositoryRoot}/config/adapter-compatibility.yaml`,
-        compatibilitySchemaPath: `${repositoryRoot}/runtime/agent-fabric/schemas/adapter-compatibility.schema.json`,
+        compatibilityPath: compatibilityFixture.compatibilityPath,
+        compatibilitySchemaPath: compatibilityFixture.schemaPath,
         agentsHome: directory, stateDirectory,
       })).resolves.toMatchObject({ executionProfile: "paired-visible", workspaceRoots: [await realpath(projectRoot)] });
-    } finally { await rm(directory, { recursive: true, force: true }); }
+    } finally {
+      await Promise.all([
+        rm(directory, { recursive: true, force: true }),
+        rm(compatibilityFixture.directory, { recursive: true, force: true }),
+      ]);
+    }
   });
 });
