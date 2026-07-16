@@ -2400,36 +2400,13 @@ const declaredRunTaskStateCountsCodec = objectCodec(
     DECLARED_RUN_TASK_STATES.map((state) => [state, integer({ minimum: 0 })]),
   ),
 );
-const declaredRunProgressBaseCodec = unionOf([
-  objectCodec({
-    plan: literal("finite"),
-    total: integer({ minimum: 0 }),
-    counts: declaredRunTaskStateCountsCodec,
-  }, {}, {
-    example: {
-      plan: "finite",
-      total: 6,
-      counts: { blocked: 1, ready: 1, active: 1, complete: 1, cancelled: 1, degraded: 1 },
-    },
-  }),
+// A finite arm is deliberately deferred to the plan-declaration package: it
+// requires an exact plan-revision binding and settled cancelled-task
+// denominator semantics, and lands as its own result-shape cutover.
+const declaredRunProgressCodec = unionOf([
   objectCodec({ plan: literal("open"), counts: declaredRunTaskStateCountsCodec }),
   objectCodec({ plan: literal("unknown"), reason: text }),
 ]);
-const declaredRunProgressCodec = parserBacked(
-  declaredRunProgressBaseCodec,
-  (value, path) => {
-    const record = value as Readonly<Record<string, unknown>>;
-    if (record.plan !== "finite") return value;
-    const counts = record.counts as Readonly<Record<string, unknown>>;
-    const sum = DECLARED_RUN_TASK_STATES
-      .reduce((total, state) => total + Number(counts[state]), 0);
-    if (sum !== record.total) {
-      throw new TypeError(`${path}.counts must sum to the declared finite total`);
-    }
-    return value;
-  },
-  declaredRunProgressBaseCodec.example,
-);
 const runSummaryCodec = objectCodec({
   kind: literal("run"),
   phase: text,

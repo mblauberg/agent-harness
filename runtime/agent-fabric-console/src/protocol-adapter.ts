@@ -1463,12 +1463,21 @@ export class ConsoleProtocolAdapter {
       }
       readTransactionId = result.readTransactionId;
       for (const row of result.rows) {
-        rows.push(mapProtocolRow(
-          view,
-          row,
-          this.#now(),
-          this.#binding.nativeNotificationProjection,
-        ));
+        try {
+          rows.push(mapProtocolRow(
+            view,
+            row,
+            this.#now(),
+            this.#binding.nativeNotificationProjection,
+          ));
+        } catch (error: unknown) {
+          // A row that violates a negotiated-shape invariant is an invalid
+          // projection, not a transport failure.
+          if (error instanceof TypeError) {
+            throw new ProjectionInvalidError(error.message);
+          }
+          throw error;
+        }
       }
       if (!result.hasMore) {
         return {

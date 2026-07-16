@@ -1,5 +1,6 @@
 import type {
   ConsoleView as ProtocolConsoleView,
+  DeclaredRunProgress,
   OperatorActionAvailability,
   NativeNotificationDeliverySummary,
   OperatorViewDetailRefMap,
@@ -126,10 +127,23 @@ export type ConsoleAttentionSummary = Readonly<
   }
 >;
 
+/**
+ * The Console maps rows only from a peer that negotiated
+ * `declared-run-progress.v1`, so past the mapping boundary the declared
+ * progress fact is an invariant, never an optional field.
+ */
+export type ConsoleRunSummary = Readonly<
+  Omit<OperatorViewSummaryMap["runs"], "declaredProgress"> & {
+    declaredProgress: DeclaredRunProgress;
+  }
+>;
+
 export type ConsoleViewSummaryMap = {
   [View in FabricView]: View extends "attention"
     ? ConsoleAttentionSummary
-    : OperatorViewSummaryMap[View];
+    : View extends "runs"
+      ? ConsoleRunSummary
+      : OperatorViewSummaryMap[View];
 };
 
 export type NativeNotificationProjectionMode =

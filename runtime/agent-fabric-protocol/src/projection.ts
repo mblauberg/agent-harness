@@ -84,13 +84,17 @@ export type DeclaredRunTaskStateCounts = {
 };
 
 /**
- * Fabric-declared run progress. The finite arm carries a declared denominator
- * with mutually consistent task-state counts; the open arm carries known
- * counts without a denominator; the unknown arm carries only its reason.
- * No arm ever carries an inferred percentage, completion ratio or ETA.
+ * Fabric-declared run progress. The open arm carries known task-state counts
+ * without a denominator; the unknown arm carries only its reason. No arm
+ * ever carries an inferred percentage, completion ratio or ETA.
+ *
+ * A finite arm is deliberately deferred: it ships with the plan-declaration
+ * package as its own result-shape cutover, bound to an exact plan revision
+ * and with settled cancelled-task denominator semantics. No run-level finite
+ * denominator authority exists yet, so freezing that arm now would freeze
+ * unproven semantics into a closed shape.
  */
 export type DeclaredRunProgress =
-  | { plan: "finite"; total: number; counts: DeclaredRunTaskStateCounts }
   | { plan: "open"; counts: DeclaredRunTaskStateCounts }
   | { plan: "unknown"; reason: string };
 

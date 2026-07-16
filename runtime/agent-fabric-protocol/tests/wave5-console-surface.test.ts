@@ -1113,11 +1113,6 @@ describe("negotiated declared-run-progress result shape", () => {
     plan: "open",
     counts: { blocked: 0, ready: 1, active: 2, complete: 3, cancelled: 0, degraded: 0 },
   } as const;
-  const finiteProgress = {
-    plan: "finite",
-    total: 6,
-    counts: { blocked: 0, ready: 1, active: 2, complete: 3, cancelled: 0, degraded: 0 },
-  } as const;
   const unknownProgress = { plan: "unknown", reason: "unrecognised task state: parked" } as const;
   const legacySummary = {
     kind: "run",
@@ -1165,7 +1160,7 @@ describe("negotiated declared-run-progress result shape", () => {
   });
 
   it("accepts every tagged progress arm on run rows and run detail", () => {
-    for (const progress of [openProgress, finiteProgress, unknownProgress]) {
+    for (const progress of [openProgress, unknownProgress]) {
       expect(parseOperationResult(
         FABRIC_OPERATIONS.projectionViewPage,
         runsPage({ ...legacySummary, declaredProgress: progress }),
@@ -1177,14 +1172,16 @@ describe("negotiated declared-run-progress result shape", () => {
     }
   });
 
-  it("rejects inconsistent finite counts, negative counts and open shapes with a denominator", () => {
+  it("rejects a premature finite arm, negative counts and denominator or percentage keys", () => {
+    // The finite arm is deliberately deferred to the plan-declaration cutover;
+    // until then a declared denominator on the wire is rejected outright.
     expect(() => parseOperationResult(
       FABRIC_OPERATIONS.projectionViewPage,
       runsPage({
         ...legacySummary,
-        declaredProgress: { ...finiteProgress, total: 5 },
+        declaredProgress: { plan: "finite", total: 6, counts: openProgress.counts },
       }),
-    )).toThrowError(/sum to the declared finite total/iu);
+    )).toThrowError();
     expect(() => parseOperationResult(
       FABRIC_OPERATIONS.projectionViewPage,
       runsPage({

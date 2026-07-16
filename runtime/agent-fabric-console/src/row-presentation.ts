@@ -167,15 +167,13 @@ function attentionGroupingLabel(
 }
 
 /**
- * Declared progress renders only Fabric-declared facts: a finite plan may
- * show `n/N`; open and unknown plans show known counts or the reason. No arm
- * is ever rendered as a percentage, completion ratio or ETA.
+ * Declared progress renders only Fabric-declared facts: an open plan shows
+ * known counts without a denominator and an unknown plan shows its reason.
+ * No arm is ever rendered as a percentage, completion ratio or ETA. A finite
+ * `n/N` arm arrives only with the deferred plan-declaration cutover.
  */
 export function declaredProgressCompactLabel(progress: DeclaredRunProgress): string {
   if (progress.plan === "unknown") return "progress unknown";
-  if (progress.plan === "finite") {
-    return `progress ${String(progress.counts.complete)}/${String(progress.total)}`;
-  }
   return `progress open | ${String(progress.counts.complete)} complete`;
 }
 
@@ -189,9 +187,6 @@ export function declaredProgressDetailLabel(progress: DeclaredRunProgress): stri
     `degraded ${String(counts.degraded)}`,
     `cancelled ${String(counts.cancelled)}`,
   ].join(" | ");
-  if (progress.plan === "finite") {
-    return `finite plan | ${String(counts.complete)}/${String(progress.total)} complete | ${states}`;
-  }
   return `open plan | ${String(counts.complete)} complete | ${states} | no declared total`;
 }
 
@@ -233,9 +228,6 @@ function summaryText(
     case "run":
       if (summary.projectSessionId === undefined) {
         throw new TypeError("exact run projection has no project-session identity");
-      }
-      if (summary.declaredProgress === undefined) {
-        throw new TypeError("exact run projection has no declared progress");
       }
       return [
         `${summary.projectSessionId} | ${summary.phase}`,
@@ -895,9 +887,6 @@ export function detailLines(
   if (row.summary?.kind === "run") {
     if (row.summary.projectSessionId === undefined) {
       throw new TypeError("exact run projection has no project-session identity");
-    }
-    if (row.summary.declaredProgress === undefined) {
-      throw new TypeError("exact run projection has no declared progress");
     }
     lines.push({
       label: "Project session",
