@@ -168,7 +168,9 @@ Durable boundaries:
 
 - access and credentials never grant authority;
 - creating branches and worktrees for implementation is pre-authorised by the
-  constitution; deletion, force-removal and integration stay gated;
+  constitution, and agents merge pull requests that pass their tier's review
+  pressure and green CI; deletion, force-removal and pushes to shared branches
+  outside authorised merges stay gated;
 - no two agents write one source surface at once; and
 - specification approval, acceptance and release stay separate user decisions
   ([`HARNESS.md`](HARNESS.md)).
