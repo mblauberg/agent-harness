@@ -232,6 +232,23 @@ def _setup_action_steps() -> list[dict[str, object]]:
     return steps
 
 
+def test_ci_concurrency_policy_exempts_main_from_cancellation() -> None:
+    # Issue #170 (deferred from #150/#168): pushes to main force every
+    # path-filter output true, so ci-status — the single required check
+    # pinned on the branch protection ruleset — always runs on a main push.
+    # cancel-in-progress must stay true for PR runs (superseded runs are
+    # disposable) but must not cancel main-push runs: a cancelled main run
+    # would leave the merged commit's ci-status stuck at "cancelled" forever,
+    # since main is never re-pushed to retrigger it, and
+    # strict_required_status_checks_policy would then block every subsequent
+    # PR on a required check that can never turn green again.
+    document = _workflow()
+    concurrency = document.get("concurrency")
+    assert isinstance(concurrency, dict)
+    assert concurrency.get("group") == "ci-${{ github.workflow }}-${{ github.ref }}"
+    assert concurrency.get("cancel-in-progress") == "${{ github.ref != 'refs/heads/main' }}"
+
+
 def test_ci_uses_immutable_actions_and_least_privilege() -> None:
     document = _workflow()
     # Top-level grants nothing; each job declares its own least privilege.

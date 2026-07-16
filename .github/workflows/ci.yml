@@ -9,9 +9,26 @@ on:
 # declares exactly what it needs.
 permissions: {}
 
+# Concurrency policy (issue #170, deferred from #150/#168): PR runs cancel
+# their predecessor on the same ref — a superseded push means the stale run's
+# result can never matter, so cancelling it just frees runners faster.
+#
+# Main-push runs are exempt from cancellation. detect-changes forces every
+# path-filter output true on `push` (see below), so every job — including
+# ci-status, the single required check pinned on the branch protection
+# ruleset — always runs to completion on main. If a second push to main
+# cancelled an in-flight run, the cancelled run's ci-status would report
+# "cancelled", not "success", against a commit that is already merged and can
+# never be re-pushed to trigger a fresh run. With
+# strict_required_status_checks_policy on, the next PR's merge would then
+# need an up-to-date green ci-status against that main commit, which can
+# never be produced again — a required check stuck unsatisfiable short of an
+# empty rebuild push. Excluding main from cancel-in-progress keeps every
+# main-push run alive to completion, so main always ends with a definitive
+# ci-status result.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   # Path filtering happens here, never via workflow-level `paths:`, so the
