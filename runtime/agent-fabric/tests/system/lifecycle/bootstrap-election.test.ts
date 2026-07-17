@@ -116,6 +116,25 @@ describe("bootstrap election receipts", () => {
     await acquired?.release();
   });
 
+  it("fences an initially absent lock path before inspecting election artifacts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-bootstrap-probe-"));
+    cleanup.push(root);
+    const runtimeDirectory = join(root, "runtime");
+    await mkdir(runtimeDirectory, { mode: 0o700 });
+    const lockPath = join(runtimeDirectory, "daemon-election.lock");
+
+    const probe = await FLOCK_ELECTION_LOCK_PORT.probe(lockPath);
+    expect(probe.status).toBe("acquired");
+    if (probe.status !== "acquired") throw new Error("probe did not fence the absent lock path");
+    await expect(FLOCK_ELECTION_LOCK_PORT.tryAcquire(lockPath)).resolves.toBeUndefined();
+    expect((await stat(lockPath)).mode & 0o777).toBe(0o600);
+    await probe.handle.release();
+
+    const acquired = await FLOCK_ELECTION_LOCK_PORT.tryAcquire(lockPath);
+    expect(acquired).toBeDefined();
+    await acquired?.release();
+  });
+
   it("requires both lease expiry and kernel-lock release before reclaiming a generation", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-bootstrap-reclaim-"));
     cleanup.push(root);

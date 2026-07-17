@@ -104,7 +104,6 @@ export type ElectionLockHandle = {
 };
 
 export type ElectionLockProbe =
-  | { status: "absent" }
   | { status: "held" }
   | { status: "acquired"; handle: ElectionLockHandle };
 
@@ -316,7 +315,14 @@ export const FLOCK_ELECTION_LOCK_PORT: ElectionLockPort = Object.freeze({
   async probe(lockPath: string): Promise<ElectionLockProbe> {
     let handle: FileHandle | undefined;
     try {
-      handle = await open(lockPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      // The lock file is a stable private runtime artifact. Creating it here
+      // closes the absent-to-created race and lets inspection hold the same
+      // kernel exclusion boundary as bootstrap ownership.
+      handle = await open(
+        lockPath,
+        constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW,
+        PRIVATE_FILE_MODE,
+      );
       await validatePrivateHandle(handle, lockPath);
       try {
         await flockPromise(handle.fd, "exnb");
@@ -346,7 +352,6 @@ export const FLOCK_ELECTION_LOCK_PORT: ElectionLockPort = Object.freeze({
       };
     } catch (error: unknown) {
       await handle?.close().catch(() => undefined);
-      if (isErrno(error, "ENOENT")) return { status: "absent" };
       if (isErrno(error, "ELOOP")) {
         throw new BootstrapElectionError("BOOTSTRAP_PATH_UNSAFE", `${lockPath} must not be a symbolic link`, { cause: error });
       }
