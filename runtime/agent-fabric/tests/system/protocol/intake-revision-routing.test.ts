@@ -346,6 +346,7 @@ function implementationRequest(
   fixture: RoutingFixture,
   commandId: string,
   prompt = "Implement accepted routing scope.",
+  nearNameMaxArtifacts = false,
 ): ProjectSessionLaunchPacketPrepareRequest {
   const resourcePlan = parseLaunchResourcePlanV1({
     schemaVersion: 1,
@@ -361,7 +362,11 @@ function implementationRequest(
     launchReservation: { amounts: { concurrent_turns: 1 } },
   });
   const resourcePlanRef = {
-    path: ".agent-run/run_implementation_target/launch-resources.json" as never,
+    path: (
+      nearNameMaxArtifacts
+        ? `.agent-run/run_implementation_target/${"r".repeat(217)}.json`
+        : ".agent-run/run_implementation_target/launch-resources.json"
+    ) as never,
     digest: `sha256:${sha256(canonicalJson(resourcePlan))}` as never,
   };
   const launchPacket = parseLaunchPacketV1({
@@ -415,7 +420,11 @@ function implementationRequest(
     intakeId: "intake_routing",
     acceptedScopeRef: { path: "plans/routing.md" as never, digest: digestB as never },
     launchPacketRef: {
-      path: ".agent-run/run_implementation_target/launch-packet.json" as never,
+      path: (
+        nearNameMaxArtifacts
+          ? `.agent-run/run_implementation_target/${"p".repeat(217)}.json`
+          : ".agent-run/run_implementation_target/launch-packet.json"
+      ) as never,
       digest: `sha256:${sha256(canonicalJson(launchPacket))}` as never,
     },
     resourcePlanRef,
@@ -1274,6 +1283,32 @@ describe("intake revision public routing", () => {
       expect(swapped).toBe(true);
       expect(await quarantinedLaunchPreparationContents(fixture.directory))
         .toContain(canonicalJson(request.launchPacket));
+    } finally {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("cleans staging custody for artifact names at the filesystem component limit", async () => {
+    const fixture = await setupRoutingFixture();
+    try {
+      await fixture.fabric.dispatchPublicProtocol(
+        fixture.operatorContext,
+        FABRIC_OPERATIONS.intakeRevise,
+        acceptedRequest(fixture),
+      );
+      const request = implementationRequest(
+        fixture,
+        "command_near_name_max_cleanup",
+        "Implement accepted routing scope.",
+        true,
+      );
+
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        request,
+      )).resolves.toMatchObject({ projectSession: { state: "awaiting_launch" } });
     } finally {
       await fixture.fabric.close();
       await rm(fixture.directory, { recursive: true, force: true });

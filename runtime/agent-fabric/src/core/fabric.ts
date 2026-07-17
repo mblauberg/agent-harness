@@ -2527,7 +2527,7 @@ export class Fabric {
     mkdirSync(quarantineDirectory, { recursive: true, mode: 0o700 });
     const destination = resolve(
       quarantineDirectory,
-      `${basename(relativePath)}-${randomBytes(16).toString("hex")}`,
+      `custody-${randomBytes(16).toString("hex")}`,
     );
     this.#fault(faultLabel);
     try {
