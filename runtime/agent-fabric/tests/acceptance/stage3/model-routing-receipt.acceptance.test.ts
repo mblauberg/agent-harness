@@ -31,7 +31,7 @@ fs.writeFileSync(out, JSON.stringify({
     const resolution = await resolveRoute({
       routerPath: repositoryPath("scripts/model-route"),
       receiptPath,
-      claudeCapabilitiesPath: producerPath,
+      testClaudeCapabilitiesPath: producerPath,
       request: {
         adapter: "claude",
         taskClass: "critical-review",

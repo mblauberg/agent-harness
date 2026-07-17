@@ -92,7 +92,8 @@ function isValidReceipt(receipt: Record<string, unknown>, request: ModelRouteReq
 export async function resolveModelRouteReceipt(input: {
   routerPath: string;
   receiptPath: string;
-  claudeCapabilitiesPath?: string;
+  /** Test-only producer seam. Production always uses the repository-owned producer. */
+  testClaudeCapabilitiesPath?: string;
   request: ModelRouteRequest;
 }): Promise<{
   receipt: Record<string, unknown>;
@@ -112,12 +113,15 @@ export async function resolveModelRouteReceipt(input: {
   ) {
     throw new TypeError("Claude task-class routing requires a wrapper-produced subscription canary");
   }
+  if (input.testClaudeCapabilitiesPath !== undefined && process.env.NODE_ENV !== "test") {
+    throw new TypeError("Claude capability producer override is test-only");
+  }
   let capabilitiesFile = input.request.capabilitiesFile;
   if (input.request.adapter === "claude" && input.request.taskClass !== undefined && capabilitiesFile === undefined) {
     const policy = taskClassPolicy.get(input.request.taskClass);
     if (policy !== undefined) {
       capabilitiesFile = `${input.receiptPath}.claude-capabilities.json`;
-      const producerPath = input.claudeCapabilitiesPath ?? resolve(
+      const producerPath = input.testClaudeCapabilitiesPath ?? resolve(
         dirname(input.routerPath), "../skills/orchestrate/scripts/claude_capabilities.py",
       );
       await execFileAsync(producerPath, [
