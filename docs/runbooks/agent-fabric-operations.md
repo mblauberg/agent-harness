@@ -90,7 +90,11 @@ state alongside an incompatible database still produces overall `state:
 "failed"` and a non-zero exit. A failed or in-progress bootstrap, ambiguous or
 stale discovery, crashed process, orphan socket and failed handshake are never
 relabelled idle. `doctor` diagnoses only; it does not start the on-demand
-daemon.
+daemon. Concurrent doctors share one non-blocking inspection fence and may
+report the same idle snapshot; bootstrap and shutdown ownership are exclusive
+and report `BOOTSTRAP_IN_PROGRESS` before socket artifacts are classified.
+Only absent discovery or an exact, generation-matched `stopped` owner can be
+idle. Unknown, crashed and otherwise non-stopped owners fail closed.
 
 Each client registry contains only the proxy command, socket path, fabric state
 directory, seat and client label:

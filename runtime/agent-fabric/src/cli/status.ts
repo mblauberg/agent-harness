@@ -132,23 +132,32 @@ async function socketIsAbsent(socketPath: string): Promise<boolean> {
 
 async function doctorDaemonState(paths: FabricPaths): Promise<DoctorDaemonState> {
   try {
-    const election = await new BootstrapElection({ runtimeDirectory: paths.runtimeDirectory }).inspectCurrent();
-    const discovery = await readPrivateDiscovery(privateDiscoveryPaths(paths.runtimeDirectory), paths.socketPath);
-    if (discovery.status === "absent" || discovery.status === "terminal") {
-      if (!await socketIsAbsent(paths.socketPath)) {
+    return await new BootstrapElection({ runtimeDirectory: paths.runtimeDirectory }).inspectCurrentWith(async (election) => {
+      if (election.status === "active") {
         return {
-          status: "failed",
-          code: "DAEMON_SOCKET_STALE",
-          detail: "daemon socket exists without an active generation-bound owner",
-          pid: discovery.status === "terminal" ? discovery.owner.pid : null,
-          socketPath: paths.socketPath,
+          status: "failed" as const,
+          code: "BOOTSTRAP_IN_PROGRESS",
+          detail: "bootstrap election is active",
+          pid: null,
+          socketPath: null,
         };
       }
+      const discovery = await readPrivateDiscovery(privateDiscoveryPaths(paths.runtimeDirectory), paths.socketPath);
+    if (discovery.status === "absent" || discovery.status === "terminal") {
       if (discovery.status === "terminal" && discovery.owner.state === "crashed") {
         return {
           status: "failed",
           code: "DAEMON_PROCESS_CRASHED",
           detail: `daemon generation crashed (exit=${String(discovery.owner.exitCode)} signal=${String(discovery.owner.signal)})`,
+          pid: discovery.owner.pid,
+          socketPath: null,
+        };
+      }
+      if (discovery.status === "terminal" && discovery.owner.state !== "stopped") {
+        return {
+          status: "failed",
+          code: "DAEMON_DISCOVERY_INVALID",
+          detail: `terminal daemon discovery state ${String(discovery.owner.state)} is not a clean stop`,
           pid: discovery.owner.pid,
           socketPath: null,
         };
@@ -165,12 +174,19 @@ async function doctorDaemonState(paths: FabricPaths): Promise<DoctorDaemonState>
         }
         return {
           status: "failed",
-          code: election.status === "active" ? "BOOTSTRAP_IN_PROGRESS" : "DAEMON_DISCOVERY_MISSING",
-          detail: election.status === "active"
-            ? "bootstrap election is active but no daemon discovery is available"
-            : "bootstrap completed but no generation-bound daemon discovery is available",
+          code: "DAEMON_DISCOVERY_MISSING",
+          detail: "bootstrap completed but no generation-bound daemon discovery is available",
           pid: null,
           socketPath: null,
+        };
+      }
+      if (!await socketIsAbsent(paths.socketPath)) {
+        return {
+          status: "failed",
+          code: "DAEMON_SOCKET_STALE",
+          detail: "daemon socket exists without an active generation-bound owner",
+          pid: discovery.status === "terminal" ? discovery.owner.pid : null,
+          socketPath: paths.socketPath,
         };
       }
       if (
@@ -268,6 +284,7 @@ async function doctorDaemonState(paths: FabricPaths): Promise<DoctorDaemonState>
       pid: discovery.receipt.pid,
       socketPath: discovery.receipt.socketPath,
     };
+    });
   } catch (error: unknown) {
     return {
       status: "failed",

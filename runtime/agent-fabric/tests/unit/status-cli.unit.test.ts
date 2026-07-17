@@ -142,6 +142,52 @@ describe("machine status and doctor", () => {
     }
   });
 
+  it("allows concurrent doctors to report the same healthy idle snapshot", async () => {
+    const value = await paths();
+    const inspection = await FLOCK_ELECTION_LOCK_PORT.probe(join(value.runtimeDirectory, "daemon-election.lock"));
+    expect(inspection.status).toBe("acquired");
+    const fixture = await createPortableActivatedPrimaryFixture();
+    cleanup.push(fixture.directory);
+    try {
+      const arguments_ = [
+        "--agents-home", fixture.directory,
+        "--trusted-config", fixture.configPath,
+        "--compatibility", fixture.compatibilityPath,
+        "--compatibility-schema", fixture.schemaPath,
+      ];
+      const results = await Promise.all([fabricDoctor(arguments_, value), fabricDoctor(arguments_, value)]);
+      expect(results).toEqual([
+        expect.objectContaining({ healthy: true, state: "idle", code: "DAEMON_ON_DEMAND_IDLE" }),
+        expect.objectContaining({ healthy: true, state: "idle", code: "DAEMON_ON_DEMAND_IDLE" }),
+      ]);
+    } finally {
+      if (inspection.status === "acquired") await inspection.handle.release();
+    }
+  });
+
+  it("reports bootstrap in progress before classifying a stale socket", async () => {
+    const value = await paths();
+    await writeFile(value.socketPath, "stale\n", { mode: 0o600 });
+    const lock = await FLOCK_ELECTION_LOCK_PORT.tryAcquire(join(value.runtimeDirectory, "daemon-election.lock"));
+    expect(lock).toBeDefined();
+    const fixture = await createPortableActivatedPrimaryFixture();
+    cleanup.push(fixture.directory);
+    try {
+      await expect(fabricDoctor([
+        "--agents-home", fixture.directory,
+        "--trusted-config", fixture.configPath,
+        "--compatibility", fixture.compatibilityPath,
+        "--compatibility-schema", fixture.schemaPath,
+      ], value)).resolves.toMatchObject({
+        healthy: false,
+        state: "failed",
+        code: "BOOTSTRAP_IN_PROGRESS",
+      });
+    } finally {
+      await lock?.release();
+    }
+  });
+
   it("rejects terminal discovery from an older generation than the current ready receipt", async () => {
     const value = await paths();
     await writeFile(join(value.runtimeDirectory, "fabric-v1.discovery-owner.json"), `${JSON.stringify({
@@ -191,6 +237,57 @@ describe("machine status and doctor", () => {
       code: "DAEMON_ELECTION_INCONSISTENT",
       daemon: { status: "failed", pid: process.pid, socketPath: null },
     });
+  });
+
+  it.each([
+    ["crashed", "DAEMON_PROCESS_CRASHED"],
+    ["unknown", "DAEMON_DISCOVERY_INVALID"],
+  ] as const)("never reports %s terminal discovery as idle", async (state, code) => {
+    const value = await paths();
+    await writeFile(join(value.runtimeDirectory, "fabric-v1.discovery-owner.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      state,
+      actionId: "terminal-action",
+      electionGeneration: 1,
+      daemonInstanceGeneration: 1,
+      socketPath: value.socketPath,
+      pid: process.pid,
+      bootstrapCapabilityHash: "a".repeat(64),
+      updatedAt: 1,
+      exitCode: 1,
+      signal: null,
+    })}\n`, { mode: 0o600 });
+    await writeFile(value.socketPath, "stale\n", { mode: 0o600 });
+    const fixture = await createPortableActivatedPrimaryFixture();
+    cleanup.push(fixture.directory);
+    await expect(fabricDoctor([
+      "--agents-home", fixture.directory,
+      "--trusted-config", fixture.configPath,
+      "--compatibility", fixture.compatibilityPath,
+      "--compatibility-schema", fixture.schemaPath,
+    ], value)).resolves.toMatchObject({
+      healthy: false,
+      state: "failed",
+      code,
+      daemon: { status: "failed" },
+    });
+  });
+
+  it.each(["runtime", "state"] as const)("keeps a missing %s directory unhealthy", async (directory) => {
+    const value = await paths();
+    await rm(directory === "runtime" ? value.runtimeDirectory : value.stateDirectory, { recursive: true });
+    const fixture = await createPortableActivatedPrimaryFixture();
+    cleanup.push(fixture.directory);
+    const result = await fabricDoctor([
+      "--agents-home", fixture.directory,
+      "--trusted-config", fixture.configPath,
+      "--compatibility", fixture.compatibilityPath,
+      "--compatibility-schema", fixture.schemaPath,
+    ], value);
+    expect(result).toMatchObject({ healthy: false, state: "failed", daemon: { status: "failed" } });
+    expect(result.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: `${directory}-directory`, status: "fail" }),
+    ]));
   });
 
   it("reports idle after an on-demand daemon stops cleanly without retaining its PID or socket", async () => {

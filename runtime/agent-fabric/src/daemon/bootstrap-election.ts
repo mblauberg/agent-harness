@@ -259,7 +259,7 @@ function parseReady(value: unknown): BootstrapReadyReceipt {
   };
 }
 
-async function flockPromise(fileDescriptor: number, mode: "exnb" | "un"): Promise<void> {
+async function flockPromise(fileDescriptor: number, mode: "shnb" | "exnb" | "un"): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
     flock(fileDescriptor, mode, (error) => error === null ? resolvePromise() : reject(error));
   });
@@ -316,8 +316,8 @@ export const FLOCK_ELECTION_LOCK_PORT: ElectionLockPort = Object.freeze({
     let handle: FileHandle | undefined;
     try {
       // The lock file is a stable private runtime artifact. Creating it here
-      // closes the absent-to-created race and lets inspection hold the same
-      // kernel exclusion boundary as bootstrap ownership.
+      // closes the absent-to-created race. Shared inspection locks coexist,
+      // while bootstrap's exclusive ownership remains excluded.
       handle = await open(
         lockPath,
         constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW,
@@ -325,7 +325,7 @@ export const FLOCK_ELECTION_LOCK_PORT: ElectionLockPort = Object.freeze({
       );
       await validatePrivateHandle(handle, lockPath);
       try {
-        await flockPromise(handle.fd, "exnb");
+        await flockPromise(handle.fd, "shnb");
       } catch (error: unknown) {
         if (isErrno(error, "EAGAIN", "EACCES", "EWOULDBLOCK")) {
           await handle.close();
@@ -642,11 +642,19 @@ export class BootstrapElection {
   }
 
   async inspectCurrent(): Promise<BootstrapElectionInspection> {
+    return await this.inspectCurrentWith(async (inspection) => inspection);
+  }
+
+  async inspectCurrentWith<T>(
+    callback: (inspection: BootstrapElectionInspection) => Promise<T>,
+  ): Promise<T> {
     const lock = await this.#lockPort.probe(this.paths.lockPath);
-    if (lock.status === "held") return { status: "active", ownership: "kernel-lock" };
+    if (lock.status === "held") {
+      return await callback({ status: "active", ownership: "kernel-lock" });
+    }
     try {
       const [lease, ready] = await Promise.all([this.#readLease(), this.#readReady()]);
-      if (lease === undefined && ready === undefined) return { status: "absent" };
+      if (lease === undefined && ready === undefined) return await callback({ status: "absent" });
       if (lease?.status === "held") {
         throw new BootstrapElectionError(
           "BOOTSTRAP_ELECTION_INCONSISTENT",
@@ -654,14 +662,15 @@ export class BootstrapElection {
         );
       }
       const generation = Math.max(lease?.electionGeneration ?? 0, ready?.electionGeneration ?? 0);
-      if (generation === 0) return { status: "absent" };
+      if (generation === 0) return await callback({ status: "absent" });
       const outcome = await this.readGenerationOutcome(generation);
       if (outcome === undefined) {
         throw new BootstrapElectionError("BOOTSTRAP_INCOMPLETE", "bootstrap election artifacts have no current outcome");
       }
-      return outcome.kind === "ready"
+      const inspection: BootstrapElectionInspection = outcome.kind === "ready"
         ? { status: "ready", receipt: outcome.receipt }
         : { status: "terminal", receipt: outcome.receipt };
+      return await callback(inspection);
     } finally {
       if (lock.status === "acquired") await lock.handle.release();
     }
