@@ -80,6 +80,12 @@ export const RESOLVED_REVIEW_PROFILE_V1_CODEC = parserBacked(
       if (effort.kind === "inapplicable" && slot.requestedEffort !== null) {
         throw new TypeError(`${path}.slots[${String(index)}].requestedEffort must be null for inapplicable effort`);
       }
+      if (
+        (slot.slot === "cursor-grok" || slot.slot === "agy-gemini") &&
+        (slot.requestedEffort !== null || effort.kind !== "inapplicable")
+      ) {
+        throw new TypeError(`${path}.slots[${String(index)}] helper effort must be inapplicable with a null request`);
+      }
     });
     const target = record.targetChairFamily as "openai" | "anthropic";
     const expected = [
@@ -89,7 +95,7 @@ export const RESOLVED_REVIEW_PROFILE_V1_CODEC = parserBacked(
       target === "openai"
         ? { slot: "other-primary", adapterClass: "equal-primary", adapterId: "claude-agent-sdk", providerFamily: "anthropic", sourceMode: "direct-portal", reviewerFamilyRelation: "distinct-family-proved" }
         : { slot: "other-primary", adapterClass: "equal-primary", adapterId: "codex-app-server", providerFamily: "openai", sourceMode: "direct-portal", reviewerFamilyRelation: "distinct-family-proved" },
-      { slot: "cursor-grok", adapterClass: "cursor", adapterId: "cursor-agent", providerFamily: "xai", model: "grok-4.5-xhigh", sourceMode: "portal-helper", reviewerFamilyRelation: "distinct-family-proved" },
+      { slot: "cursor-grok", adapterClass: "cursor", adapterId: "cursor-agent", providerFamily: "xai", model: "cursor-grok-4.5-high", sourceMode: "portal-helper", reviewerFamilyRelation: "distinct-family-proved" },
       { slot: "agy-gemini", adapterClass: "agy", adapterId: "agy", providerFamily: "google", model: "Gemini 3.1 Pro (High)", sourceMode: "portal-helper", reviewerFamilyRelation: "distinct-family-proved" },
     ] as const;
     slots.forEach((slot, index) => {

@@ -1,6 +1,7 @@
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 import {
   resolveProviderAdapterSelection,
@@ -12,24 +13,27 @@ import {
   createResolvedStage4Compatibility,
   stage4FixtureCommand,
   stage4RepositoryPath,
-  stage4SchemaPath,
 } from "../../support/stage4-pi-agy-testkit.ts";
 
 describe("Stage 4 Agy adapter", () => {
-  it("keeps the checked-in adapter disabled while portable fixtures remain verifiable", async () => {
+  it("keeps the checked-in adapter activated while portable fixtures remain verifiable", async () => {
     const fixture = process.env.AGENT_FABRIC_PORTABLE_TESTS === "1"
       ? await createResolvedStage4Compatibility("agy")
       : undefined;
     try {
-      const verification = verifyAdapterCompatibility({
-        compatibilityPath: fixture?.compatibilityPath
-          ?? stage4RepositoryPath("config/adapter-compatibility.yaml"),
-        schemaPath: fixture?.schemaPath ?? stage4SchemaPath(),
-        adapterIds: ["agy"],
-        requireEnabled: true,
-      });
-      if (fixture === undefined) await expect(verification).rejects.toThrow(/not activated/u);
-      else await expect(verification).resolves.toMatchObject({ valid: true, adapterIds: ["agy"] });
+      if (fixture === undefined) {
+        const document = parse(await readFile(stage4RepositoryPath("config/adapter-compatibility.yaml"), "utf8")) as {
+          adapters?: Record<string, { enabled?: boolean; unresolved_pins?: string[] }>;
+        };
+        expect(document.adapters?.agy).toMatchObject({ enabled: true, unresolved_pins: [] });
+      } else {
+        await expect(verifyAdapterCompatibility({
+          compatibilityPath: fixture.compatibilityPath,
+          schemaPath: fixture.schemaPath,
+          adapterIds: ["agy"],
+          requireEnabled: true,
+        })).resolves.toMatchObject({ valid: true, adapterIds: ["agy"] });
+      }
     } finally {
       if (fixture !== undefined) await rm(fixture.directory, { recursive: true, force: true });
     }

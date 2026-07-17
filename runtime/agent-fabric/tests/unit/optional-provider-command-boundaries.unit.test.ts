@@ -259,4 +259,18 @@ describe("optional provider command boundaries", () => {
       }),
     ).rejects.toMatchObject({ code: "PROVIDER_EXIT_NONZERO", details: { exitCode: 7 } });
   });
+
+  it("does not forward ambient provider API keys to subscription-authenticated CLIs", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "gemini-secret-canary");
+    vi.stubEnv("GOOGLE_API_KEY", "google-secret-canary");
+    vi.stubEnv("CURSOR_API_KEY", "cursor-secret-canary");
+    vi.stubEnv("XAI_API_KEY", "xai-secret-canary");
+    const result = await runBoundedProviderCommand({
+      executable: process.execPath,
+      args: ["-e", "process.stdout.write(JSON.stringify({gemini:process.env.GEMINI_API_KEY,google:process.env.GOOGLE_API_KEY,cursor:process.env.CURSOR_API_KEY,xai:process.env.XAI_API_KEY}))"],
+      timeoutMs: 1000,
+    });
+
+    expect(result.stdout).toBe("{}");
+  });
 });

@@ -184,7 +184,7 @@ Vitest suite:
 | Registered five-seat health | `node runtime/agent-fabric/smoke/registered-mcp-health.mjs` with `AGENT_FABRIC_PROJECT_KEY` |
 | Registered Codex/Claude round trip | `node runtime/agent-fabric/smoke/registered-mcp-roundtrip.mjs` with `AGENT_FABRIC_PROJECT_KEY` |
 | Live workstation adapter pins | `cd runtime/agent-fabric && AGENT_FABRIC_LIVE_COMPATIBILITY_SMOKE=1 npx vitest run tests/integration/adapter-compatibility.live-smoke.test.ts` |
-| Provider-backed adapters | Not run while compatibility entries remain disabled/unresolved |
+| Agy Gemini / Cursor Grok provider-backed turns | Local-only Fabric request/reply evidence after exact pin, subscription-auth and seat checks; never enabled in CI |
 
 Run live smoke only when its exact provider-use and credential authority is
 current. This is operational evidence, not a separate programme-acceptance

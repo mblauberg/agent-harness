@@ -42,8 +42,8 @@ function validOpenAiProfile() {
     slots: [
       slot({ slot: "native", adapterClass: "primary-native", adapterId: "codex-app-server", providerFamily: "openai", model: "codex-model", sourceMode: "direct-portal", reviewerFamilyRelation: "same-family-exempt" }),
       slot({ slot: "other-primary", adapterClass: "equal-primary", adapterId: "claude-agent-sdk", providerFamily: "anthropic", model: "claude-model", sourceMode: "direct-portal", reviewerFamilyRelation: "distinct-family-proved" }),
-      slot({ slot: "cursor-grok", adapterClass: "cursor", adapterId: "cursor-agent", providerFamily: "xai", model: "grok-4.5-xhigh", sourceMode: "portal-helper", reviewerFamilyRelation: "distinct-family-proved" }),
-      slot({ slot: "agy-gemini", adapterClass: "agy", adapterId: "agy", providerFamily: "google", model: "Gemini 3.1 Pro (High)", sourceMode: "portal-helper", reviewerFamilyRelation: "distinct-family-proved" }),
+      slot({ slot: "cursor-grok", adapterClass: "cursor", adapterId: "cursor-agent", providerFamily: "xai", model: "cursor-grok-4.5-high", requestedEffort: null, resolvedEffort: { kind: "inapplicable" }, sourceMode: "portal-helper", reviewerFamilyRelation: "distinct-family-proved" }),
+      slot({ slot: "agy-gemini", adapterClass: "agy", adapterId: "agy", providerFamily: "google", model: "Gemini 3.1 Pro (High)", requestedEffort: null, resolvedEffort: { kind: "inapplicable" }, sourceMode: "portal-helper", reviewerFamilyRelation: "distinct-family-proved" }),
     ],
   };
 }
@@ -148,6 +148,14 @@ describe("Agent Fabric review wire repair", () => {
       ...profile,
       slots: profile.slots.map((slot, index) => index === 2 ? { ...slot, adapterId: "agy" } : slot),
     }, "profile")).toThrow(/cursor-grok|adapterId|matrix/);
+    for (const index of [2, 3]) {
+      expect(() => RESOLVED_REVIEW_PROFILE_V1_CODEC.parse({
+        ...profile,
+        slots: profile.slots.map((slot, slotIndex) => slotIndex === index
+          ? { ...slot, resolvedEffort: { kind: "applied", value: "high" } }
+          : slot),
+      }, "profile")).toThrow(/effort|matrix/);
+    }
   });
 
   it("enforces resolution-only capacity and repair-kind evidence references", () => {
