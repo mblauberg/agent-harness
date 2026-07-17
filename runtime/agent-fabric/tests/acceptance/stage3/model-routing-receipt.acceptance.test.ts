@@ -75,6 +75,32 @@ fs.writeFileSync(out, JSON.stringify({
     await expect(readFile(receiptPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("rejects a Claude capability producer override outside the test environment", async () => {
+    const resolveRoute = requirePublicFunction("resolveModelRouteReceipt");
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-claude-producer-override-"));
+    const receiptPath = join(directory, "model-route.json");
+    const originalNodeEnvironment = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      await expect(resolveRoute({
+        routerPath: repositoryPath("scripts/model-route"),
+        receiptPath,
+        testClaudeCapabilitiesPath: join(directory, "attacker-producer"),
+        request: {
+          adapter: "claude",
+          taskClass: "critical-review",
+          role: "critical-review",
+          leadFamily: "openai",
+          requireDistinct: true,
+        },
+      })).rejects.toThrow(/producer override is test-only/u);
+      await expect(readFile(receiptPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      if (originalNodeEnvironment === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnvironment;
+    }
+  });
+
   it("binds a task class to the router invocation and retained receipt", async () => {
     const resolveRoute = requirePublicFunction("resolveModelRouteReceipt");
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-task-route-receipt-"));
