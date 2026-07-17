@@ -1,5 +1,8 @@
+import hashlib
 import importlib.util
+import json
 from pathlib import Path
+import shutil
 import subprocess
 
 import pytest
@@ -71,4 +74,31 @@ def test_retained_reuse_routing_receipt_matches_exact_candidate_tree():
         capture_output=True,
         text=True,
     )
-    assert result.stdout.strip() == "PASS: exact candidate-bound routing 24/24"
+    assert result.stdout.strip() == "PASS: exact candidate-bound routing 29/30 with comparison arms and retained failures"
+
+
+@pytest.mark.parametrize("mutation", ["omit", "relabel", "rescore", "rebind"])
+def test_retained_failure_manifest_rejects_history_mutations(tmp_path: Path, mutation: str):
+    validator = module()
+    evidence = tmp_path / "skill-reuse-2026"
+    shutil.copytree(ROOT / "docs/evals/skill-reuse-2026", evidence)
+    attempts_path = evidence / "attempts.json"
+    attempts = json.loads(attempts_path.read_text())
+    if mutation == "omit":
+        attempts["attempts"].pop()
+    elif mutation == "relabel":
+        attempts["attempts"][-1]["status"] = "pass"
+    elif mutation == "rescore":
+        attempts["attempts"][-1]["score"]["numerator"] += 1
+    else:
+        attempts["attempts"][-1]["candidate_tree"] = "0" * 40
+    attempts_path.write_text(json.dumps(attempts, indent=2, sort_keys=True) + "\n")
+    receipt_path = evidence / "receipt.json"
+    receipt = json.loads(receipt_path.read_text())
+    if mutation == "omit":
+        receipt["required_attempt_ids"].pop()
+    receipt["attempts"]["sha256"] = "sha256:" + hashlib.sha256(attempts_path.read_bytes()).hexdigest()
+    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+
+    with pytest.raises(validator.Invalid):
+        validator.validate(receipt_path, ROOT)

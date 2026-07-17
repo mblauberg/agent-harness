@@ -1,7 +1,9 @@
+import hashlib
 import json
 import importlib.util
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -20,6 +22,8 @@ def test_reuse_rules_live_in_the_existing_routing_portfolio_not_prose_pair_files
     expected_ids = {
         "natural-writing": {"q145", "q150", "q151"},
         "engineering-writing": {"q084", "q088"},
+        "engineering-docs": {"q075"},
+        "legal-writing": {"q138"},
         "deliver": {"q055", "q058"},
         "skill-craft": {"q708"},
     }
@@ -40,42 +44,72 @@ def promotion_module():
     return module
 
 
-def project(project_id: str, *, status: str = "proven") -> dict[str, str]:
+def project(tmp_path: Path, project_id: str, *, status: str = "proven") -> dict:
+    candidate = "a" * 40
+    evidence_id = f"evidence-{project_id}"
+    content = json.dumps({
+        "schema_version": 1,
+        "candidate_commit": candidate,
+        "project_id": project_id,
+        "evidence_id": evidence_id,
+        "result": status,
+    }, sort_keys=True).encode()
+    path = tmp_path / f"{project_id}.json"
+    path.write_bytes(content)
     return {
         "project_id": project_id,
-        "evidence_id": f"evidence-{project_id}",
-        "status": status,
+        "evidence_id": evidence_id,
+        "artifact": {
+            "path": path.name,
+            "sha256": "sha256:" + hashlib.sha256(content).hexdigest(),
+        },
     }
 
 
-def test_global_promotion_requires_two_distinct_projects_with_proven_evidence():
+def promotion_input(rows: list[dict]) -> dict:
+    return {"schema_version": 1, "candidate_commit": "a" * 40, "project_evidence": rows}
+
+
+def test_global_promotion_requires_two_distinct_projects_with_proven_evidence(tmp_path: Path):
     decide = promotion_module().decide
-    assert decide({"schema_version": 1, "project_evidence": [project("alpha")]}) == {
+    assert decide(promotion_input([project(tmp_path, "alpha")]), tmp_path) == {
         "schema_version": 1,
         "decision": "remain-project-local",
         "proven_project_count": 1,
     }
-    assert decide({
-        "schema_version": 1,
-        "project_evidence": [project("alpha"), project("beta")],
-    }) == {
+    assert decide(promotion_input([
+        project(tmp_path, "alpha"), project(tmp_path, "beta"),
+    ]), tmp_path) == {
         "schema_version": 1,
         "decision": "eligible-for-global-promotion",
         "proven_project_count": 2,
     }
 
 
-def test_global_promotion_rejects_duplicate_and_nonproven_evidence_mutations():
+def test_global_promotion_rejects_invented_tampered_duplicate_and_failed_evidence(tmp_path: Path):
     decide = promotion_module().decide
-    duplicate = [project("alpha"), {**project("alpha"), "evidence_id": "second"}]
-    assert decide({"schema_version": 1, "project_evidence": duplicate})["decision"] == "remain-project-local"
-    mixed = [project("alpha"), project("beta", status="failed")]
-    assert decide({"schema_version": 1, "project_evidence": mixed})["decision"] == "remain-project-local"
-    with __import__("pytest").raises(ValueError, match="duplicate evidence_id"):
-        decide({
-            "schema_version": 1,
-            "project_evidence": [project("alpha"), {**project("beta"), "evidence_id": "evidence-alpha"}],
-        })
+    alpha = project(tmp_path, "alpha")
+    beta = project(tmp_path, "beta")
+    failed = project(tmp_path, "failed", status="failed")
+    invented = {**beta, "artifact": {**beta["artifact"], "path": "missing.json"}}
+    with pytest.raises(ValueError, match="missing"):
+        decide(promotion_input([alpha, invented]), tmp_path)
+    tampered = {**beta, "artifact": {**beta["artifact"], "sha256": "sha256:" + "0" * 64}}
+    with pytest.raises(ValueError, match="digest"):
+        decide(promotion_input([alpha, tampered]), tmp_path)
+    with pytest.raises(ValueError, match="identity"):
+        decide(promotion_input([alpha, {**beta, "project_id": "gamma"}]), tmp_path)
+    rebound = promotion_input([alpha, beta])
+    rebound["candidate_commit"] = "b" * 40
+    with pytest.raises(ValueError, match="identity"):
+        decide(rebound, tmp_path)
+    assert decide(promotion_input([alpha, failed]), tmp_path)["decision"] == "remain-project-local"
+    duplicate_project = {**beta, "project_id": "alpha"}
+    with pytest.raises(ValueError, match="duplicate project_id"):
+        decide(promotion_input([alpha, duplicate_project]), tmp_path)
+    duplicate_evidence = {**beta, "evidence_id": "evidence-alpha"}
+    with pytest.raises(ValueError, match="duplicate evidence_id"):
+        decide(promotion_input([alpha, duplicate_evidence]), tmp_path)
 
 
 def test_writing_and_documentation_rules_encode_the_reusable_boundaries():

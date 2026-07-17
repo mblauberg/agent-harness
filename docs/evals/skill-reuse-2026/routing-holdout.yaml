@@ -15,6 +15,13 @@ cases:
   expected:
     primary_skill: implement
     companion_skills: []
+- id: q075
+  source_path: skills/engineering-docs/evals/trigger_cases.yaml
+  prompt: Reorganise these engineering docs, colocate a one-use diagram with its owner,
+    and remove obsolete pointer files.
+  expected:
+    primary_skill: engineering-docs
+    companion_skills: []
 - id: q084
   source_path: skills/engineering-writing/evals/trigger_cases.yaml
   prompt: Write an engineering cost note explaining this recurring operating-cost
@@ -30,6 +37,13 @@ cases:
     primary_skill: engineering-docs
     companion_skills:
     - engineering-writing
+- id: q138
+  source_path: skills/legal-writing/evals/trigger_cases.yaml
+  prompt: Prepare an Australian legal decision overview that separates proposed positions,
+    source support and confirmation still required.
+  expected:
+    primary_skill: legal-writing
+    companion_skills: []
 - id: q145
   source_path: skills/natural-writing/evals/trigger_cases.yaml
   prompt: Rewrite this general briefing so substantive headings replace helper copy
