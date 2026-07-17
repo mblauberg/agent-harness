@@ -101,6 +101,26 @@ fs.writeFileSync(out, JSON.stringify({
     expect(JSON.parse(await readFile(receiptPath, "utf8"))).toEqual(resolution.receipt);
   });
 
+  it("rejects an explicit model before invoking a task-class route", async () => {
+    const resolveRoute = requirePublicFunction("resolveModelRouteReceipt");
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-task-model-conflict-"));
+    const receiptPath = join(directory, "model-route.json");
+
+    await expect(resolveRoute({
+      routerPath: repositoryPath("scripts/model-route"),
+      receiptPath,
+      request: {
+        adapter: "claude",
+        taskClass: "critical-review",
+        model: "haiku",
+        role: "critical-review",
+        leadFamily: "openai",
+        requireDistinct: true,
+      } as never,
+    })).rejects.toThrow(/does not accept an explicit model/u);
+    await expect(readFile(receiptPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("persists a typed unknown-task rejection before failing closed", async () => {
     const resolveRoute = requirePublicFunction("resolveModelRouteReceipt");
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-unknown-task-receipt-"));
@@ -188,6 +208,7 @@ console.log(JSON.stringify({ schema_version: 1, status: "ok", adapter: "codex", 
   it.each([
     ["downgraded alias", "scout", "high", "high", "openai", "anthropic", true],
     ["downgraded effort", "flagship", "low", "low", "openai", "anthropic", true],
+    ["downgraded effective effort", "flagship", "high", "low", "openai", "anthropic", true],
     ["same-family reviewer", "flagship", "high", "high", "openai", "openai", false],
     ["wrong lead family", "flagship", "high", "high", "anthropic", "google", true],
     ["empty effective effort", "flagship", "high", "", "openai", "anthropic", true],

@@ -296,6 +296,11 @@ def resolve_effort(
     )
     if not fallback:
         return None, "", "no_effort_available", capability_source
+    if (
+        args.task_class_effort
+        and EFFORT_ORDER[fallback] < EFFORT_ORDER[args.task_class_effort]
+    ):
+        return None, "", "task_class_effort_below_floor", capability_source
     substitution = f"{requested_effort} unavailable (runtime/model capability); used {fallback}"
     if catalog_model_missing:
         substitution = (
@@ -770,6 +775,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
             if args.effort:
                 return reject("task_class_effort_conflict", alias=route_alias, effort=route_effort)
+            if args.model:
+                return reject("task_class_model_conflict", alias=route_alias, effort=route_effort)
             if args.role != route_role:
                 return reject("task_class_role_mismatch", alias=route_alias, effort=route_effort)
             args.alias = route_alias

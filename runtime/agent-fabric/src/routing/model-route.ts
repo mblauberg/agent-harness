@@ -24,13 +24,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 type ModelRouteRequest = {
   adapter: string;
   role: string;
-  model?: string;
   capabilitiesFile?: string;
   leadFamily: string;
   requireDistinct: boolean;
 } & (
-  | { alias: string; taskClass?: never; effort?: string }
-  | { taskClass: string; alias?: never; effort?: never; capabilitiesFile?: string }
+  | { alias: string; taskClass?: never; effort?: string; model?: string }
+  | { taskClass: string; alias?: never; effort?: never; model?: never; capabilitiesFile?: string }
 );
 
 function nonEmptyString(record: Record<string, unknown>, key: string): boolean {
@@ -54,13 +53,15 @@ function isValidReceipt(receipt: Record<string, unknown>, request: ModelRouteReq
   if (request.taskClass !== undefined) {
     const policy = taskClassPolicy.get(request.taskClass);
     const receiptAliasRank = aliasRank.get(String(receipt.alias));
-    const receiptEffortRank = effortRank.get(String(receipt.requested_effort));
+    const requestedEffortRank = effortRank.get(String(receipt.requested_effort));
+    const effectiveEffortRank = effortRank.get(String(receipt.effort));
     if (
       receipt.task_class !== request.taskClass || receipt.route_source !== "task-class" ||
       (receipt.status === "ok" && (
         policy === undefined || request.role !== policy.role ||
         receiptAliasRank === undefined || receiptAliasRank < aliasRank.get(policy.minimumAlias)! ||
-        receiptEffortRank === undefined || receiptEffortRank < effortRank.get(policy.minimumEffort)!
+        requestedEffortRank === undefined || requestedEffortRank < effortRank.get(policy.minimumEffort)! ||
+        effectiveEffortRank === undefined || effectiveEffortRank < effortRank.get(policy.minimumEffort)!
       ))
     ) {
       return false;
@@ -100,6 +101,9 @@ export async function resolveModelRouteReceipt(input: {
   if ((input.request.alias === undefined) === (input.request.taskClass === undefined)) {
     throw new TypeError("model route requires exactly one of alias or taskClass");
   }
+  if (input.request.taskClass !== undefined && input.request.model !== undefined) {
+    throw new TypeError("task-class model route does not accept an explicit model");
+  }
   let capabilitiesFile = input.request.capabilitiesFile;
   if (input.request.adapter === "claude" && input.request.taskClass !== undefined && capabilitiesFile === undefined) {
     const policy = taskClassPolicy.get(input.request.taskClass);
@@ -136,6 +140,7 @@ export async function resolveModelRouteReceipt(input: {
   try {
     ({ stdout } = await execFileAsync(input.routerPath, argumentsList, {
       encoding: "utf8",
+      timeout: 50_000,
       maxBuffer: 1024 * 1024,
     }));
   } catch (error: unknown) {

@@ -235,6 +235,36 @@ def test_task_class_rejects_ambiguous_or_unknown_routing_inputs(arguments):
     }
 
 
+def test_task_class_rejects_explicit_model_override():
+    result, route = resolve(
+        "--adapter", "claude", "--task-class", "critical-review",
+        "--role", "critical-review", "--model", "haiku",
+    )
+    assert result.returncode == 2
+    assert route["status"] == "task_class_model_conflict"
+    assert route["alias"] == "flagship"
+
+
+def test_task_class_rejects_effective_effort_below_policy_floor(tmp_path):
+    snapshot = tmp_path / "caps.json"
+    snapshot.write_text(json.dumps(capability_snapshot({
+        "gpt-5.6-sol": {
+            "resolved_model": "gpt-5.6-sol",
+            "supported_efforts": ["low"],
+        },
+    })))
+
+    result, route = resolve(
+        "--adapter", "codex", "--task-class", "critical-review",
+        "--role", "critical-review", "--capabilities-file", str(snapshot),
+    )
+
+    assert result.returncode == 1
+    assert route["status"] == "task_class_effort_below_floor"
+    assert route["requested_effort"] == "max"
+    assert route["effort"] == ""
+
+
 def test_invalid_task_class_effort_vocabulary_fails_closed(tmp_path, monkeypatch, capsys):
     router = load_router()
     catalog = json.loads((ROOT / "config" / "model-routing.json").read_text())
