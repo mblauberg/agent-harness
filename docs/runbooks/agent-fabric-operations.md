@@ -172,6 +172,39 @@ Set controls directly on each admitted provider spawn or turn:
 | `compact` | Checkpoint first, then continue the same retained task with bounded context. |
 | `rotate` / clear | Checkpoint first, then start fresh for a new task, independent review, stale/confused/unreconciled context, or role/model change. Fabric rotate is the clear equivalent; never clear silently. |
 
+The active optional reviewer routes are exact and subscription-authenticated:
+
+| Review route | Exact selection | Family / effort |
+| --- | --- | --- |
+| Agy | `Gemini 3.1 Pro (High)` | Google / high |
+| Cursor | `cursor-grok-4.5-high` | xAI / high |
+
+Do not set or persist provider API keys for these routes. The wrappers forward
+only the minimal process environment (`HOME`, `PATH` and `TMPDIR`) and use the
+provider CLIs' existing subscription sessions. `scripts/model-route resolve`
+must report the exact family, model and high effort through `--adapter-gate
+fabric` before dispatch. A disabled entry, inactive adapter, unresolved pin,
+artifact mismatch, unavailable model or wrong family is terminal routing
+evidence; use another already-admitted review family or record the bonus leg as
+unavailable. Never bypass the gate with a direct CLI and claim Fabric evidence.
+
+Real provider smokes are local-only, consume subscription quota and require
+current provider-use authority. They traverse the pinned Fabric adapter
+request protocol, require exact spawn/turn/release sentinels and prove the
+isolated workspace stayed unchanged:
+
+```sh
+cd runtime/agent-fabric
+node smoke/provider-adapter-readonly.mjs \
+  --adapter agy --model 'Gemini 3.1 Pro (High)' \
+  --model-family google --effort high \
+  --provider-executable "$(command -v agy)"
+node smoke/provider-adapter-readonly.mjs \
+  --adapter cursor-agent --model cursor-grok-4.5-high \
+  --model-family xai --effort high \
+  --provider-executable "$(command -v cursor-agent)"
+```
+
 Claude reviewers and one-task workers start fresh and release when done. For a
 retained Claude pair, checkpoint and compact at each stage or work-unit
 boundary, by four answer-bearing provider turns, or before a pause expected to

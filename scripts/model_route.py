@@ -216,7 +216,8 @@ def resolve_effort(
     if args.effort_transport == "model-id":
         normalized_model = re.sub(r"(?:^|[-_])extra[-_]high(?=$|[-_])", "-xhigh", model.lower())
         matches = re.findall(r"(?:^|[-_])(low|medium|high|xhigh|max|ultra)(?=$|[-_])", normalized_model)
-        derived = matches[-1] if matches else ""
+        parenthetical = re.search(r"\((low|medium|high|xhigh|max|ultra)\)\s*$", normalized_model)
+        derived = matches[-1] if matches else (parenthetical.group(1) if parenthetical else "")
         if args.effort and derived and args.effort != derived:
             return None, "", "adapter_effort_mismatch", "model-id"
         if args.effort and not derived:

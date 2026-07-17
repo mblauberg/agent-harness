@@ -75,7 +75,7 @@ function routeRequest() {
     schemaVersion: 1,
     adapterAlias: "cursor",
     modelAlias: "grok",
-    explicitModel: "grok-4.5-xhigh",
+    explicitModel: "cursor-grok-4.5-high",
     role: "reviewer",
     leadFamily: "openai",
     requireDistinct: true,
