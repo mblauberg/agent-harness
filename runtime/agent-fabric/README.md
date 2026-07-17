@@ -112,7 +112,8 @@ global entries contain the proxy command, state directory, seat and client
 label, and omit `AGENT_FABRIC_PROJECT_PATH`. A fixed project path remains
 available only as a separately scoped compatibility entry for a client that
 cannot preserve workspace cwd. It is not valid in global Claude Code and Codex
-registration.
+registration. Concurrent configuration drift produces a typed conflict rather
+than overwriting the newer client configuration.
 
 Clients use lock-safe on-demand bootstrap: they attach to a compatible
 incumbent before database preflight, or elect one daemon and inspect/publish

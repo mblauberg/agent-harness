@@ -1,11 +1,24 @@
 import json
+import importlib.util
 from pathlib import Path
 import subprocess
+import sys
 import tomllib
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "configure-agent-fabric-mcp.py"
+
+
+def load_configurer():
+    spec = importlib.util.spec_from_file_location("configure_agent_fabric_mcp", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_configure(tmp_path: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -119,6 +132,70 @@ def test_rejects_inline_codex_entry_instead_of_rewriting_ambiguous_toml(tmp_path
     assert result.returncode == 3
     assert "unsupported inline or quoted table form" in result.stderr
     assert codex_config.read_text() == original
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
+@pytest.mark.parametrize("drift", ["absent-created", "content", "symlink"])
+def test_write_rejects_config_source_drift(tmp_path: Path, client: str, drift: str) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    requested = tmp_path / f"{client}.{suffix}"
+    original = '{}\n' if client == "claude" else '[unrelated]\nvalue = "before"\n'
+    external = '{"external":true}\n' if client == "claude" else '[external]\nvalue = true\n'
+
+    if drift == "absent-created":
+        proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+        requested.write_text(external)
+        protected = requested
+    elif drift == "content":
+        requested.write_text(original)
+        proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+        requested.write_text(external)
+        protected = requested
+    else:
+        first = tmp_path / f"first.{suffix}"
+        second = tmp_path / f"second.{suffix}"
+        first.write_text(original)
+        second.write_text(external)
+        requested.symlink_to(first)
+        proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+        requested.unlink()
+        requested.symlink_to(second)
+        protected = second
+
+    with pytest.raises(configurer.RegistrationConflictError, match=f"{client.title()} config changed"):
+        configurer.write_proposal(proposal)
+    assert protected.read_text() == external
+
+
+def test_platform_all_revalidates_codex_after_writing_claude(tmp_path: Path, monkeypatch, capsys) -> None:
+    configurer = load_configurer()
+    claude_config = tmp_path / "claude.json"
+    codex_config = tmp_path / "codex.toml"
+    claude_config.write_text('{}\n')
+    codex_config.write_text('[unrelated]\nvalue = "before"\n')
+    external = '[external]\nvalue = "during-claude-write"\n'
+    write_proposal = configurer.write_proposal
+
+    def interleaved_write(proposal):
+        write_proposal(proposal)
+        if proposal.client == "claude":
+            codex_config.write_text(external)
+
+    monkeypatch.setattr(configurer, "write_proposal", interleaved_write)
+    result = configurer.main([
+        "--agents-home", str(ROOT),
+        "--state-directory", str(tmp_path / "state"),
+        "--claude-config", str(claude_config),
+        "--codex-config", str(codex_config),
+    ])
+
+    captured = capsys.readouterr()
+    assert result == 3
+    assert "Codex config changed" in captured.err
+    assert codex_config.read_text() == external
+    assert json.loads(claude_config.read_text())["mcpServers"]["agent-fabric"]["env"]["AGENT_FABRIC_SEAT"] == "claude"
 
 
 def test_operations_docs_define_dynamic_primary_registration_and_bounded_fixed_paths() -> None:
