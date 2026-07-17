@@ -22,6 +22,9 @@ orchestration, model-choice, delegation, or memory decisions.
 - **GitHub (this repo only):** issue, branch, PR, merge and Project-status
   mechanics live in `docs/runbooks/github-workflow.md` (agent merges
   authorised); provenant-local process, not harness doctrine.
+- **Fabric trust:** before first Fabric use, automatically trust only the exact
+  canonical repository root (or current project directory when there is no
+  repository); never trust a parent, wildcard, home or sibling collection.
 - **Style:** terse for inter-agent, mechanical, and status traffic; use
   domain-appropriate user prose. Load `$caveman` only on explicit request.
 

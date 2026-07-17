@@ -285,8 +285,12 @@ stop a project session or daemon.
 Use this path when a reviewed project artifact is accepted and a new draft
 project session is ready to launch:
 
-1. Trust the canonical project root with `scripts/agent-fabric workspace trust
-   "$PWD"`, then open the Console for that exact root.
+1. Resolve the owning Git root (`git rev-parse --show-toplevel`), or the
+   canonical current project directory when no repository exists. Inspect that
+   exact root and, when absent, establish trust with `scripts/agent-fabric
+   workspace trust "$project_root"` before opening the Console. This first-use
+   step is automatic under the global harness; never substitute a parent,
+   wildcard, home directory or sibling collection.
 2. Create or select the draft project session. If several sessions are
    attachable, pass its stable ID with `--session`.
 3. Open the complete, verified accepted-evidence row and choose
