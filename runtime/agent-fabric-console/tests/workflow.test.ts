@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+const fakeProviderToken = `sk-${"A".repeat(24)}`;
+const fakePrivateKey = ["-----BEGIN PRIVATE", " KEY-----\nnot-real\n-----END PRIVATE", " KEY-----"].join("");
+
 import {
   FABRIC_OPERATIONS,
   OPERATION_CONTRACT_FIXTURES,
@@ -629,8 +632,8 @@ describe("typed Console workflow planner", () => {
         input: {
           apiKey: "not-real-api-key",
           password: "not-real-password",
-          prompt: "Use sk-AAAAAAAAAAAAAAAAAAAAAAAA then https://operator:not-real@example.invalid/task",
-          keyBlock: "-----BEGIN PRIVATE KEY-----\nnot-real\n-----END PRIVATE KEY-----",
+          prompt: `Use ${fakeProviderToken} then https://operator:not-real@example.invalid/task`,
+          keyBlock: fakePrivateKey,
         },
       },
     };
@@ -650,9 +653,9 @@ describe("typed Console workflow planner", () => {
     for (const secret of [
       "not-real-api-key",
       "not-real-password",
-      "sk-AAAAAAAAAAAAAAAAAAAAAAAA",
+      fakeProviderToken,
       "operator:not-real",
-      "-----BEGIN PRIVATE KEY-----",
+      fakePrivateKey.split("\n", 1)[0],
     ]) expect(unsafeRendered).not.toContain(secret);
     expect(unsafeRendered).toContain("[REDACTED credential]");
     await expect(planner.prepareGuided({

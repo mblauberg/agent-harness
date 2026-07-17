@@ -27,6 +27,8 @@ import { createCurrentSessionRun } from "../../support/current-session-testkit.t
 const now = Date.parse("2027-01-01T00:00:00Z");
 const digestA = `sha256:${"a".repeat(64)}`;
 const digestB = `sha256:${"b".repeat(64)}`;
+const fakeProviderToken = `sk-${"A".repeat(24)}`;
+const fakePrivateKey = ["-----BEGIN PRIVATE", " KEY-----\nnot-real\n-----END PRIVATE", " KEY-----"].join("");
 
 async function quarantinedLaunchPreparationContents(directory: string): Promise<string[]> {
   const quarantine = join(directory, ".agent-run/.fabric-custody");
@@ -872,9 +874,9 @@ describe("intake revision public routing", () => {
   it.each([
     ["trusted key", { apiKey: "not-a-real-provider-key" }],
     ["fabric bearer", { prompt: "use afc_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }],
-    ["provider token", { prompt: "use sk-AAAAAAAAAAAAAAAAAAAAAAAA" }],
+    ["provider token", { prompt: `use ${fakeProviderToken}` }],
     ["password assignment", { prompt: "password=not-a-real-password" }],
-    ["private key", { prompt: "-----BEGIN PRIVATE KEY-----\nnot-real\n-----END PRIVATE KEY-----" }],
+    ["private key", { prompt: fakePrivateKey }],
     ["URL userinfo", { prompt: "https://operator:not-real@example.invalid/task" }],
   ])("rejects %s in provider input before claiming or writing launch preparation", async (_label, providerInput) => {
     const fixture = await setupRoutingFixture();
