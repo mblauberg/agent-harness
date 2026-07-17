@@ -476,6 +476,26 @@ describe("Console controller and two-phase actions", () => {
     expect(service.commit).not.toHaveBeenCalled();
   });
 
+  it("keeps Review open across an unrelated projection revision advance", async () => {
+    const controller = new ConsoleController({
+      dataset: dataset(),
+      actions: actions(),
+      credential,
+      projectId,
+      projectSessionId: sessionId,
+      confirmationId: () => "confirmation-1",
+    });
+    controller.select("attention", "attention:task-1");
+    await controller.beginAction(actionRequest());
+
+    controller.updateDataset(dataset(7, 12));
+
+    expect(controller.state.review).toMatchObject({
+      stage: "review",
+      binding: { projectionRevision: "11", itemRevision: "7" },
+    });
+  });
+
   it("keeps last-good rows readable but disables every action while non-live", async () => {
     const degraded = dataset(7, 11, {
       state: "degraded",

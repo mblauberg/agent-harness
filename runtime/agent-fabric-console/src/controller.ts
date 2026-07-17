@@ -314,15 +314,19 @@ export class ConsoleController {
       (review.stage === "review" || review.stage === "confirm")
     ) {
       const changes: ReviewChange[] = [];
-      if (dataset.snapshotRevision !== review.binding.projectionRevision) {
+      const current = this.#row(review.binding.view, review.binding.itemId);
+      const itemRevisionChanged = current?.revision !== review.binding.itemRevision;
+      if (
+        dataset.snapshotRevision !== review.binding.projectionRevision &&
+        (itemRevisionChanged || dataset.connection.state !== "live")
+      ) {
         changes.push({
           field: "projectionRevision",
           before: review.binding.projectionRevision,
           after: dataset.snapshotRevision ?? "unavailable",
         });
       }
-      const current = this.#row(review.binding.view, review.binding.itemId);
-      if (current?.revision !== review.binding.itemRevision) {
+      if (itemRevisionChanged) {
         changes.push({
           field: "itemRevision",
           before: review.binding.itemRevision,
