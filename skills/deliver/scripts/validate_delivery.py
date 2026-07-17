@@ -134,8 +134,7 @@ def _evaluate_validator():
 
 @lru_cache(maxsize=1)
 def _software_delivery_validator():
-    path = Path(__file__).with_name("software_delivery_validation.py")
-    spec = importlib.util.spec_from_file_location("software_delivery_validation", path)
+    spec = importlib.util.spec_from_file_location("software_delivery_validation", Path(__file__).with_name("software_delivery_validation.py"))
     fail(not spec or not spec.loader, "software delivery validator is unavailable")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -170,9 +169,10 @@ def _validate_artifacts(
         fail(not isinstance(artifact_id, str) or not artifact_id or artifact_id in by_id, f"artifact {index} id is missing or duplicate")
         path = item.get("path")
         uri = item.get("uri")
-        git_revision = item.get("git_revision")
-        fail(sum(bool(value) for value in (path, uri, git_revision)) != 1,
-             f"artifact {artifact_id} requires exactly one path, uri or git_revision")
+        _software_delivery_validator().validate_git_artifact(
+            item, artifact_id, path, uri, workspace_root, allowed_source_paths,
+            verify_hashes, _safe_path, _inside, Invalid,
+        )
         if path:
             clean_path = _safe_path(path, f"artifact {artifact_id}.path")
             fail(not any(_inside(clean_path, scope) for scope in allowed_artifact_paths), f"artifact {artifact_id} is outside authority.allowed_artifact_paths")
@@ -203,13 +203,6 @@ def _validate_artifacts(
             fail(not target.is_file(), f"artifact {artifact_id} path does not exist")
             actual = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
             fail(actual != digest, f"artifact {artifact_id} digest does not match live bytes")
-        if git_revision:
-            _software_delivery_validator().validate_git_revision(
-                git_revision, artifact_id=artifact_id, digest=digest,
-                unavailable=unavailable, workspace_root=workspace_root,
-                allowed_source_paths=allowed_source_paths, verify_hashes=verify_hashes,
-                safe_path=_safe_path, inside=_inside, invalid_type=Invalid,
-            )
         by_id[artifact_id] = item
     fail(not by_id, "at least one artifact is required")
     fail(not any(item.get("class") == "canonical" for item in by_id.values()), "profile requires a canonical outcome artifact")
@@ -443,7 +436,6 @@ def _validate_evidence(
             fail(not matches or any(item.get("kind") != kind for item in matches), f"profile gate {gate} requires passing {kind} evidence")
     return by_id
 
-
 def _validate_reviews(run: dict[str, Any], evidence: dict[str, dict[str, Any]], *, required: bool) -> None:
     reviews = []
     for index, raw in enumerate(_list(run.get("reviews"), "reviews")):
@@ -483,7 +475,6 @@ def _validate_reviews(run: dict[str, Any], evidence: dict[str, dict[str, Any]], 
         fail(len(bonus) < 1, "crucial run must record one bonus-family attempt")
     if required and run.get("risk_tier") == "terminal":
         fail(len({item.get("provider_family") for item in bonus}) < 2, "terminal run must record two distinct bonus-family attempts")
-
 
 def _validate_security(run: dict[str, Any], registry: dict[str, Any], profile: dict[str, Any], artifacts: dict[str, dict[str, Any]], evidence: dict[str, dict[str, Any]], *, required: bool) -> None:
     security = _mapping(run.get("security"), "security")
@@ -545,7 +536,6 @@ def _validate_security(run: dict[str, Any], registry: dict[str, Any], profile: d
                 fail(not linked or linked.get("kind") != "deterministic" or linked.get("status") != "pass" or linked.get("gate") != f"agentic-risk:{item.get('id')}", "agentic risk pass must link matching passing deterministic evidence")
             else:
                 fail(not item.get("reason"), "agentic risk not_applicable requires reason")
-
 
 def _validate_gates_observation(run: dict[str, Any], evidence: dict[str, dict[str, Any]]) -> None:
     gates = _mapping(run.get("human_gates"), "human_gates")
@@ -623,7 +613,6 @@ def _validate_gates_observation(run: dict[str, Any], evidence: dict[str, dict[st
             closed_transition = next(item for item in run["state_history"] if item["state"] == "closed")
             fail(not set(evidence_ids) <= set(closed_transition["evidence_ids"]), "closed transition must cite its observation evidence")
 
-
 def _validate_high_stakes(run: dict[str, Any], registry: dict[str, Any], evidence: dict[str, dict[str, Any]]) -> None:
     if run.get("high_stakes") is not True:
         return
@@ -644,7 +633,6 @@ def _validate_high_stakes(run: dict[str, Any], registry: dict[str, Any], evidenc
             fail(any(not control.get(field) for field in ("domain", "reviewer", "qualification")), "qualified domain review requires domain, reviewer and qualification")
         elif name == "explicit_human_action_gate":
             fail(not control.get("action") or not control.get("approved_by"), "explicit human action gate requires action and approver")
-
 
 def _validate_measures_assurance(
     run: dict[str, Any], profile: dict[str, Any], evidence: dict[str, dict[str, Any]],
@@ -926,11 +914,9 @@ def validate(
         first_review = next(item for item in run["state_history"] if item["state"] == "reviewing")
         fail(not deterministic_ids <= set(first_review["evidence_ids"]), "reviewing transition lacks deterministic gate evidence")
     _validate_reviews(run, evidence, required=acceptance_reached)
-    if run.get("profile") == "software":
-        _software_delivery_validator().validate(
-            run, artifacts, artifact_root=workspace_root or receipt_dir,
-            verify_hashes=verify_hashes, invalid_type=Invalid,
-        )
+    _software_delivery_validator().validate_if_software(
+        run, artifacts, workspace_root or receipt_dir, verify_hashes, Invalid,
+    )
     if acceptance_reached:
         profile_evidence = policy_validation.profile_evidence_requirements(profile, artifacts)
         final_transition = next(item for item in run["state_history"] if item["state"] == "awaiting_acceptance")

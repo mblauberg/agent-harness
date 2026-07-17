@@ -101,6 +101,35 @@ def validate_git_revision(
     _fail(actual != digest, f"artifact {artifact_id} digest does not match the committed Git archive", invalid_type)
 
 
+def validate_git_artifact(
+    item: dict[str, Any], artifact_id: str, path: Any, uri: Any,
+    workspace_root: Path | None, allowed_source_paths: list[str], verify_hashes: bool,
+    safe_path: Any, inside: Any, invalid_type: type[ValueError],
+) -> None:
+    revision = item.get("git_revision")
+    _fail(sum(bool(value) for value in (path, uri, revision)) != 1,
+          f"artifact {artifact_id} requires exactly one path, uri or git_revision", invalid_type)
+    if revision:
+        validate_git_revision(
+            revision, artifact_id=artifact_id, digest=item.get("digest"),
+            unavailable=item.get("digest_unavailable_reason"), workspace_root=workspace_root,
+            allowed_source_paths=allowed_source_paths, verify_hashes=verify_hashes,
+            safe_path=safe_path, inside=inside, invalid_type=invalid_type,
+        )
+
+
+def validate_if_software(
+    run: dict[str, Any], artifacts: dict[str, dict[str, Any]],
+    artifact_root: Path | None, verify_hashes: bool,
+    invalid_type: type[ValueError],
+) -> None:
+    if run.get("profile") == "software":
+        validate(
+            run, artifacts, artifact_root=artifact_root,
+            verify_hashes=verify_hashes, invalid_type=invalid_type,
+        )
+
+
 def validate(
     run: dict[str, Any], artifacts: dict[str, dict[str, Any]], *,
     artifact_root: Path | None, verify_hashes: bool,
