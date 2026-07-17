@@ -75,8 +75,8 @@ scripts/agent-fabric status --json --project "$PWD"
 scripts/agent-fabric doctor --json
 ```
 
-Each client registry contains only the proxy command, socket path, fabric state
-directory, seat and client label:
+Each client registry contains only the proxy command, fabric state directory,
+seat and client label:
 
 | Client | Global registry |
 | --- | --- |
@@ -91,6 +91,23 @@ searched for the nearest project-keyed seat. An unprovisioned project fails
 closed instead of authenticating into another project's run. Clients that do
 not preserve the workspace working directory need project-scoped registration.
 Subdirectories intentionally inherit the nearest ancestor project's seat.
+
+The harness installer configures the project-dynamic global entry for its
+selected primary client. Configure or verify both Claude Code and Codex from
+the harness checkout with:
+
+```sh
+scripts/configure-agent-fabric-mcp.py --platform all
+scripts/configure-agent-fabric-mcp.py --platform all --check
+```
+
+The command atomically replaces only the `agent-fabric` entry in each client
+configuration and reports only that entry's status. It never prints
+capabilities or unrelated configuration. Its global entries omit
+`AGENT_FABRIC_PROJECT_PATH`; Claude Code and Codex preserve cwd and must use
+nearest-ancestor discovery. A fixed `AGENT_FABRIC_PROJECT_PATH` remains a
+manual, project-scoped compatibility path only for a client that cannot preserve
+its workspace cwd. Never add it to a global Claude Code or Codex entry.
 
 The resolved `.cap` file must remain a private regular file with mode `0600`.
 The adjacent `.json` file is secret-free metadata and is checked against the
@@ -231,8 +248,10 @@ Both values come from the current project-keyed seat pointer. Do not derive a
 project key from status prose, a copied path or an older generation.
 
 The daemon and every MCP proxy derive the same stable private socket at
-`$AGENT_FABRIC_STATE_DIRECTORY/runtime/fabric-v1.sock`. Registry entries bind
-`AGENT_FABRIC_PROJECT_PATH` plus a seat; they do not hard-code credentials.
+`$AGENT_FABRIC_STATE_DIRECTORY/runtime/fabric-v1.sock`. Dynamic Claude Code and
+Codex registry entries bind a seat but no project path or credential. A client
+that cannot preserve cwd may use a separately scoped `AGENT_FABRIC_PROJECT_PATH`
+entry for one project; it must never be reused as a global registration.
 
 Start a least-privilege observer after provisioning or renewal:
 
