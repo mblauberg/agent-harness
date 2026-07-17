@@ -126,6 +126,16 @@
   "candidate_commit": "1bb67fd77c7aaabc6e8917c2c4f6a404c1e090a7",
   "candidate_tree": "07a5b1df35e9b7489a2398b1928d445f49832c9c",
   "claim": "current-candidate-correctness-and-paired-non-regression",
+  "cross_primary_family_gate": {
+    "covered_provider_families": [
+      "openai"
+    ],
+    "missing_provider_families": [
+      "anthropic"
+    ],
+    "reason": "claude-subscription-quota-unavailable",
+    "status": "unmet"
+  },
   "classifier": {
     "path": "classifier-instruction.txt",
     "sha256": "sha256:f0f71378f1f931a8bf7fadc81cf08a34933c53ee8c38497957782e5f11593eef"
@@ -145,7 +155,7 @@
     "sha256": "sha256:430575db6f5a9d597e2fb0d6059be58d3fe598333d8048179e0749e7da79272b"
   },
   "schema_version": 2,
-  "status": "pass",
+  "status": "evaluation-pass-promotion-gate-unmet",
   "threshold": {
     "denominator": 30,
     "minimum_rate": 0.95,

@@ -37,8 +37,10 @@ Both branches follow this without restating it in two voices:
 - **Reuse boundary:** global skills express cross-project triggers, procedures
   and gates. Convert contextual values into parameters, keep examples
   synthetic and leave project policy local. Global promotion requires evidence
-  from at least two projects; evaluate structured evidence with
-  [promotion_readiness.py](scripts/promotion_readiness.py) and follow the repository gate in
+  from at least two projects. Use
+  [promotion_readiness.py](scripts/promotion_readiness.py) to integrity-check the
+  local evidence inventory before human review; hashes prove retained content,
+  not its truth or promotion authority. Follow the repository gate in
   [MAINTAINING.md](../../MAINTAINING.md).
 - **Trigger fixtures:** positive, negative, boundary and composition cases.
   A keyword match is a candidate, not ground truth. Changes to routing text

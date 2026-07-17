@@ -22,6 +22,20 @@ REQUIRED_ATTEMPT_IDS = [
     "schema-type-rejection", "schema-unique-items-rejection",
     "semantic-f0f34f4", "semantic-70f2a05",
 ]
+REQUIRED_INVALID_ATTEMPTS = {
+    "schema-type-rejection": {
+        "candidate_commit": "f0f34f4007f1c6a7a183b5a57ffff5ef9bf6c60c",
+        "candidate_tree": "9b0dddd5a535ae2529c41623569790d98839b4aa",
+        "model": "gpt-5.6-luna",
+        "reason": "response schema omitted an explicit type for schema_version",
+    },
+    "schema-unique-items-rejection": {
+        "candidate_commit": "f0f34f4007f1c6a7a183b5a57ffff5ef9bf6c60c",
+        "candidate_tree": "9b0dddd5a535ae2529c41623569790d98839b4aa",
+        "model": "gpt-5.6-luna",
+        "reason": "response schema used unsupported uniqueItems",
+    },
+}
 
 
 class Invalid(ValueError):
@@ -192,6 +206,12 @@ def validate_attempts(
                 or row["raw_available"] is not False,
                 "invalid pre-inference attempt is not honestly declared",
             )
+            expected_invalid = REQUIRED_INVALID_ATTEMPTS.get(row["id"])
+            fail(
+                expected_invalid is None
+                or {field: row[field] for field in expected_invalid} != expected_invalid,
+                "invalid pre-inference attempt does not match retained history",
+            )
             continue
         fail(row["status"] != "fail", "semantic attempt status must be fail")
         required = common | {"dataset", "catalogue", "classifier", "packet", "invocations", "score"}
@@ -223,7 +243,8 @@ def validate(receipt_path: Path, repository_root: Path) -> tuple[int, int]:
     receipt = json.loads(receipt_path.read_text())
     required = {
         "schema_version", "candidate_commit", "candidate_tree", "dataset", "classifier",
-        "response_schema", "arms", "attempts", "required_attempt_ids", "threshold", "claim", "status",
+        "response_schema", "arms", "attempts", "required_attempt_ids", "threshold", "claim",
+        "cross_primary_family_gate", "status",
     }
     fail(not isinstance(receipt, dict) or set(receipt) != required, "receipt keys are invalid")
     fail(receipt["schema_version"] != 2, "unsupported receipt schema")
@@ -300,6 +321,15 @@ def validate(receipt_path: Path, repository_root: Path) -> tuple[int, int]:
     previous_pair = trial_scores["previous-package"][0]
     fail(candidate_pair[0] / candidate_pair[1] < previous_pair[0] / previous_pair[1], "paired candidate regresses previous-package exact routing")
     fail(receipt["claim"] != "current-candidate-correctness-and-paired-non-regression", "receipt claim is invalid")
+    fail(
+        receipt["cross_primary_family_gate"] != {
+            "status": "unmet",
+            "covered_provider_families": ["openai"],
+            "missing_provider_families": ["anthropic"],
+            "reason": "claude-subscription-quota-unavailable",
+        },
+        "cross-primary-family promotion gate must be declared unmet",
+    )
     required_attempt_ids = receipt["required_attempt_ids"]
     fail(
         required_attempt_ids != REQUIRED_ATTEMPT_IDS,
@@ -307,7 +337,7 @@ def validate(receipt_path: Path, repository_root: Path) -> tuple[int, int]:
     )
     attempts_content = artifact(evidence_root, receipt["attempts"], "attempts")
     validate_attempts(attempts_content, evidence_root, required_attempt_ids, repository_root)
-    fail(receipt["status"] != "pass", "receipt is not a declared pass")
+    fail(receipt["status"] != "evaluation-pass-promotion-gate-unmet", "receipt status is invalid")
     return candidate_passed, candidate_total
 
 
@@ -321,7 +351,10 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, json.JSONDecodeError, yaml.YAMLError, Invalid) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
-    print(f"PASS: exact candidate-bound routing {passed}/{total} with comparison arms and retained failures")
+    print(
+        f"PASS: exact candidate-bound routing {passed}/{total}; "
+        "cross-primary-family promotion gate unmet"
+    )
     return 0
 
 

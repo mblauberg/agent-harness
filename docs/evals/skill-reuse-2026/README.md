@@ -1,7 +1,7 @@
 # Skill-reuse routing evaluation
 
-Status: pass at the declared current-candidate threshold and paired
-non-regression check.
+Status: evaluator pass at the declared current-candidate threshold and paired
+non-regression check; the cross-primary-family promotion gate is unmet.
 
 The frozen dataset contains all ten canonical routing cases changed by the
 skill-reuse repair. Every retained packet excludes expected routes. Three fresh,
@@ -17,6 +17,12 @@ descriptions; one used the exact `origin/main` package catalogue. Both scored
 regression on this holdout. The comparison does not establish statistical
 superiority: the without-skill result also scored 10/10, and each comparison
 arm has only one trial.
+
+The required across-current-primary-families comparison is incomplete because
+Claude subscription quota was unavailable. The retained OpenAI-only arms are
+useful evaluator evidence, but they do not clear the MAINTAINING promotion
+gate. Gemini or Grok review would be additional diversity, not a substitute for
+the missing equal-primary Claude family.
 
 `receipt.json` binds the dataset, complete candidate catalogue, classifier,
 packet and raw JSON outputs to candidate commit
@@ -39,4 +45,5 @@ was relabelled or copied into the passing run.
 These are direct Codex CLI subscription invocations. The receipt records that
 adapter honestly and does not claim Fabric provider-action certification,
 cross-provider independence, statistical superiority, production task success
-or human acceptance.
+or human acceptance. The receipt therefore declares
+`evaluation-pass-promotion-gate-unmet`, not promotion readiness.

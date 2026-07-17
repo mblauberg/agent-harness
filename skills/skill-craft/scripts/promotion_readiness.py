@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide whether project evidence clears the global-skill promotion gate."""
+"""Check whether a local evidence inventory is ready for human promotion review."""
 
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ def decide(value: Any, evidence_root: Path) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "decision": (
-            "eligible-for-global-promotion"
+            "evidence-ready-for-human-review"
             if count >= 2
             else "remain-project-local"
         ),

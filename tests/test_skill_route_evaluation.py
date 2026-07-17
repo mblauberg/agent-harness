@@ -74,10 +74,15 @@ def test_retained_reuse_routing_receipt_matches_exact_candidate_tree():
         capture_output=True,
         text=True,
     )
-    assert result.stdout.strip() == "PASS: exact candidate-bound routing 29/30 with comparison arms and retained failures"
+    assert result.stdout.strip() == (
+        "PASS: exact candidate-bound routing 29/30; "
+        "cross-primary-family promotion gate unmet"
+    )
 
 
-@pytest.mark.parametrize("mutation", ["omit", "relabel", "rescore", "rebind"])
+@pytest.mark.parametrize("mutation", [
+    "omit", "relabel", "rescore", "rebind", "invalid-rebind", "invalid-model", "invalid-reason",
+])
 def test_retained_failure_manifest_rejects_history_mutations(tmp_path: Path, mutation: str):
     validator = module()
     evidence = tmp_path / "skill-reuse-2026"
@@ -90,8 +95,21 @@ def test_retained_failure_manifest_rejects_history_mutations(tmp_path: Path, mut
         attempts["attempts"][-1]["status"] = "pass"
     elif mutation == "rescore":
         attempts["attempts"][-1]["score"]["numerator"] += 1
-    else:
+    elif mutation == "rebind":
         attempts["attempts"][-1]["candidate_tree"] = "0" * 40
+    elif mutation == "invalid-rebind":
+        rebound = subprocess.run(
+            ["git", "rev-parse", "origin/main"], cwd=ROOT, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        rebound_tree = subprocess.run(
+            ["git", "rev-parse", f"{rebound}^{{tree}}"], cwd=ROOT, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        attempts["attempts"][0]["candidate_commit"] = rebound
+        attempts["attempts"][0]["candidate_tree"] = rebound_tree
+    elif mutation == "invalid-model":
+        attempts["attempts"][0]["model"] = "different-model"
+    else:
+        attempts["attempts"][0]["reason"] = "different rejection"
     attempts_path.write_text(json.dumps(attempts, indent=2, sort_keys=True) + "\n")
     receipt_path = evidence / "receipt.json"
     receipt = json.loads(receipt_path.read_text())

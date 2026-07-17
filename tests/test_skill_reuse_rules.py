@@ -70,7 +70,7 @@ def promotion_input(rows: list[dict]) -> dict:
     return {"schema_version": 1, "candidate_commit": "a" * 40, "project_evidence": rows}
 
 
-def test_global_promotion_requires_two_distinct_projects_with_proven_evidence(tmp_path: Path):
+def test_promotion_inventory_requires_two_distinct_projects_before_human_review(tmp_path: Path):
     decide = promotion_module().decide
     assert decide(promotion_input([project(tmp_path, "alpha")]), tmp_path) == {
         "schema_version": 1,
@@ -81,7 +81,7 @@ def test_global_promotion_requires_two_distinct_projects_with_proven_evidence(tm
         project(tmp_path, "alpha"), project(tmp_path, "beta"),
     ]), tmp_path) == {
         "schema_version": 1,
-        "decision": "eligible-for-global-promotion",
+        "decision": "evidence-ready-for-human-review",
         "proven_project_count": 2,
     }
 
@@ -110,6 +110,13 @@ def test_global_promotion_rejects_invented_tampered_duplicate_and_failed_evidenc
     duplicate_evidence = {**beta, "evidence_id": "evidence-alpha"}
     with pytest.raises(ValueError, match="duplicate evidence_id"):
         decide(promotion_input([alpha, duplicate_evidence]), tmp_path)
+
+
+def test_promotion_inventory_never_certifies_promotion(tmp_path: Path):
+    result = promotion_module().decide(promotion_input([
+        project(tmp_path, "alpha"), project(tmp_path, "beta"),
+    ]), tmp_path)
+    assert "promotion" not in result["decision"]
 
 
 def test_writing_and_documentation_rules_encode_the_reusable_boundaries():
