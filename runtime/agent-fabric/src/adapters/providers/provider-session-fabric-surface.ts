@@ -53,7 +53,11 @@ export class RetainedProviderSessionKeepalive {
   }
 
   async #tick(): Promise<void> {
-    if (this.#inFlight || Reflect.get(this.#transport, "closed") === true) return;
+    if (this.#inFlight) return;
+    if (Reflect.get(this.#transport, "closed") === true) {
+      this.stop();
+      return;
+    }
     this.#inFlight = true;
     try {
       parseOperationResult(

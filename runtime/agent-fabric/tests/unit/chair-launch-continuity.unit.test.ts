@@ -255,7 +255,9 @@ describe("provider-session Fabric continuity", () => {
     vi.useFakeTimers();
     try {
       const challenge = "04".repeat(32);
-      const call = vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] }));
+      const call = vi.fn<ProviderSessionProtocolTransport["call"]>(async () => (
+        { contiguousWatermark: 0, acknowledgedAboveWatermark: [] }
+      ));
       const close = vi.fn(async () => undefined);
       const transport = Object.assign(protocolTransport(call, close), { idleTimeoutMs: 1_000 });
       const bridge = await createChairLaunchFabricBridge({
@@ -310,7 +312,7 @@ describe("provider-session Fabric continuity", () => {
           capability: "retained-child-capability-canary",
           socketPath: "/private/fabric.sock",
         }, transport],
-      );
+      ) as AgentSessionFabricBridge;
       bridge.bindProviderSession("retained-child-thread-1", 1);
       const mailbox = bridge.descriptors.find(({ operation }) => operation === FABRIC_OPERATIONS.getMailboxState);
       expect(mailbox).toBeDefined();
@@ -373,6 +375,39 @@ describe("provider-session Fabric continuity", () => {
       expect(bridge.closed).toBe(true);
       await vi.advanceTimersByTimeAsync(2_000);
       expect(call).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels the keepalive timer when the retained transport closes between ticks", async () => {
+    vi.useFakeTimers();
+    try {
+      const challenge = "08".repeat(32);
+      let closed = false;
+      const call = vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] }));
+      const transport = Object.assign(protocolTransport(call, vi.fn(async () => undefined)), { idleTimeoutMs: 1_000 });
+      Object.defineProperty(transport, "closed", { get: () => closed });
+      const bridge = await createChairLaunchFabricBridge({
+        ...binding(challenge),
+        capability: "externally-closed-keepalive-capability-canary",
+        socketPath: "/private/fabric.sock",
+        attestationChallenge: challenge,
+      }, { connect: vi.fn(async () => transport) });
+      bridge.bindProviderSession("externally-closed-thread-1", 1);
+      await bridge.invokeTool(bridge.challengeToolName, { challengeResponse: challenge }, {
+        providerSessionRef: "externally-closed-thread-1",
+        providerSessionGeneration: 1,
+        providerTurnRef: "turn-1",
+        providerInvocationRef: "tool-call-1",
+      });
+      await bridge.result();
+      expect(vi.getTimerCount()).toBe(1);
+
+      closed = true;
+      await vi.advanceTimersByTimeAsync(334);
+
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }
