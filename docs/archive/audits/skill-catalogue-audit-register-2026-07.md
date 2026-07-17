@@ -1,6 +1,6 @@
-# Skill Catalogue Audit Register — Epic #124, Workstream B
+# Archived Skill Catalogue Audit Register — Epic #124, Workstream B
 
-> **Status:** audit recommendations + **owner decisions recorded** (grill-me R1–R5, see next section). All 12 DEFERs resolved into a direction; execution **complete** on branch `issue-124-skill-audit-register` (see **Implementation status** below).
+> **Status:** historical and consumed. Audit recommendations and **owner decisions are recorded** below; execution completed in July 2026.
 > **Date:** 2026-07-15 · **Epic:** #124 · **Scope:** 33 skills (+ `_shared`) · **Outcome:** 21 APPROVE-ready · 12 DEFER (now decided) · 0 CUT.
 > **Provenance:** 6 family-batched auditors + 1 licensing/provenance auditor (workhorse tier), flagship synthesis, other-primary cross-family verify (all findings folded). Source-read-only throughout.
 
