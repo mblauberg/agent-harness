@@ -1,6 +1,12 @@
 {
   "schema_version": 1,
   "catalog_date": "2026-07-10",
+  "task_class_routes": {
+    "mechanical": {"alias": "scout", "effort": "low", "role": "worker"},
+    "legwork": {"alias": "workhorse", "effort": "medium", "role": "worker"},
+    "critical-review": {"alias": "flagship", "effort": "high", "role": "critical-review"},
+    "orchestration": {"alias": "flagship", "effort": "high", "role": "orchestrator"}
+  },
   "families": {
     "anthropic": {
       "aliases": {

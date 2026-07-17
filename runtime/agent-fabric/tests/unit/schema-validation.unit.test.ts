@@ -69,6 +69,8 @@ describe("Stage 1 versioned JSON Schemas", () => {
       endpoint_provider: "openai",
       model_family: "openai",
       resolved_model: "",
+      task_class: "mechanical",
+      route_source: "task-class",
       requested_model: "gpt-5.6-sol",
       catalog_model: "gpt-5.6-sol",
       model_selection: "account-default",
