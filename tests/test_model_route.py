@@ -1,7 +1,9 @@
 import json
 from datetime import datetime, timezone
+import importlib.util
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
@@ -23,13 +25,23 @@ def resolve(*args, adapter_gate="direct-cli"):
     return result, json.loads(result.stdout) if result.stdout else None
 
 
-def capability_snapshot(models):
+def capability_snapshot(models, source="codex debug models"):
     return {
         "schema_version": 1,
-        "source": "codex debug models",
+        "source": source,
         "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "models": models,
     }
+
+
+def load_router():
+    path = ROOT / "scripts" / "model_route.py"
+    spec = importlib.util.spec_from_file_location("model_route_under_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_claude_lead_prefers_fable_and_reviewer_prefers_opus():
@@ -103,6 +115,239 @@ def test_aliases_supply_proportionate_default_effort():
         result, route = resolve("--adapter", "codex", "--alias", alias, "--role", "worker")
         assert result.returncode == 0
         assert route["effort"] == effort
+
+
+@pytest.mark.parametrize(
+    ("task_class", "alias", "effort", "catalog_model"),
+    (
+        ("mechanical", "scout", "low", "gpt-5.6-luna"),
+        ("legwork", "workhorse", "medium", "gpt-5.6-terra"),
+        ("critical-review", "flagship", "max", "gpt-5.6-sol"),
+        ("orchestration", "flagship", "ultra", "gpt-5.6-sol"),
+    ),
+)
+def test_task_classes_bind_codex_policy_identity_without_transport_model(
+    tmp_path, task_class, alias, effort, catalog_model
+):
+    snapshot = tmp_path / f"{task_class}.json"
+    snapshot.write_text(json.dumps(capability_snapshot({
+        catalog_model: {
+            "resolved_model": catalog_model,
+            "supported_efforts": [effort],
+        },
+    })))
+    result, route = resolve(
+        "--adapter", "codex", "--task-class", task_class,
+        "--role", "orchestrator" if task_class == "orchestration" else "critical-review" if task_class == "critical-review" else "worker",
+        "--capabilities-file", str(snapshot),
+    )
+    assert result.returncode == 0
+    assert route["task_class"] == task_class
+    assert route["route_source"] == "task-class"
+    assert route["alias"] == alias
+    assert route["requested_effort"] == effort
+    assert route["effort"] == effort
+    assert route["resolved_model"] == ""
+    assert route["catalog_model"] == catalog_model
+    assert route["model_selection"] == "account-default"
+    assert route["identity_source"] == "account-default"
+
+
+def test_claude_task_class_rejects_caller_authored_capability_claim(tmp_path):
+    snapshot = tmp_path / "claude-caps.json"
+    snapshot.write_text(json.dumps(capability_snapshot({
+        "opus": {"resolved_model": "opus", "supported_efforts": ["high"]},
+    }, source="claude subscription canary")))
+    result, route = resolve(
+        "--adapter", "claude", "--task-class", "critical-review",
+        "--role", "critical-review", "--capabilities-file", str(snapshot),
+    )
+    assert result.returncode == 1
+    assert route["status"] == "capability_snapshot_untrusted"
+
+
+def test_claude_task_class_accepts_subscription_canary_provenance(tmp_path):
+    snapshot = tmp_path / "claude-caps.json"
+    value = capability_snapshot({
+        "opus": {"resolved_model": "claude-opus-4-8", "supported_efforts": ["high"]},
+    }, source="claude subscription canary")
+    value["provenance"] = {
+        "kind": "subscription_runtime_canary",
+        "auth_method": "claude.ai",
+        "subscription_type": "pro",
+    }
+    snapshot.write_text(json.dumps(value))
+
+    result, route = resolve(
+        "--adapter", "claude", "--task-class", "critical-review",
+        "--role", "critical-review", "--capabilities-file", str(snapshot),
+    )
+
+    assert result.returncode == 0
+    assert route["resolved_model"] == "claude-opus-4-8"
+    assert route["requested_effort"] == route["effort"] == "high"
+
+
+def test_task_class_without_trusted_capability_evidence_fails_closed():
+    result, route = resolve(
+        "--adapter", "claude", "--task-class", "critical-review",
+        "--role", "critical-review", "--available-model", "opus",
+    )
+    assert result.returncode == 1
+    assert route["status"] == "task_class_capability_unverified"
+
+
+def test_critical_review_task_class_rejects_worker_role_before_model_resolution():
+    result, route = resolve(
+        "--adapter", "claude", "--task-class", "critical-review", "--role", "worker"
+    )
+    assert result.returncode == 2
+    assert route["status"] == "task_class_role_mismatch"
+    assert route["role"] == "worker"
+    assert route["task_class"] == "critical-review"
+
+
+def test_legacy_alias_route_does_not_claim_task_class_binding():
+    result, route = resolve(
+        "--adapter", "codex", "--alias", "scout", "--role", "worker"
+    )
+    assert result.returncode == 0
+    assert "task_class" not in route
+    assert "route_source" not in route
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ("--alias", "scout", "--task-class", "mechanical"),
+        ("--task-class", "mechanical", "--effort", "medium"),
+        ("--task-class", "unknown"),
+    ),
+)
+def test_task_class_rejects_ambiguous_or_unknown_routing_inputs(arguments):
+    result, route = resolve("--adapter", "codex", *arguments, "--role", "worker")
+    assert result.returncode == 2
+    assert route["schema_version"] == 1
+    assert route["adapter"] == "codex"
+    assert route["role"] == "worker"
+    assert route["status"] in {
+        "route_input_conflict", "task_class_effort_conflict", "unknown_task_class",
+    }
+
+
+def test_task_class_rejects_explicit_model_override():
+    result, route = resolve(
+        "--adapter", "claude", "--task-class", "critical-review",
+        "--role", "critical-review", "--model", "haiku",
+    )
+    assert result.returncode == 2
+    assert route["status"] == "task_class_model_conflict"
+    assert route["alias"] == "flagship"
+
+
+def test_task_class_rejects_effective_effort_below_policy_floor(tmp_path):
+    snapshot = tmp_path / "caps.json"
+    snapshot.write_text(json.dumps(capability_snapshot({
+        "gpt-5.6-sol": {
+            "resolved_model": "gpt-5.6-sol",
+            "supported_efforts": ["low"],
+        },
+    })))
+
+    result, route = resolve(
+        "--adapter", "codex", "--task-class", "critical-review",
+        "--role", "critical-review", "--capabilities-file", str(snapshot),
+    )
+
+    assert result.returncode == 1
+    assert route["status"] == "task_class_effort_below_floor"
+    assert route["requested_effort"] == "max"
+    assert route["effort"] == ""
+
+
+def test_invalid_task_class_effort_vocabulary_fails_closed(tmp_path, monkeypatch, capsys):
+    router = load_router()
+    catalog = json.loads((ROOT / "config" / "model-routing.json").read_text())
+    catalog["task_class_routes"]["critical-review"]["effort"] = "hgh"
+    catalog_path = tmp_path / "model-routing.json"
+    catalog_path.write_text(json.dumps(catalog))
+    monkeypatch.setattr(router, "CATALOG_PATH", catalog_path)
+
+    result = router.main([
+        "resolve", "--adapter", "claude", "--task-class", "critical-review",
+        "--role", "critical-review", "--adapter-gate", "direct-cli",
+    ])
+
+    route = json.loads(capsys.readouterr().out)
+    assert result == 2
+    assert route["status"] == "task_class_config_invalid"
+    assert route["effort"] == ""
+
+
+def test_task_class_role_policy_cannot_be_reconfigured_to_worker(tmp_path, monkeypatch, capsys):
+    router = load_router()
+    catalog = json.loads((ROOT / "config" / "model-routing.json").read_text())
+    catalog["task_class_routes"]["critical-review"]["role"] = "worker"
+    catalog_path = tmp_path / "model-routing.json"
+    catalog_path.write_text(json.dumps(catalog))
+    monkeypatch.setattr(router, "CATALOG_PATH", catalog_path)
+
+    result = router.main([
+        "resolve", "--adapter", "claude", "--task-class", "critical-review",
+        "--role", "worker", "--adapter-gate", "direct-cli",
+    ])
+
+    route = json.loads(capsys.readouterr().out)
+    assert result == 2
+    assert route["status"] == "task_class_config_invalid"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("alias", "scout"), ("effort", "low")),
+)
+def test_critical_review_policy_rejects_valid_vocabulary_downgrade(
+    tmp_path, monkeypatch, capsys, field, value
+):
+    router = load_router()
+    catalog = json.loads((ROOT / "config" / "model-routing.json").read_text())
+    catalog["task_class_routes"]["critical-review"][field] = value
+    catalog_path = tmp_path / "model-routing.json"
+    catalog_path.write_text(json.dumps(catalog))
+    monkeypatch.setattr(router, "CATALOG_PATH", catalog_path)
+
+    result = router.main([
+        "resolve", "--adapter", "claude", "--task-class", "critical-review",
+        "--role", "critical-review", "--adapter-gate", "direct-cli",
+    ])
+
+    route = json.loads(capsys.readouterr().out)
+    assert result == 2
+    assert route["status"] == "task_class_config_invalid"
+
+
+def test_role_default_cannot_lower_task_class_effort(tmp_path, monkeypatch, capsys):
+    router = load_router()
+    catalog = json.loads((ROOT / "config" / "model-routing.json").read_text())
+    catalog["families"]["openai"]["role_effort_defaults"]["orchestrator"]["flagship"] = "low"
+    catalog_path = tmp_path / "model-routing.json"
+    catalog_path.write_text(json.dumps(catalog))
+    snapshot = tmp_path / "caps.json"
+    snapshot.write_text(json.dumps(capability_snapshot({
+        "gpt-5.6-sol": {"resolved_model": "gpt-5.6-sol", "supported_efforts": ["high"]},
+    })))
+    monkeypatch.setattr(router, "CATALOG_PATH", catalog_path)
+
+    result = router.main([
+        "resolve", "--adapter", "codex", "--task-class", "orchestration",
+        "--role", "orchestrator", "--capabilities-file", str(snapshot),
+        "--adapter-gate", "direct-cli",
+    ])
+
+    route = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert route["requested_effort"] == "high"
+    assert route["effort_source"] == "task-class"
 
 
 def test_codex_lead_uses_ultra_orchestration_effort():
