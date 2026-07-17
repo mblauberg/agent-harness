@@ -4517,6 +4517,33 @@ CREATE TABLE operator_commands (
   PRIMARY KEY(operator_id, command_id)
 );
 
+CREATE TABLE project_session_launch_preparations (
+  operator_id TEXT NOT NULL REFERENCES operator_principals(operator_id),
+  command_id TEXT NOT NULL,
+  capability_id TEXT NOT NULL REFERENCES operator_capabilities(capability_id),
+  project_id TEXT NOT NULL REFERENCES projects(project_id),
+  project_session_id TEXT NOT NULL,
+  session_generation INTEGER NOT NULL CHECK (session_generation >= 1),
+  payload_hash TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('claimed','staged','committed')),
+  launch_packet_path TEXT,
+  launch_packet_digest TEXT,
+  resource_plan_path TEXT,
+  resource_plan_digest TEXT,
+  staged_launch_packet_path TEXT,
+  staged_resource_plan_path TEXT,
+  staged_launch_packet_device TEXT,
+  staged_launch_packet_inode TEXT,
+  staged_resource_plan_device TEXT,
+  staged_resource_plan_inode TEXT,
+  result_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(operator_id, command_id),
+  FOREIGN KEY(project_session_id, project_id)
+    REFERENCES project_sessions(project_session_id, project_id)
+);
+
 CREATE TABLE operator_control_fences (
   fence_id TEXT PRIMARY KEY,
   project_session_id TEXT NOT NULL,

@@ -71,6 +71,8 @@ import type {
   ProjectSessionCloseRequest,
   ProjectSessionCreateRequest,
   ProjectSessionGetRequest,
+  ProjectSessionLaunchPacketPreparation,
+  ProjectSessionLaunchPacketPrepareRequest,
   ProjectSessionLaunchPrepareRequest,
   ProjectSessionTransitionRequest,
 } from "./project-session.js";
@@ -219,6 +221,7 @@ type ExtensionOperationInputMap = {
   [FABRIC_OPERATIONS.projectSessionGet]: ProjectSessionGetRequest;
   [FABRIC_OPERATIONS.projectSessionTransition]: ProjectSessionTransitionRequest;
   [FABRIC_OPERATIONS.projectSessionClose]: ProjectSessionCloseRequest;
+  [FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare]: ProjectSessionLaunchPacketPrepareRequest;
   [FABRIC_OPERATIONS.projectSessionLaunchPrepare]: ProjectSessionLaunchPrepareRequest;
   [FABRIC_OPERATIONS.membershipBind]: MembershipBindRequest;
   [FABRIC_OPERATIONS.operatorAttach]: OperatorAttachRequest;
@@ -308,6 +311,7 @@ type ExtensionOperationResultMap = {
   [FABRIC_OPERATIONS.projectSessionGet]: ProjectSession;
   [FABRIC_OPERATIONS.projectSessionTransition]: ProjectSession;
   [FABRIC_OPERATIONS.projectSessionClose]: ProjectSession;
+  [FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare]: ProjectSessionLaunchPacketPreparation;
   [FABRIC_OPERATIONS.projectSessionLaunchPrepare]: OperatorActionPreview;
   [FABRIC_OPERATIONS.membershipBind]: MembershipBindResult;
   [FABRIC_OPERATIONS.operatorAttach]: OperatorAttachment;

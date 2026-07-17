@@ -15,6 +15,7 @@ import {
   type Sha256Digest,
 } from "./primitives.js";
 import type { HumanGateResolution } from "./gates.js";
+import type { LaunchPacketV1, LaunchResourcePlanV1 } from "./launch.js";
 import type { OperatorMutationContext } from "./operator.js";
 
 export const PROJECT_SESSION_STATES = [
@@ -177,6 +178,26 @@ export type ProjectSessionLaunchPrepareRequest = {
   projectSessionId: ProjectSessionId;
   expectedSessionGeneration: number;
   launchPacketRef: ArtifactRef;
+};
+
+export type ProjectSessionLaunchPacketPrepareRequest = {
+  command: OperatorMutationContext;
+  projectId: ProjectId;
+  projectSessionId: ProjectSessionId;
+  expectedSessionGeneration: number;
+  intakeId: string;
+  acceptedScopeRef: ArtifactRef;
+  launchPacketRef: ArtifactRef;
+  resourcePlanRef: ArtifactRef;
+  launchPacket: LaunchPacketV1;
+  resourcePlan: LaunchResourcePlanV1;
+};
+
+export type ProjectSessionLaunchPacketPreparation = {
+  projectSession: ProjectSession;
+  launchPacketRef: ArtifactRef;
+  resourcePlanRef: ArtifactRef;
+  acceptedScopeRef: ArtifactRef;
 };
 
 export type ProjectSessionCloseRequest = {
