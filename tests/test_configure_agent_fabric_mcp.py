@@ -2,6 +2,7 @@ import json
 import importlib.util
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tomllib
@@ -200,6 +201,41 @@ def test_platform_all_revalidates_codex_after_writing_claude(tmp_path: Path, mon
 
 
 @pytest.mark.parametrize("client", ["claude", "codex"])
+def test_existing_direct_config_under_symlinked_parent_binds_installed_inode(tmp_path: Path, client: str) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    linked_parent = tmp_path / "linked-parent"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+    requested = linked_parent / f"{client}.{suffix}"
+    requested.write_text('{}\n' if client == "claude" else '[unrelated]\nvalue = "before"\n')
+    proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+
+    configurer.write_proposal(proposal)
+
+    assert "agent-fabric" in requested.read_text()
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
+def test_absent_config_under_symlinked_parent_binds_installed_inode(tmp_path: Path, client: str) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    linked_parent = tmp_path / "linked-parent"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+    requested = linked_parent / f"{client}.{suffix}"
+    proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+
+    configurer.write_proposal(proposal)
+
+    assert "agent-fabric" in requested.read_text()
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
 def test_existing_write_preserves_post_validation_interleave_as_recovery(tmp_path: Path, client: str, monkeypatch) -> None:
     configurer = load_configurer()
     desired = configurer.registration(ROOT, tmp_path / "state", client)
@@ -218,6 +254,7 @@ def test_existing_write_preserves_post_validation_interleave_as_recovery(tmp_pat
             interleaved = True
             replacement = tmp_path / f"external.{suffix}"
             replacement.write_text(external)
+            replacement.chmod(0o644)
             os.replace(replacement, requested)
         atomic_exchange(first, second)
 
@@ -228,7 +265,188 @@ def test_existing_write_preserves_post_validation_interleave_as_recovery(tmp_pat
     assert "agent-fabric" in requested.read_text()
     recovery = Path(str(caught.value).rsplit(" ", 1)[-1])
     assert recovery.read_text() == external
+    assert recovery.parent != tmp_path
+    assert stat.S_IMODE(recovery.parent.stat().st_mode) == 0o700
     recovery.unlink()
+    recovery.parent.rmdir()
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
+def test_private_recovery_preserves_displaced_hardlink_without_chmod(tmp_path: Path, client: str, monkeypatch) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    requested = tmp_path / f"{client}.{suffix}"
+    requested.write_text('{}\n' if client == "claude" else '[unrelated]\nvalue = "before"\n')
+    external = '{"external":"hardlinked"}\n' if client == "claude" else '[external]\nvalue = "hardlinked"\n'
+    proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+    atomic_exchange = configurer.atomic_exchange
+    hardlink = tmp_path / f"external-hardlink.{suffix}"
+
+    def interleaved_exchange(first: Path, second: Path) -> None:
+        replacement = tmp_path / f"external.{suffix}"
+        replacement.write_text(external)
+        replacement.chmod(0o644)
+        os.link(replacement, hardlink)
+        os.replace(replacement, requested)
+        atomic_exchange(first, second)
+
+    monkeypatch.setattr(configurer, "atomic_exchange", interleaved_exchange)
+    with pytest.raises(configurer.RegistrationConflictError) as caught:
+        configurer.write_proposal(proposal)
+
+    recovery = Path(str(caught.value).rsplit(" ", 1)[-1])
+    assert recovery.parent != tmp_path
+    assert stat.S_IMODE(recovery.parent.stat().st_mode) == 0o700
+    assert recovery.stat().st_ino == hardlink.stat().st_ino
+    assert stat.S_IMODE(hardlink.stat().st_mode) == 0o644
+    assert hardlink.read_text() == external
+    recovery.unlink()
+    recovery.parent.rmdir()
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
+def test_post_exchange_fsync_error_retains_private_displaced_recovery(tmp_path: Path, client: str, monkeypatch) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    requested = tmp_path / f"{client}.{suffix}"
+    original = '{}\n' if client == "claude" else '[unrelated]\nvalue = "before"\n'
+    requested.write_text(original)
+    proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+    fsync_directory = configurer._fsync_directory
+    calls = 0
+
+    def fail_first_fsync(path: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("post-exchange durability failure")
+        fsync_directory(path)
+
+    monkeypatch.setattr(configurer, "_fsync_directory", fail_first_fsync)
+    with pytest.raises(configurer.RegistrationConflictError, match="preserve private recovery file") as caught:
+        configurer.write_proposal(proposal)
+
+    assert "agent-fabric" in requested.read_text()
+    recovery = Path(str(caught.value).rsplit(" ", 1)[-1])
+    assert recovery.read_text() == original
+    assert stat.S_IMODE(recovery.parent.stat().st_mode) == 0o700
+    recovery.unlink()
+    recovery.parent.rmdir()
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
+@pytest.mark.parametrize("failure_call", [3, 4])
+def test_post_commit_cleanup_fsync_error_does_not_report_conflict(
+    tmp_path: Path, client: str, failure_call: int, monkeypatch,
+) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    requested = tmp_path / f"{client}.{suffix}"
+    requested.write_text('{}\n' if client == "claude" else '[unrelated]\nvalue = "before"\n')
+    proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+    fsync_directory = configurer._fsync_directory
+    calls = 0
+
+    def fail_cleanup_fsync(path: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == failure_call:
+            raise OSError("cleanup durability failure")
+        fsync_directory(path)
+
+    monkeypatch.setattr(configurer, "_fsync_directory", fail_cleanup_fsync)
+
+    configurer.write_proposal(proposal)
+
+    assert "agent-fabric" in requested.read_text()
+    assert not list(tmp_path.glob(f".{requested.name}.recovery.*"))
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
+def test_pre_exchange_registration_error_cleans_private_staging(tmp_path: Path, client: str, monkeypatch) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    requested = tmp_path / f"{client}.{suffix}"
+    original = '{}\n' if client == "claude" else '[unrelated]\nvalue = "before"\n'
+    requested.write_text(original)
+    proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+
+    def unsupported_exchange(first: Path, second: Path) -> None:
+        raise configurer.RegistrationError("atomic config exchange is unavailable")
+
+    monkeypatch.setattr(configurer, "atomic_exchange", unsupported_exchange)
+    with pytest.raises(configurer.RegistrationError, match="unavailable"):
+        configurer.write_proposal(proposal)
+
+    assert requested.read_text() == original
+    assert not list(tmp_path.glob(f".{requested.name}.recovery.*"))
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
+@pytest.mark.parametrize("existing", [False, True])
+def test_post_commit_recovery_unlink_error_does_not_report_conflict(
+    tmp_path: Path, client: str, existing: bool, monkeypatch, capsys,
+) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    requested = tmp_path / f"{client}.{suffix}"
+    if existing:
+        requested.write_text('{}\n' if client == "claude" else '[unrelated]\nvalue = "before"\n')
+    proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+    unlink = configurer.Path.unlink
+
+    def fail_recovery_unlink(path: Path, *args, **kwargs) -> None:
+        if ".recovery." in path.parent.name:
+            raise OSError("recovery cleanup failure")
+        unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(configurer.Path, "unlink", fail_recovery_unlink)
+
+    configurer.write_proposal(proposal)
+
+    assert "agent-fabric" in requested.read_text()
+    recovery_directories = list(tmp_path.glob(f".{requested.name}.recovery.*"))
+    assert len(recovery_directories) == 1
+    assert stat.S_IMODE(recovery_directories[0].stat().st_mode) == 0o700
+    recovery_files = list(recovery_directories[0].iterdir())
+    assert len(recovery_files) == 1
+    assert str(recovery_files[0]) in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
+def test_private_recovery_preserves_displaced_symlink_without_following(tmp_path: Path, client: str, monkeypatch) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    requested = tmp_path / f"{client}.{suffix}"
+    requested.write_text('{}\n' if client == "claude" else '[unrelated]\nvalue = "before"\n')
+    proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+    atomic_exchange = configurer.atomic_exchange
+    referent = tmp_path / f"external-target.{suffix}"
+    referent.write_text('{"external":true}\n' if client == "claude" else '[external]\nvalue = true\n')
+
+    def interleaved_exchange(first: Path, second: Path) -> None:
+        replacement = tmp_path / f"external-link.{suffix}"
+        replacement.symlink_to(referent)
+        os.replace(replacement, requested)
+        atomic_exchange(first, second)
+
+    monkeypatch.setattr(configurer, "atomic_exchange", interleaved_exchange)
+    with pytest.raises(configurer.RegistrationConflictError) as caught:
+        configurer.write_proposal(proposal)
+
+    recovery = Path(str(caught.value).rsplit(" ", 1)[-1])
+    assert recovery.is_symlink()
+    assert os.readlink(recovery) == str(referent)
+    assert stat.S_IMODE(recovery.parent.stat().st_mode) == 0o700
+    assert referent.exists()
+    recovery.unlink()
+    recovery.parent.rmdir()
 
 
 @pytest.mark.parametrize("client", ["claude", "codex"])

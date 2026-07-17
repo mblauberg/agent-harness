@@ -136,9 +136,11 @@ Existing files are updated with an atomic exchange: the displaced identity and
 bytes must match the composed snapshot, and the requested direct path or
 symlink must still resolve to the installed inode. On any mismatch the command
 exits with a typed conflict and retains the displaced file at the reported
-private recovery path; it never rolls that file back over a pathname that a
-concurrent writer may have changed. Reconcile both the current client
-configuration and recovery file before rerunning.
+recovery path inside a fresh owner-only `0700` directory. The displaced object
+is inspected without following symlinks and is not chmodded, so hard-linked
+content retains its caller-owned mode. Conflict handling never rolls that object
+back over a pathname that a concurrent writer may have changed. Reconcile both
+the current client configuration and recovery object before rerunning.
 
 The resolved `.cap` file must remain a private regular file with mode `0600`.
 The adjacent `.json` file is secret-free metadata and is checked against the

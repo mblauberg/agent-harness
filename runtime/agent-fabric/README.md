@@ -114,8 +114,9 @@ available only as a separately scoped compatibility entry for a client that
 cannot preserve workspace cwd. It is not valid in global Claude Code and Codex
 registration. Existing-file updates use an atomic exchange with displaced-byte
 and installed-path verification. Concurrent configuration drift produces a
-typed conflict and retains the displaced configuration at a private recovery
-path; conflict handling never rolls back over the live client pathname.
+typed conflict and retains the displaced object without symlink following or
+chmod inside a fresh owner-only `0700` recovery directory; conflict handling
+never rolls back over the live client pathname.
 
 Clients use lock-safe on-demand bootstrap: they attach to a compatible
 incumbent before database preflight, or elect one daemon and inspect/publish

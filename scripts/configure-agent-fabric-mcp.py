@@ -286,7 +286,7 @@ def _requested_resolves_to_installed(proposal: ConfigProposal, installed: FileId
         elif _identity(source) != installed:
             return False
         resolved = proposal.snapshot.requested_path.resolve(strict=True)
-        if resolved != proposal.snapshot.target_path:
+        if proposal.snapshot.source_kind == "symlink" and resolved != proposal.snapshot.target_path:
             return False
         target, _ = _read_regular(resolved, proposal.client.title())
         return _identity(target) == installed
@@ -294,14 +294,50 @@ def _requested_resolves_to_installed(proposal: ConfigProposal, installed: FileId
         return False
 
 
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | os.O_NOFOLLOW)
+    try:
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise RegistrationError(f"recovery parent is not a directory: {path}")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _cleanup_recovery_directory(recovery_directory: Path, target_parent: Path) -> None:
+    try:
+        _fsync_directory(recovery_directory)
+    except OSError:
+        pass
+    try:
+        recovery_directory.rmdir()
+    except OSError:
+        return
+    try:
+        _fsync_directory(target_parent.resolve(strict=True))
+    except (OSError, RuntimeError):
+        pass
+
+
 def write_proposal(proposal: ConfigProposal) -> None:
     target = proposal.snapshot.target_path
     target.parent.mkdir(parents=True, exist_ok=True)
+    recovery_directory = Path(tempfile.mkdtemp(
+        dir=target.parent, prefix=f".{target.name}.recovery.",
+    )).resolve(strict=True)
+    recovery_stat = recovery_directory.lstat()
+    if (
+        not stat.S_ISDIR(recovery_stat.st_mode) or
+        recovery_stat.st_uid != os.geteuid() or
+        stat.S_IMODE(recovery_stat.st_mode) & 0o077
+    ):
+        recovery_directory.rmdir()
+        raise RegistrationError("private recovery directory could not be established")
     temporary: Path | None = None
     retain_temporary = False
     try:
         with tempfile.NamedTemporaryFile(
-            "w", dir=target.parent, prefix=f".{target.name}.", suffix=".tmp", delete=False,
+            "w", dir=recovery_directory, prefix=f".{target.name}.", suffix=".tmp", delete=False,
         ) as handle:
             temporary = Path(handle.name)
             os.chmod(handle.fileno(), 0o600)
@@ -318,16 +354,34 @@ def write_proposal(proposal: ConfigProposal) -> None:
                     f"{proposal.client.title()} config changed after registration was composed",
                 ) from exc
             retain_temporary = True
+            try:
+                _fsync_directory(recovery_directory)
+                _fsync_directory(target.parent.resolve(strict=True))
+            except OSError as exc:
+                raise RegistrationConflictError(
+                    f"{proposal.client.title()} config install durability failed; "
+                    f"preserve private recovery file {temporary}",
+                ) from exc
             if not _requested_resolves_to_installed(proposal, installed_identity):
                 raise RegistrationConflictError(
                     f"{proposal.client.title()} config changed during atomic install; "
-                    f"preserve recovery file {temporary}",
+                    f"preserve private recovery file {temporary}",
                 )
-            temporary.unlink()
             retain_temporary = False
         else:
-            atomic_exchange(temporary, target)
+            try:
+                atomic_exchange(temporary, target)
+            except (OSError, RegistrationError):
+                raise
             retain_temporary = True
+            try:
+                _fsync_directory(recovery_directory)
+                _fsync_directory(target.parent.resolve(strict=True))
+            except OSError as exc:
+                raise RegistrationConflictError(
+                    f"{proposal.client.title()} config exchange failed; "
+                    f"preserve private recovery file {temporary}",
+                ) from exc
             if (
                 not _displaced_matches(proposal, temporary) or
                 not _requested_resolves_to_installed(proposal, installed_identity)
@@ -336,11 +390,21 @@ def write_proposal(proposal: ConfigProposal) -> None:
                     f"{proposal.client.title()} config changed during atomic exchange; "
                     f"preserve displaced recovery file {temporary}",
                 )
-            temporary.unlink()
             retain_temporary = False
     finally:
+        cleanup_ready = True
         if temporary and not retain_temporary and temporary.exists():
-            temporary.unlink()
+            try:
+                temporary.unlink()
+            except OSError:
+                cleanup_ready = False
+                print(
+                    f"warning: {proposal.client.title()} config installed; cleanup failed; "
+                    f"preserve private recovery file {temporary}",
+                    file=sys.stderr,
+                )
+        if not retain_temporary and cleanup_ready and recovery_directory.exists():
+            _cleanup_recovery_directory(recovery_directory, target.parent)
 
 
 def main(argv: list[str] | None = None) -> int:
