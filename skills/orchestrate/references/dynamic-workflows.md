@@ -43,9 +43,10 @@ or `~/.claude/workflows/` (personal).
 
 ## Cost and model routing
 
-- Every agent inherits the session model unless the script routes a stage to another model. Route
-  explicitly: cheap tier for bulk scan/extract phases, mid tier for drafting/review legwork,
-  flagship only for synthesis and adjudication stages.
+- Resolve every stage's task class to tier, catalog identity and effort before
+  dispatch. Claude binds the runtime-discovered effective model and effort and
+  records the route receipt; inheritance is allowed only when explicit and
+  recorded.
 - Pilot a small slice first (one directory, one chapter, one claim family) to gauge spend; the
   agent caps bound runaway cost.
 - Pre-add the shell commands agents will need to the allowlist, or a long run stalls on prompts.
@@ -74,11 +75,12 @@ A workflow saved to `.claude/workflows/` (project) or `~/.claude/workflows/` (pe
   stringified JSON; `undefined` if absent). The script has no clock and no RNG: derive `runId`/timestamps
   from `args` or from the first agent (agents have Bash/FS), and vary per-item by index, never
   `Math.random()`.
-- **Model-tier routing.** Express routing as `role → family/tier/effort → runtime-discovered model`;
+- **Model-tier routing.** Express routing as `task class → role/family/tier/effort → runtime-discovered model`;
   never hard-code a dated model ID in the script body. Scout for bulk scan/extract, workhorse
   for drafting/review legwork, flagship for synthesis/adjudication, cross-family for decorrelated
-  review. Override per stage via `agent(…, { model })`; default to omitting `model` so agents inherit the
-  session model.
+  review. Bind the resolved model and effort per stage and retain the route receipt. Omit either only
+  for explicit, recorded chair inheritance or when the runtime lacks the control and the receipt records
+  an authorised substitution.
 - **Escalation as output.** Contract's escalation boundary and user gate: the runtime cannot pause a
   live script mid-run for approval — there is no adapter mechanism to suspend a running workflow and
   wait on a user. A gate-adjacent stage instead ends the workflow there and records `awaiting-user`

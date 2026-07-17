@@ -10,9 +10,23 @@ executor that owns its own safety and activation gates must opt in explicitly
 with `--adapter-gate direct-cli`; this never bypasses family or model-pattern
 constraints.
 
-Route by **role, evidence surface, safety requirement, and capability tier**. Never route by a memorised
-model name. Discover current model IDs and tool modes at runtime (`cli-headless.md`) and record what was
-actually used for high-stakes work.
+Route every dispatch by **task class, role, evidence surface, safety requirement,
+and capability tier**. Never route by a memorised model name. Discover current
+model IDs and effort modes at runtime (`cli-headless.md`) and retain the route
+receipt.
+
+| Task class | Default tier | Default effort | Typical work |
+|---|---|---|---|
+| `mechanical` | scout | low | search, extraction, formatting, deterministic checks |
+| `legwork` | workhorse | medium | ordinary implementation, analysis, drafting, source mapping |
+| `critical-review` | flagship | high | hard review, adversarial verification, design judgement |
+| `orchestration` | flagship | high | decomposition, adjudication, synthesis |
+
+`scripts/model-route resolve --task-class ...` is authoritative for these
+defaults. An explicit role override may raise effort; an unavailable effort may
+substitute only when the receipt records requested and effective values. Alias
+routing remains a compatibility surface. Chair inheritance is exceptional: it
+must be explicit and recorded, never inferred from an omitted binding.
 
 ## Tiers (relative, family-agnostic)
 
@@ -69,9 +83,9 @@ two different-family passes where practical. Prefer the safest adapter that can 
 artifact. If no safe external adapter is available under the host data policy, use objective local
 checks and record `CROSS-FAMILY-NOT-RUN` instead of pretending it happened.
 
-In dynamic workflows, every stage inherits the session model unless the script routes it. Route bulk
-scan/extract stages to the cheap tier and reserve flagship for synthesis/adjudication stages
-explicitly (`dynamic-workflows.md`).
+In dynamic workflows, bind every stage from its task class. Route bulk
+scan/extract stages to scout and reserve flagship for synthesis/adjudication
+(`dynamic-workflows.md`).
 
 Express chains by **role → tier/family**, resolving names at runtime:
 

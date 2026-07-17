@@ -44,6 +44,22 @@ def test_constitution_names_equal_primaries_and_router_has_current_codex_family(
     assert "GPT-5.6" in routing
 
 
+def test_subagent_dispatch_contract_requires_task_class_bound_route_and_receipt():
+    harness = (ROOT / "HARNESS.md").read_text()
+    skill = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text()
+    contract = (
+        ROOT / "skills" / "orchestrate" / "references" / "orchestration-contract.md"
+    ).read_text()
+    codex = (
+        ROOT / "skills" / "orchestrate" / "references" / "codex-subagents.md"
+    ).read_text()
+    for field in ("task class", "tier", "model", "effort", "route receipt"):
+        assert field in contract.lower()
+    assert "task class" in skill.lower()
+    assert "Codex subscription-native workers bind effort only" in harness
+    assert "omit" in codex.lower() and "model" in codex.lower()
+
+
 def test_constitution_is_a_compact_core_with_progressive_disclosure():
     text = (ROOT / "HARNESS.md").read_text()
     assert len(text.split()) <= 700

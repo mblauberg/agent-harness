@@ -60,9 +60,8 @@ rewrites and shared-branch pushes outside authorised merges stay gated.
 
 ## Routing and coverage
 
-Route roles through `scripts/model-route` as `flagship`, `workhorse` or `scout`;
-executors consume its receipt. Use runtime-discovered model and effort
-capabilities; a dated catalogue is an explicit cache. Receipts distinguish
+Dispatch task classes through `scripts/model-route` to `flagship`, `workhorse`
+or `scout`; bind identity, effort and receipt. Codex subscription-native workers bind effort only. Runtime governs; catalogues are caches. Receipts distinguish
 adapter, endpoint, model family, requested/effective effort, capability source
 and substitution. See `skills/orchestrate/references/routing-and-tiers.md`.
 

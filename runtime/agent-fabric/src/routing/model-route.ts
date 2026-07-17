@@ -20,29 +20,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+type ModelRouteRequest = {
+  adapter: string;
+  role: string;
+  model?: string;
+  leadFamily: string;
+  requireDistinct: boolean;
+} & (
+  | { alias: string; taskClass?: never; effort?: string }
+  | { taskClass: string; alias?: never; effort?: never }
+);
+
 export async function resolveModelRouteReceipt(input: {
   routerPath: string;
   receiptPath: string;
-  request: {
-    adapter: string;
-    alias: string;
-    role: string;
-    model?: string;
-    leadFamily: string;
-    requireDistinct: boolean;
-  };
+  request: ModelRouteRequest;
 }): Promise<{
   receipt: Record<string, unknown>;
   invocation: { executable: string; arguments: string[] };
 }> {
+  if ((input.request.alias === undefined) === (input.request.taskClass === undefined)) {
+    throw new TypeError("model route requires exactly one of alias or taskClass");
+  }
   const argumentsList = [
     "resolve",
     "--adapter",
     input.request.adapter,
-    "--alias",
-    input.request.alias,
+    ...(input.request.taskClass === undefined
+      ? ["--alias", input.request.alias]
+      : ["--task-class", input.request.taskClass]),
     "--role",
     input.request.role,
+    ...(input.request.effort === undefined ? [] : ["--effort", input.request.effort]),
     ...(input.request.model === undefined ? [] : ["--model", input.request.model]),
     "--lead-family",
     input.request.leadFamily,

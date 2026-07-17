@@ -105,6 +105,90 @@ def test_aliases_supply_proportionate_default_effort():
         assert route["effort"] == effort
 
 
+@pytest.mark.parametrize(
+    ("task_class", "alias", "effort", "catalog_model"),
+    (
+        ("mechanical", "scout", "low", "gpt-5.6-luna"),
+        ("legwork", "workhorse", "medium", "gpt-5.6-terra"),
+        ("critical-review", "flagship", "high", "gpt-5.6-sol"),
+        ("orchestration", "flagship", "high", "gpt-5.6-sol"),
+    ),
+)
+def test_task_classes_bind_codex_policy_identity_without_transport_model(
+    task_class, alias, effort, catalog_model
+):
+    result, route = resolve(
+        "--adapter", "codex", "--task-class", task_class, "--role", "worker"
+    )
+    assert result.returncode == 0
+    assert route["task_class"] == task_class
+    assert route["route_source"] == "task-class"
+    assert route["alias"] == alias
+    assert route["requested_effort"] == effort
+    assert route["effort"] == effort
+    assert route["resolved_model"] == ""
+    assert route["catalog_model"] == catalog_model
+    assert route["model_selection"] == "account-default"
+    assert route["identity_source"] == "account-default"
+
+
+def test_claude_critical_review_task_class_uses_runtime_discovered_reviewer_route():
+    result, route = resolve(
+        "--adapter", "claude", "--task-class", "critical-review",
+        "--role", "critical-review", "--available-model", "opus",
+    )
+    assert result.returncode == 0
+    assert route["alias"] == "flagship"
+    assert route["requested_effort"] == "high"
+    assert route["resolved_model"] == "opus"
+    assert route["identity_source"] == "runtime-available+catalog"
+
+
+def test_task_class_effort_substitution_is_audited_when_baseline_is_unavailable():
+    result, route = resolve(
+        "--adapter", "codex", "--task-class", "critical-review", "--role", "worker",
+        "--available-effort", "medium",
+    )
+    assert result.returncode == 0
+    assert route["requested_effort"] == "high"
+    assert route["effort"] == "medium"
+    assert route["effort_substitution"] == (
+        "high unavailable (runtime/model capability); used medium"
+    )
+
+
+def test_task_class_role_override_is_audited_above_the_class_baseline():
+    result, route = resolve(
+        "--adapter", "codex", "--task-class", "orchestration", "--role", "lead"
+    )
+    assert result.returncode == 0
+    assert route["requested_effort"] == "ultra"
+    assert route["effort_source"] == "role-default"
+
+
+def test_legacy_alias_route_does_not_claim_task_class_binding():
+    result, route = resolve(
+        "--adapter", "codex", "--alias", "scout", "--role", "worker"
+    )
+    assert result.returncode == 0
+    assert "task_class" not in route
+    assert "route_source" not in route
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ("--alias", "scout", "--task-class", "mechanical"),
+        ("--task-class", "mechanical", "--effort", "medium"),
+        ("--task-class", "unknown"),
+    ),
+)
+def test_task_class_rejects_ambiguous_or_unknown_routing_inputs(arguments):
+    result, route = resolve("--adapter", "codex", *arguments, "--role", "worker")
+    assert result.returncode == 2
+    assert route is None
+
+
 def test_codex_lead_uses_ultra_orchestration_effort():
     result, route = resolve("--adapter", "codex", "--alias", "flagship", "--role", "lead")
     assert result.returncode == 0

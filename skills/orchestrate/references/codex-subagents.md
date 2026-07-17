@@ -56,12 +56,24 @@ Good Codex worker prompt fields:
 
 ```
 role:              explorer | worker | default
+task-class:        mechanical | legwork | critical-review | orchestration
+tier:              scout | workhorse | flagship
+catalog-model:     Luna | Terra | Sol
+effort:            <effective effort from route receipt>
+route-receipt:     <path or receipt identity>
 scope:             <files / sources / task slice>
 write-scope:       read-only | exact owned paths
 must-not:          <shared writes, destructive commands, stale sources>
 output-path:       <run-dir>/findings/<name>.md
 return:            3-6 bullets, surprises, unresolved, file path
 ```
+
+For subscription-native Codex workers, omit the literal transport `model` and
+bind the resolved `effort`; retain Luna/Terra/Sol as the catalog identity in the
+receipt. If the native surface cannot bind that effort, stop or use an
+authorised adapter and record the substitution. Do not silently inherit the
+chair route. Explicit chair inheritance is valid only when the dispatch and
+receipt say so.
 
 Codex should consolidate results after all requested subagents finish. The orchestrator still decides
 which findings are supported; do not majority-vote weak claims into truth.

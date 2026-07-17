@@ -280,8 +280,16 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
     fixed_family = adapter.get("fixed_model_family") if adapter else None
     family_config = catalog["families"].get(fixed_family, {}) if fixed_family else {}
     role_effort = family_config.get("role_effort_defaults", {}).get(args.role, {}).get(args.alias)
-    requested_effort = args.effort or role_effort or {"flagship": "high", "workhorse": "medium", "scout": "low"}[args.alias]
-    effort_source = "explicit" if args.effort else ("role-default" if role_effort else "alias-default")
+    task_class_effort = args.task_class_effort
+    requested_effort = args.effort or role_effort or task_class_effort or {
+        "flagship": "high", "workhorse": "medium", "scout": "low"
+    }[args.alias]
+    effort_source = (
+        "explicit" if args.effort
+        else "role-default" if role_effort
+        else "task-class" if task_class_effort
+        else "alias-default"
+    )
     base = {
         "schema_version": 1,
         "catalog_date": catalog["catalog_date"],
@@ -294,6 +302,8 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
         "lead_family": args.lead_family,
         "adapter_gate": args.adapter_gate,
     }
+    if args.task_class:
+        base.update({"task_class": args.task_class, "route_source": "task-class"})
     if not adapter:
         return emit({**base, "status": "unknown_adapter"}, 2)
     args.effort_transport = adapter.get("effort_transport", "none")
@@ -627,7 +637,9 @@ def parser() -> argparse.ArgumentParser:
     commands = root.add_subparsers(dest="command", required=True)
     command = commands.add_parser("resolve")
     command.add_argument("--adapter", required=True)
-    command.add_argument("--alias", choices=("flagship", "workhorse", "scout"), required=True)
+    route = command.add_mutually_exclusive_group(required=True)
+    route.add_argument("--alias", choices=("flagship", "workhorse", "scout"))
+    route.add_argument("--task-class")
     command.add_argument("--role", required=True)
     command.add_argument("--effort")
     command.add_argument("--model")
@@ -651,9 +663,24 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    argument_parser = parser()
+    args = argument_parser.parse_args(argv)
     catalog = load_catalog()
     if args.command == "resolve":
+        args.task_class_effort = ""
+        if args.task_class:
+            route = catalog.get("task_class_routes", {}).get(args.task_class)
+            if (
+                not isinstance(route, dict)
+                or route.get("alias") not in {"flagship", "workhorse", "scout"}
+                or not isinstance(route.get("effort"), str)
+                or not route["effort"]
+            ):
+                argument_parser.error(f"unknown task class: {args.task_class}")
+            if args.effort:
+                argument_parser.error("--task-class cannot be combined with --effort")
+            args.alias = route["alias"]
+            args.task_class_effort = route["effort"]
         return resolve(args, catalog)
     return 2
 

@@ -11,6 +11,46 @@ import {
 } from "../../support/primary-adapter-testkit.ts";
 
 describe("FR-015 controlled model routing receipt", () => {
+  it("binds a task class to the router invocation and retained receipt", async () => {
+    const resolveRoute = requirePublicFunction("resolveModelRouteReceipt");
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-task-route-receipt-"));
+    const receiptPath = join(directory, "model-route.json");
+    const routerPath = repositoryPath("scripts/model-route");
+
+    const resolution = await resolveRoute({
+      routerPath,
+      receiptPath,
+      request: {
+        adapter: "codex",
+        taskClass: "mechanical",
+        role: "worker",
+        leadFamily: "anthropic",
+        requireDistinct: true,
+      },
+    }) as {
+      invocation: { arguments: string[] };
+      receipt: Record<string, unknown>;
+    };
+
+    expect(resolution.invocation.arguments).toEqual(expect.arrayContaining([
+      "--task-class", "mechanical",
+    ]));
+    expect(resolution.invocation.arguments).not.toContain("--alias");
+    expect(resolution.receipt).toMatchObject({
+      status: "ok",
+      task_class: "mechanical",
+      route_source: "task-class",
+      alias: "scout",
+      requested_effort: "low",
+      effort: "low",
+      resolved_model: "",
+      catalog_model: "gpt-5.6-luna",
+      model_selection: "account-default",
+      identity_source: "account-default",
+    });
+    expect(JSON.parse(await readFile(receiptPath, "utf8"))).toEqual(resolution.receipt);
+  });
+
   it("retains the complete rejection receipt and fails closed for a disabled adapter", async () => {
     const resolveRoute = requirePublicFunction("resolveModelRouteReceipt");
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-route-receipt-"));
