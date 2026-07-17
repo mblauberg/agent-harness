@@ -14,6 +14,8 @@ allowedAdapters:
 activeAdapters:
   - claude-agent-sdk
   - codex-app-server
+  - agy
+  - cursor-agent
 
 allowedProfiles:
   - headless

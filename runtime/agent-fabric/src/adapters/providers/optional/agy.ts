@@ -27,7 +27,11 @@ export function createAgyAdapter(options: {
     }),
     boundary: options.boundary,
     journal: options.journal,
-    modelPolicy: { adapterId: "agy", allowedFamilies: ["google"] },
+    modelPolicy: {
+      adapterId: "agy",
+      allowedFamilies: ["google"],
+      allowedModelPatterns: ["gemini*"],
+    },
   });
 }
 
