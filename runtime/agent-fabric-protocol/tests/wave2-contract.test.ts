@@ -132,6 +132,23 @@ describe("semantic operation boundaries", () => {
     })).toThrowError(/status|hasMore|snapshotRevision|resnapshot/iu);
   });
 
+  it("accepts zero cursors for an empty projection stream", () => {
+    expect(parseOperationResult(FABRIC_OPERATIONS.projectionEvents, {
+      status: "continuation",
+      events: [],
+      nextCursor: 0,
+      hasMore: false,
+      snapshotRevision: 1,
+      readTransactionId: "projection_01",
+    })).toMatchObject({ status: "continuation", events: [], nextCursor: 0 });
+    expect(parseOperationResult(FABRIC_OPERATIONS.projectionEvents, {
+      status: "resnapshot-required",
+      reason: "cursor-overflow",
+      currentSnapshotRevision: 1,
+      snapshotCursor: 0,
+    })).toMatchObject({ status: "resnapshot-required", snapshotCursor: 0 });
+  });
+
   it.each(Object.keys(OPERATION_CONTRACT_FIXTURES) as ProtocolOperation[])(
     "rejects a wrong-type required input boundary for %s",
     (operation) => {

@@ -6,7 +6,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { startFabricDaemon, type FabricDaemonHandle } from "@local/agent-fabric";
 
-import type { ConsoleBootstrapRequest } from "../src/application.js";
+import {
+  startFabricConsoleApplication,
+  type ConsoleBootstrapPort,
+  type ConsoleBootstrapRequest,
+} from "../src/application.js";
+import { reduceFabricPointer, renderFabricConsoleFrame } from "../src/index.js";
 import { createProductionConsoleBootstrap } from "../src/production-composition.js";
 
 type FabricTestPaths = Readonly<{
@@ -117,6 +122,39 @@ async function seedRunWithTasks(databasePath: string, projectId: string): Promis
 }
 
 describe("real local-session to production-binding path", () => {
+  it(
+    "keeps an eventless production Console live after its first refresh",
+    { timeout: 120_000 },
+    async () => {
+      const { paths, project } = await realFabricFixture();
+      const production = createProductionConsoleBootstrap();
+      const bootstrap: ConsoleBootstrapPort = {
+        startOrAttach: async (request) => await production.startOrAttach({
+          ...request,
+          paths,
+          daemon: { executionProfile: "headless", workspaceRoots: [project] },
+          clientId: "console_real_refresh_01",
+        } as unknown as ConsoleBootstrapRequest),
+      };
+      const application = await startFabricConsoleApplication({
+        bootstrap,
+        projectRoot: project,
+        surface: "standalone",
+        viewport: { columns: 80, rows: 24 },
+        draw: () => {},
+        eventId: () => "console-real-refresh",
+        confirmationId: () => "console-real-refresh-confirmation",
+        render: renderFabricConsoleFrame,
+        reducePointer: reduceFabricPointer,
+      });
+      closers.push(async () => await application.close("operator"));
+
+      expect(application.dataset.connection).toMatchObject({ state: "live" });
+      await application.refresh();
+      expect(application.dataset.connection).toMatchObject({ state: "live" });
+    },
+  );
+
   it(
     "negotiates declared run progress end-to-end and serves the fact through the production binding",
     { timeout: 120_000 },
