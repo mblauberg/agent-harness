@@ -186,6 +186,12 @@ describe("optional production provider wrappers", () => {
       }),
     ).rejects.toMatchObject({ code: "ADAPTER_FAMILY_FORBIDDEN" });
     await expect(
+      adapter.request("spawn", {
+        actionId: "agy-google-non-gemini",
+        payload: { model: "gpt-5", modelFamily: "google", prompt: "wrong model" },
+      }),
+    ).rejects.toMatchObject({ code: "ADAPTER_MODEL_FORBIDDEN" });
+    await expect(
       adapter.request("dispatch", {
         actionId: "agy-steer-1",
         operation: "steer",

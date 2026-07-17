@@ -18,5 +18,5 @@ describe.skipIf(!liveSmokeEnabled)("live workstation adapter compatibility smoke
       valid: true,
       adapterIds: ["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent"],
     });
-  });
+  }, 30_000);
 });

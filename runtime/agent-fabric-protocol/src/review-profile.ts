@@ -80,6 +80,12 @@ export const RESOLVED_REVIEW_PROFILE_V1_CODEC = parserBacked(
       if (effort.kind === "inapplicable" && slot.requestedEffort !== null) {
         throw new TypeError(`${path}.slots[${String(index)}].requestedEffort must be null for inapplicable effort`);
       }
+      if (
+        (slot.slot === "cursor-grok" || slot.slot === "agy-gemini") &&
+        (slot.requestedEffort !== null || effort.kind !== "inapplicable")
+      ) {
+        throw new TypeError(`${path}.slots[${String(index)}] helper effort must be inapplicable with a null request`);
+      }
     });
     const target = record.targetChairFamily as "openai" | "anthropic";
     const expected = [
