@@ -5,13 +5,20 @@ import { join, resolve } from "node:path";
 import { verifyAdapterCompatibility } from "../adapters/compatibility.js";
 import { loadFabricConfig } from "../config/index.js";
 import { assertDatabaseIntegrity } from "../persistence/invariants.js";
+import { BootstrapElection, FLOCK_ELECTION_LOCK_PORT } from "../daemon/bootstrap-election.js";
 import { connectFabricDaemon } from "../daemon/client.js";
+import { privateDiscoveryPaths, readPrivateDiscovery } from "../daemon/private-discovery.js";
 import { readDiscoveryReceipt } from "./mcp-provision.js";
 import type { FabricPaths } from "./paths.js";
 import { MCP_SEATS, resolveSeatPaths, type SeatMetadata } from "./seat-store.js";
 import { trustedWorkspaceRoots } from "./workspace-trust.js";
 
-type Check = { id: string; status: "pass" | "fail"; detail: string };
+type Check = { id: string; status: "pass" | "idle" | "fail"; code: string; detail: string };
+
+type DoctorDaemonState =
+  | { status: "live"; code: "DAEMON_LIVE"; detail: string; pid: number; socketPath: string }
+  | { status: "idle"; code: "DAEMON_ON_DEMAND_IDLE"; detail: string; pid: null; socketPath: null }
+  | { status: "failed"; code: string; detail: string; pid: number | null; socketPath: string | null };
 
 function option(arguments_: string[], name: string): string | undefined {
   const index = arguments_.indexOf(name);
@@ -22,6 +29,26 @@ function option(arguments_: string[], name: string): string | undefined {
 
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function errorCode(error: unknown, fallback: string): string {
+  return error instanceof Error && "code" in error && typeof error.code === "string"
+    ? error.code
+    : fallback;
+}
+
+function checkCode(id: string, outcome: "OK" | "FAILED"): string {
+  return `${id.replaceAll("-", "_").toUpperCase()}_${outcome}`;
+}
+
+function generationIdentityMatches(
+  owner: { actionId: string; electionGeneration: number; daemonInstanceGeneration: number; socketPath: string },
+  ready: { actionId: string; electionGeneration: number; daemonInstanceGeneration: number; socketPath: string },
+): boolean {
+  return ready.actionId === owner.actionId
+    && ready.electionGeneration === owner.electionGeneration
+    && ready.daemonInstanceGeneration === owner.daemonInstanceGeneration
+    && ready.socketPath === owner.socketPath;
 }
 
 function agentsHome(arguments_: string[]): string {
@@ -87,9 +114,211 @@ export async function fabricStatus(arguments_: string[], paths: FabricPaths): Pr
 async function check(id: string, operation: () => string | undefined | Promise<string | undefined>): Promise<Check> {
   try {
     const detail = await operation();
-    return { id, status: "pass", detail: detail === undefined || detail.length === 0 ? "ok" : detail };
+    return { id, status: "pass", code: checkCode(id, "OK"), detail: detail === undefined || detail.length === 0 ? "ok" : detail };
   } catch (error: unknown) {
-    return { id, status: "fail", detail: errorDetail(error) };
+    return { id, status: "fail", code: errorCode(error, checkCode(id, "FAILED")), detail: errorDetail(error) };
+  }
+}
+
+async function socketIsAbsent(socketPath: string): Promise<boolean> {
+  try {
+    await lstat(socketPath);
+    return false;
+  } catch (error: unknown) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return true;
+    throw error;
+  }
+}
+
+async function doctorDaemonState(paths: FabricPaths): Promise<DoctorDaemonState> {
+  try {
+    return await new BootstrapElection({ runtimeDirectory: paths.runtimeDirectory }).inspectCurrentWith(async (election) => {
+      if (election.status === "active") {
+        return {
+          status: "failed" as const,
+          code: "BOOTSTRAP_IN_PROGRESS",
+          detail: "bootstrap election is active",
+          pid: null,
+          socketPath: null,
+        };
+      }
+      const shutdown = await FLOCK_ELECTION_LOCK_PORT.probe(join(paths.runtimeDirectory, "daemon-shutdown.lock"));
+      if (shutdown.status === "held") {
+        return {
+          status: "failed" as const,
+          code: "DAEMON_SHUTDOWN_IN_PROGRESS",
+          detail: "daemon shutdown transition is active",
+          pid: null,
+          socketPath: null,
+        };
+      }
+      try {
+      const discovery = await readPrivateDiscovery(privateDiscoveryPaths(paths.runtimeDirectory), paths.socketPath);
+    if (discovery.status === "absent" || discovery.status === "terminal") {
+      if (discovery.status === "terminal" && discovery.owner.state === "crashed") {
+        return {
+          status: "failed",
+          code: "DAEMON_PROCESS_CRASHED",
+          detail: `daemon generation crashed (exit=${String(discovery.owner.exitCode)} signal=${String(discovery.owner.signal)})`,
+          pid: discovery.owner.pid,
+          socketPath: null,
+        };
+      }
+      if (discovery.status === "terminal" && discovery.owner.state !== "stopped") {
+        return {
+          status: "failed",
+          code: "DAEMON_DISCOVERY_INVALID",
+          detail: `terminal daemon discovery state ${String(discovery.owner.state)} is not a clean stop`,
+          pid: discovery.owner.pid,
+          socketPath: null,
+        };
+      }
+      if (
+        discovery.status === "terminal"
+        && (discovery.owner.exitCode !== 0 || discovery.owner.signal !== null)
+      ) {
+        return {
+          status: "failed",
+          code: "DAEMON_PROCESS_UNCLEAN_STOP",
+          detail: `daemon stopped uncleanly (exit=${String(discovery.owner.exitCode)} signal=${String(discovery.owner.signal)})`,
+          pid: discovery.owner.pid,
+          socketPath: null,
+        };
+      }
+      if (discovery.status === "absent" && election.status !== "absent") {
+        if (election.status === "terminal") {
+          return {
+            status: "failed",
+            code: election.receipt.code,
+            detail: election.receipt.message,
+            pid: null,
+            socketPath: null,
+          };
+        }
+        return {
+          status: "failed",
+          code: "DAEMON_DISCOVERY_MISSING",
+          detail: "bootstrap completed but no generation-bound daemon discovery is available",
+          pid: null,
+          socketPath: null,
+        };
+      }
+      if (!await socketIsAbsent(paths.socketPath)) {
+        return {
+          status: "failed",
+          code: "DAEMON_SOCKET_STALE",
+          detail: "daemon socket exists without an active generation-bound owner",
+          pid: discovery.status === "terminal" ? discovery.owner.pid : null,
+          socketPath: paths.socketPath,
+        };
+      }
+      if (
+        discovery.status === "terminal"
+        && (election.status !== "ready" || !generationIdentityMatches(discovery.owner, election.receipt))
+      ) {
+        return {
+          status: "failed",
+          code: "DAEMON_ELECTION_INCONSISTENT",
+          detail: "terminal daemon discovery has no matching successful bootstrap election",
+          pid: discovery.owner.pid,
+          socketPath: null,
+        };
+      }
+      return {
+        status: "idle",
+        code: "DAEMON_ON_DEMAND_IDLE",
+        detail: discovery.status === "terminal" ? "on-demand daemon stopped cleanly" : "on-demand daemon has not been started",
+        pid: null,
+        socketPath: null,
+      };
+    }
+    if (discovery.status === "ambiguous") {
+      return {
+        status: "failed",
+        code: "DAEMON_DISCOVERY_AMBIGUOUS",
+        detail: discovery.message,
+        pid: discovery.owner?.pid ?? discovery.receipt?.pid ?? null,
+        socketPath: paths.socketPath,
+      };
+    }
+    if (
+      election.status !== "ready" ||
+      !generationIdentityMatches(discovery.owner, election.receipt)
+    ) {
+      return {
+        status: "failed",
+        code: "DAEMON_ELECTION_INCONSISTENT",
+        detail: "active daemon discovery does not match the successful bootstrap election",
+        pid: discovery.receipt.pid,
+        socketPath: discovery.receipt.socketPath,
+      };
+    }
+    try {
+      process.kill(discovery.receipt.pid, 0);
+    } catch (error: unknown) {
+      return {
+        status: "failed",
+        code: "DAEMON_PROCESS_UNAVAILABLE",
+        detail: errorDetail(error),
+        pid: discovery.receipt.pid,
+        socketPath: discovery.receipt.socketPath,
+      };
+    }
+    let info;
+    try {
+      info = await lstat(discovery.receipt.socketPath);
+    } catch (error: unknown) {
+      return {
+        status: "failed",
+        code: "DAEMON_SOCKET_UNAVAILABLE",
+        detail: errorDetail(error),
+        pid: discovery.receipt.pid,
+        socketPath: discovery.receipt.socketPath,
+      };
+    }
+    if (!info.isSocket() || info.uid !== process.getuid?.()) {
+      return {
+        status: "failed",
+        code: "DAEMON_SOCKET_UNSAFE",
+        detail: "daemon socket is not owned by the current user",
+        pid: discovery.receipt.pid,
+        socketPath: discovery.receipt.socketPath,
+      };
+    }
+    try {
+      const client = await connectFabricDaemon({
+        socketPath: discovery.receipt.socketPath,
+        capability: discovery.receipt.bootstrapCapability,
+      });
+      await client.close();
+    } catch (error: unknown) {
+      return {
+        status: "failed",
+        code: "DAEMON_HANDSHAKE_FAILED",
+        detail: errorDetail(error),
+        pid: discovery.receipt.pid,
+        socketPath: discovery.receipt.socketPath,
+      };
+    }
+    return {
+      status: "live",
+      code: "DAEMON_LIVE",
+      detail: "daemon discovery, process, socket and handshake are healthy",
+      pid: discovery.receipt.pid,
+      socketPath: discovery.receipt.socketPath,
+    };
+      } finally {
+        await shutdown.handle.release();
+      }
+    });
+  } catch (error: unknown) {
+    return {
+      status: "failed",
+      code: errorCode(error, "DAEMON_DISCOVERY_FAILED"),
+      detail: errorDetail(error),
+      pid: null,
+      socketPath: null,
+    };
   }
 }
 
@@ -137,11 +366,24 @@ export async function fabricDoctor(arguments_: string[], paths: FabricPaths): Pr
     const database = new Database(paths.databasePath, { readonly: true, fileMustExist: true });
     try { assertDatabaseIntegrity(database); } finally { database.close(); }
   }));
-  checks.push(await check("daemon-socket", async () => {
-    const state = await daemonState(paths);
-    if (!state.reachable) throw new Error("daemon discovery, process or Unix socket is unavailable");
-    const info = await lstat(paths.socketPath);
-    if (!info.isSocket() || info.uid !== process.getuid?.()) throw new Error("daemon socket is not owned by the current user");
-  }));
-  return { schemaVersion: 1, healthy: checks.every((item) => item.status === "pass"), checks };
+  const daemon = await doctorDaemonState(paths);
+  checks.push({
+    id: "daemon-socket",
+    status: daemon.status === "live" ? "pass" : daemon.status === "idle" ? "idle" : "fail",
+    code: daemon.code,
+    detail: daemon.detail,
+  });
+  const failed = checks.find((item) => item.status === "fail");
+  return {
+    schemaVersion: 1,
+    healthy: failed === undefined,
+    state: failed === undefined ? daemon.status : "failed",
+    code: failed?.code ?? daemon.code,
+    daemon: {
+      status: daemon.status,
+      pid: daemon.pid,
+      socketPath: daemon.socketPath,
+    },
+    checks,
+  };
 }

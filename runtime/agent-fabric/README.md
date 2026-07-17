@@ -112,4 +112,9 @@ may host or observe processes, but it does not own daemon truth. A newly
 started client session loads its MCP registry entry; an older provider session
 may need to reconnect or restart after a registry or seat-generation change.
 
+Doctor inspection uses a shared flock across election and discovery
+classification. Concurrent doctors coexist, while an exclusive bootstrap or
+shutdown-transition fence reports in progress rather than idle or
+stale-socket. Healthy stopped-idle requires exit `0` with no signal.
+
 See [the operations runbook](../../docs/runbooks/agent-fabric-operations.md) before any live start or registration.

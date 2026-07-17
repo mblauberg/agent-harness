@@ -83,6 +83,12 @@ export type BootstrapGenerationOutcome =
   | { kind: "ready"; receipt: BootstrapReadyReceipt }
   | { kind: "terminal"; receipt: BootstrapTerminalLease };
 
+export type BootstrapElectionInspection =
+  | { status: "absent" }
+  | { status: "active"; ownership: "kernel-lock" }
+  | { status: "ready"; receipt: BootstrapReadyReceipt }
+  | { status: "terminal"; receipt: BootstrapTerminalLease };
+
 export class BootstrapElectionError extends Error {
   readonly code: string;
 
@@ -97,8 +103,13 @@ export type ElectionLockHandle = {
   release(): Promise<void>;
 };
 
+export type ElectionLockProbe =
+  | { status: "held" }
+  | { status: "acquired"; handle: ElectionLockHandle };
+
 export type ElectionLockPort = {
   tryAcquire(lockPath: string): Promise<ElectionLockHandle | undefined>;
+  probe(lockPath: string): Promise<ElectionLockProbe>;
 };
 
 export type BootstrapElectionPaths = {
@@ -248,7 +259,7 @@ function parseReady(value: unknown): BootstrapReadyReceipt {
   };
 }
 
-async function flockPromise(fileDescriptor: number, mode: "exnb" | "un"): Promise<void> {
+async function flockPromise(fileDescriptor: number, mode: "shnb" | "exnb" | "un"): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
     flock(fileDescriptor, mode, (error) => error === null ? resolvePromise() : reject(error));
   });
@@ -291,6 +302,52 @@ export const FLOCK_ELECTION_LOCK_PORT: ElectionLockPort = Object.freeze({
           } finally {
             await lockedHandle.close();
           }
+        },
+      };
+    } catch (error: unknown) {
+      await handle?.close().catch(() => undefined);
+      if (isErrno(error, "ELOOP")) {
+        throw new BootstrapElectionError("BOOTSTRAP_PATH_UNSAFE", `${lockPath} must not be a symbolic link`, { cause: error });
+      }
+      throw error;
+    }
+  },
+  async probe(lockPath: string): Promise<ElectionLockProbe> {
+    let handle: FileHandle | undefined;
+    try {
+      // The lock file is a stable private runtime artifact. Creating it here
+      // closes the absent-to-created race. Shared inspection locks coexist,
+      // while bootstrap's exclusive ownership remains excluded.
+      handle = await open(
+        lockPath,
+        constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW,
+        PRIVATE_FILE_MODE,
+      );
+      await validatePrivateHandle(handle, lockPath);
+      try {
+        await flockPromise(handle.fd, "shnb");
+      } catch (error: unknown) {
+        if (isErrno(error, "EAGAIN", "EACCES", "EWOULDBLOCK")) {
+          await handle.close();
+          return { status: "held" };
+        }
+        throw error;
+      }
+      await validatePrivateHandle(handle, lockPath);
+      let released = false;
+      const lockedHandle = handle;
+      return {
+        status: "acquired",
+        handle: {
+          async release(): Promise<void> {
+            if (released) return;
+            released = true;
+            try {
+              await flockPromise(lockedHandle.fd, "un");
+            } finally {
+              await lockedHandle.close();
+            }
+          },
         },
       };
     } catch (error: unknown) {
@@ -582,6 +639,41 @@ export class BootstrapElection {
       throw new BootstrapElectionError("BOOTSTRAP_GENERATION_SUPERSEDED", `bootstrap generation ${String(generation)} was superseded`);
     }
     return undefined;
+  }
+
+  async inspectCurrent(): Promise<BootstrapElectionInspection> {
+    return await this.inspectCurrentWith(async (inspection) => inspection);
+  }
+
+  async inspectCurrentWith<T>(
+    callback: (inspection: BootstrapElectionInspection) => Promise<T>,
+  ): Promise<T> {
+    const lock = await this.#lockPort.probe(this.paths.lockPath);
+    if (lock.status === "held") {
+      return await callback({ status: "active", ownership: "kernel-lock" });
+    }
+    try {
+      const [lease, ready] = await Promise.all([this.#readLease(), this.#readReady()]);
+      if (lease === undefined && ready === undefined) return await callback({ status: "absent" });
+      if (lease?.status === "held") {
+        throw new BootstrapElectionError(
+          "BOOTSTRAP_ELECTION_INCONSISTENT",
+          "bootstrap lease is held without kernel election ownership",
+        );
+      }
+      const generation = Math.max(lease?.electionGeneration ?? 0, ready?.electionGeneration ?? 0);
+      if (generation === 0) return await callback({ status: "absent" });
+      const outcome = await this.readGenerationOutcome(generation);
+      if (outcome === undefined) {
+        throw new BootstrapElectionError("BOOTSTRAP_INCOMPLETE", "bootstrap election artifacts have no current outcome");
+      }
+      const inspection: BootstrapElectionInspection = outcome.kind === "ready"
+        ? { status: "ready", receipt: outcome.receipt }
+        : { status: "terminal", receipt: outcome.receipt };
+      return await callback(inspection);
+    } finally {
+      if (lock.status === "acquired") await lock.handle.release();
+    }
   }
 
   async waitForGenerationOutcome(generation: number, deadlineAt = this.#clock() + this.#waitTimeoutMs): Promise<BootstrapGenerationOutcome> {
