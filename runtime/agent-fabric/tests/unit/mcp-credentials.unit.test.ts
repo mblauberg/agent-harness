@@ -63,23 +63,31 @@ describe("MCP capability loading", () => {
     await expect(resolveMcpCapability({ AGENT_FABRIC_CAPABILITY_FILE: path })).rejects.toThrow(/private/u);
   });
 
-  it("selects the nearest provisioned project seat and fails closed in another project", async () => {
+  it("derives distinct project keys from two working directories and never crosses their capabilities", async () => {
     const directory = await mkdtemp(join(tmpdir(), "fabric-mcp-project-seat-"));
     cleanup.push(directory);
     const stateDirectory = join(directory, "state");
     const project = join(directory, "project-a");
     const nested = join(project, "nested");
     const otherProject = join(directory, "project-b");
+    const unprovisioned = join(directory, "project-c");
     await Promise.all([
       mkdir(nested, { recursive: true }),
       mkdir(otherProject, { recursive: true }),
+      mkdir(unprovisioned, { recursive: true }),
       mkdir(stateDirectory, { recursive: true, mode: 0o700 }),
     ]);
     const projectPath = await realpath(project);
+    const otherProjectPath = await realpath(otherProject);
     const { key, directory: seatDirectory } = await createCurrentSeatDirectory(
       stateDirectory,
       projectPath,
       GENERATION_NEAREST,
+    );
+    const { key: otherKey, directory: otherSeatDirectory } = await createCurrentSeatDirectory(
+      stateDirectory,
+      otherProjectPath,
+      GENERATION_EXPIRY,
     );
     const credentialPath = join(seatDirectory, "codex.cap");
     const capability = `afc_${"c".repeat(43)}`;
@@ -97,13 +105,31 @@ describe("MCP capability loading", () => {
       credentialPath,
       expiresAt: "2026-08-01T00:00:00.000Z",
     })}\n`, { mode: 0o600 });
+    const otherCredentialPath = join(otherSeatDirectory, "codex.cap");
+    const otherCapability = `afc_${"f".repeat(43)}`;
+    await writeFile(otherCredentialPath, `${otherCapability}\n`, { mode: 0o600 });
+    await writeFile(join(otherSeatDirectory, "codex.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      projectKey: otherKey,
+      projectPath: otherProjectPath,
+      generation: GENERATION_EXPIRY,
+      previousGeneration: null,
+      runId: "run-project-b",
+      seat: "codex",
+      agentId: "codex",
+      role: "chair",
+      credentialPath: otherCredentialPath,
+      expiresAt: "2026-08-01T00:00:00.000Z",
+    })}\n`, { mode: 0o600 });
     const environment = {
       AGENT_FABRIC_SEAT: "codex",
       AGENT_FABRIC_STATE_DIRECTORY: stateDirectory,
     };
 
+    expect(key).not.toBe(otherKey);
     await expect(resolveMcpCapability(environment, nested)).resolves.toBe(capability);
-    await expect(resolveMcpCapability(environment, otherProject)).rejects.toThrow(/not provisioned/u);
+    await expect(resolveMcpCapability(environment, otherProject)).resolves.toBe(otherCapability);
+    await expect(resolveMcpCapability(environment, unprovisioned)).rejects.toThrow(/not provisioned/u);
   });
 
   it("warns before project-seat expiry and fails closed after expiry", async () => {

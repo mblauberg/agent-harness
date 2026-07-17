@@ -1,6 +1,8 @@
 from pathlib import Path
+import json
 import os
 import subprocess
+import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +36,13 @@ def test_installs_claude_skills_and_global_instructions_idempotently(tmp_path):
     content = instructions.read_text()
     assert str(ROOT / "AGENTS.md") in content
     assert str(ROOT / "HARNESS.md") in content
+    registration = json.loads((tmp_path / ".claude.json").read_text())["mcpServers"]["agent-fabric"]
+    assert registration["command"] == str(ROOT / "scripts" / "agent-fabric-mcp")
+    assert registration["env"] == {
+        "AGENT_FABRIC_CLIENT_LABEL": "claude",
+        "AGENT_FABRIC_SEAT": "claude",
+        "AGENT_FABRIC_STATE_DIRECTORY": str(tmp_path / ".local/state/agent-harness/fabric"),
+    }
 
     second = run("claude", tmp_path, CLAUDE_CONFIG_DIR=str(config))
     assert second.returncode == 0, second.stderr
@@ -53,6 +62,15 @@ def test_installs_codex_skills_and_global_instructions(tmp_path):
     assert "[custom]\nvalue = 'preserved'" in configured
     assert configured.count('name = "skill-creator"') == 1
     assert "enabled = false" in configured
+    registration = tomllib.loads(configured)["mcp_servers"]["agent-fabric"]
+    assert registration == {
+        "command": str(ROOT / "scripts" / "agent-fabric-mcp"),
+        "env": {
+            "AGENT_FABRIC_CLIENT_LABEL": "codex",
+            "AGENT_FABRIC_SEAT": "codex",
+            "AGENT_FABRIC_STATE_DIRECTORY": str(tmp_path / ".local/state/agent-harness/fabric"),
+        },
+    }
 
     second = run("codex", tmp_path, CODEX_HOME=str(config))
     assert second.returncode == 0, second.stderr
