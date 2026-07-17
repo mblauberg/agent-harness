@@ -15,7 +15,6 @@ import re
 import sys
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[3]
 POLICY_VALIDATION_PATH = Path(__file__).with_name("delivery_policy_validation.py")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -133,6 +132,16 @@ def _evaluate_validator():
     return module
 
 
+@lru_cache(maxsize=1)
+def _software_delivery_validator():
+    path = Path(__file__).with_name("software_delivery_validation.py")
+    spec = importlib.util.spec_from_file_location("software_delivery_validation", path)
+    fail(not spec or not spec.loader, "software delivery validator is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_bound_json(raw: bytes, field: str) -> dict[str, Any]:
     def no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -151,7 +160,8 @@ def _load_bound_json(raw: bytes, field: str) -> dict[str, Any]:
 
 def _validate_artifacts(
     artifacts: list[Any], *, workspace_root: Path | None, verify_hashes: bool,
-    allowed_artifact_paths: list[str], profile: dict[str, Any],
+    allowed_artifact_paths: list[str], allowed_source_paths: list[str],
+    profile: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
     by_id: dict[str, dict[str, Any]] = {}
     for index, raw in enumerate(artifacts):
@@ -160,7 +170,9 @@ def _validate_artifacts(
         fail(not isinstance(artifact_id, str) or not artifact_id or artifact_id in by_id, f"artifact {index} id is missing or duplicate")
         path = item.get("path")
         uri = item.get("uri")
-        fail(bool(path) == bool(uri), f"artifact {artifact_id} requires exactly one path or uri")
+        git_revision = item.get("git_revision")
+        fail(sum(bool(value) for value in (path, uri, git_revision)) != 1,
+             f"artifact {artifact_id} requires exactly one path, uri or git_revision")
         if path:
             clean_path = _safe_path(path, f"artifact {artifact_id}.path")
             fail(not any(_inside(clean_path, scope) for scope in allowed_artifact_paths), f"artifact {artifact_id} is outside authority.allowed_artifact_paths")
@@ -191,6 +203,13 @@ def _validate_artifacts(
             fail(not target.is_file(), f"artifact {artifact_id} path does not exist")
             actual = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
             fail(actual != digest, f"artifact {artifact_id} digest does not match live bytes")
+        if git_revision:
+            _software_delivery_validator().validate_git_revision(
+                git_revision, artifact_id=artifact_id, digest=digest,
+                unavailable=unavailable, workspace_root=workspace_root,
+                allowed_source_paths=allowed_source_paths, verify_hashes=verify_hashes,
+                safe_path=_safe_path, inside=_inside, invalid_type=Invalid,
+            )
         by_id[artifact_id] = item
     fail(not by_id, "at least one artifact is required")
     fail(not any(item.get("class") == "canonical" for item in by_id.values()), "profile requires a canonical outcome artifact")
@@ -841,11 +860,13 @@ def validate(
         authority, run, ROOT, invalid_type=Invalid,
     )
     allowed_artifact_paths = [_safe_path(item, "authority.allowed_artifact_paths") for item in authority["allowed_artifact_paths"]]
+    allowed_source_paths = [_safe_path(item, "authority.allowed_source_paths") for item in authority["allowed_source_paths"]]
     artifacts = _validate_artifacts(
         _list(run.get("artifacts"), "artifacts"),
         workspace_root=workspace_root or receipt_dir,
         verify_hashes=verify_hashes,
         allowed_artifact_paths=allowed_artifact_paths,
+        allowed_source_paths=allowed_source_paths,
         profile=profile,
     )
     _validate_history(run)
@@ -856,7 +877,6 @@ def validate(
     reviewing_reached = furthest >= NORMAL_STATES.index("reviewing")
     acceptance_reached = furthest >= NORMAL_STATES.index("awaiting_acceptance")
     required_kinds = ({"deterministic"} if reviewing_reached else set()) | ({"judgement"} if acceptance_reached else set())
-    allowed_source_paths = [_safe_path(item, "authority.allowed_source_paths") for item in authority["allowed_source_paths"]]
     evidence = _validate_evidence(
         run, profile, artifacts, required_kinds, allowed_source_paths,
         artifact_root=workspace_root or receipt_dir, verify_hashes=verify_hashes,
@@ -893,6 +913,11 @@ def validate(
         first_review = next(item for item in run["state_history"] if item["state"] == "reviewing")
         fail(not deterministic_ids <= set(first_review["evidence_ids"]), "reviewing transition lacks deterministic gate evidence")
     _validate_reviews(run, evidence, required=acceptance_reached)
+    if run.get("profile") == "software":
+        _software_delivery_validator().validate(
+            run, artifacts, artifact_root=workspace_root or receipt_dir,
+            verify_hashes=verify_hashes, invalid_type=Invalid,
+        )
     if acceptance_reached:
         final_transition = next(item for item in run["state_history"] if item["state"] == "awaiting_acceptance")
         profile_ids = {

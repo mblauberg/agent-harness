@@ -41,3 +41,24 @@ it does not replace or weaken validation of the private canonical receipt.
 
 `awaiting_acceptance` is machine-ready, not complete. User acceptance and any
 production promotion remain separate gates.
+
+## Post-merge continuity
+
+For a pull-request delivery, retain the complete ignored run directory until
+the merge commit and its `ci-status` check exist. Copy that directory into the
+synced primary checkout before removing the implementation worktree, then run
+`scripts/bind_merged_delivery.py` there. The binder keeps the receipt at
+`awaiting_acceptance` and adds:
+
+- a canonical `git_revision` artifact whose digest is the exact merged commit's
+  Git archive;
+- readable, hash-bound `github-pull-request-evidence` and
+  `github-ci-evidence` JSON; and
+- one readable `code-review-evidence` JSON artifact for every passing review
+  retained by the receipt.
+
+The merged tree must equal the reviewed PR-head tree, and `ci-status` binds the
+merge commit. Validate the updated receipt with `--verify-hashes` before asking
+for acceptance. Only explicit acceptance advances that same receipt through
+`accepted` to `awaiting_release`; release validation will not accept a legacy
+software receipt or reconstruct this evidence later.

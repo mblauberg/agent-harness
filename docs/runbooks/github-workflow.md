@@ -157,6 +157,12 @@ gh project field-list 2 --owner mblauberg --format json \
 
 ### Merge
 
+Before queueing merge for a substantial software change, validate its one
+canonical `delivery-run` receipt in `awaiting_acceptance` and retain the entire
+ignored run directory. Do not remove the worktree or discard that directory
+after GitHub merges it. This is a receipt-continuity gate, not user acceptance
+or promotion authority.
+
 Merge authority is repo-based. This repository is a personal harness, not
 production: by user directive (2026-07-16), repository auto-merge is enabled
 and agents merge directly. An agent merges a pull request once it has passed
@@ -211,9 +217,29 @@ green; that gate is the whole review pressure for these PRs.
 
 Afterwards:
 
-1. Confirm the issue closed (`Closes #N`) or close it with its terminal reason
+1. For a software delivery, sync the primary checkout and copy the retained run
+   directory into the same workspace-relative `.agent-run/<id>/` location.
+   After the merge commit's main-branch `ci-status` succeeds, bind the exact
+   merge, PR and review evidence while the receipt remains
+   `awaiting_acceptance`:
+
+   ```sh
+   skills/implement/scripts/bind_merged_delivery.py \
+     .agent-run/<id>/RUN.json --workspace-root "$PWD" \
+     --repository owner/repository --pr-number <number> --pr-url <url> \
+     --head-commit <reviewed-head> --merge-commit <merged-commit> \
+     --recorded-at <ci-completed-at>
+   skills/deliver/scripts/validate_delivery.py \
+     .agent-run/<id>/RUN.json --workspace-root "$PWD" --verify-hashes
+   ```
+
+   The binder fails if the reviewed and merged trees differ. Do not request
+   acceptance or promotion authority until this validation passes. Explicit
+   user acceptance advances this same receipt to `accepted` and then
+   `awaiting_release`; release binds it directly and never reconstructs it.
+2. Confirm the issue closed (`Closes #N`) or close it with its terminal reason
    recorded, and confirm Status is `Done`.
-2. After syncing the main checkout, keep the fabric dist warm so
+3. After syncing the main checkout, keep the fabric dist warm so
    `scripts/agent-fabric` never falls back to the slow tsx loader path
    (no-op when the dist is fresh; see [Keep the CLI dist
    warm](agent-fabric-operations.md#keep-the-cli-dist-warm)):
@@ -222,14 +248,14 @@ Afterwards:
    scripts/agent-fabric-warm
    ```
 
-3. Remove the worktree once `git status` in it is clean and no live agent,
+4. Remove the worktree once `git status` in it is clean and no live agent,
    pane or unconsumed handoff remains:
 
    ```sh
    scripts/worktree remove impl-148 --human-authorised
    ```
 
-4. Branch deletion, local or remote, needs separate explicit user authority.
+5. Branch deletion, local or remote, needs separate explicit user authority.
    After an authorised remote deletion, run `git fetch --prune`.
 
 ## Agent-go trigger
