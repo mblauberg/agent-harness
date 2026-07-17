@@ -108,8 +108,11 @@ capabilities or unrelated configuration. Its global entries omit
 nearest-ancestor discovery. A fixed `AGENT_FABRIC_PROJECT_PATH` remains a
 manual, project-scoped compatibility path only for a client that cannot preserve
 its workspace cwd. Never add it to a global Claude Code or Codex entry.
-If either configuration changes after it is read, the command exits with a
-typed conflict without overwriting that file; rerun it against the new state.
+Existing files are updated with an atomic exchange: the displaced identity and
+bytes must match the composed snapshot or the exchange is rolled back and the
+command exits with a typed conflict. If rollback itself fails, the displaced
+file is retained at the reported private recovery path. Rerun only after
+resolving either conflict against the current client configuration.
 
 The resolved `.cap` file must remain a private regular file with mode `0600`.
 The adjacent `.json` file is secret-free metadata and is checked against the

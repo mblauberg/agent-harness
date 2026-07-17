@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 from dataclasses import dataclass
+import errno
 from hashlib import sha256
 import json
 import os
@@ -70,6 +72,29 @@ def _lstat(path: Path) -> os.stat_result | None:
         return None
 
 
+def _read_regular(path: Path, client: str) -> tuple[os.stat_result, bytes]:
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise RegistrationError(f"{client} config must be a regular file")
+        with os.fdopen(descriptor, "rb") as handle:
+            descriptor = None
+            content = handle.read()
+            after = os.fstat(handle.fileno())
+        if _identity(after) != _identity(before):
+            raise RegistrationConflictError(f"{client} config changed while it was being read")
+        return before, content
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise RegistrationError(f"{client} config must not resolve through a symbolic link") from exc
+        raise
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
 def _capture(path: Path, client: str) -> ConfigSnapshot:
     source_before = _lstat(path)
     if source_before is None:
@@ -86,11 +111,8 @@ def _capture(path: Path, client: str) -> ConfigSnapshot:
     else:
         target = path
         source_kind = "direct"
-    target_before = _lstat(target)
-    if target_before is None or not stat.S_ISREG(target_before.st_mode):
-        raise RegistrationError(f"{client} config must be a regular file")
     try:
-        content = target.read_bytes()
+        target_before, content = _read_regular(target, client)
     except OSError as exc:
         raise RegistrationError(f"{client} config cannot be read: {exc}") from exc
     source_after = _lstat(path)
@@ -216,10 +238,45 @@ def _assert_unchanged(proposal: ConfigProposal) -> None:
         raise RegistrationConflictError(f"{proposal.client.title()} config changed after registration was composed")
 
 
+def atomic_exchange(first: Path, second: Path) -> None:
+    """Atomically exchange two same-filesystem paths without an overwrite gap."""
+    library = ctypes.CDLL(None, use_errno=True)
+    first_bytes = os.fsencode(first)
+    second_bytes = os.fsencode(second)
+    if sys.platform == "darwin":
+        operation = library.renamex_np
+        operation.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        arguments = (first_bytes, second_bytes, 0x00000002)  # RENAME_SWAP
+    elif sys.platform.startswith("linux"):
+        try:
+            operation = library.renameat2
+        except AttributeError as exc:
+            raise RegistrationError("atomic config exchange is unavailable on this platform") from exc
+        operation.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        arguments = (-100, first_bytes, -100, second_bytes, 0x00000002)  # AT_FDCWD, RENAME_EXCHANGE
+    else:
+        raise RegistrationError("atomic config exchange is unavailable on this platform")
+    operation.restype = ctypes.c_int
+    if operation(*arguments) != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number), str(second))
+
+
+def _displaced_matches(proposal: ConfigProposal, displaced: Path) -> bool:
+    try:
+        identity, content = _read_regular(displaced, proposal.client.title())
+    except (OSError, RegistrationError):
+        return False
+    return _identity(identity) == proposal.snapshot.target_identity \
+        and sha256(content).hexdigest() == proposal.snapshot.digest \
+        and content == proposal.snapshot.content
+
+
 def write_proposal(proposal: ConfigProposal) -> None:
     target = proposal.snapshot.target_path
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
+    exchanged = False
     try:
         with tempfile.NamedTemporaryFile(
             "w", dir=target.parent, prefix=f".{target.name}.", suffix=".tmp", delete=False,
@@ -239,9 +296,23 @@ def write_proposal(proposal: ConfigProposal) -> None:
                 ) from exc
             temporary.unlink()
         else:
-            os.replace(temporary, target)
+            atomic_exchange(temporary, target)
+            exchanged = True
+            if not _displaced_matches(proposal, temporary):
+                try:
+                    atomic_exchange(temporary, target)
+                    exchanged = False
+                except OSError as exc:
+                    raise RegistrationConflictError(
+                        f"{proposal.client.title()} config changed and rollback failed; preserve recovery file {temporary}",
+                    ) from exc
+                raise RegistrationConflictError(
+                    f"{proposal.client.title()} config changed after registration was composed",
+                )
+            temporary.unlink()
+            exchanged = False
     finally:
-        if temporary and temporary.exists():
+        if temporary and not exchanged and temporary.exists():
             temporary.unlink()
 
 

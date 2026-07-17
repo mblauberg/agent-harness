@@ -1,5 +1,6 @@
 import json
 import importlib.util
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -196,6 +197,35 @@ def test_platform_all_revalidates_codex_after_writing_claude(tmp_path: Path, mon
     assert "Codex config changed" in captured.err
     assert codex_config.read_text() == external
     assert json.loads(claude_config.read_text())["mcpServers"]["agent-fabric"]["env"]["AGENT_FABRIC_SEAT"] == "claude"
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
+def test_existing_write_rolls_back_post_validation_interleave(tmp_path: Path, client: str, monkeypatch) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    requested = tmp_path / f"{client}.{suffix}"
+    original = '{}\n' if client == "claude" else '[unrelated]\nvalue = "before"\n'
+    external = '{"external":"after-validation"}\n' if client == "claude" else '[external]\nvalue = "after-validation"\n'
+    requested.write_text(original)
+    proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+    atomic_exchange = configurer.atomic_exchange
+    interleaved = False
+
+    def interleaved_exchange(first: Path, second: Path) -> None:
+        nonlocal interleaved
+        if not interleaved:
+            interleaved = True
+            replacement = tmp_path / f"external.{suffix}"
+            replacement.write_text(external)
+            os.replace(replacement, requested)
+        atomic_exchange(first, second)
+
+    monkeypatch.setattr(configurer, "atomic_exchange", interleaved_exchange)
+    with pytest.raises(configurer.RegistrationConflictError, match=f"{client.title()} config changed"):
+        configurer.write_proposal(proposal)
+
+    assert requested.read_text() == external
 
 
 def test_operations_docs_define_dynamic_primary_registration_and_bounded_fixed_paths() -> None:
