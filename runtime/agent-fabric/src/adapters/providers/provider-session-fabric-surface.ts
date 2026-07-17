@@ -30,9 +30,14 @@ export class RetainedProviderSessionKeepalive {
   #inFlight = false;
 
   constructor(transport: ProviderSessionProtocolTransport) {
+    if (!transport.allowedOperations.has(FABRIC_OPERATIONS.getMailboxState)) {
+      throw new TypeError("retained provider-session keepalive requires mailbox read");
+    }
     this.#transport = transport;
     const idleTimeoutMs = transport.idleTimeoutMs ?? PROTOCOL_LIMITS.idleTimeoutMs;
-    this.#intervalMs = Math.max(1, Math.floor(idleTimeoutMs / 2));
+    // Leave one full retry window before the negotiated idle deadline when a
+    // live transport transiently rejects a heartbeat.
+    this.#intervalMs = Math.max(1, Math.floor(idleTimeoutMs / 3));
   }
 
   start(): void {
@@ -48,7 +53,7 @@ export class RetainedProviderSessionKeepalive {
   }
 
   async #tick(): Promise<void> {
-    if (this.#inFlight || this.#transport.closed === true) return;
+    if (this.#inFlight || Reflect.get(this.#transport, "closed") === true) return;
     this.#inFlight = true;
     try {
       parseOperationResult(
@@ -56,8 +61,10 @@ export class RetainedProviderSessionKeepalive {
         await this.#transport.call(FABRIC_OPERATIONS.getMailboxState, {}),
       );
     } catch {
-      this.stop();
-      await this.#transport.close().catch(() => undefined);
+      if (Reflect.get(this.#transport, "closed") === true) {
+        this.stop();
+        await this.#transport.close().catch(() => undefined);
+      }
     } finally {
       this.#inFlight = false;
     }

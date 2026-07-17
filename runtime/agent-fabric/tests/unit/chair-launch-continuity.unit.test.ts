@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   FABRIC_OPERATIONS,
   buildMcpDescriptorSet,
+  ProtocolRemoteError,
+  ProtocolTransportError,
 } from "@local/agent-fabric-protocol";
 
 import {
@@ -341,7 +343,10 @@ describe("provider-session Fabric continuity", () => {
       let closed = false;
       const call = vi.fn()
         .mockResolvedValueOnce({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] })
-        .mockRejectedValue(new Error("inner Fabric transport lost"));
+        .mockImplementationOnce(async () => {
+          closed = true;
+          throw new ProtocolTransportError("PROTOCOL_DISCONNECTED", "inner Fabric transport lost");
+        });
       const close = vi.fn(async () => { closed = true; });
       const transport = Object.assign(protocolTransport(call, close), { idleTimeoutMs: 1_000 });
       Object.defineProperty(transport, "closed", { get: () => closed });
@@ -371,6 +376,75 @@ describe("provider-session Fabric continuity", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it.each([
+    new ProtocolTransportError("PROTOCOL_OVERLOADED", "protocol pending-call limit reached"),
+    new ProtocolTransportError("PROTOCOL_TIMEOUT", "queued protocol request timed out: fabric.v1.mailbox.read"),
+    new ProtocolRemoteError({ code: "OVERLOADED", message: "daemon busy", retryable: true }),
+  ])("retries a live retained bridge after a non-terminal keepalive error", async (transientError) => {
+    vi.useFakeTimers();
+    try {
+      const challenge = "06".repeat(32);
+      const call = vi.fn()
+        .mockResolvedValueOnce({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] })
+        .mockRejectedValueOnce(transientError)
+        .mockResolvedValue({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] });
+      const close = vi.fn(async () => undefined);
+      const transport = Object.assign(protocolTransport(call, close), { idleTimeoutMs: 1_000, closed: false });
+      const bridge = await createChairLaunchFabricBridge({
+        ...binding(challenge),
+        capability: "transient-keepalive-capability-canary",
+        socketPath: "/private/fabric.sock",
+        attestationChallenge: challenge,
+      }, { connect: vi.fn(async () => transport) });
+      bridge.bindProviderSession("transient-keepalive-thread-1", 1);
+      await bridge.invokeTool(bridge.challengeToolName, { challengeResponse: challenge }, {
+        providerSessionRef: "transient-keepalive-thread-1",
+        providerSessionGeneration: 1,
+        providerTurnRef: "turn-1",
+        providerInvocationRef: "tool-call-1",
+      });
+      await bridge.result();
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(close).not.toHaveBeenCalled();
+      expect(bridge.closed).toBe(false);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(call.mock.calls.length).toBeGreaterThanOrEqual(3);
+      expect(close).not.toHaveBeenCalled();
+      await bridge.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a retained lifecycle child whose narrow grant cannot carry the keepalive", () => {
+    const expectedChild = { ...expectedPrincipal, agentId: "narrow-child", principalGeneration: 2 } as const;
+    const challenge = "07".repeat(32);
+    const transport = {
+      ...protocolTransport(vi.fn(), vi.fn(async () => undefined), new Set()),
+      principal: { kind: "agent", ...expectedChild } as ProviderSessionProtocolTransport["principal"],
+    };
+    expect(() => Reflect.construct(
+      AgentSessionFabricBridge as unknown as new (...args: never[]) => AgentSessionFabricBridge,
+      [{
+        providerAdapterId: "codex-app-server",
+        providerActionId: "narrow-child-action",
+        targetAgentId: expectedChild.agentId,
+        expectedPrincipal: expectedChild,
+        bridgeGeneration: 2,
+        bridgeContractDigest: `sha256:${"c".repeat(64)}`,
+        capability: "narrow-child-capability-canary",
+        socketPath: "/private/fabric.sock",
+        lifecycleAttestation: {
+          custodyId: "narrow-child-custody",
+          checkpointDigest: `sha256:${"d".repeat(64)}`,
+          challengeDigest: chairLaunchChallengeDigest(challenge),
+          challenge,
+        },
+      }, transport],
+    )).toThrow(/keepalive requires mailbox read/iu);
   });
 
   it("cannot succeed after the owning bridge is torn down", async () => {
