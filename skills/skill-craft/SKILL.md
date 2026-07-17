@@ -36,8 +36,9 @@ Both branches follow this without restating it in two voices:
   body, one-hop `references/` depth. Never nest a second reference level.
 - **Reuse boundary:** global skills express cross-project triggers, procedures
   and gates. Convert contextual values into parameters, keep examples
-  synthetic, leave project policy local, and require the cross-project evidence
-  defined in `MAINTAINING.md` before promotion.
+  synthetic and leave project policy local. Global promotion requires evidence
+  from at least two projects; follow the repository gate in
+  [MAINTAINING.md](../../MAINTAINING.md).
 - **Trigger fixtures:** positive, negative, boundary and composition cases.
   A keyword match is a candidate, not ground truth. Changes to routing text
   re-run the held-out set.

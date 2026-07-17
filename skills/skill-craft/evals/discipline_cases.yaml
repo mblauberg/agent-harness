@@ -1,7 +1,0 @@
-cases:
-  - prompt: "Promote a workflow observed across unrelated repositories into a global skill."
-    expected: "Express stable triggers, procedures and gates; parameterise contextual values and use synthetic examples."
-  - prompt: "Add one team's preferred page title and product vocabulary to a global writing skill."
-    expected: "Keep the preference in project policy because it has no cross-project capability boundary."
-  - prompt: "Mine a long session of human corrections for possible skill improvements."
-    expected: "Cluster by semantic failure, distinguish execution misses from doctrine gaps, and use literal search only to confirm known residue."

@@ -15,12 +15,32 @@ def compact(relative: str) -> str:
     return " ".join(read(relative).split())
 
 
-def test_reuse_discipline_fixtures_follow_the_shared_minimal_schema():
-    for skill in ("natural-writing", "engineering-writing", "deliver", "skill-craft"):
-        data = yaml.safe_load(read(f"skills/{skill}/evals/discipline_cases.yaml"))
-        assert len(data["cases"]) == 3
-        assert all(set(case) == {"prompt", "expected"} for case in data["cases"])
-        assert all(case["prompt"].strip() and case["expected"].strip() for case in data["cases"])
+def test_reuse_rules_live_in_the_existing_routing_portfolio_not_prose_pair_files():
+    expected_ids = {
+        "natural-writing": {"q145", "q150", "q151"},
+        "engineering-writing": {"q082", "q084", "q088"},
+        "deliver": {"q055", "q058", "q061"},
+        "skill-craft": {"q700", "q708"},
+    }
+    for skill, ids in expected_ids.items():
+        assert not (ROOT / f"skills/{skill}/evals/discipline_cases.yaml").exists()
+        cases = yaml.safe_load(read(f"skills/{skill}/evals/trigger_cases.yaml"))["cases"]
+        selected = [case for case in cases if case["id"] in ids]
+        assert {case["id"] for case in selected} == ids
+        assert selected
+
+
+def test_global_promotion_boundary_has_one_project_negative_and_two_project_boundary():
+    fixtures = yaml.safe_load(
+        read("skills/skill-craft/evals/boundary_trace_cases.yaml")
+    )["routing_reference_cases"]
+    cases = {case["id"]: case for case in fixtures}
+    one = cases["sc-019"]
+    two = cases["sc-020"]
+    assert "one project" in one["prompt"]
+    assert one["expected"]["promotion_decision"] == "remain-project-local"
+    assert "two unrelated projects" in two["prompt"]
+    assert two["expected"]["promotion_decision"] == "eligible-for-global-promotion"
 
 
 def test_writing_and_documentation_rules_encode_the_reusable_boundaries():
@@ -47,6 +67,13 @@ def test_skill_craft_requires_cross_project_generalisation_and_semantic_correcti
     assert "contextual values into parameters" in skill
     assert "cluster corrections by meaning" in audit
     assert "Literal search can confirm known residue" in audit
+    assert "at least two projects" in skill
+    assert "[MAINTAINING.md](../../MAINTAINING.md)" in skill
+
+
+def test_legal_decision_overview_is_one_hop_from_the_skill_front_door():
+    legal_skill = read("skills/legal-writing/SKILL.md")
+    assert "(references/decision-overviews.md)" in legal_skill
 
 
 def test_document_profile_classifies_interactive_html_and_its_conditional_evidence():
@@ -57,6 +84,13 @@ def test_document_profile_classifies_interactive_html_and_its_conditional_eviden
 
     assert {"html", "interactive-document"} <= set(document["artifact_types"])
     assert surfaces["html"] == ["generated-artifact"]
-    assert surfaces["interactive-document"] == ["generated-artifact"]
+    assert surfaces["interactive-document"] == ["generated-artifact", "source"]
+    assert document["conditional_evidence"] == {
+        "html": {"deterministic": ["link-integrity"], "judgement": []},
+        "interactive-document": {
+            "deterministic": ["link-integrity", "interaction-smoke"],
+            "judgement": [],
+        },
+    }
     assert "link-integrity evidence" in deliver
     assert "interaction-smoke evidence" in deliver

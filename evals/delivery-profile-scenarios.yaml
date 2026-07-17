@@ -148,6 +148,21 @@ cases:
     repetitions: 1
     fixture_overrides:
       artifact_type: html
+      deterministic_gates: [render, link-integrity]
+    patches: []
+  - id: document-html-link-integrity-negative
+    profile: document
+    case_type: negative
+    expected: fail
+    expected_error: profile gate link-integrity requires passing deterministic evidence
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    fixture_overrides:
+      artifact_type: html
+      deterministic_gates: [render, link-integrity]
+    pre_materialize_patches:
+      - {op: remove, path: /evidence/1}
     patches: []
   - id: document-interactive-positive
     profile: document
@@ -158,6 +173,55 @@ cases:
     repetitions: 1
     fixture_overrides:
       artifact_type: interactive-document
+      deterministic_gates: [render, link-integrity, interaction-smoke]
+      security_surfaces: [generated-artifact, source]
+      security_checks: [provenance, secrets-scan, sast]
+    patches: []
+  - id: document-interactive-link-integrity-negative
+    profile: document
+    case_type: negative
+    expected: fail
+    expected_error: profile gate link-integrity requires passing deterministic evidence
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    fixture_overrides:
+      artifact_type: interactive-document
+      deterministic_gates: [render, link-integrity, interaction-smoke]
+      security_surfaces: [generated-artifact, source]
+      security_checks: [provenance, secrets-scan, sast]
+    pre_materialize_patches:
+      - {op: remove, path: /evidence/1}
+    patches: []
+  - id: document-interactive-smoke-negative
+    profile: document
+    case_type: negative
+    expected: fail
+    expected_error: profile gate interaction-smoke requires passing deterministic evidence
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    fixture_overrides:
+      artifact_type: interactive-document
+      deterministic_gates: [render, link-integrity, interaction-smoke]
+      security_surfaces: [generated-artifact, source]
+      security_checks: [provenance, secrets-scan, sast]
+    pre_materialize_patches:
+      - {op: remove, path: /evidence/2}
+    patches: []
+  - id: document-interactive-source-security-negative
+    profile: document
+    case_type: boundary
+    expected: fail
+    expected_error: interactive document requires source security composition
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    fixture_overrides:
+      artifact_type: interactive-document
+      deterministic_gates: [render, link-integrity, interaction-smoke]
+      security_surfaces: []
+      security_checks: []
     patches: []
   - id: document-review-negative
     profile: document

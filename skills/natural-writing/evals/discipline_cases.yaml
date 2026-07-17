@@ -1,7 +1,0 @@
-cases:
-  - prompt: "Rewrite a briefing page whose headings advertise simplicity and whose status label repeats the named actor in the sentence."
-    expected: "Use substantive headings, remove obvious helper copy, and state the actor once."
-  - prompt: "Review a non-obvious keyboard instruction needed to operate a custom control."
-    expected: "Keep the instruction because it communicates an action or accessibility affordance."
-  - prompt: "Tighten a decision summary that attributes a legal conclusion to named counsel."
-    expected: "Retain attribution where the source changes authority or provenance while removing duplicated labels."

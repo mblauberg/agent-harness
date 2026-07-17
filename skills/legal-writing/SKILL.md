@@ -27,7 +27,8 @@ does not map to the hub's observed/inferred evidence schema.
    `final-scrub`. Load [legal concision](references/legal-concision-and-anti-ai.md)
    for all prose; see the reference map in
    [validation-checklists.md](references/validation-checklists.md) for which
-   remaining reference a mode or content type needs.
+   remaining reference a mode or content type needs. For `decision-overview`,
+   load [decision overviews](references/decision-overviews.md) directly.
 3. Classify each sentence by legal function before polishing. Affidavits and
    witness statements give evidence; submissions argue; orders command;
    chronologies organise; internal notes analyse; correspondence communicates.
