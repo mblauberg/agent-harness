@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolve, sep } from "node:path";
 
 import type Database from "better-sqlite3";
@@ -2504,8 +2504,12 @@ export class Fabric {
     expectedInode: unknown,
   ): boolean {
     if (typeof relativePath !== "string") return true;
-    const destination = resolve(root, canonicalAuthorityPath(root, relativePath));
-    if (!existsSync(destination)) return true;
+    const destination = this.#quarantineLaunchPreparationFile(
+      root,
+      relativePath,
+      "launch-preparation:before-committed-stage-quarantine",
+    );
+    if (destination === null) return true;
     if (
       typeof expectedDigest !== "string" || typeof expectedDevice !== "string" ||
       typeof expectedInode !== "string"
@@ -2515,6 +2519,24 @@ export class Fabric {
     if (sha256Digest(readFileSync(destination, "utf8")) !== expectedDigest) return true;
     unlinkSync(destination);
     return true;
+  }
+
+  #quarantineLaunchPreparationFile(root: string, relativePath: string, faultLabel: string): string | null {
+    const source = resolve(root, canonicalAuthorityPath(root, relativePath));
+    const quarantineDirectory = resolve(root, canonicalAuthorityPath(root, ".agent-run/.fabric-custody"));
+    mkdirSync(quarantineDirectory, { recursive: true, mode: 0o700 });
+    const destination = resolve(
+      quarantineDirectory,
+      `${basename(relativePath)}-${randomBytes(16).toString("hex")}`,
+    );
+    this.#fault(faultLabel);
+    try {
+      renameSync(source, destination);
+      return destination;
+    } catch (error: unknown) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return null;
+      throw error;
+    }
   }
 
   #compensateLaunchPreparationPair(
@@ -2532,25 +2554,34 @@ export class Fabric {
       const published = resolve(root, canonicalAuthorityPath(root, publishedPath));
       return !existsSync(published);
     }
-    const staged = resolve(root, canonicalAuthorityPath(root, stagedPath));
     const published = resolve(root, canonicalAuthorityPath(root, publishedPath));
+    const staged = this.#quarantineLaunchPreparationFile(
+      root,
+      stagedPath,
+      "launch-preparation:before-compensation-stage-quarantine",
+    );
     if (typeof expectedDevice !== "string" || typeof expectedInode !== "string") {
       return !existsSync(published);
     }
-    if (!existsSync(staged)) return !existsSync(published);
+    if (staged === null) return !existsSync(published);
     const stagedIdentity = statSync(staged, { bigint: true });
     if (
       stagedIdentity.dev.toString() !== expectedDevice ||
       stagedIdentity.ino.toString() !== expectedInode
     ) return false;
     if (sha256Digest(readFileSync(staged, "utf8")) !== expectedDigest) return false;
-    if (existsSync(published)) {
-      const publishedIdentity = statSync(published, { bigint: true });
+    const quarantinedPublished = this.#quarantineLaunchPreparationFile(
+      root,
+      publishedPath,
+      "launch-preparation:before-compensation-published-quarantine",
+    );
+    if (quarantinedPublished !== null) {
+      const publishedIdentity = statSync(quarantinedPublished, { bigint: true });
       if (
         stagedIdentity.dev !== publishedIdentity.dev || stagedIdentity.ino !== publishedIdentity.ino ||
-        sha256Digest(readFileSync(published, "utf8")) !== expectedDigest
+        sha256Digest(readFileSync(quarantinedPublished, "utf8")) !== expectedDigest
       ) return false;
-      unlinkSync(published);
+      unlinkSync(quarantinedPublished);
     }
     unlinkSync(staged);
     return true;

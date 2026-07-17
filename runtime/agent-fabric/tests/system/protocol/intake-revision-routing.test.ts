@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
-import { link, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { renameSync, writeFileSync } from "node:fs";
+import { link, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -27,6 +27,18 @@ import { createCurrentSessionRun } from "../../support/current-session-testkit.t
 const now = Date.parse("2027-01-01T00:00:00Z");
 const digestA = `sha256:${"a".repeat(64)}`;
 const digestB = `sha256:${"b".repeat(64)}`;
+
+async function quarantinedLaunchPreparationContents(directory: string): Promise<string[]> {
+  const quarantine = join(directory, ".agent-run/.fabric-custody");
+  let names: string[];
+  try {
+    names = await readdir(quarantine);
+  } catch (error: unknown) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return [];
+    throw error;
+  }
+  return await Promise.all(names.map((name) => readFile(join(quarantine, name), "utf8")));
+}
 
 type RoutingFixture = {
   fabric: Fabric;
@@ -1074,9 +1086,12 @@ describe("intake revision public routing", () => {
       expect(foreignPaths).toBeDefined();
       if (foreignPaths === undefined) throw new Error("foreign staging paths were not captured");
       await expect(readFile(join(fixture.directory, foreignPaths[0]), "utf8"))
-        .resolves.toBe(canonicalJson(request.launchPacket));
+        .rejects.toMatchObject({ code: "ENOENT" });
       await expect(readFile(join(fixture.directory, foreignPaths[1]), "utf8"))
-        .resolves.toBe(canonicalJson(request.resourcePlan));
+        .rejects.toMatchObject({ code: "ENOENT" });
+      const quarantined = await quarantinedLaunchPreparationContents(fixture.directory);
+      expect(quarantined).toContain(canonicalJson(request.launchPacket));
+      expect(quarantined).toContain(canonicalJson(request.resourcePlan));
     } finally {
       await fixture.fabric.close();
       await rm(fixture.directory, { recursive: true, force: true });
@@ -1113,7 +1128,9 @@ describe("intake revision public routing", () => {
       expect(orphanPath).toBeDefined();
       if (orphanPath === undefined) throw new Error("orphan staging path was not captured");
       await expect(readFile(join(fixture.directory, orphanPath), "utf8"))
-        .resolves.toBe(canonicalJson(request.resourcePlan));
+        .rejects.toMatchObject({ code: "ENOENT" });
+      expect(await quarantinedLaunchPreparationContents(fixture.directory))
+        .toContain(canonicalJson(request.resourcePlan));
 
       interruptStageIdentity = false;
       await expect(fixture.fabric.dispatchPublicProtocol(
@@ -1121,8 +1138,8 @@ describe("intake revision public routing", () => {
         FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
         request,
       )).resolves.toMatchObject({ projectSession: { state: "awaiting_launch" } });
-      await expect(readFile(join(fixture.directory, orphanPath), "utf8"))
-        .resolves.toBe(canonicalJson(request.resourcePlan));
+      expect(await quarantinedLaunchPreparationContents(fixture.directory))
+        .toContain(canonicalJson(request.resourcePlan));
     } finally {
       await fixture.fabric.close();
       await rm(fixture.directory, { recursive: true, force: true });
@@ -1163,17 +1180,27 @@ describe("intake revision public routing", () => {
         [custody.staged_launch_packet_path, canonicalJson(request.launchPacket)],
         [custody.staged_resource_plan_path, canonicalJson(request.resourcePlan)],
       ] as const;
-      for (const [path, content] of replacements) {
-        await rename(join(fixture.directory, path), join(fixture.directory, `${path}.owned-backup`));
-        await writeFile(join(fixture.directory, path), content);
-      }
-
       await fixture.fabric.close();
       closed = true;
       interruptCleanup = false;
-      reopened = await openFabric({ databasePath: fixture.databasePath, workspaceRoots: [fixture.directory], clock: () => now });
+      let swapIndex = 0;
+      reopened = await openFabric({
+        databasePath: fixture.databasePath,
+        workspaceRoots: [fixture.directory],
+        clock: () => now,
+        fault: (label) => {
+          if (label !== "launch-preparation:before-committed-stage-quarantine") return;
+          const replacement = replacements[swapIndex];
+          if (replacement === undefined) return;
+          swapIndex += 1;
+          const [path, content] = replacement;
+          renameSync(join(fixture.directory, path), join(fixture.directory, `${path}.owned-backup`));
+          writeFileSync(join(fixture.directory, path), content);
+        },
+      });
       for (const [path, content] of replacements) {
-        await expect(readFile(join(fixture.directory, path), "utf8")).resolves.toBe(content);
+        await expect(readFile(join(fixture.directory, path), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+        expect(await quarantinedLaunchPreparationContents(fixture.directory)).toContain(content);
       }
       const database = new Database(fixture.databasePath, { readonly: true });
       try {
@@ -1201,6 +1228,54 @@ describe("intake revision public routing", () => {
     } finally {
       if (!closed) await fixture.fabric.close();
       if (reopened !== undefined) await reopened.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("quarantines a same-byte foreign stage swap during compensation", async () => {
+    let request: ProjectSessionLaunchPacketPrepareRequest | undefined;
+    let stagePath: string | undefined;
+    let compensationStarted = false;
+    let swapped = false;
+    let fixture: RoutingFixture;
+    fixture = await setupRoutingFixture((label) => {
+      if (label === "launch-preparation:after-resource-publish") {
+        if (request === undefined) return;
+        const database = new Database(fixture.databasePath, { readonly: true });
+        const row = database.prepare(`
+          SELECT staged_launch_packet_path FROM project_session_launch_preparations WHERE command_id=?
+        `).get(request.command.commandId) as { staged_launch_packet_path: string };
+        database.close();
+        stagePath = row.staged_launch_packet_path;
+        compensationStarted = true;
+        throw new Error("begin compensation swap");
+      }
+      if (
+        label === "launch-preparation:before-compensation-stage-quarantine" &&
+        compensationStarted && !swapped && stagePath !== undefined && request !== undefined
+      ) {
+        swapped = true;
+        renameSync(join(fixture.directory, stagePath), join(fixture.directory, `${stagePath}.owned-backup`));
+        writeFileSync(join(fixture.directory, stagePath), canonicalJson(request.launchPacket));
+      }
+    });
+    try {
+      await fixture.fabric.dispatchPublicProtocol(
+        fixture.operatorContext,
+        FABRIC_OPERATIONS.intakeRevise,
+        acceptedRequest(fixture),
+      );
+      request = implementationRequest(fixture, "command_compensation_quarantine_swap");
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        request,
+      )).rejects.toMatchObject({ code: "DEDUPE_CONFLICT" });
+      expect(swapped).toBe(true);
+      expect(await quarantinedLaunchPreparationContents(fixture.directory))
+        .toContain(canonicalJson(request.launchPacket));
+    } finally {
+      await fixture.fabric.close();
       await rm(fixture.directory, { recursive: true, force: true });
     }
   });
