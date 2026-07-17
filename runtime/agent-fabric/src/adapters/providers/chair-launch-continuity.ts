@@ -6,6 +6,7 @@ import {
   FABRIC_OPERATIONS,
   NdjsonRpcTransport,
   OPERATION_REGISTRY,
+  PROTOCOL_LIMITS,
   operationsForPrincipal,
   parseOperationInput,
   parseOperationResult,
@@ -25,6 +26,7 @@ import {
 } from "./types.js";
 import {
   ProviderSessionFabricSurface,
+  RetainedProviderSessionKeepalive,
   type ProviderSessionProtocolTransport,
   type ProviderSessionToolResult,
 } from "./provider-session-fabric-surface.js";
@@ -86,6 +88,9 @@ const defaultDependencies: ChairLaunchFabricBridgeDependencies = {
       features: protocol.features,
       principal: protocol.principal,
       allowedOperations: protocol.allowedOperations,
+      idleTimeoutMs: typeof Reflect.get(protocol, "idleTimeoutMs") === "number"
+        ? Number(Reflect.get(protocol, "idleTimeoutMs"))
+        : PROTOCOL_LIMITS.idleTimeoutMs,
       async call(operation: FabricOperation, value: unknown): Promise<unknown> {
         return await protocol.call(operation, parseOperationInput(operation, value));
       },
@@ -115,6 +120,7 @@ export class ChairLaunchFabricBridge {
   readonly #binding: ChairLaunchAttestationBinding;
   readonly #transport: ProviderSessionProtocolTransport;
   readonly #surface: ProviderSessionFabricSurface;
+  readonly #keepalive: RetainedProviderSessionKeepalive;
   #session: { providerSessionRef: string; providerSessionGeneration: number } | undefined;
   #providerTurnRef: string | undefined;
   #invocationRef: string | undefined;
@@ -157,6 +163,7 @@ export class ChairLaunchFabricBridge {
       operation: FABRIC_OPERATIONS.launchAttest,
       invoke: async (value, context) => await this.#attest(value, context),
     }]);
+    this.#keepalive = new RetainedProviderSessionKeepalive(transport);
     const challengeDescriptor = this.#surface.descriptors.find(
       (descriptor) => descriptor.operation === FABRIC_OPERATIONS.launchAttest,
     );
@@ -274,6 +281,7 @@ export class ChairLaunchFabricBridge {
       providerTurnRef: this.#providerTurnRef,
       providerInvocationRef: this.#invocationRef,
     };
+    this.#keepalive.start();
     return {
       resumeReference: this.#session.providerSessionRef,
       providerSessionGeneration: this.#session.providerSessionGeneration,
@@ -287,6 +295,7 @@ export class ChairLaunchFabricBridge {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#keepalive.stop();
     await this.#transport.close();
   }
 }

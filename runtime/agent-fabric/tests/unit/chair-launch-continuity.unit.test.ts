@@ -7,6 +7,7 @@ import {
 import {
   createChairLaunchFabricBridge,
 } from "../../src/adapters/providers/chair-launch-continuity.ts";
+import { AgentSessionFabricBridge } from "../../src/adapters/providers/agent-session-continuity.ts";
 import type { ProviderSessionProtocolTransport } from "../../src/adapters/providers/provider-session-fabric-surface.ts";
 import {
   chairLaunchChallengeDigest,
@@ -246,6 +247,130 @@ describe("provider-session Fabric continuity", () => {
     expect(call).toHaveBeenCalledTimes(2);
     await bridge.close();
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an authenticated retained chair bridge alive across negotiated idle windows", async () => {
+    vi.useFakeTimers();
+    try {
+      const challenge = "04".repeat(32);
+      const call = vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] }));
+      const close = vi.fn(async () => undefined);
+      const transport = Object.assign(protocolTransport(call, close), { idleTimeoutMs: 1_000 });
+      const bridge = await createChairLaunchFabricBridge({
+        ...binding(challenge),
+        capability: "retained-keepalive-capability-canary",
+        socketPath: "/private/fabric.sock",
+        attestationChallenge: challenge,
+      }, {
+        connect: vi.fn(async () => transport),
+      });
+      bridge.bindProviderSession("retained-thread-1", 1);
+      await bridge.invokeTool(bridge.challengeToolName, { challengeResponse: challenge }, {
+        providerSessionRef: "retained-thread-1",
+        providerSessionGeneration: 1,
+        providerTurnRef: "turn-1",
+        providerInvocationRef: "tool-call-1",
+      });
+      await bridge.result();
+      const activationCalls = call.mock.calls.length;
+
+      await vi.advanceTimersByTimeAsync(2_500);
+
+      expect(call.mock.calls.length).toBeGreaterThan(activationCalls);
+      expect(call.mock.calls.slice(activationCalls).every(([operation, input]) => (
+        operation === FABRIC_OPERATIONS.getMailboxState && JSON.stringify(input) === "{}"
+      ))).toBe(true);
+      expect(bridge.closed).toBe(false);
+      await bridge.close();
+      const callsAtClose = call.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(call).toHaveBeenCalledTimes(callsAtClose);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses the same negotiated keepalive for an authenticated retained child bridge", async () => {
+    vi.useFakeTimers();
+    try {
+      const call = vi.fn(async () => ({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] }));
+      const close = vi.fn(async () => undefined);
+      const transport = Object.assign(protocolTransport(call, close), { idleTimeoutMs: 1_000 });
+      const bridge = Reflect.construct(
+        AgentSessionFabricBridge as unknown as new (...args: never[]) => AgentSessionFabricBridge,
+        [{
+          providerAdapterId: "codex-app-server",
+          providerActionId: "child-action-1",
+          targetAgentId: expectedPrincipal.agentId,
+          expectedPrincipal,
+          bridgeGeneration: 1,
+          bridgeContractDigest: `sha256:${"b".repeat(64)}`,
+          capability: "retained-child-capability-canary",
+          socketPath: "/private/fabric.sock",
+        }, transport],
+      );
+      bridge.bindProviderSession("retained-child-thread-1", 1);
+      const mailbox = bridge.descriptors.find(({ operation }) => operation === FABRIC_OPERATIONS.getMailboxState);
+      expect(mailbox).toBeDefined();
+      await bridge.invokeTool(mailbox!.name, {}, {
+        providerSessionRef: "retained-child-thread-1",
+        providerSessionGeneration: 1,
+        providerTurnRef: "turn-1",
+        providerInvocationRef: "tool-call-1",
+      });
+      bridge.result();
+      const activationCalls = call.mock.calls.length;
+
+      await vi.advanceTimersByTimeAsync(2_500);
+
+      expect(call.mock.calls.length).toBeGreaterThan(activationCalls);
+      expect(bridge.closed).toBe(false);
+      await bridge.close();
+      const callsAtClose = call.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(call).toHaveBeenCalledTimes(callsAtClose);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("closes a retained bridge when its authenticated keepalive fails", async () => {
+    vi.useFakeTimers();
+    try {
+      const challenge = "05".repeat(32);
+      let closed = false;
+      const call = vi.fn()
+        .mockResolvedValueOnce({ contiguousWatermark: 0, acknowledgedAboveWatermark: [] })
+        .mockRejectedValue(new Error("inner Fabric transport lost"));
+      const close = vi.fn(async () => { closed = true; });
+      const transport = Object.assign(protocolTransport(call, close), { idleTimeoutMs: 1_000 });
+      Object.defineProperty(transport, "closed", { get: () => closed });
+      const bridge = await createChairLaunchFabricBridge({
+        ...binding(challenge),
+        capability: "failed-keepalive-capability-canary",
+        socketPath: "/private/fabric.sock",
+        attestationChallenge: challenge,
+      }, {
+        connect: vi.fn(async () => transport),
+      });
+      bridge.bindProviderSession("failed-keepalive-thread-1", 1);
+      await bridge.invokeTool(bridge.challengeToolName, { challengeResponse: challenge }, {
+        providerSessionRef: "failed-keepalive-thread-1",
+        providerSessionGeneration: 1,
+        providerTurnRef: "turn-1",
+        providerInvocationRef: "tool-call-1",
+      });
+      await bridge.result();
+
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(close).toHaveBeenCalledOnce();
+      expect(bridge.closed).toBe(true);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(call).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("cannot succeed after the owning bridge is torn down", async () => {
