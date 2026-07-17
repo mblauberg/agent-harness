@@ -663,9 +663,6 @@ export class ConsoleController {
   }
 
   #assertReviewCurrent(review: ActionReview): void {
-    if (review.binding.projectionRevision !== this.#dataset.snapshotRevision) {
-      throw new Error("Review projection revision changed");
-    }
     const row = this.#row(review.binding.view, review.binding.itemId);
     if (
       row === null ||

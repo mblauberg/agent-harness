@@ -477,9 +477,10 @@ describe("Console controller and two-phase actions", () => {
   });
 
   it("keeps Review open across an unrelated projection revision advance", async () => {
+    const service = actions();
     const controller = new ConsoleController({
       dataset: dataset(),
-      actions: actions(),
+      actions: service,
       credential,
       projectId,
       projectSessionId: sessionId,
@@ -494,6 +495,12 @@ describe("Console controller and two-phase actions", () => {
       stage: "review",
       binding: { projectionRevision: "11", itemRevision: "7" },
     });
+    controller.armConfirmation(activation("event-arm"));
+    await expect(controller.confirmAction(
+      activation("event-confirm"),
+      context("commit-after-churn", "event-confirm"),
+    )).resolves.toMatchObject({ status: "committed" });
+    expect(service.commit).toHaveBeenCalledOnce();
   });
 
   it("keeps last-good rows readable but disables every action while non-live", async () => {
