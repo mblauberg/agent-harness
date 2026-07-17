@@ -33,7 +33,12 @@ semantic outputs independently exercise the portability prompts and their
 artifact contracts. Neither layer claims human acceptance or production
 task-success rates.
 
-Commands:
+## Historical commands
+
+These commands are preserved as execution provenance and no longer run after
+the evaluator and live result path were retired. Current lifecycle-skill checks
+are owned by each skill's descriptive fixtures; use Git history to reconstruct
+this archived evaluator if the original run must be audited.
 
 ```sh
 python3 skills/orchestrate/evals/spec05_skill_evaluation.py validate-inputs
