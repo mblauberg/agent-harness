@@ -298,8 +298,10 @@ project session is ready to launch:
    authority; budget; provider route; and worktree/write scopes. Editing either
    JSON document creates a new digest and review. Confirming Implement closes
    the two artifacts and moves the same project session to `awaiting_launch`;
-   it does not contact the provider. Cancel or fix any missing, stale, expired
-   or inconsistent binding.
+   it does not contact the provider. Provider input is shown through the shared
+   inert redactor and any trusted control, credential-like key or credential
+   value is rejected before a preparation row or artifact is written. Cancel or
+   fix any missing, stale, expired or inconsistent binding.
 5. Select the live Project row and choose `Launch...`. Review the daemon-owned
    launch preview, then use a separate confirmation gesture. Only this step may
    dispatch the provider. After reconnect or handoff, reopen the session by its
@@ -312,6 +314,11 @@ project session is ready to launch:
 Stop before Launch if Implement reports a changed evidence digest, session
 revision, authority expiry, budget, provider route or artifact ref. Do not
 repair those bindings by editing a generated digest or bypassing the Console.
+Implement uses one stable command identity derived from the exact session,
+accepted-scope, packet and plan bindings. A lost response is replayed with that
+identity; after Console restart, reopen the same accepted evidence and submit
+the exact packet and plan to recover the committed result. A changed binding is
+a new command and never adopts the earlier result.
 
 ## Verify registrations
 

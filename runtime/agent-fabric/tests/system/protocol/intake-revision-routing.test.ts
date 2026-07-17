@@ -39,7 +39,10 @@ type RoutingFixture = {
   chairContext: PublicProtocolContext;
 };
 
-async function setupRoutingFixture(fault?: (label: string) => void): Promise<RoutingFixture> {
+async function setupRoutingFixture(
+  fault?: (label: string) => void,
+  implementationActions: readonly ["read", ...Array<"read" | "decide" | "launch">] = ["read", "decide", "launch"],
+): Promise<RoutingFixture> {
   const directory = await mkdtemp(join(tmpdir(), "fabric-intake-revision-routing-"));
   const databasePath = join(directory, "fabric.sqlite3");
   const initial = await openFabric({ databasePath, workspaceRoots: [directory], clock: () => now });
@@ -205,7 +208,7 @@ async function setupRoutingFixture(fault?: (label: string) => void): Promise<Rou
       expiresAt: "2099-01-01T00:00:00Z",
       status: "active",
       kind: "session",
-      actions: ["read", "decide", "launch"],
+      actions: implementationActions,
     }), "implementation-routing-secret");
   } finally {
     database.close();
@@ -817,6 +820,90 @@ describe("intake revision public routing", () => {
   });
 
   it.each([
+    ["launch-only", ["read", "launch"] as const, true],
+    ["decide-only", ["read", "decide"] as const, false],
+  ])("enforces %s least-privilege admission for launch packet preparation", async (_label, actions, admitted) => {
+    const fixture = await setupRoutingFixture(undefined, actions);
+    try {
+      await fixture.fabric.dispatchPublicProtocol(
+        fixture.operatorContext,
+        FABRIC_OPERATIONS.intakeRevise,
+        acceptedRequest(fixture),
+      );
+      const request = implementationRequest(fixture, `least_privilege_${String(_label)}`);
+      const operation = fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        request,
+      );
+      if (admitted) {
+        await expect(operation).resolves.toMatchObject({ projectSession: { state: "awaiting_launch" } });
+      } else {
+        await expect(operation).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+      }
+    } finally {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["trusted key", { apiKey: "not-a-real-provider-key" }],
+    ["fabric bearer", { prompt: "use afc_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }],
+    ["provider token", { prompt: "use sk-AAAAAAAAAAAAAAAAAAAAAAAA" }],
+    ["password assignment", { prompt: "password=not-a-real-password" }],
+    ["private key", { prompt: "-----BEGIN PRIVATE KEY-----\nnot-real\n-----END PRIVATE KEY-----" }],
+    ["URL userinfo", { prompt: "https://operator:not-real@example.invalid/task" }],
+  ])("rejects %s in provider input before claiming or writing launch preparation", async (_label, providerInput) => {
+    const fixture = await setupRoutingFixture();
+    try {
+      await fixture.fabric.dispatchPublicProtocol(
+        fixture.operatorContext,
+        FABRIC_OPERATIONS.intakeRevise,
+        acceptedRequest(fixture),
+      );
+      const base = implementationRequest(fixture, `unsafe_${String(_label).replaceAll(" ", "_")}`);
+      const launchPacket = parseLaunchPacketV1({
+        ...base.launchPacket,
+        provider: { ...base.launchPacket.provider, input: providerInput },
+      });
+      const request = {
+        ...base,
+        launchPacket,
+        launchPacketRef: {
+          ...base.launchPacketRef,
+          digest: `sha256:${sha256(canonicalJson(launchPacket))}` as never,
+        },
+      };
+
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        request,
+      )).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+      await expect(readFile(join(fixture.directory, request.launchPacketRef.path), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(join(fixture.directory, request.resourcePlanRef.path), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+      const database = new Database(fixture.databasePath, { readonly: true });
+      try {
+        expect(database.prepare(`
+          SELECT COUNT(*) AS count FROM project_session_launch_preparations
+           WHERE command_id=?
+        `).get(request.command.commandId)).toEqual({ count: 0 });
+        expect(database.prepare(`
+          SELECT state, revision FROM project_sessions WHERE project_session_id=?
+        `).get(fixture.implementationSessionId)).toEqual({ state: "draft", revision: 1 });
+      } finally {
+        database.close();
+      }
+    } finally {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
     "launch-preparation:after-resource-publish",
     "launch-preparation:after-launch-publish",
     "launch-preparation:before-transition",
@@ -893,6 +980,59 @@ describe("intake revision public routing", () => {
       )).rejects.toMatchObject({ code: "DEDUPE_CONFLICT" });
     } finally {
       await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("clears committed staging custody so later foreign files survive replay and restart", async () => {
+    const fixture = await setupRoutingFixture();
+    let closed = false;
+    let reopened: Fabric | undefined;
+    try {
+      await fixture.fabric.dispatchPublicProtocol(
+        fixture.operatorContext,
+        FABRIC_OPERATIONS.intakeRevise,
+        acceptedRequest(fixture),
+      );
+      const request = implementationRequest(fixture, "command_clear_committed_staging");
+      const prepared = await fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        request,
+      );
+      const suffix = sha256(`operator_routing:${request.command.commandId}`).slice(0, 16);
+      const foreignPaths = [
+        `${request.launchPacketRef.path}.prepare-${suffix}`,
+        `${request.resourcePlanRef.path}.prepare-${suffix}`,
+      ];
+      for (const path of foreignPaths) await writeFile(join(fixture.directory, path), `foreign:${path}\n`);
+      const database = new Database(fixture.databasePath, { readonly: true });
+      try {
+        expect(database.prepare(`
+          SELECT staged_launch_packet_path, staged_resource_plan_path
+            FROM project_session_launch_preparations WHERE command_id=?
+        `).get(request.command.commandId)).toEqual({
+          staged_launch_packet_path: null,
+          staged_resource_plan_path: null,
+        });
+      } finally {
+        database.close();
+      }
+
+      await fixture.fabric.close();
+      closed = true;
+      reopened = await openFabric({ databasePath: fixture.databasePath, workspaceRoots: [fixture.directory], clock: () => now });
+      await expect(reopened.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        request,
+      )).resolves.toEqual(prepared);
+      for (const path of foreignPaths) {
+        await expect(readFile(join(fixture.directory, path), "utf8")).resolves.toBe(`foreign:${path}\n`);
+      }
+    } finally {
+      if (!closed) await fixture.fabric.close();
+      if (reopened !== undefined) await reopened.close();
       await rm(fixture.directory, { recursive: true, force: true });
     }
   });

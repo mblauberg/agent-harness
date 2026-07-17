@@ -32,9 +32,10 @@ import {
   type ScopedGateResolveRequest,
   type TaskRequest,
 } from "@local/agent-fabric-protocol";
+import { redactLaunchProviderInput } from "@local/agent-fabric";
 
 import { operatorIntentRevision } from "./action-revision.js";
-import { consoleLaunchCommandId } from "./launch-command.js";
+import { consoleImplementationCommandId, consoleLaunchCommandId } from "./launch-command.js";
 import {
   revisionFromProtocol,
   type ConsoleWorkflowCapabilities,
@@ -517,7 +518,18 @@ function expectedRevision(
     if (revision === null) throw new TypeError("typed Git workflow revision is unavailable");
     return revision;
   }
-  return liveSession(dataset).revision;
+  const session = liveSession(dataset);
+  if (
+    envelope.kind === "project-session-launch-packet-prepare" &&
+    session.state === "awaiting_launch" &&
+    isRecord(envelope.request.launchPacketRef) &&
+    envelope.request.launchPacketRef.path === session.launchPacketRef.path &&
+    envelope.request.launchPacketRef.digest === session.launchPacketRef.digest
+  ) {
+    if (session.revision <= 1) throw new Error("prepared project session revision is invalid");
+    return session.revision - 1;
+  }
+  return session.revision;
 }
 
 function mutationContext(
@@ -656,7 +668,7 @@ function implementationDetails(request: Record<string, unknown>): readonly Reado
         inputSchemaId: provider.inputSchemaId,
       })),
     },
-    { label: "Provider input", value: canonical(safeValue(provider.input)) },
+    { label: "Provider input", value: canonical(redactLaunchProviderInput(provider.input)) },
     {
       label: "Worktree/write scopes",
       value: canonical({
@@ -1013,13 +1025,13 @@ export function createProductionConsoleWorkflowPlanner(
         });
         const session = liveSession(input.dataset);
         if (
-          session.state !== "draft" || intake.state !== "accepted" ||
+          (session.state !== "draft" && session.state !== "awaiting_launch") || intake.state !== "accepted" ||
           intake.projectId !== options.projectId ||
           intake.acceptedScopeRef?.path !== inspection.result.artifactRef.path ||
           intake.acceptedScopeRef.digest !== inspection.result.artifactRef.digest ||
           (inspection.result.coordinationRunId !== null && inspection.result.coordinationRunId !== intake.coordinationRunId)
         ) {
-          throw new Error("guided Implement requires the exact accepted evidence and draft project session");
+          throw new Error("guided Implement requires the exact accepted evidence and preparable project session");
         }
         const resourcePlan = parseLaunchResourcePlanV1(
           guidedJsonField(fields, "resource-plan"),
@@ -1044,6 +1056,15 @@ export function createProductionConsoleWorkflowPlanner(
           path: requiredGuidedField(fields, "launch-packet-path"),
           digest: sha256(launchPacket),
         };
+        if (
+          session.state === "awaiting_launch" &&
+          (
+            session.launchPacketRef.path !== launchPacketRef.path ||
+            session.launchPacketRef.digest !== launchPacketRef.digest
+          )
+        ) {
+          throw new Error("guided Implement recovery requires the session's exact committed launch packet");
+        }
         if (
           launchPacket.projectId !== options.projectId ||
           launchPacket.projectSessionId !== session.projectSessionId ||
@@ -1305,6 +1326,7 @@ export function createProductionConsoleWorkflowPlanner(
     let result: unknown;
     let launchStatus: OperatorActionStatus | undefined;
     let launchCommandId: CommandId | undefined;
+    let implementationRequest: ProjectSessionLaunchPacketPrepareRequest | undefined;
     let reconnectProjectSessionId: ProjectSessionId | null = null;
     try {
       switch (stored.review.kind) {
@@ -1343,12 +1365,40 @@ export function createProductionConsoleWorkflowPlanner(
           if (client?.prepareImplementation === undefined) {
             throw new Error("project-session implementation preparation is unavailable");
           }
-          result = await client.prepareImplementation(
-            parseOperation<ProjectSessionLaunchPacketPrepareRequest>(
-              FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
-              { ...stored.request, command },
-            ),
+          const provisional = parseOperation<ProjectSessionLaunchPacketPrepareRequest>(
+            FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+            { ...stored.request, command },
           );
+          const implementationCommandId = consoleImplementationCommandId({
+            operatorId: options.operatorId,
+            projectId: provisional.projectId,
+            projectSessionId: provisional.projectSessionId,
+            sessionGeneration: provisional.expectedSessionGeneration,
+            acceptedScopeRef: provisional.acceptedScopeRef,
+            launchPacketRef: provisional.launchPacketRef,
+            resourcePlanRef: provisional.resourcePlanRef,
+          });
+          implementationRequest = parseOperation<ProjectSessionLaunchPacketPrepareRequest>(
+            FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+            {
+              ...stored.request,
+              command: {
+                ...command,
+                commandId: implementationCommandId,
+                provenance: {
+                  kind: "console-direct-input",
+                  clientId: "console_implementation_custody" as OperatorClientId,
+                  inputEventId: implementationCommandId,
+                },
+              },
+            },
+          );
+          prepared.set(input.review.workflowId, {
+            ...stored,
+            review: pending,
+            commitCommandId: implementationCommandId,
+          });
+          result = await client.prepareImplementation(implementationRequest);
           break;
         }
         case "intake-draft-create": {
@@ -1460,6 +1510,39 @@ export function createProductionConsoleWorkflowPlanner(
         }
       }
     } catch (error: unknown) {
+      if (implementationRequest !== undefined) {
+        const firstFailureCode = isRecord(error) && typeof error.code === "string" ? error.code : undefined;
+        const client = options.client.projectSessions;
+        if (firstFailureCode !== undefined) {
+          implementationRequest = undefined;
+        } else if (client?.prepareImplementation !== undefined) {
+          try {
+            result = await client.prepareImplementation(implementationRequest);
+          } catch (replayError: unknown) {
+            const replayFailureCode = isRecord(replayError) && typeof replayError.code === "string"
+              ? replayError.code
+              : undefined;
+            if (replayFailureCode !== undefined) {
+              return {
+                review: { ...pending, stage: "conflict", failure: replayFailureCode },
+                reconnectProjectSessionId: null,
+              };
+            }
+            const unresolved: ConsoleWorkflowReview = {
+              ...pending,
+              stage: "ambiguous",
+              result: `project-session-launch-packet-prepare | ${implementationRequest.command.commandId} | replay-unavailable`,
+              failure: "IMPLEMENT_REPLAY_UNAVAILABLE",
+            };
+            prepared.set(input.review.workflowId, {
+              ...stored,
+              review: unresolved,
+              commitCommandId: implementationRequest.command.commandId,
+            });
+            return { review: unresolved, reconnectProjectSessionId: null };
+          }
+        }
+      }
       if (launchCommandId !== undefined) {
         const actions = options.client.console?.actions;
         if (actions !== undefined) {
@@ -1484,7 +1567,7 @@ export function createProductionConsoleWorkflowPlanner(
           }
         }
       }
-      if (launchStatus === undefined) {
+      if (launchStatus === undefined && implementationRequest === undefined) {
         const failureCode = isRecord(error) && typeof error.code === "string" &&
             /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u.test(error.code)
           ? error.code
@@ -1534,6 +1617,46 @@ export function createProductionConsoleWorkflowPlanner(
       stored.commitCommandId === undefined
     ) {
       throw new Error("Console workflow settlement is stale or unavailable");
+    }
+    if (input.review.kind === "project-session-launch-packet-prepare") {
+      const client = options.client.projectSessions;
+      if (client?.prepareImplementation === undefined) {
+        throw new Error("project-session implementation preparation is unavailable");
+      }
+      const commandId = stored.commitCommandId;
+      const command = mutationContext(
+        options,
+        commandId,
+        "commit",
+        Number(stored.review.expectedRevision),
+        stored.review.previewDigest,
+      );
+      try {
+        const result = await client.prepareImplementation(parseOperation<ProjectSessionLaunchPacketPrepareRequest>(
+          FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+          {
+            ...stored.request,
+            command: {
+              ...command,
+              commandId,
+              provenance: {
+                kind: "console-direct-input",
+                clientId: "console_implementation_custody" as OperatorClientId,
+                inputEventId: commandId,
+              },
+            },
+          },
+        ));
+        prepared.delete(input.review.workflowId);
+        return {
+          ...input.review,
+          stage: "committed",
+          result: resultSummary(input.review.kind, result),
+          failure: null,
+        };
+      } catch {
+        return input.review;
+      }
     }
     const actions = options.client.console?.actions;
     if (actions === undefined) throw new Error("operator action status is unavailable");

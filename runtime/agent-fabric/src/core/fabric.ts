@@ -153,6 +153,7 @@ import {
   type ChairRecoveryDispatchHandle,
 } from "../project-session/launch-custody.js";
 import { IntakeStore } from "../project-session/intake-store.js";
+import { assertSafeLaunchProviderInput } from "../project-session/provider-input-safety.js";
 import {
   ProjectFabricCoreError,
   type AuthenticatedAgentContext,
@@ -2533,17 +2534,42 @@ export class Fabric {
   }
 
   #cleanCommittedLaunchPreparationStages(row: Row): void {
-    const project = rowOrNotFound(this.#database.prepare(`
-      SELECT canonical_root FROM projects WHERE project_id=?
-    `).get(stringField(row, "project_id")), "project");
-    const root = realpathSync(stringField(project, "canonical_root"));
-    const removed = [
-      this.#removeLaunchPreparationFile(root, row.staged_launch_packet_path, row.launch_packet_digest),
-      this.#removeLaunchPreparationFile(root, row.staged_resource_plan_path, row.resource_plan_digest),
-    ];
-    if (removed.includes(false)) {
-      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "committed launch preparation staging bytes changed");
-    }
+    this.#database.transaction(() => {
+      const current = rowOrNotFound(this.#database.prepare(`
+        SELECT * FROM project_session_launch_preparations
+         WHERE operator_id=? AND command_id=?
+      `).get(stringField(row, "operator_id"), stringField(row, "command_id")), "committed launch preparation");
+      if (stringField(current, "status") !== "committed") {
+        throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch preparation custody changed during committed cleanup");
+      }
+      if (current.staged_launch_packet_path === null && current.staged_resource_plan_path === null) return;
+      const project = rowOrNotFound(this.#database.prepare(`
+        SELECT canonical_root FROM projects WHERE project_id=?
+      `).get(stringField(current, "project_id")), "project");
+      const root = realpathSync(stringField(project, "canonical_root"));
+      const removed = [
+        this.#removeLaunchPreparationFile(root, current.staged_launch_packet_path, current.launch_packet_digest),
+        this.#removeLaunchPreparationFile(root, current.staged_resource_plan_path, current.resource_plan_digest),
+      ];
+      if (removed.includes(false)) {
+        throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "committed launch preparation staging bytes changed");
+      }
+      const cleared = this.#database.prepare(`
+        UPDATE project_session_launch_preparations
+           SET staged_launch_packet_path=NULL, staged_resource_plan_path=NULL, updated_at=?
+         WHERE operator_id=? AND command_id=? AND status='committed'
+           AND staged_launch_packet_path IS ? AND staged_resource_plan_path IS ?
+      `).run(
+        this.#clock(),
+        stringField(current, "operator_id"),
+        stringField(current, "command_id"),
+        current.staged_launch_packet_path,
+        current.staged_resource_plan_path,
+      );
+      if (cleared.changes !== 1) {
+        throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch preparation custody changed during committed cleanup");
+      }
+    })();
   }
 
   #compensateLaunchPreparation(row: Row): void {
@@ -2608,7 +2634,7 @@ export class Fabric {
       projectId: request.projectId,
       projectSessionId: request.projectSessionId,
       sessionGeneration: request.expectedSessionGeneration,
-      requiredAction: "decide",
+      requiredAction: "launch",
       commandPayload,
     });
     const claim = this.#database.transaction((): Row => {
@@ -2656,6 +2682,7 @@ export class Fabric {
     request: ProjectSessionLaunchPacketPrepareRequest,
   ): ProjectSessionLaunchPacketPreparation {
     const context = credential.context;
+    assertSafeLaunchProviderInput(request.launchPacket.provider.input);
     const replay = this.#claimLaunchPreparation(credential, request);
     if (replay !== undefined) return replay;
     const session = rowOrNotFound(this.#database.prepare(`
@@ -2782,7 +2809,7 @@ export class Fabric {
             reason: `accepted evidence ${request.acceptedScopeRef.digest}`,
             launchPacketRef: request.launchPacketRef,
           },
-        });
+        }, "launch");
         const prepared = {
           projectSession,
           launchPacketRef: request.launchPacketRef,
