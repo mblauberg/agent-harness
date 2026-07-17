@@ -73,7 +73,8 @@ function restrictRowActionAvailability(
         action === "cancel" || action === "steer";
     }
     if (view === "project" && detailKind === "project") {
-      return action === "project-session-drain" ||
+      return action === "cancel" ||
+        action === "project-session-drain" ||
         action === "project-session-stop" ||
         action === "project-session-launch" ||
         action === "chair-bridge-recovery" ||
@@ -248,6 +249,27 @@ function plannedIntent(
       chairRecoveryIntent.expectedSessionRevision === session.revision &&
       chairRecoveryIntent.expectedSessionGeneration === session.generation
       ? chairRecoveryIntent
+      : null;
+  }
+  if (
+    action === "cancel" &&
+    row.view === "project" &&
+    row.detailRef?.kind === "project"
+  ) {
+    return (session.state === "draft" || session.state === "awaiting_launch") &&
+      row.detailRef.projectId === session.projectId &&
+      draft.trim().length > 0
+      ? {
+          kind: "control",
+          action,
+          target: {
+            kind: "session",
+            projectSessionId: session.projectSessionId,
+            expectedRevision: session.revision,
+            expectedGeneration: session.generation,
+          },
+          reason: draft,
+        }
       : null;
   }
   const controlAction = action === "pause" || action === "resume" ||

@@ -324,6 +324,120 @@ describe("production Console mutation planner", () => {
     })).resolves.toBeNull();
   });
 
+  it("plans effect-free prelaunch cancellation only from the exact live Project row", async () => {
+    const planner = createProductionConsoleActionPlanner({
+      credential,
+      operatorId: "operator_console_production" as never,
+      clientId: "console_client_production" as never,
+    });
+    const projectFixture = (
+      sessionState: "draft" | "awaiting_launch" | "active",
+      stale = false,
+    ): { value: FabricConsoleDataset; controller: ConsoleControllerState; activation: FabricRuntimeActivation } => {
+      const current = dataset();
+      const snapshot = current.snapshot;
+      if (snapshot?.session.freshness !== "live" || snapshot.session.value === null) {
+        throw new Error("live session fixture unavailable");
+      }
+      const runRow = current.pages.runs.rows[0];
+      if (runRow === undefined) throw new Error("run fixture unavailable");
+      const value = {
+        ...current,
+        snapshot: {
+          ...snapshot,
+          session: {
+            ...snapshot.session,
+            value: { ...snapshot.session.value, state: sessionState },
+          },
+        },
+        pages: {
+          ...current.pages,
+          project: {
+            view: "project" as const,
+            rows: [{
+              view: "project" as const,
+              stableId: projectId,
+              revision: revisionFromProtocol(1),
+              urgency: "normal" as const,
+              freshness: { ...runRow.freshness, state: stale ? "stale" as const : "live" as const },
+              summary: {
+                kind: "project" as const,
+                goal: "cancel unused prelaunch session",
+                acceptedScopeRef: null,
+                repositoryRevision: "head",
+              },
+              detailRef: { kind: "project" as const, projectId, expectedRevision: 1 },
+              actionAvailability: {
+                state: "available" as const,
+                actions: ["cancel" as const],
+                requiresPreview: true,
+              },
+            }],
+            nextCursor: 1,
+            hasMore: false,
+            snapshotRevision: revisionFromProtocol(11),
+            readTransactionId: "project_cancel",
+          },
+        },
+      } satisfies FabricConsoleDataset;
+      const controller = state();
+      return {
+        value,
+        controller: {
+          ...controller,
+          activeView: "project",
+          selectionByView: {
+            ...controller.selectionByView,
+            project: { stableId: projectId, revision: revisionFromProtocol(1) },
+          },
+        },
+        activation: {
+          regionId: "action:cancel",
+          provenance: "keyboard",
+          eventId: `cancel_${sessionState}`,
+          binding: {
+            view: "project",
+            itemId: projectId,
+            itemRevision: revisionFromProtocol(1),
+            projectionRevision: revisionFromProtocol(11),
+          },
+        },
+      };
+    };
+
+    for (const sessionState of ["draft", "awaiting_launch"] as const) {
+      const fixture = projectFixture(sessionState);
+      await expect(planner.plan({
+        activation: fixture.activation,
+        dataset: fixture.value,
+        state: fixture.controller,
+        draft: "cancel unused session",
+      })).resolves.toMatchObject({
+        availableAction: "cancel",
+        intent: {
+          kind: "control",
+          action: "cancel",
+          target: {
+            kind: "session",
+            projectSessionId,
+            expectedRevision: 8,
+            expectedGeneration: 3,
+          },
+        },
+        command: { expectedRevision: 8 },
+      });
+    }
+
+    for (const fixture of [projectFixture("active"), projectFixture("draft", true)]) {
+      await expect(planner.plan({
+        activation: fixture.activation,
+        dataset: fixture.value,
+        state: fixture.controller,
+        draft: "cancel unused session",
+      })).resolves.toBeNull();
+    }
+  });
+
   it("builds confirmation and reconciliation commands from the bound preview revision", async () => {
     const planner = createProductionConsoleActionPlanner({
       credential,

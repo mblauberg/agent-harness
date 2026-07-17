@@ -207,7 +207,7 @@ redispatches or invokes generic action reconciliation for launch custody.
 
 If a selected session is `recovery_required`, Console asks the daemon to derive one loss-bound takeover capability and
 server-authored recovery intent. Do not copy loss IDs or construct recovery payloads by hand. Abandon remains a
-destructive action: inspect the preview, choose Confirm, and supply the displayed confirmation text. On confirmed
+destructive action: inspect the preview, then use the separate explicit Confirm gesture. On confirmed
 abandon, the daemon may repair historical launch accounting only from the exact terminal-success provider action
 (`provider_calls=1`, retained `concurrent_turns=0`); other unknown capacity remains unknown.
 

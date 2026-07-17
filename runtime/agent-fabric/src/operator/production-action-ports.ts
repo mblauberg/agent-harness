@@ -1678,7 +1678,7 @@ class ProductionOperatorActions {
   #cancel(target: ResolvedControlTarget, request: OperatorEffectRequest): OperatorEffectOutcome {
     if (request.intent.kind !== "control" || request.intent.action !== "cancel") unsupported();
     if (target.scopeKind === "session" && target.runs.length === 0) {
-      return this.#cancelEffectFreeSession(target, request.intent.reason, request.commandId);
+      return this.#cancelEffectFreeSession(target, request, this.#effectScope(request));
     }
     const reason = request.intent.reason;
     const commandId = request.commandId;
@@ -1729,9 +1729,16 @@ class ProductionOperatorActions {
 
   #cancelEffectFreeSession(
     target: ResolvedControlTarget,
-    reason: string,
-    commandId: string,
+    request: OperatorEffectRequest,
+    scope: EffectScope,
   ): OperatorEffectOutcome {
+    if (request.intent.kind !== "control" || request.intent.action !== "cancel") unsupported();
+    const reason = request.intent.reason;
+    const commandId = request.commandId;
+    const outcome: OperatorEffectOutcome = {
+      status: "committed",
+      afterState: { lifecycleState: "cancelled", cancelledTasks: 0 },
+    };
     const terminalPath = canonicalJson({
       kind: "cancelled",
       reason,
@@ -1786,12 +1793,10 @@ class ProductionOperatorActions {
       if (changed.changes !== 1) {
         throw new ProjectFabricCoreError("STALE_REVISION", "effect-free cancellation raced another transition");
       }
+      this.#storeCustodyOutcome(scope, commandId, outcome);
     })();
     try { this.#retireVolatileProjectSession?.(target.projectSessionId); } catch { /* durable cancellation committed */ }
-    return {
-      status: "committed",
-      afterState: { lifecycleState: "cancelled", cancelledTasks: 0 },
-    };
+    return outcome;
   }
 
   #settleCancelledTask(

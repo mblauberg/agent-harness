@@ -243,6 +243,71 @@ describe("production operator lifecycle ports", () => {
     },
   );
 
+  it("rehydrates committed effect-free cancellation after a post-mutation crash", async () => {
+    const database = new Database(":memory:");
+    databases.push(database);
+    applyMigrations(database);
+    database.exec(`
+      INSERT INTO projects(project_id, canonical_root, trust_record_digest, revision, authority_generation, created_at, updated_at)
+      VALUES ('project_01', '/project/one', '${digest}', 1, 1, ${now}, ${now});
+      INSERT INTO operator_principals(
+        operator_id, project_id, project_session_id, authenticated_subject_hash,
+        project_authority_generation, principal_generation, state, created_at, updated_at
+      ) VALUES ('operator_01', 'project_01', NULL, '${digest}', 1, 1, 'active', ${now}, ${now});
+      INSERT INTO project_sessions(
+        project_session_id, project_id, mode, state, revision, generation, authority_ref,
+        budget_ref, launch_packet_path, launch_packet_digest, membership_revision,
+        origin_kind, origin_operator_id, created_at, updated_at
+      ) VALUES (
+        'session_01', 'project_01', 'coordinated', 'draft', 2, 1, '${digest}',
+        'budget_01', 'launch.json', '${digest}', 1, 'operator-launch', 'operator_01', ${now}, ${now}
+      );
+    `);
+    const actionPorts = (fault?: (label: string) => void) => createProductionOperatorActionPorts({
+      database,
+      clock: () => now,
+      providerActionAdmission: new ProviderActionAdmissionCoordinator({ database, clock: () => now }),
+      adapter: {
+        capabilities: async () => { throw new Error("effect-free cancel must not inspect an adapter"); },
+        dispatch: async () => { throw new Error("effect-free cancel must not dispatch an adapter"); },
+        lookup: async () => { throw new Error("effect-free cancel must not look up an adapter"); },
+      },
+      ...(fault === undefined ? {} : { fault }),
+    });
+    const crashing = actionPorts((label) => {
+      if (label === "operator-effect:after-owned-dispatch") throw new Error("crash after effect-free cancellation");
+    });
+    const intent = {
+      kind: "control" as const,
+      action: "cancel" as const,
+      target: {
+        kind: "session" as const,
+        projectSessionId: "session_01" as never,
+        expectedRevision: 2,
+        expectedGeneration: 1,
+      },
+      reason: "cancel unused draft",
+    };
+    const request = scopedEffectRequest(
+      "cancel_effect_free_crash",
+      intent,
+      stateDigest(await crashing.statePort.read(intent)),
+    );
+
+    await expect(crashing.effectPort.dispatch(request)).rejects.toThrow("crash after effect-free cancellation");
+    expect(database.prepare(`
+      SELECT state, outcome_json FROM operator_effect_custody WHERE command_id='cancel_effect_free_crash'
+    `).get()).toMatchObject({ state: "terminal", outcome_json: expect.stringContaining('"status":"committed"') });
+    expect(database.prepare("SELECT state, revision FROM project_sessions WHERE project_session_id='session_01'").get())
+      .toEqual({ state: "cancelled", revision: 3 });
+
+    await expect(actionPorts().effectPort.observe({ ...request, attemptGeneration: 2, effectRef: null }))
+      .resolves.toMatchObject({
+        status: "committed",
+        afterState: { lifecycleState: "cancelled", cancelledTasks: 0 },
+      });
+  });
+
   it("rejects run cancellation when no task changed and leaves the session active", async () => {
     const { database, ports } = fixture();
     database.prepare("UPDATE tasks SET state='complete' WHERE run_id='run_01'").run();
