@@ -152,6 +152,90 @@ afterEach(() => {
 });
 
 describe("production operator lifecycle ports", () => {
+  it.each(["draft", "awaiting_launch"] as const)(
+    "cancels an effect-free %s session without fabricating task cancellation",
+    async (state) => {
+      const database = new Database(":memory:");
+      databases.push(database);
+      applyMigrations(database);
+      database.exec(`
+        INSERT INTO projects(project_id, canonical_root, trust_record_digest, revision, authority_generation, created_at, updated_at)
+        VALUES ('project_01', '/project/one', '${digest}', 1, 1, ${now}, ${now});
+        INSERT INTO project_sessions(
+          project_session_id, project_id, mode, state, revision, generation, authority_ref,
+          budget_ref, launch_packet_path, launch_packet_digest, membership_revision,
+          origin_kind, origin_operator_id, created_at, updated_at
+        ) VALUES (
+          'session_01', 'project_01', 'coordinated', '${state}', 2, 1, '${digest}',
+          'budget_01', 'launch.json', '${digest}', 1, 'operator-launch', 'operator_01', ${now}, ${now}
+        );
+      `);
+      const ports = createProductionOperatorActionPorts({
+        database,
+        clock: () => now,
+        providerActionAdmission: new ProviderActionAdmissionCoordinator({ database, clock: () => now }),
+        adapter: {
+          capabilities: async () => { throw new Error("effect-free cancel must not inspect an adapter"); },
+          dispatch: async () => { throw new Error("effect-free cancel must not dispatch an adapter"); },
+          lookup: async () => { throw new Error("effect-free cancel must not look up an adapter"); },
+        },
+      });
+      const intent = {
+        kind: "control" as const,
+        action: "cancel" as const,
+        target: {
+          kind: "session" as const,
+          projectSessionId: "session_01" as never,
+          expectedRevision: 2,
+          expectedGeneration: 1,
+        },
+        reason: "operator cancelled effect-free retry",
+      };
+
+      const before = await ports.statePort.read(intent);
+      await expect(ports.effectPort.dispatch(scopedEffectRequest(
+        `cancel_${state}`,
+        intent,
+        stateDigest(before),
+      ))).resolves.toMatchObject({
+        status: "committed",
+        afterState: { lifecycleState: "cancelled", cancelledTasks: 0 },
+      });
+      expect(database.prepare(`
+        SELECT state, revision, terminal_path_json FROM project_sessions WHERE project_session_id='session_01'
+      `).get()).toEqual({
+        state: "cancelled",
+        revision: 3,
+        terminal_path_json: canonicalJson({ kind: "cancelled", reason: "operator cancelled effect-free retry" }),
+      });
+    },
+  );
+
+  it("rejects run cancellation when no task changed and leaves the session active", async () => {
+    const { database, ports } = fixture();
+    database.prepare("UPDATE tasks SET state='complete' WHERE run_id='run_01'").run();
+    const intent = {
+      kind: "control" as const,
+      action: "cancel" as const,
+      target: {
+        kind: "run" as const,
+        projectSessionId: "session_01" as never,
+        coordinationRunId: "run_01" as never,
+        expectedRevision: 4,
+      },
+      reason: "nothing remains to cancel",
+    };
+
+    const before = await ports.statePort.read(intent);
+    await expect(ports.effectPort.dispatch(scopedEffectRequest(
+      "cancel_zero_tasks",
+      intent,
+      stateDigest(before),
+    ))).resolves.toEqual({ status: "rejected", code: "state-changed", evidenceRefs: [] });
+    expect(database.prepare("SELECT state FROM project_sessions WHERE project_session_id='session_01'").get())
+      .toEqual({ state: "active" });
+  });
+
   it("pauses and resumes an idle exact-revision task without provider I/O", async () => {
     const { database, ports } = fixture();
     database.exec(`
