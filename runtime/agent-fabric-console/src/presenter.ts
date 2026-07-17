@@ -229,9 +229,7 @@ function evidenceWorkflowActions(
         ? "confirm-terminal-neutralised"
         : "artifact-content-redacted";
   const decisionReason = intakeReason ?? artifactReason;
-  // Evidence-to-session implementation planning has no production binding yet.
-  // Do not let availability of Project-row launch preparation expose it.
-  const implementationReason = decisionReason ?? "implementation-planning-unavailable";
+  const implementationReason = decisionReason ?? capabilityReason(capabilities.implement);
   return [
     guidedAction("discuss", discussionReason),
     guidedAction("accept", decisionReason),

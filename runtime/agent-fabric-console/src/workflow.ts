@@ -4,6 +4,8 @@ import {
   FABRIC_OPERATIONS,
   OPERATION_CODECS,
   parseIdentifier,
+  parseLaunchPacketV1,
+  parseLaunchResourcePlanV1,
   parseTimestamp,
   type CommandId,
   type IntakeDraftCreateRequest,
@@ -25,6 +27,7 @@ import {
   type ProjectSessionCloseRequest,
   type ProjectSessionCreateRequest,
   type ProjectSessionId,
+  type ProjectSessionLaunchPacketPrepareRequest,
   type ProjectSessionTransitionRequest,
   type ScopedGateResolveRequest,
   type TaskRequest,
@@ -51,6 +54,7 @@ export const CONSOLE_WORKFLOW_KINDS = Object.freeze([
   "intake-revise",
   "scoped-gate-resolve",
   "project-session-close",
+  "project-session-launch-packet-prepare",
   "operator-action",
 ] as const);
 
@@ -287,6 +291,18 @@ function requiredGuidedField(
     );
   }
   return value;
+}
+
+function guidedJsonField(fields: Readonly<Record<string, string>>, key: string): unknown {
+  const value = requiredGuidedField(fields, key);
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    throw new ConsoleGuidedInputError(
+      "CONSOLE_GUIDED_JSON_INVALID",
+      `guided workflow field ${key} must contain valid JSON`,
+    );
+  }
 }
 
 function exactArtifactInspection(
@@ -562,6 +578,12 @@ function validateDirectRequest(
         { ...envelope.request, command },
       );
       return;
+    case "project-session-launch-packet-prepare":
+      parseOperation<ProjectSessionLaunchPacketPrepareRequest>(
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        { ...envelope.request, command },
+      );
+      return;
     case "intake-draft-create":
       parseOperation<IntakeDraftCreateRequest>(
         FABRIC_OPERATIONS.intakeDraftCreate,
@@ -615,9 +637,43 @@ function requestDetails(request: Record<string, unknown>): readonly Readonly<{ l
   }));
 }
 
+function implementationDetails(request: Record<string, unknown>): readonly Readonly<{ label: string; value: string }>[] {
+  const packet = isRecord(request.launchPacket) ? request.launchPacket : {};
+  const authority = isRecord(packet.chairAuthority) ? packet.chairAuthority : {};
+  const provider = isRecord(packet.provider) ? packet.provider : {};
+  return [
+    { label: "Accepted evidence", value: canonical(request.acceptedScopeRef) },
+    { label: "Launch packet", value: canonical(request.launchPacketRef) },
+    { label: "Resource plan", value: canonical(request.resourcePlanRef) },
+    { label: "Authority", value: canonical(safeValue(authority)) },
+    { label: "Budget", value: canonical(authority.budget) },
+    {
+      label: "Provider route",
+      value: canonical(safeValue({
+        adapterId: provider.adapterId,
+        actionId: provider.actionId,
+        contractDigest: provider.contractDigest,
+        inputSchemaId: provider.inputSchemaId,
+      })),
+    },
+    {
+      label: "Worktree/write scopes",
+      value: canonical({
+        projectRunDirectory: packet.projectRunDirectory,
+        workspaceRoots: authority.workspaceRoots,
+        sourcePaths: authority.sourcePaths,
+        artifactPaths: authority.artifactPaths,
+      }),
+    },
+  ];
+}
+
 function consequence(kind: ConsoleWorkflowKind): ConsoleWorkflowReview["consequenceClass"] {
   if (kind === "project-session-close") return "destructive";
-  if (kind === "project-session-create" || kind === "project-session-transition" || kind === "scoped-gate-resolve") {
+  if (
+    kind === "project-session-create" || kind === "project-session-transition" ||
+    kind === "project-session-launch-packet-prepare" || kind === "scoped-gate-resolve"
+  ) {
     return "consequential";
   }
   return "routine";
@@ -695,7 +751,9 @@ function directPreview(
     consequenceClass: consequence(envelope.kind),
     confirmationMode: "explicit",
     summary: envelope.kind,
-    details: requestDetails(envelope.request),
+    details: envelope.kind === "project-session-launch-packet-prepare"
+      ? implementationDetails(envelope.request)
+      : requestDetails(envelope.request),
     evidence: [],
     openedByEventId: eventId,
     armedByEventId: null,
@@ -721,6 +779,9 @@ export function createProductionConsoleWorkflowPlanner(
       : { state: "available" },
     gate: options.client.gates === undefined || options.client.console?.gates === undefined
       ? { state: "unavailable", reason: "gate-protocol-unavailable" }
+      : { state: "available" },
+    implement: options.client.intakes === undefined || options.client.projectSessions?.prepareImplementation === undefined
+      ? { state: "unavailable", reason: "project-session-implementation-prepare-unavailable" }
       : { state: "available" },
     launch: options.typedEntryPlanner?.capabilities.launch ?? {
       state: "unavailable",
@@ -927,7 +988,96 @@ export function createProductionConsoleWorkflowPlanner(
       input.action === "git" || input.action === "promotion"
     ) {
       if (input.action === "implement") {
-        throw new Error("implementation-planning-unavailable");
+        const capability = capabilities.implement;
+        if (capability === undefined || capability.state === "unavailable") {
+          throw new Error(capability?.reason ?? "project-session-implementation-prepare-unavailable");
+        }
+        const fields = guidedFields(input.raw);
+        if (Object.keys(fields).sort().join(",") !== "intake,launch-packet-path,packet,resource-plan") {
+          throw new ConsoleGuidedInputError(
+            "CONSOLE_GUIDED_IMPLEMENT_FIELDS_INVALID",
+            "guided Implement requires exactly intake, launch-packet-path, packet and resource-plan",
+          );
+        }
+        const inspection = exactArtifactInspection(
+          input.dataset,
+          input.binding,
+          input.artifactConfirmation,
+        );
+        const intakes = options.client.intakes;
+        if (intakes === undefined) throw new Error("intake protocol is unavailable");
+        const intake = await intakes.read({
+          credential: options.credential,
+          intakeId: requiredGuidedField(fields, "intake") as never,
+        });
+        const session = liveSession(input.dataset);
+        if (
+          session.state !== "draft" || intake.state !== "accepted" ||
+          intake.projectId !== options.projectId ||
+          intake.acceptedScopeRef?.path !== inspection.result.artifactRef.path ||
+          intake.acceptedScopeRef.digest !== inspection.result.artifactRef.digest ||
+          (inspection.result.coordinationRunId !== null && inspection.result.coordinationRunId !== intake.coordinationRunId)
+        ) {
+          throw new Error("guided Implement requires the exact accepted evidence and draft project session");
+        }
+        const resourcePlan = parseLaunchResourcePlanV1(
+          guidedJsonField(fields, "resource-plan"),
+          "guidedImplement.resourcePlan",
+        );
+        const rawPacket = guidedJsonField(fields, "packet");
+        if (!isRecord(rawPacket) || !isRecord(rawPacket.resourcePlanRef) || typeof rawPacket.resourcePlanRef.path !== "string") {
+          throw new ConsoleGuidedInputError(
+            "CONSOLE_GUIDED_IMPLEMENT_PACKET_INVALID",
+            "guided Implement packet requires a resourcePlanRef path",
+          );
+        }
+        const resourcePlanRef = {
+          path: rawPacket.resourcePlanRef.path,
+          digest: sha256(resourcePlan),
+        };
+        const launchPacket = parseLaunchPacketV1(
+          { ...rawPacket, resourcePlanRef },
+          "guidedImplement.launchPacket",
+        );
+        const launchPacketRef = {
+          path: requiredGuidedField(fields, "launch-packet-path"),
+          digest: sha256(launchPacket),
+        };
+        if (
+          launchPacket.projectId !== options.projectId ||
+          launchPacket.projectSessionId !== session.projectSessionId ||
+          launchPacket.topologyMode !== session.mode ||
+          launchPacket.budgetRef !== session.budgetRef ||
+          resourcePlan.projectId !== options.projectId ||
+          resourcePlan.projectSessionId !== session.projectSessionId ||
+          resourcePlan.runId !== launchPacket.runId ||
+          resourcePlan.budgetRef !== session.budgetRef ||
+          launchPacket.chairAuthority.approval.evidenceDigest !== inspection.result.artifactRef.digest ||
+          canonical(launchPacket.chairAuthority.budget) !== canonical(resourcePlan.scopes.coordinationRun.limits)
+        ) {
+          throw new Error("guided Implement packet authority, budget or session binding is inconsistent");
+        }
+        if (Date.parse(launchPacket.chairAuthority.expiresAt) <= now()) {
+          throw new Error("guided Implement packet authority has expired");
+        }
+        return await prepare({
+          raw: JSON.stringify({
+            kind: "project-session-launch-packet-prepare",
+            request: {
+              projectId: options.projectId,
+              projectSessionId: session.projectSessionId,
+              expectedSessionGeneration: session.generation,
+              intakeId: intake.intakeId,
+              acceptedScopeRef: inspection.result.artifactRef,
+              launchPacketRef,
+              resourcePlanRef,
+              launchPacket,
+              resourcePlan,
+            },
+          }),
+          dataset: input.dataset,
+          eventId: input.eventId,
+        });
       }
       const kind: ConsoleTypedEntryKind = input.action;
       const capability = capabilities[kind];
@@ -1185,6 +1335,19 @@ export function createProductionConsoleWorkflowPlanner(
             FABRIC_OPERATIONS.projectSessionClose,
             { ...stored.request, command },
           ));
+          break;
+        }
+        case "project-session-launch-packet-prepare": {
+          const client = options.client.projectSessions;
+          if (client?.prepareImplementation === undefined) {
+            throw new Error("project-session implementation preparation is unavailable");
+          }
+          result = await client.prepareImplementation(
+            parseOperation<ProjectSessionLaunchPacketPrepareRequest>(
+              FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+              { ...stored.request, command },
+            ),
+          );
           break;
         }
         case "intake-draft-create": {

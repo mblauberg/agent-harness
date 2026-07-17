@@ -197,6 +197,39 @@ reflow full, compact and inert layouts while preserving stable selection,
 focus, scroll, drafts and pending commands. `q` detaches the UI; it does not
 stop a project session or daemon.
 
+### Onboard accepted work
+
+Use this path when a reviewed project artifact is accepted and a new draft
+project session is ready to launch:
+
+1. Trust the canonical project root with `scripts/agent-fabric workspace trust
+   "$PWD"`, then open the Console for that exact root.
+2. Create or select the draft project session. If several sessions are
+   attachable, pass its stable ID with `--session`.
+3. Open the complete, verified accepted-evidence row and choose
+   `Implement...`. Supply exactly `intake`, `launch-packet-path`, `packet` and
+   `resource-plan`. The packet contains the authority expiry, budget, provider
+   route, run directory and write/worktree scopes. It references artifact
+   paths and digests instead of embedding accepted source bytes.
+4. Review the accepted-evidence, launch-packet and resource-plan refs;
+   authority; budget; provider route; and worktree/write scopes. Editing either
+   JSON document creates a new digest and review. Confirming Implement closes
+   the two artifacts and moves the same project session to `awaiting_launch`;
+   it does not contact the provider. Cancel or fix any missing, stale, expired
+   or inconsistent binding.
+5. Select the live Project row and choose `Launch...`. Review the daemon-owned
+   launch preview, then use a separate confirmation gesture. Only this step may
+   dispatch the provider. After reconnect or handoff, reopen the session by its
+   stable ID; Console uses its persisted exact packet ref.
+6. Wait for committed launch status with a terminal-success journal and a
+   current `seatProvisioning` descriptor. Provision the complete roster with
+   the command under [Renew seats](#renew-seats), reconnect all clients, then
+   run both registered MCP smoke checks.
+
+Stop before Launch if Implement reports a changed evidence digest, session
+revision, authority expiry, budget, provider route or artifact ref. Do not
+repair those bindings by editing a generated digest or bypassing the Console.
+
 ## Verify registrations
 
 Client registry commands should report `agent-fabric` connected or ready. New

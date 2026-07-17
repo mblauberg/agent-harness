@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolve, sep } from "node:path";
 
 import type Database from "better-sqlite3";
@@ -23,6 +23,8 @@ import {
   type LifecycleCurrentStateV1,
   type LifecycleGenerationLossRowV1,
   type OperationInputMap,
+  type ProjectSessionLaunchPacketPreparation,
+  type ProjectSessionLaunchPacketPrepareRequest,
   type ProtocolOperation,
   type VerifiedProtocolCredential,
 } from "@local/agent-fabric-protocol";
@@ -142,6 +144,7 @@ import { ProjectSessionMembershipStore } from "../project-session/membership-sto
 import { CoordinatedWorkstreamStore } from "../project-session/workstream-store.js";
 import {
   LaunchCustodyService,
+  normaliseLaunchChairAuthority,
   parseLaunchAdapterContract,
   type LaunchAdapterContract,
   type AgentBridgeContract,
@@ -2470,6 +2473,131 @@ export class Fabric {
     };
   }
 
+  #writeClosedLaunchArtifact(root: string, relativePath: string, content: string): void {
+    const destination = resolve(root, canonicalAuthorityPath(root, relativePath));
+    if (existsSync(destination)) {
+      if (readFileSync(destination, "utf8") !== content) {
+        throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch artifact path already contains different bytes");
+      }
+      return;
+    }
+    mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+    const temporary = `${destination}.tmp-${randomBytes(12).toString("hex")}`;
+    writeFileSync(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    renameSync(temporary, destination);
+  }
+
+  #prepareProjectSessionImplementation(
+    credential: AuthenticatedOperatorCredential,
+    request: ProjectSessionLaunchPacketPrepareRequest,
+  ): ProjectSessionLaunchPacketPreparation {
+    const context = credential.context;
+    const session = rowOrNotFound(this.#database.prepare(`
+      SELECT * FROM project_sessions WHERE project_session_id=? AND project_id=?
+    `).get(request.projectSessionId, request.projectId), "project session");
+    if (
+      request.projectId !== context.projectId ||
+      credential.projectSessionId !== request.projectSessionId ||
+      credential.sessionGeneration !== request.expectedSessionGeneration ||
+      numberField(session, "generation") !== request.expectedSessionGeneration ||
+      numberField(session, "revision") !== request.command.expectedRevision
+    ) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "Implement requires the exact current project-session binding");
+    }
+    if (stringField(session, "state") !== "draft") {
+      throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "Implement requires a draft project session");
+    }
+    const accepted = this.#database.prepare(`
+      SELECT 1 FROM intakes intake
+      JOIN artifacts artifact ON artifact.artifact_id=intake.accepted_scope_artifact_id
+       WHERE intake.intake_id=? AND intake.project_id=?
+         AND intake.state='accepted' AND intake.accepted_scope_state='bound'
+         AND artifact.registry_state='active'
+         AND artifact.relative_path=? AND artifact.sha256=?
+    `).get(
+      request.intakeId,
+      request.projectId,
+      request.acceptedScopeRef.path,
+      request.acceptedScopeRef.digest,
+    );
+    if (accepted === undefined) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "Implement requires the exact current accepted scope artifact");
+    }
+    const packet = request.launchPacket;
+    const plan = request.resourcePlan;
+    if (
+      packet.projectId !== request.projectId || packet.projectSessionId !== request.projectSessionId ||
+      plan.projectId !== request.projectId || plan.projectSessionId !== request.projectSessionId ||
+      packet.runId !== plan.runId || packet.topologyMode !== stringField(session, "mode") ||
+      packet.budgetRef !== stringField(session, "budget_ref") || plan.budgetRef !== packet.budgetRef
+    ) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "launch packet, resource plan and project session identities differ");
+    }
+    if (packet.chairAuthority.approval.evidenceDigest !== request.acceptedScopeRef.digest) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair authority is not bound to the accepted scope digest");
+    }
+    if (Date.parse(packet.chairAuthority.expiresAt) <= this.#clock()) {
+      throw new ProjectFabricCoreError("CAPABILITY_EXPIRED", "chair authority expired before Implement confirmation");
+    }
+    if (canonicalJson(packet.chairAuthority.budget) !== canonicalJson(plan.scopes.coordinationRun.limits)) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair authority budget must equal coordination-run limits");
+    }
+    const resourcePlanText = canonicalJson(plan);
+    const resourcePlanDigest = sha256Digest(resourcePlanText);
+    if (
+      packet.resourcePlanRef.path !== request.resourcePlanRef.path ||
+      packet.resourcePlanRef.digest !== request.resourcePlanRef.digest ||
+      request.resourcePlanRef.digest !== resourcePlanDigest
+    ) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "resource plan digest changed since review");
+    }
+    const launchPacketText = canonicalJson(packet);
+    const launchPacketDigest = sha256Digest(launchPacketText);
+    if (request.launchPacketRef.digest !== launchPacketDigest) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "launch packet digest changed since review");
+    }
+    if (request.launchPacketRef.path === request.resourcePlanRef.path) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "launch packet and resource plan require distinct artifact paths");
+    }
+    const project = rowOrNotFound(this.#database.prepare(`
+      SELECT canonical_root FROM projects WHERE project_id=?
+    `).get(request.projectId), "project");
+    const root = realpathSync(stringField(project, "canonical_root"));
+    const authority = normaliseLaunchChairAuthority(packet.chairAuthority, root);
+    const projectRunDirectory = canonicalAuthorityPath(root, packet.projectRunDirectory);
+    const launchPacketPath = canonicalAuthorityPath(root, request.launchPacketRef.path);
+    const resourcePlanPath = canonicalAuthorityPath(root, request.resourcePlanRef.path);
+    const artifactPaths = [launchPacketPath, resourcePlanPath];
+    if (
+      artifactPaths.some((path) => !pathContains(projectRunDirectory, path)) ||
+      artifactPaths.some((path) => !authority.artifactPaths.some((scope) => pathContains(scope, path))) ||
+      artifactPaths.some((path) => authority.deniedPaths.some((scope) => pathContains(scope, path)))
+    ) {
+      throw new ProjectFabricCoreError(
+        "CAPABILITY_FORBIDDEN",
+        "launch artifacts must remain inside the reviewed run directory and chair artifact scope",
+      );
+    }
+    this.#writeClosedLaunchArtifact(root, request.resourcePlanRef.path, resourcePlanText);
+    this.#writeClosedLaunchArtifact(root, request.launchPacketRef.path, launchPacketText);
+    const projectSession = this.#projectSessions.transitionProjectSession(context, {
+      command: request.command,
+      projectSessionId: request.projectSessionId,
+      expectedGeneration: request.expectedSessionGeneration,
+      transition: {
+        to: "awaiting_launch",
+        reason: `accepted evidence ${request.acceptedScopeRef.digest}`,
+        launchPacketRef: request.launchPacketRef,
+      },
+    });
+    return {
+      projectSession,
+      launchPacketRef: request.launchPacketRef,
+      resourcePlanRef: request.resourcePlanRef,
+      acceptedScopeRef: request.acceptedScopeRef,
+    };
+  }
+
   async dispatchPublicProtocol(
     context: PublicProtocolContext,
     operation: ProtocolOperation,
@@ -2701,6 +2829,12 @@ export class Fabric {
         const credential = operatorCredential();
         operatorCommand(credential, request.command);
         return this.#projectSessions.closeProjectSession(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#prepareProjectSessionImplementation(credential, request);
       }
       case FABRIC_OPERATIONS.projectSessionLaunchPrepare: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionLaunchPrepare];

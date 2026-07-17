@@ -445,6 +445,209 @@ describe("typed Console workflow planner", () => {
     }));
   });
 
+  it("reviews an editable closed launch packet from exact accepted evidence before preparing the session", async () => {
+    const acceptedScopeRef = { path: "docs/accepted-scope.md" as never, digest };
+    const intake: Intake = {
+      intakeId: "intake_implement" as never,
+      projectId,
+      projectSessionId,
+      coordinationRunId: "run_implement" as never,
+      revision: 5,
+      state: "accepted",
+      dedupeKey: "implement",
+      summary: "Implement accepted scope",
+      artifactRefs: [acceptedScopeRef],
+      gateIds: [],
+      acceptedScopeRef,
+    };
+    const prepareImplementation = vi.fn(async (request) => ({
+      projectSession: {
+        ...request,
+        mode: "coordinated",
+        state: "awaiting_launch",
+        revision: 9,
+        generation: 2,
+        authorityRef: digest,
+        budgetRef: "budget_workflow",
+        launchPacketRef: request.launchPacketRef,
+        membershipRevision: 1,
+        origin: { kind: "operator-launch", operatorId: "operator_workflow" },
+      },
+      launchPacketRef: request.launchPacketRef,
+      resourcePlanRef: request.resourcePlanRef,
+      acceptedScopeRef,
+    }));
+    const planner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        intakes: { createDraft: vi.fn(), read: vi.fn(async () => intake), submit: vi.fn(), revise: vi.fn() },
+        projectSessions: { prepareImplementation } as never,
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow" as never,
+      projectId,
+      now: () => Date.parse("2026-07-17T01:00:00.000Z"),
+    });
+    const selected = dataset();
+    const session = selected.snapshot?.session;
+    if (session?.freshness !== "live" || session.value === null) throw new Error("session fixture unavailable");
+    const binding = {
+      view: "evidence" as const,
+      itemId: "evidence_implement",
+      itemRevision: revisionFromProtocol(7),
+      projectionRevision: revisionFromProtocol(11),
+    };
+    const guidedDataset: FabricConsoleDataset = {
+      ...selected,
+      snapshot: {
+        ...selected.snapshot!,
+        session: { ...session, value: { ...session.value, state: "draft" } },
+      },
+      inspection: {
+        kind: "artifact",
+        state: "current",
+        binding,
+        readTransactionId: "implement-artifact-read",
+        result: {
+          artifactRef: acceptedScopeRef,
+          evidenceRevision: 7,
+          evidenceKind: "artifact",
+          sourceKind: "project-file",
+          publisherKind: "agent",
+          publisherRef: "chair-implement",
+          projectSessionId,
+          coordinationRunId: intake.coordinationRunId,
+          taskId: null,
+          createdAt: observedAt,
+          mediaType: "text/markdown",
+          content: "accepted scope",
+          totalBytes: 14,
+          totalLines: 1,
+          renderedTotalBytes: 14,
+          renderedTotalLines: 1,
+          renderedArtifactDigest: digest,
+          transformation: "none",
+          terminalNeutralised: true,
+          capabilityValuesRedacted: true,
+          credentialValuesRedacted: true,
+          pages: [{ pageIndex: 0, lineFragment: "whole", pageContentDigest: digest, bytes: 14 }],
+          coverage: { complete: true, verified: true, pageCount: 1 },
+          reviewDisposition: "eligible",
+        },
+      },
+    };
+    const resourcePlan = {
+      schemaVersion: 1,
+      projectId,
+      projectSessionId,
+      runId: "run_implement",
+      budgetRef: "budget_workflow",
+      scopes: {
+        project: { scopeId: "scope_project", limits: { concurrent_turns: 2 } },
+        projectSession: { scopeId: "scope_session", limits: { concurrent_turns: 2 } },
+        coordinationRun: { scopeId: "scope_run", limits: { concurrent_turns: 1 } },
+      },
+      launchReservation: { amounts: { concurrent_turns: 1 } },
+    };
+    const packet = {
+      schemaVersion: 1,
+      projectId,
+      projectSessionId,
+      runId: "run_implement",
+      chairAgentId: "chair_implement",
+      projectRunDirectory: ".agent-run/run_implement",
+      topologyMode: "coordinated",
+      budgetRef: "budget_workflow",
+      resourcePlanRef: { path: ".agent-run/run_implement/launch-resources.json", digest },
+      chairAuthority: {
+        schemaVersion: 2,
+        approval: { approvedBy: "human-maintainer", evidenceId: "accepted-scope", evidenceDigest: digest },
+        workspaceRoots: ["."],
+        sourcePaths: ["runtime/agent-fabric-console"],
+        artifactPaths: [".agent-run/run_implement"],
+        actions: [FABRIC_OPERATIONS.getTask],
+        deniedPaths: [],
+        deniedActions: [],
+        prohibitedActions: ["deployment"],
+        disclosure: { level: "scoped", scopes: ["local", "approved-provider"] },
+        secrets: { access: "none" },
+        deployment: { allowed: false },
+        irreversibleActions: { allowed: false },
+        network: { toolEgress: "none" },
+        expiresAt: "2026-07-18T01:00:00.000Z",
+        budget: { concurrent_turns: 1 },
+      },
+      provider: {
+        adapterId: "claude-agent-sdk",
+        actionId: "provider_implement",
+        contractDigest: digest,
+        inputSchemaId: "provider-launch.v1",
+        input: { model: "claude-opus", prompt: "Reopen docs/accepted-scope.md and implement it." },
+      },
+    };
+    const raw = [
+      "intake=intake_implement",
+      "launch-packet-path=.agent-run/run_implement/launch-packet.json",
+      `packet=${JSON.stringify(packet)}`,
+      `resource-plan=${JSON.stringify(resourcePlan)}`,
+    ].join("\n");
+
+    const review = await planner.prepareGuided({
+      action: "implement",
+      binding,
+      raw,
+      dataset: guidedDataset,
+      eventId: "implement-open",
+    });
+
+    expect(prepareImplementation).not.toHaveBeenCalled();
+    expect(review).toMatchObject({
+      kind: "project-session-launch-packet-prepare",
+      stage: "review",
+      confirmationMode: "explicit",
+      details: expect.arrayContaining([
+        { label: "Provider route", value: expect.stringContaining("claude-agent-sdk") },
+        { label: "Worktree/write scopes", value: expect.stringContaining("runtime/agent-fabric-console") },
+        { label: "Budget", value: expect.stringContaining("concurrent_turns") },
+      ]),
+    });
+    await expect(planner.prepareGuided({
+      action: "implement",
+      binding,
+      raw: raw.replace("2026-07-18T01:00:00.000Z", "2026-07-17T00:59:59.000Z"),
+      dataset: guidedDataset,
+      eventId: "implement-expired",
+    })).rejects.toThrow("authority has expired");
+    expect(prepareImplementation).not.toHaveBeenCalled();
+
+    const editedReview = await planner.prepareGuided({
+      action: "implement",
+      binding,
+      raw: raw.replace("and implement it.", "and implement it, then write the handoff."),
+      dataset: guidedDataset,
+      eventId: "implement-edit",
+    });
+    expect(editedReview.previewDigest).not.toBe(review.previewDigest);
+    expect(editedReview.details).toContainEqual({
+      label: "Launch packet",
+      value: expect.stringContaining("sha256:"),
+    });
+
+    await planner.commit({
+      review: planner.arm(editedReview, "implement-arm"),
+      eventId: "implement-confirm",
+    });
+    expect(prepareImplementation).toHaveBeenCalledTimes(1);
+    expect(prepareImplementation).toHaveBeenCalledWith(expect.objectContaining({
+      acceptedScopeRef,
+      launchPacket: expect.objectContaining({
+        provider: expect.objectContaining({
+          input: expect.objectContaining({ prompt: expect.stringContaining("write the handoff") }),
+        }),
+      }),
+    }));
+  });
+
   it("fails a guided decision before mutation when the supplied intake is cross-session", async () => {
     const wrongSessionIntake: Intake = {
       intakeId: "intake_wrong_session" as never,
