@@ -370,6 +370,7 @@ export async function attemptIdleStop(options: {
   clock?: () => number;
   beforeFinalRecheck?: () => Promise<void>;
   beforeStopCommit?: () => Promise<void>;
+  beforeElectionRelease?: () => Promise<void>;
   closeSocket(): Promise<void>;
   reopenSocket(): Promise<void>;
 }): Promise<IdleStopResult> {
@@ -384,13 +385,15 @@ export async function attemptIdleStop(options: {
     const final = recheckIdle(options.database, { now: clock(), token: started.token });
     if (final.state === "busy") return final;
     await options.closeSocket();
-    return await completeDrainedIdleStop({
+    const stopped = await completeDrainedIdleStop({
       database: options.database,
       token: started.token,
       clock,
       ...(options.beforeStopCommit === undefined ? {} : { beforeStopCommit: options.beforeStopCommit }),
       reopenSocket: options.reopenSocket,
     });
+    if (stopped.state === "stopped") await options.beforeElectionRelease?.();
+    return stopped;
   });
   if (elected.role === "observer") return { state: "busy", reason: "election-active" };
   return elected.value;
@@ -405,6 +408,7 @@ export async function attemptDrainedStop(options: {
   clock?: () => number;
   beforeFinalRecheck?: () => Promise<void>;
   beforeStopCommit?: () => Promise<void>;
+  beforeElectionRelease?: () => Promise<void>;
   closeSocket(): Promise<void>;
   reopenSocket(): Promise<void>;
 }): Promise<IdleStopResult> {
@@ -420,7 +424,7 @@ export async function attemptDrainedStop(options: {
     });
     if (final.state === "busy") return final;
     await options.closeSocket();
-    return await completeDrainedIdleStop({
+    const stopped = await completeDrainedIdleStop({
       database: options.database,
       token: options.token,
       clock,
@@ -430,6 +434,8 @@ export async function attemptDrainedStop(options: {
       ...(options.beforeStopCommit === undefined ? {} : { beforeStopCommit: options.beforeStopCommit }),
       reopenSocket: options.reopenSocket,
     });
+    if (stopped.state === "stopped") await options.beforeElectionRelease?.();
+    return stopped;
   });
   if (elected.role === "observer") return { state: "busy", reason: "election-active" };
   return elected.value;
