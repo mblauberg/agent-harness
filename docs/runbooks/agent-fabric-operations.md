@@ -75,6 +75,23 @@ scripts/agent-fabric status --json --project "$PWD"
 scripts/agent-fabric doctor --json
 ```
 
+`doctor` reports one typed overall state and exits successfully for both normal
+operating modes:
+
+| `state` | `code` | `healthy` | Meaning |
+| --- | --- | --- | --- |
+| `idle` | `DAEMON_ON_DEMAND_IDLE` | `true` | Configuration, compatibility, private paths, database and election state pass; no daemon is expected to be running. `daemon.pid` and `daemon.socketPath` are `null`. |
+| `live` | `DAEMON_LIVE` | `true` | Generation-bound discovery, bootstrap election, process, owned Unix socket and authenticated handshake agree. |
+| `failed` | causal failure code | `false` | A preflight, election, discovery, process, socket or handshake failed. The command exits non-zero. |
+
+In the idle case the `daemon-socket` check has status `idle`, not `pass` or
+`fail`. This does not weaken preflight: for example, an intact idle daemon
+state alongside an incompatible database still produces overall `state:
+"failed"` and a non-zero exit. A failed or in-progress bootstrap, ambiguous or
+stale discovery, crashed process, orphan socket and failed handshake are never
+relabelled idle. `doctor` diagnoses only; it does not start the on-demand
+daemon.
+
 Each client registry contains only the proxy command, socket path, fabric state
 directory, seat and client label:
 

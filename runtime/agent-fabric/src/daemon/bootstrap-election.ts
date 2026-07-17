@@ -83,6 +83,12 @@ export type BootstrapGenerationOutcome =
   | { kind: "ready"; receipt: BootstrapReadyReceipt }
   | { kind: "terminal"; receipt: BootstrapTerminalLease };
 
+export type BootstrapElectionInspection =
+  | { status: "absent" }
+  | { status: "active"; lease: BootstrapHeldLease }
+  | { status: "ready"; receipt: BootstrapReadyReceipt }
+  | { status: "terminal"; receipt: BootstrapTerminalLease };
+
 export class BootstrapElectionError extends Error {
   readonly code: string;
 
@@ -582,6 +588,21 @@ export class BootstrapElection {
       throw new BootstrapElectionError("BOOTSTRAP_GENERATION_SUPERSEDED", `bootstrap generation ${String(generation)} was superseded`);
     }
     return undefined;
+  }
+
+  async inspectCurrent(): Promise<BootstrapElectionInspection> {
+    const [lease, ready] = await Promise.all([this.#readLease(), this.#readReady()]);
+    if (lease === undefined && ready === undefined) return { status: "absent" };
+    if (lease?.status === "held") return { status: "active", lease };
+    const generation = Math.max(lease?.electionGeneration ?? 0, ready?.electionGeneration ?? 0);
+    if (generation === 0) return { status: "absent" };
+    const outcome = await this.readGenerationOutcome(generation);
+    if (outcome === undefined) {
+      throw new BootstrapElectionError("BOOTSTRAP_INCOMPLETE", "bootstrap election artifacts have no current outcome");
+    }
+    return outcome.kind === "ready"
+      ? { status: "ready", receipt: outcome.receipt }
+      : { status: "terminal", receipt: outcome.receipt };
   }
 
   async waitForGenerationOutcome(generation: number, deadlineAt = this.#clock() + this.#waitTimeoutMs): Promise<BootstrapGenerationOutcome> {
