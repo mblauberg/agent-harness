@@ -48,7 +48,7 @@ What the route is intended to deliver. Link the owning specification.
   run, are not linked as route state, and are removed or archived when consumed.
 - **One map writer.** Parallel workers write namespaced continuity artifacts;
   one chair updates the shared route after checking the tracker.
-- Archive a route map under the project's move-never-delete rule only when the
+- Archive a route map under the project's archival policy only when the
   owning issue records that disposition.
 - Validate an authored map with
   `scripts/validate_work_map.py <EFFORT-file>` before handoff.

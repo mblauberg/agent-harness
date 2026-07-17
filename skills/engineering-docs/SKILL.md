@@ -19,7 +19,7 @@ advisory mode, propose paths without creating them.
 |---|---|---|
 | Stories / specs | `docs/stories/` or `docs/specs/` | `NN-slug.md`, indexed |
 | Architecture map | `docs/ARCHITECTURE.md` | current state; links to ADRs |
-| Diagrams | `docs/diagrams/` | Mermaid, `NN-slug.md`, indexed |
+| Diagrams | owning document or `docs/diagrams/` | colocate by default; separate when independently owned, reused or generated |
 | Runbooks | `docs/runbooks/` | numbered steps and verification |
 | Open-decision register | `docs/OPEN_DECISIONS.md` | one row per user/owner gate; never auto-answered |
 | Threat models | `docs/threat-models/` | STRIDE/LINDDUN structure |
@@ -46,11 +46,15 @@ Default to **Mermaid in markdown** for GitHub and operational docs. Use
 `flowchart` for routing, `sequenceDiagram` for calls, `stateDiagram-v2` for
 lifecycles, `erDiagram` for schemas and a C4-style flowchart for context.
 
+Place a load-bearing diagram in the document whose explanation it supports
+when both have the same audience, owner and lifecycle. Use a separate diagram
+file when it is reused, generated, or maintained as an independent artifact.
+
 **Render and visually inspect before commit.** Parser success proves syntax,
 not layout quality:
 
 ```sh
-src="$(pwd)/docs/diagrams/NN-slug.md"
+src="$(pwd)/path/to/owning-document.md"
 out="$(mktemp -d)"
 (cd "$out" && mmdc -i "$src" -o check.md)
 ```
@@ -61,11 +65,13 @@ clipping, crossings, blank space and unreadable scaling. Apply
 [diagram-quality.md](references/diagram-quality.md). Use `d2-diagrams` only
 when fixed layout or publication quality justifies a rendered asset.
 
-## Archiving (move-never-delete)
+## Retirement and archiving
 
-Move into the archive, update its index, and repair live citations or leave a
-tombstone pointer. Preserve history across repositories with linked commits.
-True deletion requires an owner decision.
+Preserve durable records in the archive and update its index. After an
+authorised move, repair inbound links and remove a pointer-only file when
+repository history and the relevant index preserve provenance. Keep a
+tombstone only while a stable external link or unsupported consumer still
+requires one. Deleting a substantive record still requires owner authority.
 
 ## Red flags
 

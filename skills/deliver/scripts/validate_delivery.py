@@ -415,7 +415,8 @@ def _validate_evidence(
                     },
                     f"deterministic evidence artifact {artifact_id} check {evidence_id} does not match its evidence row",
                 )
-    for kind, gates in profile["required_evidence"].items():
+    required_evidence = _policy_validation_module().profile_evidence_requirements(profile, artifacts)
+    for kind, gates in required_evidence.items():
         if kind not in required_kinds:
             continue
         for gate in gates:
@@ -480,8 +481,19 @@ def _validate_security(run: dict[str, Any], registry: dict[str, Any], profile: d
     fail(actual_pairs != expected_pairs, "security checks do not exactly match policy-selected surfaces")
     canonical = {artifact_id: artifact for artifact_id, artifact in artifacts.items() if artifact.get("class") == "canonical"}
     technical_types = set(registry["profiles"]["software"]["artifact_types"]) | set(registry["profiles"]["agent-product"]["artifact_types"])
-    technical_required = any(artifact.get("artifact_type") in technical_types for artifact in canonical.values())
+    interactive_required = any(
+        artifact.get("artifact_type") == "interactive-document"
+        for artifact in canonical.values()
+    )
+    technical_required = interactive_required or any(
+        artifact.get("artifact_type") in technical_types for artifact in canonical.values()
+    )
     if required and run.get("risk_tier") in {"substantial", "crucial", "terminal"} and technical_required:
+        if interactive_required:
+            fail(
+                "source" not in surfaces,
+                "interactive document requires source security composition",
+            )
         fail(not surfaces, "substantial+ technical profile requires changed security surfaces")
         fail(security.get("status") != "pass" or not checks, "substantial+ technical profile requires passing security evidence")
         mappings = _list(security.get("artifact_surfaces"), "security.artifact_surfaces")
@@ -885,20 +897,22 @@ def validate(
         unknown = set(item["evidence_ids"]) - allowed_history_evidence
         fail(bool(unknown), f"state_history[{index}] references unknown evidence ids")
     if reviewing_reached:
+        profile_evidence = policy_validation.profile_evidence_requirements(profile, artifacts)
         deterministic_ids = {
             item["id"] for item in evidence.values()
             if item.get("kind") == "deterministic" and item.get("status") == "pass"
-            and item.get("gate") in profile["required_evidence"]["deterministic"]
+            and item.get("gate") in profile_evidence["deterministic"]
         }
         first_review = next(item for item in run["state_history"] if item["state"] == "reviewing")
         fail(not deterministic_ids <= set(first_review["evidence_ids"]), "reviewing transition lacks deterministic gate evidence")
     _validate_reviews(run, evidence, required=acceptance_reached)
     if acceptance_reached:
+        profile_evidence = policy_validation.profile_evidence_requirements(profile, artifacts)
         final_transition = next(item for item in run["state_history"] if item["state"] == "awaiting_acceptance")
         profile_ids = {
             item["id"] for item in evidence.values()
             if item.get("status") == "pass" and item.get("gate") in {
-                *profile["required_evidence"]["deterministic"], *profile["required_evidence"]["judgement"]
+                *profile_evidence["deterministic"], *profile_evidence["judgement"]
             }
         }
         review_ids = {item.get("evidence_id") for item in run["reviews"] if item.get("status") == "pass" and item.get("role") in {"native-review", "other-primary"}}
