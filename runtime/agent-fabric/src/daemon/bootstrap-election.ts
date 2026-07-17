@@ -85,7 +85,7 @@ export type BootstrapGenerationOutcome =
 
 export type BootstrapElectionInspection =
   | { status: "absent" }
-  | { status: "active"; lease: BootstrapHeldLease }
+  | { status: "active"; ownership: "kernel-lock" }
   | { status: "ready"; receipt: BootstrapReadyReceipt }
   | { status: "terminal"; receipt: BootstrapTerminalLease };
 
@@ -103,8 +103,14 @@ export type ElectionLockHandle = {
   release(): Promise<void>;
 };
 
+export type ElectionLockProbe =
+  | { status: "absent" }
+  | { status: "held" }
+  | { status: "acquired"; handle: ElectionLockHandle };
+
 export type ElectionLockPort = {
   tryAcquire(lockPath: string): Promise<ElectionLockHandle | undefined>;
+  probe(lockPath: string): Promise<ElectionLockProbe>;
 };
 
 export type BootstrapElectionPaths = {
@@ -301,6 +307,46 @@ export const FLOCK_ELECTION_LOCK_PORT: ElectionLockPort = Object.freeze({
       };
     } catch (error: unknown) {
       await handle?.close().catch(() => undefined);
+      if (isErrno(error, "ELOOP")) {
+        throw new BootstrapElectionError("BOOTSTRAP_PATH_UNSAFE", `${lockPath} must not be a symbolic link`, { cause: error });
+      }
+      throw error;
+    }
+  },
+  async probe(lockPath: string): Promise<ElectionLockProbe> {
+    let handle: FileHandle | undefined;
+    try {
+      handle = await open(lockPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      await validatePrivateHandle(handle, lockPath);
+      try {
+        await flockPromise(handle.fd, "exnb");
+      } catch (error: unknown) {
+        if (isErrno(error, "EAGAIN", "EACCES", "EWOULDBLOCK")) {
+          await handle.close();
+          return { status: "held" };
+        }
+        throw error;
+      }
+      await validatePrivateHandle(handle, lockPath);
+      let released = false;
+      const lockedHandle = handle;
+      return {
+        status: "acquired",
+        handle: {
+          async release(): Promise<void> {
+            if (released) return;
+            released = true;
+            try {
+              await flockPromise(lockedHandle.fd, "un");
+            } finally {
+              await lockedHandle.close();
+            }
+          },
+        },
+      };
+    } catch (error: unknown) {
+      await handle?.close().catch(() => undefined);
+      if (isErrno(error, "ENOENT")) return { status: "absent" };
       if (isErrno(error, "ELOOP")) {
         throw new BootstrapElectionError("BOOTSTRAP_PATH_UNSAFE", `${lockPath} must not be a symbolic link`, { cause: error });
       }
@@ -591,18 +637,29 @@ export class BootstrapElection {
   }
 
   async inspectCurrent(): Promise<BootstrapElectionInspection> {
-    const [lease, ready] = await Promise.all([this.#readLease(), this.#readReady()]);
-    if (lease === undefined && ready === undefined) return { status: "absent" };
-    if (lease?.status === "held") return { status: "active", lease };
-    const generation = Math.max(lease?.electionGeneration ?? 0, ready?.electionGeneration ?? 0);
-    if (generation === 0) return { status: "absent" };
-    const outcome = await this.readGenerationOutcome(generation);
-    if (outcome === undefined) {
-      throw new BootstrapElectionError("BOOTSTRAP_INCOMPLETE", "bootstrap election artifacts have no current outcome");
+    const lock = await this.#lockPort.probe(this.paths.lockPath);
+    if (lock.status === "held") return { status: "active", ownership: "kernel-lock" };
+    try {
+      const [lease, ready] = await Promise.all([this.#readLease(), this.#readReady()]);
+      if (lease === undefined && ready === undefined) return { status: "absent" };
+      if (lease?.status === "held") {
+        throw new BootstrapElectionError(
+          "BOOTSTRAP_ELECTION_INCONSISTENT",
+          "bootstrap lease is held without kernel election ownership",
+        );
+      }
+      const generation = Math.max(lease?.electionGeneration ?? 0, ready?.electionGeneration ?? 0);
+      if (generation === 0) return { status: "absent" };
+      const outcome = await this.readGenerationOutcome(generation);
+      if (outcome === undefined) {
+        throw new BootstrapElectionError("BOOTSTRAP_INCOMPLETE", "bootstrap election artifacts have no current outcome");
+      }
+      return outcome.kind === "ready"
+        ? { status: "ready", receipt: outcome.receipt }
+        : { status: "terminal", receipt: outcome.receipt };
+    } finally {
+      if (lock.status === "acquired") await lock.handle.release();
     }
-    return outcome.kind === "ready"
-      ? { status: "ready", receipt: outcome.receipt }
-      : { status: "terminal", receipt: outcome.receipt };
   }
 
   async waitForGenerationOutcome(generation: number, deadlineAt = this.#clock() + this.#waitTimeoutMs): Promise<BootstrapGenerationOutcome> {

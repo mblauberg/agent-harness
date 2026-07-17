@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { fabricDoctor, fabricStatus } from "../../src/cli/status.ts";
 import type { FabricPaths } from "../../src/cli/paths.ts";
+import { FLOCK_ELECTION_LOCK_PORT } from "../../src/daemon/bootstrap-election.ts";
 import { openFabric, startFabricDaemon } from "../../src/index.ts";
 import { createPortableActivatedPrimaryFixture } from "../support/primary-adapter-testkit.ts";
 
@@ -115,6 +116,80 @@ describe("machine status and doctor", () => {
       state: "failed",
       code: "BOOTSTRAP_TEST_FAILURE",
       daemon: { status: "failed", pid: null, socketPath: null },
+    });
+  });
+
+  it("does not report idle while the kernel election lock is held before artifacts exist", async () => {
+    const value = await paths();
+    const lock = await FLOCK_ELECTION_LOCK_PORT.tryAcquire(join(value.runtimeDirectory, "daemon-election.lock"));
+    expect(lock).toBeDefined();
+    const fixture = await createPortableActivatedPrimaryFixture();
+    cleanup.push(fixture.directory);
+    try {
+      await expect(fabricDoctor([
+        "--agents-home", fixture.directory,
+        "--trusted-config", fixture.configPath,
+        "--compatibility", fixture.compatibilityPath,
+        "--compatibility-schema", fixture.schemaPath,
+      ], value)).resolves.toMatchObject({
+        healthy: false,
+        state: "failed",
+        code: "BOOTSTRAP_IN_PROGRESS",
+        daemon: { status: "failed", pid: null, socketPath: null },
+      });
+    } finally {
+      await lock?.release();
+    }
+  });
+
+  it("rejects terminal discovery from an older generation than the current ready receipt", async () => {
+    const value = await paths();
+    await writeFile(join(value.runtimeDirectory, "fabric-v1.discovery-owner.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      state: "stopped",
+      actionId: "old-action",
+      electionGeneration: 1,
+      daemonInstanceGeneration: 1,
+      socketPath: value.socketPath,
+      pid: process.pid,
+      bootstrapCapabilityHash: "a".repeat(64),
+      updatedAt: 1,
+      exitCode: 0,
+      signal: null,
+    })}\n`, { mode: 0o600 });
+    await writeFile(join(value.runtimeDirectory, "daemon-election.lease.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      actionId: "new-action",
+      electionGeneration: 2,
+      status: "succeeded",
+      acquiredAt: 2,
+      terminalAt: 3,
+      code: "BOOTSTRAP_READY",
+      message: "new generation is ready",
+    })}\n`, { mode: 0o600 });
+    await writeFile(join(value.runtimeDirectory, "daemon-election.ready.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      actionId: "new-action",
+      electionGeneration: 2,
+      daemonInstanceGeneration: 2,
+      socketPath: value.socketPath,
+      protocolVersion: 1,
+      features: ["rpc"],
+      readyAt: 3,
+      evidence: { databaseOwned: true, migrationsComplete: true, recoveryComplete: true, socketBound: true },
+    })}\n`, { mode: 0o600 });
+    const fixture = await createPortableActivatedPrimaryFixture();
+    cleanup.push(fixture.directory);
+    await expect(fabricDoctor([
+      "--agents-home", fixture.directory,
+      "--trusted-config", fixture.configPath,
+      "--compatibility", fixture.compatibilityPath,
+      "--compatibility-schema", fixture.schemaPath,
+    ], value)).resolves.toMatchObject({
+      healthy: false,
+      state: "failed",
+      code: "DAEMON_ELECTION_INCONSISTENT",
+      daemon: { status: "failed", pid: process.pid, socketPath: null },
     });
   });
 

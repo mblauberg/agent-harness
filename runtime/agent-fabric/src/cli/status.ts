@@ -41,6 +41,16 @@ function checkCode(id: string, outcome: "OK" | "FAILED"): string {
   return `${id.replaceAll("-", "_").toUpperCase()}_${outcome}`;
 }
 
+function generationIdentityMatches(
+  owner: { actionId: string; electionGeneration: number; daemonInstanceGeneration: number; socketPath: string },
+  ready: { actionId: string; electionGeneration: number; daemonInstanceGeneration: number; socketPath: string },
+): boolean {
+  return ready.actionId === owner.actionId
+    && ready.electionGeneration === owner.electionGeneration
+    && ready.daemonInstanceGeneration === owner.daemonInstanceGeneration
+    && ready.socketPath === owner.socketPath;
+}
+
 function agentsHome(arguments_: string[]): string {
   return resolve(option(arguments_, "--agents-home") ?? process.env.AGENTS_HOME ?? process.cwd());
 }
@@ -163,7 +173,10 @@ async function doctorDaemonState(paths: FabricPaths): Promise<DoctorDaemonState>
           socketPath: null,
         };
       }
-      if (discovery.status === "terminal" && election.status !== "ready") {
+      if (
+        discovery.status === "terminal"
+        && (election.status !== "ready" || !generationIdentityMatches(discovery.owner, election.receipt))
+      ) {
         return {
           status: "failed",
           code: "DAEMON_ELECTION_INCONSISTENT",
@@ -191,10 +204,7 @@ async function doctorDaemonState(paths: FabricPaths): Promise<DoctorDaemonState>
     }
     if (
       election.status !== "ready" ||
-      election.receipt.actionId !== discovery.owner.actionId ||
-      election.receipt.electionGeneration !== discovery.owner.electionGeneration ||
-      election.receipt.daemonInstanceGeneration !== discovery.owner.daemonInstanceGeneration ||
-      election.receipt.socketPath !== discovery.receipt.socketPath
+      !generationIdentityMatches(discovery.owner, election.receipt)
     ) {
       return {
         status: "failed",
