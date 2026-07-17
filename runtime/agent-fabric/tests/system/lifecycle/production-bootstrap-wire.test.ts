@@ -47,7 +47,7 @@ async function provisionLifecycleReceiptAuthority(
 
 async function launchAndReleaseFromSeparateProcess(
   options: StartOptions,
-): Promise<number> {
+): Promise<{ pid: number; launcherPid: number }> {
   const clientPath = fileURLToPath(new URL("../../../src/daemon/client.ts", import.meta.url));
   const script = `
     import { startFabricDaemon } from ${JSON.stringify(clientPath)};
@@ -60,12 +60,15 @@ async function launchAndReleaseFromSeparateProcess(
     ["--import", "tsx", "--input-type=module", "-e", script, JSON.stringify(options)],
     {
       cwd: fileURLToPath(new URL("../../..", import.meta.url)),
+      detached: true,
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
   if (launcher.stdout === null || launcher.stderr === null) {
     throw new Error("released daemon launcher pipes are unavailable");
   }
+  if (launcher.pid === undefined) throw new Error("released daemon launcher pid is unavailable");
+  const launcherPid = launcher.pid;
   let stderr = "";
   launcher.stderr.setEncoding("utf8");
   launcher.stderr.on("data", (chunk: string) => { stderr += chunk; });
@@ -93,7 +96,7 @@ async function launchAndReleaseFromSeparateProcess(
     !("pid" in result) ||
     typeof result.pid !== "number"
   ) throw new Error("released daemon launcher result is invalid");
-  return result.pid;
+  return { pid: result.pid, launcherPid };
 }
 
 async function waitForOwnerState(
@@ -652,13 +655,46 @@ describe("production daemon bootstrap wiring", () => {
       workspaceRoots: [root],
     };
 
-    const pid = await launchAndReleaseFromSeparateProcess(options);
+    const { pid } = await launchAndReleaseFromSeparateProcess(options);
     process.kill(pid, "SIGTERM");
     await expect(waitForOwnerState(options.runtimeDirectory, "stopped"))
       .resolves.toMatchObject({ pid, state: "stopped" });
     await expect(readdir(options.runtimeDirectory)).resolves.not.toContain(
       "fabric-v1.discovery.json",
     );
+  });
+
+  it("keeps a released active daemon outside its launcher's process group", async () => {
+    const root = await mkdtemp(join(tmpdir(), "f-release-custody-"));
+    roots.push(root);
+    const options = {
+      databasePath: join(root, "s", "f.sqlite3"),
+      stateDirectory: join(root, "s"),
+      runtimeDirectory: join(root, "r"),
+      socketPath: join(root, "r", "f.sock"),
+      workspaceRoots: [root],
+    };
+
+    const { pid, launcherPid } = await launchAndReleaseFromSeparateProcess(options);
+    await createCurrentSessionRun({
+      databasePath: options.databasePath,
+      workspaceRoot: root,
+      runId: "run_release_custody_01",
+      projectRunDirectory: join(root, "project-run"),
+      chair: { agentId: "chair_release_custody_01", authority: MCP_ROOT_AUTHORITY },
+    });
+
+    try {
+      process.kill(-launcherPid, "SIGHUP");
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 250));
+
+    const attached = await startFabricDaemon(options);
+    handles.push(attached);
+    expect(attached.pid).toBe(pid);
+    expect(attached.ownsProcess).toBe(false);
   });
 
   it("keeps serving after SIGTERM while authoritative run work remains active", async () => {
@@ -710,7 +746,7 @@ describe("production daemon bootstrap wiring", () => {
       workspaceRoots: [root],
     };
 
-    const crashedPid = await launchAndReleaseFromSeparateProcess(options);
+    const { pid: crashedPid } = await launchAndReleaseFromSeparateProcess(options);
     process.kill(crashedPid, "SIGKILL");
     for (;;) {
       try {

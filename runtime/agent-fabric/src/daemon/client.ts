@@ -628,6 +628,7 @@ async function spawnDaemonChild(
     : [fileURLToPath(processUrl)];
   const child = spawn(process.execPath, args, {
     cwd: packageRoot,
+    detached: true,
     env: childEnvironment(
       options,
       bootstrapCapability,
