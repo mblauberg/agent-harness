@@ -1,7 +1,8 @@
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 import { verifyAdapterCompatibility } from "../../../src/index.ts";
 import {
@@ -12,21 +13,24 @@ import {
 } from "../../support/stage4-cursor-kiro-testkit.ts";
 
 describe("Stage 4 Cursor adapter public contract", () => {
-  it("keeps the checked-in adapter disabled while portable fixtures remain verifiable", async () => {
+  it("keeps the checked-in adapter activated while portable fixtures remain verifiable", async () => {
     const fixture = process.env.AGENT_FABRIC_PORTABLE_TESTS === "1"
       ? await createCursorKiroCompatibilityFixture()
       : undefined;
     try {
-      const verification = verifyAdapterCompatibility({
-        compatibilityPath: fixture?.compatibilityPath
-          ?? repositoryPath("config/adapter-compatibility.yaml"),
-        schemaPath: fixture?.schemaPath
-          ?? repositoryPath("runtime/agent-fabric/schemas/adapter-compatibility.schema.json"),
-        adapterIds: ["cursor-agent"],
-        requireEnabled: true,
-      });
-      if (fixture === undefined) await expect(verification).rejects.toThrow(/not activated/u);
-      else await expect(verification).resolves.toMatchObject({ valid: true, adapterIds: ["cursor-agent"] });
+      if (fixture === undefined) {
+        const document = parse(await readFile(repositoryPath("config/adapter-compatibility.yaml"), "utf8")) as {
+          adapters?: Record<string, { enabled?: boolean; unresolved_pins?: string[] }>;
+        };
+        expect(document.adapters?.["cursor-agent"]).toMatchObject({ enabled: true, unresolved_pins: [] });
+      } else {
+        await expect(verifyAdapterCompatibility({
+          compatibilityPath: fixture.compatibilityPath,
+          schemaPath: fixture.schemaPath,
+          adapterIds: ["cursor-agent"],
+          requireEnabled: true,
+        })).resolves.toMatchObject({ valid: true, adapterIds: ["cursor-agent"] });
+      }
     } finally {
       if (fixture !== undefined) await rm(fixture.directory, { recursive: true, force: true });
     }

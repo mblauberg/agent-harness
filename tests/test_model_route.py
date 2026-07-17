@@ -598,12 +598,14 @@ def test_model_id_effort_uses_last_token_and_explicit_unresolved_fails():
     assert route["status"] == "ok"
     assert route["effort"] == "low"
     result, route = resolve(
-        "--adapter", "agy", "--model", "gemini-3.1-pro", "--alias", "flagship",
+        "--adapter", "agy", "--model", "Gemini 3.1 Pro (High)", "--alias", "flagship",
         "--role", "reviewer", "--effort", "high", "--lead-family", "openai", "--require-distinct",
         "--adapter-gate", "direct-cli",
     )
-    assert result.returncode == 1
-    assert route["status"] == "adapter_effort_unresolved"
+    assert result.returncode == 0
+    assert route["status"] == "ok"
+    assert route["effort"] == "high"
+    assert route["effort_capability_source"] == "model-id"
     result, route = resolve(
         "--adapter", "cursor", "--model", "composer-2-extra-high", "--alias", "flagship",
         "--role", "reviewer", "--lead-family", "anthropic", "--require-distinct",
@@ -680,7 +682,7 @@ def test_cursor_composer_route_uses_cursor_model_family():
     assert route["distinct_from_lead"] is True
 
 
-def test_disabled_agy_remains_available_only_for_explicit_direct_routing():
+def test_agy_accepts_only_explicit_gemini_routing():
     allowed, allowed_route = resolve(
         "--adapter", "agy", "--model", "gemini-3.1-pro", "--alias", "flagship", "--role", "worker",
         "--adapter-gate", "direct-cli",
@@ -692,7 +694,7 @@ def test_disabled_agy_remains_available_only_for_explicit_direct_routing():
     assert allowed.returncode == 0
     assert allowed_route["status"] == "ok"
     assert allowed_route["model_family"] == "google"
-    assert allowed_route["adapter_enabled"] is False
+    assert allowed_route["adapter_enabled"] is True
     assert forbidden.returncode == 1
     assert forbidden_route["status"] == "adapter_family_forbidden"
 
@@ -763,21 +765,31 @@ def test_same_family_rejection_precedes_adapter_family_rejection():
     assert route["status"] == "same_family_forbidden"
 
 
-def test_disabled_optional_broker_is_unavailable_through_fabric_only():
-    arguments = (
-        "--adapter", "agy", "--model", "gemini-3.1-pro", "--alias", "flagship",
-        "--role", "reviewer", "--lead-family", "openai", "--require-distinct",
+@pytest.mark.parametrize(
+    ("adapter", "model", "family", "effort"),
+    [
+        ("agy", "Gemini 3.1 Pro (High)", "google", "high"),
+        ("cursor", "cursor-grok-4.5-high", "xai", "high"),
+    ],
+)
+def test_activated_optional_reviewers_route_through_fabric_with_exact_identity(
+    adapter, model, family, effort
+):
+    result, route = resolve(
+        "--adapter", adapter, "--model", model, "--alias", "flagship",
+        "--role", "reviewer", "--effort", effort,
+        "--lead-family", "openai", "--require-distinct",
+        adapter_gate="fabric",
     )
 
-    fabric, fabric_route = resolve(*arguments, adapter_gate="fabric")
-    direct, direct_route = resolve(*arguments, "--adapter-gate", "direct-cli")
-
-    assert fabric.returncode == 1
-    assert fabric_route["status"] == "adapter_disabled"
-    assert fabric_route["adapter_enabled"] is False
-    assert direct.returncode == 0
-    assert direct_route["status"] == "ok"
-    assert direct_route["adapter_gate"] == "direct-cli"
+    assert result.returncode == 0
+    assert route["status"] == "ok"
+    assert route["resolved_model"] == model
+    assert route["model_family"] == family
+    assert route["effort"] == effort
+    assert route["adapter_enabled"] is True
+    assert route["adapter_active"] is True
+    assert route["adapter_unresolved_pins"] == []
 
 
 def test_primary_adapters_honour_fabric_activation_gate():
@@ -814,7 +826,7 @@ def test_fabric_gate_rejects_catalogue_adapter_without_compatibility_contract():
     assert direct_route["status"] == "ok"
 
 
-def test_fabric_gate_rejects_disabled_adapter_before_activation_state(tmp_path):
+def test_fabric_gate_rejects_inactive_adapter_before_dispatch(tmp_path):
     fabric_config = tmp_path / "agent-fabric.yaml"
     fabric_config.write_text("schemaVersion: 1\nactiveAdapters: []\n")
 
@@ -825,8 +837,8 @@ def test_fabric_gate_rejects_disabled_adapter_before_activation_state(tmp_path):
     )
 
     assert result.returncode == 1
-    assert route["status"] == "adapter_disabled"
-    assert route["adapter_enabled"] is False
+    assert route["status"] == "adapter_inactive"
+    assert route["adapter_enabled"] is True
 
 
 def test_fabric_gate_fails_closed_for_invalid_activation_config(tmp_path):

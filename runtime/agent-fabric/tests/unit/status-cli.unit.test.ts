@@ -72,7 +72,7 @@ describe("machine status and doctor", () => {
     expect(status).toMatchObject({
       schemaVersion: 1,
       daemon: { reachable: false, protocolVersion: 1 },
-      configuredAdapters: ["claude-agent-sdk", "codex-app-server"],
+      configuredAdapters: ["claude-agent-sdk", "codex-app-server", "agy", "cursor-agent"],
       activeAdapters: [],
       project: { path: agentsHome },
     });
@@ -452,7 +452,7 @@ describe("machine status and doctor", () => {
       const agentsHome = resolve(import.meta.dirname, "../../../..");
       await expect(fabricStatus(["--agents-home", agentsHome, "--project", agentsHome], value)).resolves.toMatchObject({
         daemon: { reachable: true, activeAdapters: ["live-only"] },
-        configuredAdapters: ["claude-agent-sdk", "codex-app-server"],
+        configuredAdapters: ["claude-agent-sdk", "codex-app-server", "agy", "cursor-agent"],
         activeAdapters: ["live-only"],
       });
     } finally { await daemon.stop(); }
