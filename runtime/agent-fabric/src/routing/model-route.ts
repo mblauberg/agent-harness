@@ -104,6 +104,14 @@ export async function resolveModelRouteReceipt(input: {
   if (input.request.taskClass !== undefined && input.request.model !== undefined) {
     throw new TypeError("task-class model route does not accept an explicit model");
   }
+  if (
+    input.request.adapter === "claude" &&
+    input.request.taskClass !== undefined &&
+    taskClassPolicy.has(input.request.taskClass) &&
+    input.request.capabilitiesFile !== undefined
+  ) {
+    throw new TypeError("Claude task-class routing requires a wrapper-produced subscription canary");
+  }
   let capabilitiesFile = input.request.capabilitiesFile;
   if (input.request.adapter === "claude" && input.request.taskClass !== undefined && capabilitiesFile === undefined) {
     const policy = taskClassPolicy.get(input.request.taskClass);

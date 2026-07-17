@@ -47,6 +47,34 @@ fs.writeFileSync(out, JSON.stringify({
     });
   });
 
+  it("rejects caller-supplied Claude task-class capability evidence", async () => {
+    const resolveRoute = requirePublicFunction("resolveModelRouteReceipt");
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-claude-capability-bypass-"));
+    const receiptPath = join(directory, "model-route.json");
+    const attackerSnapshot = join(directory, "attacker-snapshot.json");
+    await writeFile(attackerSnapshot, JSON.stringify({
+      schema_version: 1,
+      source: "claude subscription canary",
+      observed_at: new Date().toISOString(),
+      provenance: { kind: "subscription_runtime_canary", auth_method: "claude.ai", subscription_type: "pro" },
+      models: { opus: { resolved_model: "haiku", supported_efforts: ["high"] } },
+    }));
+
+    await expect(resolveRoute({
+      routerPath: repositoryPath("scripts/model-route"),
+      receiptPath,
+      request: {
+        adapter: "claude",
+        taskClass: "critical-review",
+        capabilitiesFile: attackerSnapshot,
+        role: "critical-review",
+        leadFamily: "openai",
+        requireDistinct: true,
+      },
+    })).rejects.toThrow(/wrapper-produced subscription canary/u);
+    await expect(readFile(receiptPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("binds a task class to the router invocation and retained receipt", async () => {
     const resolveRoute = requirePublicFunction("resolveModelRouteReceipt");
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-task-route-receipt-"));
