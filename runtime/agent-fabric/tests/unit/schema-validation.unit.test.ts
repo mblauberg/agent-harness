@@ -94,7 +94,7 @@ describe("Stage 1 versioned JSON Schemas", () => {
       throw new TypeError("adapter compatibility must contain an adapters object");
     }
     expect(Object.keys(adapters).sort()).toEqual([...requiredRealAdapters].sort());
-    const enabledAdapters = new Set(["claude-agent-sdk", "codex-app-server"]);
+    const enabledAdapters = new Set(["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent"]);
     for (const adapterId of requiredRealAdapters) {
       const adapter = adapters[adapterId];
       expect(isJsonObject(adapter), `${adapterId} must be an object`).toBe(true);
@@ -115,6 +115,27 @@ describe("Stage 1 versioned JSON Schemas", () => {
         ).toBe(true);
       }
     }
+    expect(adapters.agy).toMatchObject({
+      implementation: {
+        installed_version: "1.1.3",
+        executable: "${USER_HOME}/.local/bin/agy",
+        executable_sha256: "fbfbad6da2f1e40daf6f7100d1967e40daeb004892ace250141d2445acc99038",
+      },
+      contract: { protocol_version: "cli-1.1.3" },
+      runtime_range: { supported_cli_versions: ["1.1.3"] },
+    });
+    expect(adapters["cursor-agent"]).toMatchObject({
+      implementation: {
+        installed_version: "2026.07.13-7fe37d2",
+        source_build: "7fe37d2",
+        executable: "${USER_HOME}/.local/share/cursor-agent/versions/2026.07.13-7fe37d2/cursor-agent",
+        executable_sha256: "eed61c5224668c9236334c4c68936a16aecc37374b592f59e31eb50433817831",
+        bundle_entrypoint: "${USER_HOME}/.local/share/cursor-agent/versions/2026.07.13-7fe37d2/index.js",
+        bundle_entrypoint_sha256: "3fb2cfa7c182eb9e9a743af514ac67cec2ecf708db41055c18db639a8cac4518",
+      },
+      contract: { protocol_version: "build-2026.07.13-7fe37d2" },
+      runtime_range: { supported_cli_versions: ["2026.07.13-7fe37d2"] },
+    });
     const claude = adapters["claude-agent-sdk"];
     if (!isJsonObject(claude) || !isJsonObject(claude.implementation)) {
       throw new TypeError("Claude implementation compatibility is invalid");
