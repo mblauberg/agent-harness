@@ -272,11 +272,33 @@ def _displaced_matches(proposal: ConfigProposal, displaced: Path) -> bool:
         and content == proposal.snapshot.content
 
 
+def _requested_resolves_to_installed(proposal: ConfigProposal, installed: FileIdentity) -> bool:
+    try:
+        source = _lstat(proposal.snapshot.requested_path)
+        if source is None:
+            return False
+        if proposal.snapshot.source_kind == "symlink":
+            if (
+                _identity(source) != proposal.snapshot.source_identity or
+                os.readlink(proposal.snapshot.requested_path) != proposal.snapshot.symlink_value
+            ):
+                return False
+        elif _identity(source) != installed:
+            return False
+        resolved = proposal.snapshot.requested_path.resolve(strict=True)
+        if resolved != proposal.snapshot.target_path:
+            return False
+        target, _ = _read_regular(resolved, proposal.client.title())
+        return _identity(target) == installed
+    except (OSError, RegistrationError, RuntimeError):
+        return False
+
+
 def write_proposal(proposal: ConfigProposal) -> None:
     target = proposal.snapshot.target_path
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
-    exchanged = False
+    retain_temporary = False
     try:
         with tempfile.NamedTemporaryFile(
             "w", dir=target.parent, prefix=f".{target.name}.", suffix=".tmp", delete=False,
@@ -286,6 +308,7 @@ def write_proposal(proposal: ConfigProposal) -> None:
             handle.write(proposal.content)
             handle.flush()
             os.fsync(handle.fileno())
+        installed_identity = _identity(temporary.stat(follow_symlinks=False))
         _assert_unchanged(proposal)
         if proposal.snapshot.target_identity is None:
             try:
@@ -294,25 +317,29 @@ def write_proposal(proposal: ConfigProposal) -> None:
                 raise RegistrationConflictError(
                     f"{proposal.client.title()} config changed after registration was composed",
                 ) from exc
-            temporary.unlink()
-        else:
-            atomic_exchange(temporary, target)
-            exchanged = True
-            if not _displaced_matches(proposal, temporary):
-                try:
-                    atomic_exchange(temporary, target)
-                    exchanged = False
-                except OSError as exc:
-                    raise RegistrationConflictError(
-                        f"{proposal.client.title()} config changed and rollback failed; preserve recovery file {temporary}",
-                    ) from exc
+            retain_temporary = True
+            if not _requested_resolves_to_installed(proposal, installed_identity):
                 raise RegistrationConflictError(
-                    f"{proposal.client.title()} config changed after registration was composed",
+                    f"{proposal.client.title()} config changed during atomic install; "
+                    f"preserve recovery file {temporary}",
                 )
             temporary.unlink()
-            exchanged = False
+            retain_temporary = False
+        else:
+            atomic_exchange(temporary, target)
+            retain_temporary = True
+            if (
+                not _displaced_matches(proposal, temporary) or
+                not _requested_resolves_to_installed(proposal, installed_identity)
+            ):
+                raise RegistrationConflictError(
+                    f"{proposal.client.title()} config changed during atomic exchange; "
+                    f"preserve displaced recovery file {temporary}",
+                )
+            temporary.unlink()
+            retain_temporary = False
     finally:
-        if temporary and not exchanged and temporary.exists():
+        if temporary and not retain_temporary and temporary.exists():
             temporary.unlink()
 
 

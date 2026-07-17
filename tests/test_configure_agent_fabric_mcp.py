@@ -200,7 +200,7 @@ def test_platform_all_revalidates_codex_after_writing_claude(tmp_path: Path, mon
 
 
 @pytest.mark.parametrize("client", ["claude", "codex"])
-def test_existing_write_rolls_back_post_validation_interleave(tmp_path: Path, client: str, monkeypatch) -> None:
+def test_existing_write_preserves_post_validation_interleave_as_recovery(tmp_path: Path, client: str, monkeypatch) -> None:
     configurer = load_configurer()
     desired = configurer.registration(ROOT, tmp_path / "state", client)
     suffix = "json" if client == "claude" else "toml"
@@ -222,10 +222,113 @@ def test_existing_write_rolls_back_post_validation_interleave(tmp_path: Path, cl
         atomic_exchange(first, second)
 
     monkeypatch.setattr(configurer, "atomic_exchange", interleaved_exchange)
-    with pytest.raises(configurer.RegistrationConflictError, match=f"{client.title()} config changed"):
+    with pytest.raises(configurer.RegistrationConflictError, match=f"{client.title()} config changed") as caught:
+        configurer.write_proposal(proposal)
+
+    assert "agent-fabric" in requested.read_text()
+    recovery = Path(str(caught.value).rsplit(" ", 1)[-1])
+    assert recovery.read_text() == external
+    recovery.unlink()
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
+def test_conflict_never_rolls_back_over_a_newer_target(tmp_path: Path, client: str, monkeypatch) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    requested = tmp_path / f"{client}.{suffix}"
+    original = '{}\n' if client == "claude" else '[unrelated]\nvalue = "before"\n'
+    first_race = '{"external":"first-race"}\n' if client == "claude" else '[external]\nvalue = "first-race"\n'
+    newest = '{"external":"newest"}\n' if client == "claude" else '[external]\nvalue = "newest"\n'
+    requested.write_text(original)
+    proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+    atomic_exchange = configurer.atomic_exchange
+    displaced_matches = configurer._displaced_matches
+    exchanged = False
+
+    def first_interleave(first: Path, second: Path) -> None:
+        nonlocal exchanged
+        if not exchanged:
+            exchanged = True
+            replacement = tmp_path / f"first-race.{suffix}"
+            replacement.write_text(first_race)
+            os.replace(replacement, requested)
+        atomic_exchange(first, second)
+
+    def second_interleave(candidate, displaced: Path) -> bool:
+        matched = displaced_matches(candidate, displaced)
+        replacement = tmp_path / f"newest.{suffix}"
+        replacement.write_text(newest)
+        os.replace(replacement, requested)
+        return matched
+
+    monkeypatch.setattr(configurer, "atomic_exchange", first_interleave)
+    monkeypatch.setattr(configurer, "_displaced_matches", second_interleave)
+    with pytest.raises(configurer.RegistrationConflictError) as caught:
+        configurer.write_proposal(proposal)
+
+    assert requested.read_text() == newest
+    recovery = Path(str(caught.value).rsplit(" ", 1)[-1])
+    assert recovery.read_text() == first_race
+    recovery.unlink()
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
+def test_symlink_retarget_after_exchange_fails_closed_with_recovery(tmp_path: Path, client: str, monkeypatch) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    requested = tmp_path / f"{client}.{suffix}"
+    original = '{}\n' if client == "claude" else '[unrelated]\nvalue = "before"\n'
+    external = '{"external":"retargeted"}\n' if client == "claude" else '[external]\nvalue = "retargeted"\n'
+    first = tmp_path / f"first.{suffix}"
+    second = tmp_path / f"second.{suffix}"
+    first.write_text(original)
+    second.write_text(external)
+    requested.symlink_to(first)
+    proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+    atomic_exchange = configurer.atomic_exchange
+
+    def retarget_after_exchange(first_path: Path, second_path: Path) -> None:
+        atomic_exchange(first_path, second_path)
+        requested.unlink()
+        requested.symlink_to(second)
+
+    monkeypatch.setattr(configurer, "atomic_exchange", retarget_after_exchange)
+    with pytest.raises(configurer.RegistrationConflictError) as caught:
+        configurer.write_proposal(proposal)
+
+    assert requested.resolve() == second
+    assert second.read_text() == external
+    recovery = Path(str(caught.value).rsplit(" ", 1)[-1])
+    assert recovery.read_text() == original
+    recovery.unlink()
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
+def test_absent_target_replaced_after_link_fails_closed_with_recovery(tmp_path: Path, client: str, monkeypatch) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    requested = tmp_path / f"{client}.{suffix}"
+    external = '{"external":"newest"}\n' if client == "claude" else '[external]\nvalue = "newest"\n'
+    proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+    link = configurer.os.link
+
+    def replace_after_link(source: Path, target: Path, **options) -> None:
+        link(source, target, **options)
+        replacement = tmp_path / f"external.{suffix}"
+        replacement.write_text(external)
+        os.replace(replacement, requested)
+
+    monkeypatch.setattr(configurer.os, "link", replace_after_link)
+    with pytest.raises(configurer.RegistrationConflictError) as caught:
         configurer.write_proposal(proposal)
 
     assert requested.read_text() == external
+    recovery = Path(str(caught.value).rsplit(" ", 1)[-1])
+    assert "agent-fabric" in recovery.read_text()
+    recovery.unlink()
 
 
 def test_operations_docs_define_dynamic_primary_registration_and_bounded_fixed_paths() -> None:

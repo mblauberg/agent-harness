@@ -133,10 +133,12 @@ nearest-ancestor discovery. A fixed `AGENT_FABRIC_PROJECT_PATH` remains a
 manual, project-scoped compatibility path only for a client that cannot preserve
 its workspace cwd. Never add it to a global Claude Code or Codex entry.
 Existing files are updated with an atomic exchange: the displaced identity and
-bytes must match the composed snapshot or the exchange is rolled back and the
-command exits with a typed conflict. If rollback itself fails, the displaced
-file is retained at the reported private recovery path. Rerun only after
-resolving either conflict against the current client configuration.
+bytes must match the composed snapshot, and the requested direct path or
+symlink must still resolve to the installed inode. On any mismatch the command
+exits with a typed conflict and retains the displaced file at the reported
+private recovery path; it never rolls that file back over a pathname that a
+concurrent writer may have changed. Reconcile both the current client
+configuration and recovery file before rerunning.
 
 The resolved `.cap` file must remain a private regular file with mode `0600`.
 The adjacent `.json` file is secret-free metadata and is checked against the
