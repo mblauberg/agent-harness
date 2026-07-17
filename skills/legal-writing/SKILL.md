@@ -1,6 +1,6 @@
 ---
 name: legal-writing
-description: "Use for drafting, reviewing, condensing, or source-checking Australian forms, affidavits, submissions, orders, annexures, or legal correspondence. Not for academic, engineering, or general prose; use its specialist."
+description: "Use for drafting, reviewing, condensing, or source-checking Australian legal documents (forms, affidavits, submissions and orders), legal decision overviews, or correspondence. Not for academic, engineering, or general prose; use its specialist."
 ---
 
 # Australian legal writing

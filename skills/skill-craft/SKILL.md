@@ -34,6 +34,10 @@ Both branches follow this without restating it in two voices:
   don't restate the number here.
 - **Token model, three-tier:** always-loaded frontmatter, triggered branch
   body, one-hop `references/` depth. Never nest a second reference level.
+- **Reuse boundary:** global skills express cross-project triggers, procedures
+  and gates. Convert contextual values into parameters, keep examples
+  synthetic, leave project policy local, and require the cross-project evidence
+  defined in `MAINTAINING.md` before promotion.
 - **Trigger fixtures:** positive, negative, boundary and composition cases.
   A keyword match is a candidate, not ground truth. Changes to routing text
   re-run the held-out set.

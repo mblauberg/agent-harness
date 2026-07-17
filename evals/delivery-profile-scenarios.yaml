@@ -139,6 +139,26 @@ cases:
     risk_tier: substantial
     repetitions: 1
     patches: []
+  - id: document-html-positive
+    profile: document
+    case_type: positive
+    expected: pass
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    fixture_overrides:
+      artifact_type: html
+    patches: []
+  - id: document-interactive-positive
+    profile: document
+    case_type: positive
+    expected: pass
+    high_stakes: false
+    risk_tier: substantial
+    repetitions: 1
+    fixture_overrides:
+      artifact_type: interactive-document
+    patches: []
   - id: document-review-negative
     profile: document
     case_type: negative

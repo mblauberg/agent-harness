@@ -62,6 +62,9 @@ transport is unavailable.
 implementation receipt format exists. Live task or membership projections may
 link to it but never replace its canonical acceptance evidence.
 
+For audience-ready HTML, apply the
+[interactive-document boundary](references/interactive-documents.md).
+
 ## Adapter-absent path
 
 Console, Herdr and GitHub are optional. Continue from canonical project

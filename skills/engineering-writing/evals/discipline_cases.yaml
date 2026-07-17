@@ -1,0 +1,7 @@
+cases:
+  - prompt: "Write a mixed-audience technical overview with optional access to canonical engineering detail."
+    expected: "Make the primary layer sufficient for the reader's decision, then link requirements, architecture, design and evidence with useful labels."
+  - prompt: "Explain a recurring operating-cost range in a technical briefing."
+    expected: "Name the period, assumptions and contributing services or components, then link the technical drivers."
+  - prompt: "Write an internal runbook whose operators use exact repository paths and identifiers."
+    expected: "Keep the exact mechanics because this audience can access and use them."

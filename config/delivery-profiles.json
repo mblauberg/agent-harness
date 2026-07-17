@@ -44,7 +44,7 @@
       "observation_examples": ["decision-follow-up", "assumption-review"]
     },
     "document": {
-      "artifact_types": ["markdown", "docx", "pdf", "slides", "spreadsheet"],
+      "artifact_types": ["markdown", "docx", "pdf", "slides", "spreadsheet", "html", "interactive-document"],
       "required_evidence": {
         "deterministic": ["render"],
         "judgement": ["audience-fit"]
@@ -88,6 +88,8 @@
     "pdf": ["generated-artifact"],
     "slides": ["generated-artifact"],
     "spreadsheet": ["generated-artifact"],
+    "html": ["generated-artifact"],
+    "interactive-document": ["generated-artifact"],
     "prompt": ["agent-tools"],
     "tool": ["source", "agent-tools"],
     "policy": ["source", "agent-tools"],

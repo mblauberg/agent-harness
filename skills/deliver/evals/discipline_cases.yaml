@@ -1,0 +1,7 @@
+cases:
+  - prompt: "Deliver an approved static HTML briefing through evidence, review and acceptance."
+    expected: "Use the document profile and retain its render and audience-fit gates."
+  - prompt: "Deliver an approved interactive document with client-side search and filters."
+    expected: "Use the document profile, add link-integrity and interaction-smoke evidence, and route changed source behaviour through implement."
+  - prompt: "Deliver a web application that processes consequential user data."
+    expected: "Use the software profile rather than treating the application as a document."

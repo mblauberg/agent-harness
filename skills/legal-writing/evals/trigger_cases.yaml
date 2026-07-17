@@ -3,7 +3,7 @@ target_skill: legal-writing
 cases:
   - {id: q136, relation: positive, prompt: "Draft an Australian affidavit from the provided evidence and preserve every source anchor.", tags: [direct], expected: {primary_skill: legal-writing, companion_skills: []}}
   - {id: q137, relation: positive, prompt: "Condense these court submissions without changing authorities, contentions, dates, or relief.", tags: [direct], expected: {primary_skill: legal-writing, companion_skills: []}}
-  - {id: q138, relation: positive, prompt: "Final-scrub this proposed order and annexure labels without adding any new argument.", tags: [direct], expected: {primary_skill: legal-writing, companion_skills: []}}
+  - {id: q138, relation: positive, prompt: "Prepare an Australian legal decision overview that separates proposed positions, source support and confirmation still required.", tags: [direct], expected: {primary_skill: legal-writing, companion_skills: []}}
   - {id: q139, relation: negative, prompt: "Make this friendly neighbourhood email sound natural and direct.", tags: [adjacent], expected: {primary_skill: natural-writing, companion_skills: []}}
   - {id: q140, relation: negative, prompt: "Polish this law-journal article discussion and retain its citations.", tags: [adjacent], expected: {primary_skill: academic-writing, companion_skills: []}}
   - {id: q141, relation: negative, prompt: "Tighten this software privacy runbook for engineers.", tags: [adjacent], expected: {primary_skill: engineering-writing, companion_skills: []}}
