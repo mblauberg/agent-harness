@@ -3350,7 +3350,7 @@ const projectionEventsResultCodec = unionOf([
   objectCodec({
     status: literal("continuation"),
     events: arrayOf(projectionEventCodec, { maximum: 256 }),
-    nextCursor: positiveInteger,
+    nextCursor: integer(),
     hasMore: boolean,
     snapshotRevision: positiveInteger,
     readTransactionId: identifier,
@@ -3359,7 +3359,7 @@ const projectionEventsResultCodec = unionOf([
     status: literal("resnapshot-required"),
     reason: enumeration(["retention-gap", "project-cursor-mismatch", "cursor-overflow"]),
     currentSnapshotRevision: positiveInteger,
-    snapshotCursor: positiveInteger,
+    snapshotCursor: integer(),
   }),
 ]);
 const operatorAttachmentCodec = objectCodec({
