@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "attempts": [
+    {
+      "candidate_commit": "f0f34f4007f1c6a7a183b5a57ffff5ef9bf6c60c",
+      "candidate_tree": "9b0dddd5a535ae2529c41623569790d98839b4aa",
+      "status": "invalid-pre-inference",
+      "model": "gpt-5.6-luna",
+      "reason": "response schema omitted an explicit type for schema_version"
+    },
+    {
+      "candidate_commit": "f0f34f4007f1c6a7a183b5a57ffff5ef9bf6c60c",
+      "candidate_tree": "9b0dddd5a535ae2529c41623569790d98839b4aa",
+      "status": "invalid-pre-inference",
+      "model": "gpt-5.6-luna",
+      "reason": "response schema used unsupported uniqueItems"
+    },
+    {
+      "candidate_commit": "f0f34f4007f1c6a7a183b5a57ffff5ef9bf6c60c",
+      "candidate_tree": "9b0dddd5a535ae2529c41623569790d98839b4aa",
+      "status": "fail",
+      "numerator": 23,
+      "denominator": 33,
+      "evidence_path": "attempts/f0f34f4"
+    },
+    {
+      "candidate_commit": "70f2a05beeb03502e467cc366103a14fd8ee42e6",
+      "candidate_tree": "0e41d4219f0ee3c484f217b798ea8988f38f445f",
+      "status": "fail",
+      "numerator": 21,
+      "denominator": 24,
+      "evidence_path": "attempts/70f2a05"
+    }
+  ]
+}

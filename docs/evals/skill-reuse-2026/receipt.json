@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "candidate_commit": "92faf6dba6821c13adf30263e6a96886028ae1c2",
+  "candidate_tree": "1bc740cee36042397a525039c5c140465c3ccf68",
+  "dataset": {
+    "path": "routing-holdout.yaml",
+    "sha256": "sha256:597dcadcc0cf36549ad1300b1178c2da08c6aceb3d3a2eaece055d9e74e27ce1"
+  },
+  "catalogue": {
+    "path": "catalogue.txt",
+    "sha256": "sha256:cb6e9dedb32053221675378acca3df6f01f7fb37815b37154fd7cd4c5bd4cc46"
+  },
+  "classifier": {
+    "path": "classifier-instruction.txt",
+    "sha256": "sha256:f0f71378f1f931a8bf7fadc81cf08a34933c53ee8c38497957782e5f11593eef"
+  },
+  "packet": {
+    "path": "routing-packet.txt",
+    "sha256": "sha256:d0f960bdd8b88223c4603770b6d75e1df2983efc958867f6090c6547d7c11666"
+  },
+  "minimum_trials": 3,
+  "invocations": [
+    {
+      "trial": 1,
+      "provider_family": "openai",
+      "adapter": "codex-cli-subscription",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "low",
+      "output": {
+        "path": "trial-01.json",
+        "sha256": "sha256:f120fd5092c1245959d8f52c0a0712f35ca00062a54a6b2ddd1556e02fbd6e86"
+      }
+    },
+    {
+      "trial": 2,
+      "provider_family": "openai",
+      "adapter": "codex-cli-subscription",
+      "model": "gpt-5.6-terra",
+      "reasoning_effort": "low",
+      "output": {
+        "path": "trial-02.json",
+        "sha256": "sha256:f120fd5092c1245959d8f52c0a0712f35ca00062a54a6b2ddd1556e02fbd6e86"
+      }
+    },
+    {
+      "trial": 3,
+      "provider_family": "openai",
+      "adapter": "codex-cli-subscription",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "low",
+      "output": {
+        "path": "trial-03.json",
+        "sha256": "sha256:f120fd5092c1245959d8f52c0a0712f35ca00062a54a6b2ddd1556e02fbd6e86"
+      }
+    }
+  ],
+  "threshold": {
+    "numerator": 24,
+    "denominator": 24,
+    "minimum_rate": 1.0
+  },
+  "status": "pass"
+}

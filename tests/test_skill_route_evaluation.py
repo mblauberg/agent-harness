@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import subprocess
 
 import pytest
 import yaml
@@ -56,3 +57,18 @@ def test_route_scoring_executes_exact_primary_and_companion_behavior():
     assert validator.score_trial(expected, mutated) == (1, 2)
     with pytest.raises(validator.Invalid, match="case coverage"):
         validator.score_trial(expected, correct[:1])
+
+
+def test_retained_reuse_routing_receipt_matches_exact_candidate_tree():
+    result = subprocess.run(
+        [
+            "python3",
+            "scripts/validate_skill_routing_evaluation.py",
+            "docs/evals/skill-reuse-2026/receipt.json",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == "PASS: exact candidate-bound routing 24/24"
