@@ -313,6 +313,13 @@ describe("fresh Agent Fabric launch bootstrap", () => {
       chair_generation: number;
       chair_lease_id: string;
     };
+    expect(database.prepare(`
+      SELECT dimension.used, dimension.reserved, dimension.usage_unknown
+        FROM resource_dimensions dimension
+        JOIN resource_scopes scope ON scope.scope_id=dimension.scope_id
+       WHERE scope.project_id=? AND scope.scope_kind='project'
+         AND dimension.unit_key='provider_calls'
+    `).get(console.projectId)).toEqual({ used: 1, reserved: 0, usage_unknown: 0 });
     database.close();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString();
     const provisioned = await provisionMcpSeats([

@@ -1713,7 +1713,10 @@ export class Fabric {
       : 1;
   }
 
-  #launchResourceUsage(providerAdapterId: string, providerActionId: string): Record<string, "unknown"> {
+  #launchResourceUsage(
+    providerAdapterId: string,
+    providerActionId: string,
+  ): Record<string, number | "unknown"> {
     const reservation = rowOrNotFound(this.#database.prepare(`
       SELECT r.amounts_json
         FROM project_session_launch_custody c
@@ -1724,7 +1727,10 @@ export class Fabric {
     if (!isRow(amounts) || Object.values(amounts).some((value) => !Number.isSafeInteger(value) || Number(value) < 0)) {
       throw new Error("launch reservation amounts are invalid");
     }
-    return Object.fromEntries(Object.keys(amounts).sort().map((unit) => [unit, "unknown"]));
+    return Object.fromEntries(Object.keys(amounts).sort().map((unit) => [
+      unit,
+      unit === "provider_calls" ? 1 : "unknown",
+    ]));
   }
 
   #terminalLaunchOutcome(
