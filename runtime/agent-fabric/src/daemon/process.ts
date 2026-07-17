@@ -9,6 +9,7 @@ import {
   rmSync,
 } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
+import { join } from "node:path";
 
 import {
   FABRIC_OPERATIONS,
@@ -42,7 +43,7 @@ import {
   herdrPresencePollInterval,
   parseHerdrDaemonProcessConfiguration,
 } from "./herdr-composition.js";
-import { BootstrapElection } from "./bootstrap-election.js";
+import { BootstrapElection, FLOCK_ELECTION_LOCK_PORT, type ElectionLockHandle } from "./bootstrap-election.js";
 import { GuardedIdleStopController, type IdleStopResult, type QuiesceToken } from "./global-liveness.js";
 import { IdleShutdownScheduler } from "./idle-shutdown-scheduler.js";
 import { ResultDeadlineScheduler } from "./result-deadline-scheduler.js";
@@ -623,6 +624,13 @@ await openServingSocket();
 fabric.markDaemonRuntimeRunning(daemonInstanceGeneration);
 
 let shuttingDown = false;
+let shutdownTransition: ElectionLockHandle | undefined;
+const beginShutdownTransition = async (): Promise<void> => {
+  if (shutdownTransition !== undefined) return;
+  const acquired = await FLOCK_ELECTION_LOCK_PORT.tryAcquire(join(runtimeDirectory, "daemon-shutdown.lock"));
+  if (acquired === undefined) throw new Error("daemon shutdown transition is already owned");
+  shutdownTransition = acquired;
+};
 const markProductionTerminal = async (
   signal: NodeJS.Signals | null,
   state: "stopped" | "crashed" = "stopped",
@@ -692,6 +700,8 @@ const finishProcess = async (input: {
     releaseLocks: async () => await releaseDaemonLocks(daemonLocks),
     markTerminal: async ({ state, exitCode }) => {
       await markProductionTerminal(input.signal, state, exitCode);
+      await shutdownTransition?.release();
+      shutdownTransition = undefined;
     },
     reportFailure: (failure) => {
       process.stderr.write(`${failure.message}\n`);
@@ -710,6 +720,7 @@ const attemptIdleStopWithServingRecovery = async (input: {
       actionId: input.actionId,
       daemonInstanceGeneration,
       election: stopElection,
+      beforeElectionRelease: beginShutdownTransition,
       closeSocket: async () => {
         socketClosed = true;
         await closeServingSocket();
@@ -795,6 +806,7 @@ completeQueuedDaemonStop = (custodyId: string): void => {
       token: pending.token,
       excludeOperatorEffectCustodyId: custodyId,
       election: stopElection,
+      beforeElectionRelease: beginShutdownTransition,
       closeSocket: async () => {
         socketClosed = true;
         await closeServingSocket();
@@ -848,7 +860,8 @@ const signalStop = new GuardedIdleStopController(async (signal) => {
   });
   if (result.state === "stopped") {
     shuttingDown = true;
-    await finishProcess({ signal, state: "stopped", exitCode: 0 });
+    // A handled termination request is a graceful exit, not signal death.
+    await finishProcess({ signal: null, state: "stopped", exitCode: 0 });
   }
   return result;
 });
