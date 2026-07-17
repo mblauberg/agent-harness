@@ -713,7 +713,7 @@ describe("production daemon bootstrap wiring", () => {
     expect(restarted.pid).not.toBe(abandoned.pid);
   });
 
-  it("recovers when launcher custody is lost before discovery publication", async () => {
+  it("removes its socket when launcher custody is lost immediately after bind", async () => {
     const root = await mkdtemp(join(tmpdir(), "f-pre-discovery-custody-"));
     roots.push(root);
     const barrierPath = join(root, "spawn.barrier");
@@ -737,7 +737,7 @@ describe("production daemon bootstrap wiring", () => {
         detached: true,
         env: {
           ...process.env,
-          AGENT_FABRIC_TEST_BOOTSTRAP_CUSTODY_BARRIER_PATH: barrierPath,
+          AGENT_FABRIC_TEST_BOOTSTRAP_SOCKET_BARRIER_PATH: barrierPath,
         },
         stdio: "ignore",
       },
@@ -751,6 +751,7 @@ describe("production daemon bootstrap wiring", () => {
     await waitForProcessExit(launcher.pid);
     await waitForProcessExit(daemonPid);
     await rm(barrierPath, { force: true });
+    await expect(stat(options.socketPath)).rejects.toMatchObject({ code: "ENOENT" });
 
     const restarted = await startFabricDaemon(options);
     handles.push(restarted);

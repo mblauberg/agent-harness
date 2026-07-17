@@ -7,6 +7,7 @@ import {
   mkdirSync,
   rmdirSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { join } from "node:path";
@@ -641,10 +642,22 @@ const server = createServer((socket) => {
 });
 
 const openServingSocket = async (): Promise<void> =>
-  await openRecoverableUnixListener(server, socketPath, { admissionFence: servingAdmission });
+  await openRecoverableUnixListener(server, socketPath, {
+    admissionFence: servingAdmission,
+    onListening: async () => {
+      bootstrapSocketOwned = true;
+      const barrierPath = process.env.NODE_ENV === "test"
+        ? process.env.AGENT_FABRIC_TEST_BOOTSTRAP_SOCKET_BARRIER_PATH
+        : undefined;
+      if (barrierPath === undefined) return;
+      writeFileSync(barrierPath, `${String(process.pid)}\n`, { flag: "wx", mode: 0o600 });
+      while (existsSync(barrierPath)) {
+        await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 20));
+      }
+    },
+  });
 
 await openServingSocket();
-bootstrapSocketOwned = true;
 fabric.markDaemonRuntimeRunning(daemonInstanceGeneration);
 
 let shuttingDown = false;

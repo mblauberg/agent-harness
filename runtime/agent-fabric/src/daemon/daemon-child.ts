@@ -88,13 +88,17 @@ function childEnvironment(
   }
   const cutoverRaceFixture = process.env.AGENT_FABRIC_TEST_CUTOVER_RACE_FIXTURE_PATH;
   const idleStopAttemptSocket = process.env.AGENT_FABRIC_TEST_IDLE_STOP_ATTEMPT_SOCKET_PATH;
-  if (process.env.NODE_ENV === "test" && (cutoverRaceFixture !== undefined || idleStopAttemptSocket !== undefined)) {
+  const bootstrapSocketBarrier = process.env.AGENT_FABRIC_TEST_BOOTSTRAP_SOCKET_BARRIER_PATH;
+  if (process.env.NODE_ENV === "test" && (cutoverRaceFixture !== undefined || idleStopAttemptSocket !== undefined || bootstrapSocketBarrier !== undefined)) {
     environment.NODE_ENV = "test";
     if (cutoverRaceFixture !== undefined) {
       environment.AGENT_FABRIC_TEST_CUTOVER_RACE_FIXTURE_PATH = cutoverRaceFixture;
     }
     if (idleStopAttemptSocket !== undefined) {
       environment.AGENT_FABRIC_TEST_IDLE_STOP_ATTEMPT_SOCKET_PATH = idleStopAttemptSocket;
+    }
+    if (bootstrapSocketBarrier !== undefined) {
+      environment.AGENT_FABRIC_TEST_BOOTSTRAP_SOCKET_BARRIER_PATH = bootstrapSocketBarrier;
     }
   }
   return environment;
