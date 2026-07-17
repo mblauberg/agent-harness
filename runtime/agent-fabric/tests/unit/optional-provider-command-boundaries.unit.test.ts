@@ -175,6 +175,35 @@ describe("optional provider command boundaries", () => {
     }));
   });
 
+  it("reports only safe metadata for an unsupported Cursor stream record", async () => {
+    const boundary = createCursorCliBoundary({
+      executable: "/trusted/cursor",
+      cwd: "/workspace",
+      runner: async () => ({
+        stdout: `${JSON.stringify({
+          type: "private_provider_content",
+          message: "private provider content",
+          session_id: "private-session",
+          "private provider content": "must not become metadata",
+        })}\n`,
+        stderr: "",
+        exitCode: 0,
+      }),
+    });
+
+    await expect(boundary.spawn({ model: "cursor-grok-4.5-high", prompt: "review" }))
+      .rejects.toMatchObject({
+        code: "PROVIDER_RESPONSE_INVALID",
+        message: "Cursor stream contained an unsupported record type",
+        details: {
+          recordIndex: 0,
+          recordTypeSha256: "03ac7d3ac98ea049784810426c00f5a0221fe198644336030896a0310099ee47",
+          recordTypeLength: 24,
+          recordFields: ["message", "session_id", "type"],
+        },
+      });
+  });
+
   it.each([
     {
       name: "malformed middle line",

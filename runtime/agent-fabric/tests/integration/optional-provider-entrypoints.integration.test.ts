@@ -13,7 +13,16 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-async function providerFixture(directory: string): Promise<string> {
+async function providerFixture(
+  directory: string,
+  cursorResult: Record<string, unknown> = {
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    session_id: "provider-session-1",
+    result: "done",
+  },
+): Promise<string> {
   const path = join(directory, "provider-fixture.mjs");
   await writeFile(
     path,
@@ -23,7 +32,7 @@ const cursor = process.argv.includes("--output-format");
 const logIndex = process.argv.indexOf("--log-file");
 if (logIndex !== -1) writeFileSync(process.argv[logIndex + 1], "Created conversation 3cbfa155-fc5f-4c6e-aa99-3a44d48262b4\\n");
 const result = cursor
-  ? { type: "result", subtype: "success", is_error: false, session_id: "provider-session-1", result: "done" }
+  ? ${JSON.stringify(cursorResult)}
   : "done";
 process.stdout.write((typeof result === "string" ? result : JSON.stringify(result)) + "\\n");
 `,
@@ -218,6 +227,59 @@ describe("optional provider executable wrappers", () => {
       await expect(
         transport.request("lookup_action", { actionId: `${fixture.adapterId}:spawn:1` }),
       ).resolves.toMatchObject({ status: "terminal", executionCount: 1, effectCount: 1 });
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("preserves bounded Cursor record diagnostics and ambiguous effect accounting across the adapter process", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "fabric-cursor-unsupported-record-"));
+    temporaryDirectories.push(directory);
+    const providerExecutable = await providerFixture(directory, {
+      type: "private_provider_content",
+      private_provider_content: "must not cross the adapter boundary",
+    });
+    const wrapperPath = fileURLToPath(new URL("../../src/adapters/providers/optional/cursor-agent.ts", import.meta.url));
+    const transport = new AdapterProcessTransport({
+      command: [
+        process.execPath,
+        "--import",
+        "tsx",
+        wrapperPath,
+        "--journal",
+        join(directory, "adapter.sqlite3"),
+        "--provider-executable",
+        providerExecutable,
+        "--cwd",
+        directory,
+      ],
+      environment: {},
+      responseTimeoutMs: 2_000,
+    });
+    const actionId = "cursor-agent:unsupported-record:1";
+    try {
+      await expect(transport.request("spawn", {
+        actionId,
+        payload: {
+          model: "composer-fixture",
+          modelFamily: "cursor-composer",
+          prompt: "bounded fixture task",
+        },
+      })).rejects.toMatchObject({
+        name: "PROVIDER_RESPONSE_INVALID",
+        message: "Cursor stream contained an unsupported record type",
+        details: {
+          recordIndex: 0,
+          recordTypeSha256: "03ac7d3ac98ea049784810426c00f5a0221fe198644336030896a0310099ee47",
+          recordTypeLength: 24,
+          recordFields: ["type"],
+        },
+      });
+      await expect(transport.request("lookup_action", { actionId })).resolves.toMatchObject({
+        status: "ambiguous",
+        executionCount: 1,
+        effectCount: 0,
+      });
     } finally {
       await transport.close();
     }
