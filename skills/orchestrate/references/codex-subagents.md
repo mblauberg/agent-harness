@@ -68,8 +68,8 @@ output-path:       <run-dir>/findings/<name>.md
 return:            3-6 bullets, surprises, unresolved, file path
 ```
 
-For subscription-native Codex workers, omit the literal transport `model` and
-bind the resolved `effort`; retain Luna/Terra/Sol as the catalog identity in the
+For subscription-native Codex workers, omit the literal transport `model` and bind the resolved `effort`.
+Retain Luna/Terra/Sol as the catalog identity in the
 receipt. If the native surface cannot bind that effort, stop or use an
 authorised adapter and record the substitution. Do not silently inherit the
 chair route. Explicit chair inheritance is valid only when the dispatch and

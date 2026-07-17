@@ -57,7 +57,10 @@ def test_subagent_dispatch_contract_requires_task_class_bound_route_and_receipt(
         assert field in contract.lower()
     assert "task class" in skill.lower()
     assert "Codex subscription-native workers bind effort only" in harness
-    assert "omit" in codex.lower() and "model" in codex.lower()
+    assert (
+        "For subscription-native Codex workers, omit the literal transport `model` "
+        "and bind the resolved `effort`."
+    ) in codex
 
 
 def test_constitution_is_a_compact_core_with_progressive_disclosure():

@@ -27,6 +27,17 @@ COMPATIBILITY_ADAPTER_IDS = {
     "kiro": "kiro-acp",
     "pi": "pi-rpc",
 }
+EFFORT_ORDER = {name: index for index, name in enumerate(("low", "medium", "high", "xhigh", "max", "ultra"))}
+TRUSTED_CAPABILITY_SOURCES = {
+    "codex debug models": "codex",
+    "claude runtime models": "claude",
+}
+TASK_CLASS_ROLES = {
+    "mechanical": "worker",
+    "legwork": "worker",
+    "critical-review": "critical-review",
+    "orchestration": "orchestrator",
+}
 
 
 def load_catalog() -> dict[str, Any]:
@@ -132,7 +143,7 @@ def load_json(raw: str) -> Any:
     return json.loads(raw, object_pairs_hook=reject_duplicate_members)
 
 
-def load_capabilities(path: str | None) -> tuple[dict[str, Any], str]:
+def load_capabilities(path: str | None, adapter: str) -> tuple[dict[str, Any], str]:
     if not path:
         return {}, ""
     try:
@@ -141,7 +152,7 @@ def load_capabilities(path: str | None) -> tuple[dict[str, Any], str]:
         return {}, "capability_discovery_failed"
     if not isinstance(data, dict) or data.get("schema_version") != 1 or not isinstance(data.get("models"), dict):
         return {}, "capability_discovery_failed"
-    if data.get("source") != "codex debug models":
+    if TRUSTED_CAPABILITY_SOURCES.get(data.get("source")) != adapter:
         return {}, "capability_snapshot_untrusted"
     try:
         observed = datetime.fromisoformat(str(data.get("observed_at", "")).replace("Z", "+00:00"))
@@ -274,22 +285,32 @@ def resolve_effort(
 
 
 def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
-    capability_models, capability_error = load_capabilities(args.capabilities_file)
+    capability_models, capability_error = load_capabilities(args.capabilities_file, args.adapter)
     args.capability_models = capability_models
     adapter = catalog["adapters"].get(args.adapter)
     fixed_family = adapter.get("fixed_model_family") if adapter else None
     family_config = catalog["families"].get(fixed_family, {}) if fixed_family else {}
     role_effort = family_config.get("role_effort_defaults", {}).get(args.role, {}).get(args.alias)
     task_class_effort = args.task_class_effort
-    requested_effort = args.effort or role_effort or task_class_effort or {
-        "flagship": "high", "workhorse": "medium", "scout": "low"
-    }[args.alias]
-    effort_source = (
-        "explicit" if args.effort
-        else "role-default" if role_effort
-        else "task-class" if task_class_effort
-        else "alias-default"
-    )
+    if role_effort and role_effort not in EFFORT_ORDER:
+        record = {
+            "schema_version": 1, "status": "role_effort_config_invalid",
+            "adapter": args.adapter, "alias": args.alias, "role": args.role,
+            "requested_effort": task_class_effort or "", "effort": "",
+        }
+        if args.task_class:
+            record.update({"task_class": args.task_class, "route_source": "task-class"})
+        return emit(record, 2)
+    if task_class_effort:
+        if role_effort and EFFORT_ORDER[role_effort] > EFFORT_ORDER[task_class_effort]:
+            requested_effort, effort_source = role_effort, "role-default"
+        else:
+            requested_effort, effort_source = task_class_effort, "task-class"
+    else:
+        requested_effort = args.effort or role_effort or {
+            "flagship": "high", "workhorse": "medium", "scout": "low"
+        }[args.alias]
+        effort_source = "explicit" if args.effort else "role-default" if role_effort else "alias-default"
     base = {
         "schema_version": 1,
         "catalog_date": catalog["catalog_date"],
@@ -444,10 +465,10 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             fallback_model = candidates[1] if len(candidates) > 1 else ""
             identity_source = "account-default"
         else:
-            available = {item.lower(): item for item in args.available_model}
+            available = {item.lower(): (item, "caller-runtime+catalog") for item in args.available_model}
             if capability_models:
                 available.update(
-                    {key.lower(): item["resolved_model"] for key, item in capability_models.items()}
+                    {key.lower(): (item["resolved_model"], "runtime-capability+catalog") for key, item in capability_models.items()}
                 )
             if available:
                 chosen = next((candidate for candidate in candidates if candidate.lower() in available), None)
@@ -462,10 +483,9 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
                         },
                         1,
                     )
-                model = available[chosen.lower()]
+                model, identity_source = available[chosen.lower()]
                 if chosen != candidates[0]:
                     substitution = f"{candidates[0]} unavailable; used {chosen}"
-                identity_source = "runtime-available+catalog"
             else:
                 model = candidates[0]
                 fallback_model = candidates[1] if len(candidates) > 1 else ""
@@ -595,6 +615,25 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             1,
         )
 
+    if args.task_class and (
+        (not account_default and identity_source != "runtime-capability+catalog")
+        or capability_source != "runtime-model-catalog"
+    ):
+        return emit_route(
+            {
+                **base,
+                "status": "task_class_capability_unverified",
+                "effort": "",
+                "effort_substitution": "",
+                "effort_capability_source": capability_source,
+                "endpoint_provider": endpoint,
+                "model_family": family,
+                "resolved_model": model,
+                "identity_source": identity_source,
+            },
+            1,
+        )
+
     record = {
         **base,
         "effort": effort,
@@ -637,9 +676,8 @@ def parser() -> argparse.ArgumentParser:
     commands = root.add_subparsers(dest="command", required=True)
     command = commands.add_parser("resolve")
     command.add_argument("--adapter", required=True)
-    route = command.add_mutually_exclusive_group(required=True)
-    route.add_argument("--alias", choices=("flagship", "workhorse", "scout"))
-    route.add_argument("--task-class")
+    command.add_argument("--alias")
+    command.add_argument("--task-class")
     command.add_argument("--role", required=True)
     command.add_argument("--effort")
     command.add_argument("--model")
@@ -667,20 +705,55 @@ def main(argv: list[str] | None = None) -> int:
     args = argument_parser.parse_args(argv)
     catalog = load_catalog()
     if args.command == "resolve":
+        def reject(status: str, *, alias: str = "", effort: str = "") -> int:
+            record = {
+                "schema_version": 1,
+                "catalog_date": catalog.get("catalog_date", ""),
+                "status": status,
+                "adapter": args.adapter,
+                "role": args.role,
+                "alias": alias or args.alias or "",
+                "requested_effort": effort or args.effort or "",
+                "effort": "",
+                "lead_family": args.lead_family,
+                "adapter_gate": args.adapter_gate,
+            }
+            if args.task_class:
+                record.update({"task_class": args.task_class, "route_source": "task-class"})
+            return emit(record, 2)
+
         args.task_class_effort = ""
+        if bool(args.alias) == bool(args.task_class):
+            return reject("route_input_conflict" if args.alias else "route_input_missing")
         if args.task_class:
             route = catalog.get("task_class_routes", {}).get(args.task_class)
+            if route is None:
+                return reject("unknown_task_class")
+            if not isinstance(route, dict):
+                return reject("task_class_config_invalid")
+            route_alias = route.get("alias")
+            route_effort = route.get("effort")
+            route_role = route.get("role")
             if (
-                not isinstance(route, dict)
-                or route.get("alias") not in {"flagship", "workhorse", "scout"}
-                or not isinstance(route.get("effort"), str)
-                or not route["effort"]
+                route_alias not in {"flagship", "workhorse", "scout"}
+                or route_effort not in EFFORT_ORDER
+                or route_role != TASK_CLASS_ROLES.get(args.task_class)
             ):
-                argument_parser.error(f"unknown task class: {args.task_class}")
+                return reject(
+                    "task_class_config_invalid",
+                    alias=route_alias if isinstance(route_alias, str) else "",
+                    effort=route_effort if isinstance(route_effort, str) else "",
+                )
             if args.effort:
-                argument_parser.error("--task-class cannot be combined with --effort")
-            args.alias = route["alias"]
-            args.task_class_effort = route["effort"]
+                return reject("task_class_effort_conflict", alias=route_alias, effort=route_effort)
+            if args.role != route_role:
+                return reject("task_class_role_mismatch", alias=route_alias, effort=route_effort)
+            args.alias = route_alias
+            args.task_class_effort = route_effort
+        elif args.alias not in {"flagship", "workhorse", "scout"}:
+            return reject("unknown_alias")
+        if args.effort and args.effort not in EFFORT_ORDER:
+            return reject("invalid_effort", alias=args.alias)
         return resolve(args, catalog)
     return 2
 

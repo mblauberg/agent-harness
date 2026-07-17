@@ -15,18 +15,22 @@ and capability tier**. Never route by a memorised model name. Discover current
 model IDs and effort modes at runtime (`cli-headless.md`) and retain the route
 receipt.
 
-| Task class | Default tier | Default effort | Typical work |
-|---|---|---|---|
-| `mechanical` | scout | low | search, extraction, formatting, deterministic checks |
-| `legwork` | workhorse | medium | ordinary implementation, analysis, drafting, source mapping |
-| `critical-review` | flagship | high | hard review, adversarial verification, design judgement |
-| `orchestration` | flagship | high | decomposition, adjudication, synthesis |
+| Task class | Bound role | Default tier | Default effort | Typical work |
+|---|---|---|---|---|
+| `mechanical` | worker | scout | low | search, extraction, formatting, deterministic checks |
+| `legwork` | worker | workhorse | medium | ordinary implementation, analysis, drafting, source mapping |
+| `critical-review` | critical-review | flagship | high | hard review, adversarial verification, design judgement |
+| `orchestration` | orchestrator | flagship | high | decomposition, adjudication, synthesis |
 
 `scripts/model-route resolve --task-class ...` is authoritative for these
 defaults. An explicit role override may raise effort; an unavailable effort may
 substitute only when the receipt records requested and effective values. Alias
 routing remains a compatibility surface. Chair inheritance is exceptional: it
 must be explicit and recorded, never inferred from an omitted binding.
+Task-class dispatch rejects a mismatched role and requires a fresh, adapter-bound
+runtime capability snapshot that verifies the effective model and effort. Codex
+account-default transport still omits the literal model; its snapshot verifies
+effort while the receipt retains policy identity.
 
 ## Tiers (relative, family-agnostic)
 
