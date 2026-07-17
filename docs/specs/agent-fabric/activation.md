@@ -76,6 +76,15 @@ migration or new authority model.
 
 Each step must pass compatibility, boundary, conformance and negative tests before joining `activeAdapters`. Provider-backed smoke follows activation and stops on any write attempt, schema drift, unexpected permission request, missing session reference or unbounded output.
 
+The current activated optional-reviewer identities are Agy
+`Gemini 3.1 Pro (High)` (`google`, high) and Cursor
+`cursor-grok-4.5-high` (`xai`, high). They use the existing provider
+subscription sessions. Adapter subprocesses receive no ambient provider API
+key, and no provider credential is stored in Fabric. Activation remains exact:
+the installed CLI version, executable (and Cursor bundle), schema, wrapper
+provenance, explicit model, family and model-encoded effort must all match the
+checked contract or new work fails closed.
+
 ## Non-goals
 
 - No provider credential export or login changes.
