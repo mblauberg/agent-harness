@@ -1236,6 +1236,7 @@ export class Fabric {
     actionId: string;
     daemonInstanceGeneration: number;
     election: IdleElectionPort;
+    beforeElectionRelease?: () => Promise<void>;
     closeSocket(): Promise<void>;
     reopenSocket(): Promise<void>;
   }): Promise<IdleStopResult> {
@@ -1259,6 +1260,7 @@ export class Fabric {
     token: QuiesceToken;
     excludeOperatorEffectCustodyId?: string;
     election: IdleElectionPort;
+    beforeElectionRelease?: () => Promise<void>;
     closeSocket(): Promise<void>;
     reopenSocket(): Promise<void>;
   }): Promise<IdleStopResult> {

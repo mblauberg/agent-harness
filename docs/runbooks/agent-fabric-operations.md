@@ -92,9 +92,12 @@ stale discovery, crashed process, orphan socket and failed handshake are never
 relabelled idle. `doctor` diagnoses only; it does not start the on-demand
 daemon. Concurrent doctors share one non-blocking inspection fence and may
 report the same idle snapshot; bootstrap and shutdown ownership are exclusive
-and report `BOOTSTRAP_IN_PROGRESS` before socket artifacts are classified.
-Only absent discovery or an exact, generation-matched `stopped` owner can be
-idle. Unknown, crashed and otherwise non-stopped owners fail closed.
+and report an in-progress code before socket artifacts are classified. The
+daemon acquires its shutdown-transition fence before releasing the election
+lock and retains it until terminal discovery is durable. Only absent discovery
+or an exact, generation-matched `stopped` owner with exit `0` and no signal can
+be idle. Forced, non-zero, unknown, crashed and otherwise non-clean owners fail
+closed.
 
 Each client registry contains only the proxy command, socket path, fabric state
 directory, seat and client label:

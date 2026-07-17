@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { verifyAdapterCompatibility } from "../adapters/compatibility.js";
 import { loadFabricConfig } from "../config/index.js";
 import { assertDatabaseIntegrity } from "../persistence/invariants.js";
-import { BootstrapElection } from "../daemon/bootstrap-election.js";
+import { BootstrapElection, FLOCK_ELECTION_LOCK_PORT } from "../daemon/bootstrap-election.js";
 import { connectFabricDaemon } from "../daemon/client.js";
 import { privateDiscoveryPaths, readPrivateDiscovery } from "../daemon/private-discovery.js";
 import { readDiscoveryReceipt } from "./mcp-provision.js";
@@ -142,6 +142,17 @@ async function doctorDaemonState(paths: FabricPaths): Promise<DoctorDaemonState>
           socketPath: null,
         };
       }
+      const shutdown = await FLOCK_ELECTION_LOCK_PORT.probe(join(paths.runtimeDirectory, "daemon-shutdown.lock"));
+      if (shutdown.status === "held") {
+        return {
+          status: "failed" as const,
+          code: "DAEMON_SHUTDOWN_IN_PROGRESS",
+          detail: "daemon shutdown transition is active",
+          pid: null,
+          socketPath: null,
+        };
+      }
+      try {
       const discovery = await readPrivateDiscovery(privateDiscoveryPaths(paths.runtimeDirectory), paths.socketPath);
     if (discovery.status === "absent" || discovery.status === "terminal") {
       if (discovery.status === "terminal" && discovery.owner.state === "crashed") {
@@ -158,6 +169,18 @@ async function doctorDaemonState(paths: FabricPaths): Promise<DoctorDaemonState>
           status: "failed",
           code: "DAEMON_DISCOVERY_INVALID",
           detail: `terminal daemon discovery state ${String(discovery.owner.state)} is not a clean stop`,
+          pid: discovery.owner.pid,
+          socketPath: null,
+        };
+      }
+      if (
+        discovery.status === "terminal"
+        && (discovery.owner.exitCode !== 0 || discovery.owner.signal !== null)
+      ) {
+        return {
+          status: "failed",
+          code: "DAEMON_PROCESS_UNCLEAN_STOP",
+          detail: `daemon stopped uncleanly (exit=${String(discovery.owner.exitCode)} signal=${String(discovery.owner.signal)})`,
           pid: discovery.owner.pid,
           socketPath: null,
         };
@@ -284,6 +307,9 @@ async function doctorDaemonState(paths: FabricPaths): Promise<DoctorDaemonState>
       pid: discovery.receipt.pid,
       socketPath: discovery.receipt.socketPath,
     };
+      } finally {
+        await shutdown.handle.release();
+      }
     });
   } catch (error: unknown) {
     return {

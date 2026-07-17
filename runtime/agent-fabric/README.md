@@ -114,6 +114,7 @@ may need to reconnect or restart after a registry or seat-generation change.
 
 Doctor inspection uses a shared flock across election and discovery
 classification. Concurrent doctors coexist, while an exclusive bootstrap or
-shutdown transition reports in progress rather than idle or stale-socket.
+shutdown-transition fence reports in progress rather than idle or
+stale-socket. Healthy stopped-idle requires exit `0` with no signal.
 
 See [the operations runbook](../../docs/runbooks/agent-fabric-operations.md) before any live start or registration.

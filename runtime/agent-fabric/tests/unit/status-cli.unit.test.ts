@@ -25,6 +25,45 @@ async function paths(): Promise<FabricPaths> {
   return { stateDirectory, runtimeDirectory, databasePath, socketPath: join(runtimeDirectory, "fabric-v1.sock") };
 }
 
+async function writeStoppedGeneration(
+  value: FabricPaths,
+  outcome: { exitCode: number | null; signal: NodeJS.Signals | null },
+): Promise<void> {
+  await writeFile(join(value.runtimeDirectory, "fabric-v1.discovery-owner.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    state: "stopped",
+    actionId: "stopped-action",
+    electionGeneration: 1,
+    daemonInstanceGeneration: 1,
+    socketPath: value.socketPath,
+    pid: process.pid,
+    bootstrapCapabilityHash: "a".repeat(64),
+    updatedAt: 2,
+    ...outcome,
+  })}\n`, { mode: 0o600 });
+  await writeFile(join(value.runtimeDirectory, "daemon-election.lease.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    actionId: "stopped-action",
+    electionGeneration: 1,
+    status: "succeeded",
+    acquiredAt: 1,
+    terminalAt: 2,
+    code: "BOOTSTRAP_READY",
+    message: "generation reached ready",
+  })}\n`, { mode: 0o600 });
+  await writeFile(join(value.runtimeDirectory, "daemon-election.ready.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    actionId: "stopped-action",
+    electionGeneration: 1,
+    daemonInstanceGeneration: 1,
+    socketPath: value.socketPath,
+    protocolVersion: 1,
+    features: ["rpc"],
+    readyAt: 2,
+    evidence: { databaseOwned: true, migrationsComplete: true, recoveryComplete: true, socketBound: true },
+  })}\n`, { mode: 0o600 });
+}
+
 describe("machine status and doctor", () => {
   it("reports configured adapters, exact roots and secret-free seat metadata", async () => {
     const value = await paths();
@@ -188,6 +227,34 @@ describe("machine status and doctor", () => {
     }
   });
 
+  it("reports shutdown in progress while the terminal publication fence is held", async () => {
+    const value = await paths();
+    const daemon = await startFabricDaemon({
+      ...value,
+      workspaceRoots: [value.stateDirectory],
+      adapters: {},
+    });
+    const shutdown = await FLOCK_ELECTION_LOCK_PORT.tryAcquire(join(value.runtimeDirectory, "daemon-shutdown.lock"));
+    expect(shutdown).toBeDefined();
+    const fixture = await createPortableActivatedPrimaryFixture();
+    cleanup.push(fixture.directory);
+    try {
+      await expect(fabricDoctor([
+        "--agents-home", fixture.directory,
+        "--trusted-config", fixture.configPath,
+        "--compatibility", fixture.compatibilityPath,
+        "--compatibility-schema", fixture.schemaPath,
+      ], value)).resolves.toMatchObject({
+        healthy: false,
+        state: "failed",
+        code: "DAEMON_SHUTDOWN_IN_PROGRESS",
+      });
+    } finally {
+      await shutdown?.release();
+      await daemon.stop();
+    }
+  });
+
   it("rejects terminal discovery from an older generation than the current ready receipt", async () => {
     const value = await paths();
     await writeFile(join(value.runtimeDirectory, "fabric-v1.discovery-owner.json"), `${JSON.stringify({
@@ -270,6 +337,27 @@ describe("machine status and doctor", () => {
       state: "failed",
       code,
       daemon: { status: "failed" },
+    });
+  });
+
+  it.each([
+    ["nonzero", { exitCode: 1, signal: null }],
+    ["forced", { exitCode: null, signal: "SIGKILL" as const }],
+  ] as const)("rejects a %s stopped outcome as unhealthy", async (_label, outcome) => {
+    const value = await paths();
+    await writeStoppedGeneration(value, outcome);
+    const fixture = await createPortableActivatedPrimaryFixture();
+    cleanup.push(fixture.directory);
+    await expect(fabricDoctor([
+      "--agents-home", fixture.directory,
+      "--trusted-config", fixture.configPath,
+      "--compatibility", fixture.compatibilityPath,
+      "--compatibility-schema", fixture.schemaPath,
+    ], value)).resolves.toMatchObject({
+      healthy: false,
+      state: "failed",
+      code: "DAEMON_PROCESS_UNCLEAN_STOP",
+      daemon: { status: "failed", pid: process.pid, socketPath: null },
     });
   });
 

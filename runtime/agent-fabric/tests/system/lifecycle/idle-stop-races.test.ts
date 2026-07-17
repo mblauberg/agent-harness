@@ -63,6 +63,7 @@ describe("global idle stop races", () => {
     const runtimeDirectory = join(root, "runtime");
     const election = new BootstrapElection({ runtimeDirectory });
     const reopenSocket = vi.fn();
+    let shutdownTransition: Awaited<ReturnType<typeof FLOCK_ELECTION_LOCK_PORT.tryAcquire>>;
     const closeSocket = vi.fn().mockImplementation(async () => {
       await expect(FLOCK_ELECTION_LOCK_PORT.tryAcquire(election.paths.lockPath)).resolves.toBeUndefined();
     });
@@ -75,11 +76,19 @@ describe("global idle stop races", () => {
       clock: () => 1_000,
       closeSocket,
       reopenSocket,
+      beforeElectionRelease: async () => {
+        await expect(FLOCK_ELECTION_LOCK_PORT.tryAcquire(election.paths.lockPath)).resolves.toBeUndefined();
+        shutdownTransition = await FLOCK_ELECTION_LOCK_PORT.tryAcquire(join(runtimeDirectory, "daemon-shutdown.lock"));
+        expect(shutdownTransition).toBeDefined();
+      },
     })).resolves.toMatchObject({ state: "stopped", globalStateRevision: 1 });
     expect(closeSocket).toHaveBeenCalledTimes(1);
     expect(reopenSocket).not.toHaveBeenCalled();
     expect(database.prepare("SELECT state, stopped_at FROM daemon_runtime_epochs WHERE instance_generation = 7").get())
       .toEqual({ state: "stopped", stopped_at: 1_000 });
+    await expect(FLOCK_ELECTION_LOCK_PORT.probe(join(runtimeDirectory, "daemon-shutdown.lock")))
+      .resolves.toMatchObject({ status: "held" });
+    await shutdownTransition?.release();
 
     await expect(attemptIdleStop({
       actionId: "idle_stop_repeat",
