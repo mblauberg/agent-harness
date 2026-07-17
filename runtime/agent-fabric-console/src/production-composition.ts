@@ -16,6 +16,7 @@ import type {
   ProjectSession,
   ProjectSessionDiscovery,
   ProjectSessionId,
+  ChairBridgeRecoveryIntent,
 } from "@local/agent-fabric-protocol";
 
 import type {
@@ -43,6 +44,7 @@ export type ProductionConsoleActionPlannerOptions = Readonly<{
   credential: OperatorCapabilityCredential;
   operatorId: OperatorId;
   clientId: OperatorClientId;
+  chairRecoveryIntent?: Extract<ChairBridgeRecoveryIntent, { path: "abandon" }>;
 }>;
 
 const supportedActions = [
@@ -52,6 +54,7 @@ const supportedActions = [
   "steer",
   "project-session-drain",
   "project-session-stop",
+  "chair-bridge-recovery",
 ] as const satisfies readonly OperatorAvailableAction[];
 type ProductionConsoleAction = typeof supportedActions[number];
 
@@ -73,6 +76,7 @@ function restrictRowActionAvailability(
       return action === "project-session-drain" ||
         action === "project-session-stop" ||
         action === "project-session-launch" ||
+        action === "chair-bridge-recovery" ||
         action === "git" ||
         action === "promotion";
     }
@@ -233,9 +237,19 @@ function plannedIntent(
   row: ConsoleRow,
   dataset: FabricConsoleDataset,
   draft: string,
+  chairRecoveryIntent?: Extract<ChairBridgeRecoveryIntent, { path: "abandon" }>,
 ): OperatorActionIntent | null {
   const session = selectedSession(dataset);
   if (session === null) return null;
+  if (action === "chair-bridge-recovery") {
+    return row.view === "project" &&
+      session.state === "recovery_required" &&
+      chairRecoveryIntent?.projectSessionId === session.projectSessionId &&
+      chairRecoveryIntent.expectedSessionRevision === session.revision &&
+      chairRecoveryIntent.expectedSessionGeneration === session.generation
+      ? chairRecoveryIntent
+      : null;
+  }
   const controlAction = action === "pause" || action === "resume" ||
     action === "cancel" || action === "steer";
   if (controlAction && (row.view !== "runs" || row.detailRef?.kind !== "run")) {
@@ -298,6 +312,7 @@ type PublicLocalOperatorConsoleSession = Readonly<{
   projectId: ProjectId;
   operatorId: OperatorId;
   projectSessionId?: ProjectSessionId;
+  chairRecoveryIntent?: Extract<ChairBridgeRecoveryIntent, { path: "abandon" }>;
   clientId: OperatorClientId;
   attachableProjectSessions?: readonly ProjectSessionDiscovery[];
   selectProjectSession?(projectSessionId: ProjectSessionId): Promise<void>;
@@ -485,6 +500,9 @@ export function createProductionConsoleBootstrap(
         credential: session.credential,
         operatorId: session.operatorId,
         clientId: session.clientId,
+        ...(session.chairRecoveryIntent === undefined
+          ? {}
+          : { chairRecoveryIntent: session.chairRecoveryIntent }),
       }),
       workflowPlanner: createProductionConsoleWorkflowPlanner({
         client: session.client,
@@ -544,7 +562,13 @@ export function createProductionConsoleActionPlanner(
       ) {
         return null;
       }
-      const intent = plannedIntent(action, row, input.dataset, input.draft);
+      const intent = plannedIntent(
+        action,
+        row,
+        input.dataset,
+        input.draft,
+        options.chairRecoveryIntent,
+      );
       const binding = input.activation.binding;
       if (intent === null || binding === null) return null;
       return {

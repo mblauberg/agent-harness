@@ -33,6 +33,7 @@ import {
   isDaemonRequest,
   isRecord,
   openLocalOperatorConsoleCapabilityInput,
+  openLocalOperatorTakeoverCapabilityInput,
   provisionLocalOperatorInput,
   rotateLocalOperatorPrincipalInput,
   type DaemonRequest,
@@ -429,6 +430,10 @@ const servePrivateControlConnection = (socket: Socket): void => {
         case "openLocalOperatorConsoleSessionCapability":
           return fabric.openLocalOperatorConsoleSessionCapability(await withTrustedLocalSubject(
             issueLocalOperatorSessionCapabilityInput(request.params),
+          ));
+        case "openLocalOperatorConsoleTakeoverCapability":
+          return fabric.openLocalOperatorConsoleTakeoverCapability(await withTrustedLocalSubject(
+            openLocalOperatorTakeoverCapabilityInput(request.params),
           ));
         case "rotateLocalOperatorPrincipal":
           return fabric.rotateLocalOperatorPrincipal(await withTrustedLocalSubject(

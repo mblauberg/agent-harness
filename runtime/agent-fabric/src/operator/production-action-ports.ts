@@ -1759,8 +1759,7 @@ class ProductionOperatorActions {
         [
           "operator effect",
           `SELECT 1 FROM operator_effect_custody
-            WHERE project_session_id=? AND command_id<>?
-              AND state NOT IN ('no-effect','rejected') LIMIT 1`,
+            WHERE project_session_id=? AND command_id<>? LIMIT 1`,
           [commandId],
         ],
       ];

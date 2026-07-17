@@ -8,6 +8,7 @@ import type {
   ProjectSessionId,
   Sha256Digest,
   Timestamp,
+  ChairBridgeRecoveryIntent,
 } from "@local/agent-fabric-protocol";
 
 import {
@@ -484,6 +485,109 @@ describe("production Console mutation planner", () => {
           : "exact operator payload",
       })).resolves.toMatchObject({ availableAction: action });
     }
+  });
+
+  it("plans the server-authored lost-chair abandon from the recovery project row", async () => {
+    const recoveryIntent: Extract<ChairBridgeRecoveryIntent, { path: "abandon" }> = {
+      kind: "chair-bridge-recovery",
+      schemaVersion: 1,
+      path: "abandon",
+      projectSessionId,
+      coordinationRunId: "run_console_production" as never,
+      lossId: "loss_console_production",
+      recoveryManifestDigest: digest,
+      expectedSessionRevision: 8,
+      expectedSessionGeneration: 3,
+      expectedRunRevision: 4,
+      expectedChairGeneration: 2,
+      expectedPrincipalGeneration: 1,
+      expectedBridgeRevision: 5,
+      expectedLostBridgeGeneration: 1,
+      expectedProviderSessionGeneration: 2,
+      providerAdapterId: "claude-agent-sdk",
+      providerContractDigest: digest,
+      reason: "operator confirmed terminal retained-chair loss",
+    };
+    const planner = createProductionConsoleActionPlanner({
+      credential,
+      operatorId: "operator_console_production" as never,
+      clientId: "console_client_production" as never,
+      chairRecoveryIntent: recoveryIntent,
+    });
+    const current = dataset();
+    const snapshot = current.snapshot;
+    if (snapshot?.session.freshness !== "live" || snapshot.session.value === null) {
+      throw new Error("live session fixture unavailable");
+    }
+    const recovery = {
+      ...current,
+      snapshot: {
+        ...snapshot,
+        session: {
+          ...snapshot.session,
+          value: { ...snapshot.session.value, state: "recovery_required" as const },
+        },
+      },
+      pages: {
+        ...current.pages,
+        project: {
+          view: "project" as const,
+          rows: [{
+            view: "project" as const,
+            stableId: projectId,
+            revision: revisionFromProtocol(1),
+            urgency: "critical-path" as const,
+            freshness: current.pages.runs.rows[0]!.freshness,
+            summary: {
+              kind: "project" as const,
+              goal: "recover retained chair",
+              acceptedScopeRef: null,
+              repositoryRevision: "head",
+            },
+            detailRef: { kind: "project" as const, projectId, expectedRevision: 1 },
+            actionAvailability: {
+              state: "available" as const,
+              actions: ["chair-bridge-recovery" as const],
+              requiresPreview: true,
+            },
+          }],
+          nextCursor: 1,
+          hasMore: false,
+          snapshotRevision: revisionFromProtocol(11),
+          readTransactionId: "project_recovery",
+        },
+      },
+    } satisfies FabricConsoleDataset;
+    const controller = state();
+    const projectState: ConsoleControllerState = {
+      ...controller,
+      activeView: "project",
+      selectionByView: {
+        ...controller.selectionByView,
+        project: { stableId: projectId, revision: revisionFromProtocol(1) },
+      },
+    };
+
+    await expect(planner.plan({
+      activation: {
+        regionId: "action:chair-bridge-recovery",
+        provenance: "keyboard",
+        eventId: "recover_chair",
+        binding: {
+          view: "project",
+          itemId: projectId,
+          itemRevision: revisionFromProtocol(1),
+          projectionRevision: revisionFromProtocol(11),
+        },
+      },
+      dataset: recovery,
+      state: projectState,
+      draft: "ignored caller text",
+    })).resolves.toMatchObject({
+      availableAction: "chair-bridge-recovery",
+      intent: recoveryIntent,
+      command: { expectedRevision: 5 },
+    });
   });
 });
 

@@ -169,6 +169,18 @@ describe("production operator lifecycle ports", () => {
           'session_01', 'project_01', 'coordinated', '${state}', 2, 1, '${digest}',
           'budget_01', 'launch.json', '${digest}', 1, 'operator-launch', 'operator_01', ${now}, ${now}
         );
+        INSERT INTO operator_principals(
+          operator_id, project_id, project_session_id, authenticated_subject_hash,
+          project_authority_generation, principal_generation, state, created_at, updated_at
+        ) VALUES ('operator_01', 'project_01', NULL, '${digest}', 1, 1, 'active', ${now}, ${now});
+        INSERT INTO operator_client_attachments(
+          attachment_id, operator_id, project_id, project_authority_generation, project_session_id,
+          session_generation, daemon_instance_generation, lease_generation, state, expires_at,
+          revision, created_at, updated_at
+        ) VALUES (
+          'attachment_01', 'operator_01', 'project_01', 1, 'session_01',
+          1, 1, 1, 'active', ${now + 60_000}, 1, ${now}, ${now}
+        );
       `);
       const ports = createProductionOperatorActionPorts({
         database,
@@ -208,6 +220,26 @@ describe("production operator lifecycle ports", () => {
         revision: 3,
         terminal_path_json: canonicalJson({ kind: "cancelled", reason: "operator cancelled effect-free retry" }),
       });
+
+      database.prepare(`
+        UPDATE operator_effect_custody SET state='no-effect' WHERE command_id=?
+      `).run(`cancel_${state}`);
+      database.prepare(`
+        UPDATE project_sessions SET state=?, revision=4, terminal_path_json=NULL WHERE project_session_id='session_01'
+      `).run(state);
+      const retryIntent = {
+        ...intent,
+        target: { ...intent.target, expectedRevision: 4 },
+      };
+      const retryBefore = await ports.statePort.read(retryIntent);
+      await expect(ports.effectPort.dispatch(scopedEffectRequest(
+        `cancel_${state}_with_history`,
+        retryIntent,
+        stateDigest(retryBefore),
+      ))).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
+      expect(database.prepare(`
+        SELECT state, revision, terminal_path_json FROM project_sessions WHERE project_session_id='session_01'
+      `).get()).toEqual({ state, revision: 4, terminal_path_json: null });
     },
   );
 

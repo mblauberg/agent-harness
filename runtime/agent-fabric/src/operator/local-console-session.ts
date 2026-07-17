@@ -27,6 +27,7 @@ import {
   type ProtocolFeature,
   type ProtocolInitializeRequest,
   type Timestamp,
+  type ChairBridgeRecoveryIntent,
 } from "@local/agent-fabric-protocol";
 
 import {
@@ -221,6 +222,7 @@ export type LocalOperatorConsoleSession = Readonly<{
   projectId: ProjectId;
   operatorId: OperatorId;
   projectSessionId: ProjectSessionId | undefined;
+  chairRecoveryIntent: Extract<ChairBridgeRecoveryIntent, { path: "abandon" }> | undefined;
   clientId: OperatorClientId;
   daemonPid: number;
   refreshProjectSessions(): Promise<readonly ProjectSessionDiscovery[]>;
@@ -275,12 +277,25 @@ async function sessionCredential(
   selected: ProjectSessionDiscovery,
   now: number,
   credentialLifetimeMs: number,
-): ReturnType<FabricDaemonClient["openLocalOperatorConsoleSessionCapability"]> {
+): Promise<
+  | Awaited<ReturnType<FabricDaemonClient["openLocalOperatorConsoleSessionCapability"]>>
+  | Awaited<ReturnType<FabricDaemonClient["openLocalOperatorConsoleTakeoverCapability"]>>
+> {
   const expiresAt = isoTimestamp(Math.min(
     Date.parse(project.expiresAt),
     now + credentialLifetimeMs,
   ));
   assertFuture(expiresAt, now);
+  if (selected.state === "recovery_required") {
+    return await privateClient.openLocalOperatorConsoleTakeoverCapability({
+      projectId: project.projectId,
+      canonicalRoot: identity.canonicalRoot,
+      trustRecordDigest: identity.trustRecordDigest,
+      projectCapability: project.credential,
+      projectSessionId: selected.projectSessionId,
+      expiresAt,
+    });
+  }
   return await privateClient.openLocalOperatorConsoleSessionCapability({
     projectId: project.projectId,
     canonicalRoot: identity.canonicalRoot,
@@ -647,6 +662,7 @@ export async function openLocalOperatorConsoleSession(
     let activeCredential = project.credential as OperatorCapabilityCredential;
     let activeCompatibility = projectCompatibility;
     let activeProjectSessionId: ProjectSessionId | undefined;
+    let activeChairRecoveryIntent: Extract<ChairBridgeRecoveryIntent, { path: "abandon" }> | undefined;
     if (selected !== undefined) {
       const issued = await sessionCredential(
         privateClient,
@@ -665,6 +681,9 @@ export async function openLocalOperatorConsoleSession(
       activeCompatibility = sessionConnection.compatibility;
       activeCredential = issued.credential as OperatorCapabilityCredential;
       activeProjectSessionId = selected.projectSessionId;
+      activeChairRecoveryIntent = issued.kind === "takeover"
+        ? issued.recoveryIntent
+        : undefined;
     }
     const retainedProjectClient = projectClient;
     const retainedPrivateClient = privateClient;
@@ -779,6 +798,9 @@ export async function openLocalOperatorConsoleSession(
         activeCompatibility = connection.compatibility;
         activeCredential = issued.credential as OperatorCapabilityCredential;
         activeProjectSessionId = projectSessionId;
+        activeChairRecoveryIntent = issued.kind === "takeover"
+          ? issued.recoveryIntent
+          : undefined;
         await previous?.close();
       };
       const operation = selectionQueue.then(change, change);
@@ -793,6 +815,7 @@ export async function openLocalOperatorConsoleSession(
         activeCredential = projectCredentialValue;
         activeCompatibility = projectCompatibility;
         activeProjectSessionId = undefined;
+        activeChairRecoveryIntent = undefined;
         await previous?.close();
       };
       const operation = selectionQueue.then(change, change);
@@ -810,6 +833,7 @@ export async function openLocalOperatorConsoleSession(
       projectId,
       operatorId,
       get projectSessionId() { return activeProjectSessionId; },
+      get chairRecoveryIntent() { return activeChairRecoveryIntent; },
       clientId,
       daemonPid: daemon.pid,
       refreshProjectSessions,

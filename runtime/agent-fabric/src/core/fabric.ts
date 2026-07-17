@@ -86,6 +86,8 @@ import {
   type LocalOperatorProvisioningResult,
   type LocalOperatorSessionCapabilityInput,
   type LocalOperatorSessionCapabilityResult,
+  type LocalOperatorTakeoverCapabilityInput,
+  type LocalOperatorTakeoverCapabilityResult,
 } from "../operator/store.js";
 import { OperatorProjectionStore } from "../operator/projection-store.js";
 import {
@@ -1413,6 +1415,12 @@ export class Fabric {
     return this.#operatorStore.openLocalOperatorConsoleSessionCapability(input);
   }
 
+  openLocalOperatorConsoleTakeoverCapability(
+    input: LocalOperatorTakeoverCapabilityInput,
+  ): LocalOperatorTakeoverCapabilityResult {
+    return this.#operatorStore.openLocalOperatorConsoleTakeoverCapability(input);
+  }
+
   rotateLocalOperatorPrincipal(
     input: LocalOperatorPrincipalRotationInput,
   ): LocalOperatorPrincipalRotationResult {
@@ -1729,7 +1737,9 @@ export class Fabric {
     }
     return Object.fromEntries(Object.keys(amounts).sort().map((unit) => [
       unit,
-      unit === "provider_calls" ? 1 : "unknown",
+      unit === "provider_calls" ? 1
+        : unit === "concurrent_turns" ? 0
+          : "unknown",
     ]));
   }
 

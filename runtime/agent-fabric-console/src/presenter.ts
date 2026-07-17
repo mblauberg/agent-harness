@@ -163,6 +163,12 @@ function productionActionUnavailableReason(
       ? null
       : "enter-drain-receipt-ref";
   }
+  if (action === "chair-bridge-recovery") {
+    const session = dataset.snapshot?.session;
+    return session?.freshness === "live" && session.value?.state === "recovery_required"
+      ? null
+      : "session-recovery-not-current";
+  }
   return "typed-guided-entry-required";
 }
 
