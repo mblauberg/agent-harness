@@ -78,8 +78,12 @@ role names) live only in the adapters.
 
 ## Worker contract
 
-Every dispatched worker states identity, objective, authority, paths, output,
-checks, stop condition and budget. Validate payloads; never infer permission.
+Every dispatched worker states task class, route tier, catalog model identity,
+effort, route receipt, identity, objective, authority, paths, output, checks,
+stop condition and budget. The binding is invalid if any route field is absent;
+validate payloads and never infer permission. Codex account-default transport
+omits a literal model while its receipt retains catalog identity and effective
+effort. Claude records the runtime-discovered effective model and effort.
 Forbid unpartitioned edits and out-of-scope git restore/checkout/stash. Stop
 at budget or invariant failure and record residual work. Handoffs preserve
 claim, source, confidence, issues and validation. Certification needs a

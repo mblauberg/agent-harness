@@ -61,8 +61,9 @@ passing topology.
 
 ## Worker Contract
 
-Every worker gets a stated identity, objective, authority, paths, output,
-checks, stop condition and budget; validate payloads, never infer permission.
+Every worker gets task class, route (`tier`, `model`, `effort`, route receipt),
+identity, objective, authority, paths, output, checks, stop and budget;
+validate payloads, never infer permission.
 See [orchestration-contract.md](references/orchestration-contract.md) for the
 full contract, gates and recovery transitions.
 
