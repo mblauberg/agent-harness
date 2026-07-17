@@ -37,7 +37,7 @@ All staged implement work landed on branch `issue-124-skill-audit-register`. Cat
 
 **Remaining (not on this branch):**
 - **#135**: direct milestone-codename retirement and commit-plus-path routing provenance, implemented on its child branch.
-- **Codex P2 (release-gate trackedness), deferred:** `public_release_check.scan_paths` validates `REQUIRED` legal files by filesystem existence, not tracked-set membership, so a future consolidation could omit a tracked required file while the gate passes. The current tree is unaffected (`NOTICE` + all eight `LICENSES/*` are tracked). The clean fix (a canonical manifest plus an untracked-decoy regression test) is a gate refactor deferred to its own change rather than rushed under a CI green-up.
+- **Codex P2 (release-gate trackedness), deferred to [#224](https://github.com/mblauberg/provenant/issues/224):** `public_release_check.scan_paths` validates `REQUIRED` legal files by filesystem existence, not tracked-set membership, so a future consolidation could omit a tracked required file while the gate passes. The current tree is unaffected (`NOTICE` + all eight `LICENSES/*` are tracked). The live issue owns the canonical-manifest and untracked-decoy regression fix.
 
 ## Owner decisions (grill-me R1–R5)
 
