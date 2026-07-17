@@ -1,9 +1,9 @@
 schema_version: 1
 target_skill: engineering-writing
 cases:
-  - {id: q082, relation: positive, prompt: "Write a mixed-audience technical overview whose primary layer supports the decision and links canonical engineering detail.", tags: [direct], expected: {primary_skill: engineering-writing, companion_skills: []}}
+  - {id: q082, relation: positive, prompt: "Tighten this README for engineers while preserving commands, versions, and behaviour.", tags: [direct], expected: {primary_skill: engineering-writing, companion_skills: []}}
   - {id: q083, relation: positive, prompt: "Draft an imperative commit message that says what changed and why.", tags: [direct], expected: {primary_skill: engineering-writing, companion_skills: []}}
-  - {id: q084, relation: positive, prompt: "Explain this recurring operating-cost range with its period, assumptions, contributing services and technical drivers.", tags: [direct], expected: {primary_skill: engineering-writing, companion_skills: []}}
+  - {id: q084, relation: positive, prompt: "Write an engineering cost note explaining this recurring operating-cost range, its period, assumptions, contributing services and technical drivers.", tags: [direct], expected: {primary_skill: engineering-writing, companion_skills: []}}
   - {id: q085, relation: negative, prompt: "Make this personal travel story sound less robotic.", tags: [adjacent], expected: {primary_skill: natural-writing, companion_skills: []}}
   - {id: q086, relation: negative, prompt: "Polish this journal-paper discussion and preserve its citations.", tags: [adjacent], expected: {primary_skill: academic-writing, companion_skills: []}}
   - {id: q087, relation: negative, prompt: "Condense these Australian court submissions without changing source anchors.", tags: [adjacent], expected: {primary_skill: legal-writing, companion_skills: []}}

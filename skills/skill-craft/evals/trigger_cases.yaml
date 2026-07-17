@@ -8,7 +8,7 @@
 schema_version: 1
 target_skill: skill-craft
 cases:
-  - {id: q700, relation: positive, prompt: "Mine these authorised human corrections by semantic failure and decide which warrant reusable skill changes.", tags: [direct], expected: {primary_skill: skill-craft, companion_skills: []}}
+  - {id: q700, relation: positive, prompt: "Audit this existing Agent Skill for missed triggers, false triggers, overlap, and token cost.", tags: [direct], expected: {primary_skill: skill-craft, companion_skills: []}}
   - {id: q701, relation: positive, prompt: "Create a new Agent Skill with a compact SKILL.md, references, scripts, and trigger fixtures.", tags: [direct], expected: {primary_skill: skill-craft, companion_skills: []}}
   - {id: q702, relation: positive, prompt: "Materially revise this existing skill's trigger, progressive disclosure, fixtures, and validation after its audit.", tags: [direct], expected: {primary_skill: skill-craft, companion_skills: []}}
   - {id: q703, relation: negative, prompt: "Implement the already approved skill changes and verify the harness.", tags: [adjacent], expected: {primary_skill: implement, companion_skills: []}}

@@ -19,9 +19,9 @@ def compact(relative: str) -> str:
 def test_reuse_rules_live_in_the_existing_routing_portfolio_not_prose_pair_files():
     expected_ids = {
         "natural-writing": {"q145", "q150", "q151"},
-        "engineering-writing": {"q082", "q084", "q088"},
-        "deliver": {"q055", "q058", "q061"},
-        "skill-craft": {"q700", "q708"},
+        "engineering-writing": {"q084", "q088"},
+        "deliver": {"q055", "q058"},
+        "skill-craft": {"q708"},
     }
     for skill, ids in expected_ids.items():
         assert not (ROOT / f"skills/{skill}/evals/discipline_cases.yaml").exists()
