@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolve, sep } from "node:path";
 
 import type Database from "better-sqlite3";
@@ -2477,28 +2477,42 @@ export class Fabric {
     };
   }
 
-  #writeClosedLaunchArtifact(root: string, relativePath: string, content: string): void {
+  #writeClosedLaunchArtifact(
+    root: string,
+    relativePath: string,
+    content: string,
+  ): Readonly<{ device: string; inode: string }> {
     const destination = resolve(root, canonicalAuthorityPath(root, relativePath));
-    if (existsSync(destination)) {
-      if (readFileSync(destination, "utf8") !== content) {
-        throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch artifact path already contains different bytes");
-      }
-      return;
-    }
     mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
-    const temporary = `${destination}.tmp-${randomBytes(12).toString("hex")}`;
-    writeFileSync(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    renameSync(temporary, destination);
+    try {
+      writeFileSync(destination, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    } catch (error: unknown) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST") {
+        throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch staging path is already occupied");
+      }
+      throw error;
+    }
+    const identity = statSync(destination, { bigint: true });
+    return { device: identity.dev.toString(), inode: identity.ino.toString() };
   }
 
-  #removeLaunchPreparationFile(root: string, relativePath: unknown, expectedDigest?: unknown): boolean {
+  #removeLaunchPreparationFile(
+    root: string,
+    relativePath: unknown,
+    expectedDigest: unknown,
+    expectedDevice: unknown,
+    expectedInode: unknown,
+  ): boolean {
     if (typeof relativePath !== "string") return true;
     const destination = resolve(root, canonicalAuthorityPath(root, relativePath));
     if (!existsSync(destination)) return true;
-    if (typeof expectedDigest === "string") {
-      const observed = sha256Digest(readFileSync(destination, "utf8"));
-      if (observed !== expectedDigest) return false;
-    }
+    if (
+      typeof expectedDigest !== "string" || typeof expectedDevice !== "string" ||
+      typeof expectedInode !== "string"
+    ) return true;
+    const identity = statSync(destination, { bigint: true });
+    if (identity.dev.toString() !== expectedDevice || identity.ino.toString() !== expectedInode) return true;
+    if (sha256Digest(readFileSync(destination, "utf8")) !== expectedDigest) return true;
     unlinkSync(destination);
     return true;
   }
@@ -2508,6 +2522,8 @@ export class Fabric {
     stagedPath: unknown,
     publishedPath: unknown,
     expectedDigest: unknown,
+    expectedDevice: unknown,
+    expectedInode: unknown,
   ): boolean {
     if (typeof publishedPath !== "string" || typeof expectedDigest !== "string") {
       return stagedPath === null && publishedPath === null;
@@ -2518,11 +2534,18 @@ export class Fabric {
     }
     const staged = resolve(root, canonicalAuthorityPath(root, stagedPath));
     const published = resolve(root, canonicalAuthorityPath(root, publishedPath));
+    if (typeof expectedDevice !== "string" || typeof expectedInode !== "string") {
+      return !existsSync(published);
+    }
     if (!existsSync(staged)) return !existsSync(published);
+    const stagedIdentity = statSync(staged, { bigint: true });
+    if (
+      stagedIdentity.dev.toString() !== expectedDevice ||
+      stagedIdentity.ino.toString() !== expectedInode
+    ) return false;
     if (sha256Digest(readFileSync(staged, "utf8")) !== expectedDigest) return false;
     if (existsSync(published)) {
-      const stagedIdentity = statSync(staged);
-      const publishedIdentity = statSync(published);
+      const publishedIdentity = statSync(published, { bigint: true });
       if (
         stagedIdentity.dev !== publishedIdentity.dev || stagedIdentity.ino !== publishedIdentity.ino ||
         sha256Digest(readFileSync(published, "utf8")) !== expectedDigest
@@ -2548,23 +2571,44 @@ export class Fabric {
       `).get(stringField(current, "project_id")), "project");
       const root = realpathSync(stringField(project, "canonical_root"));
       const removed = [
-        this.#removeLaunchPreparationFile(root, current.staged_launch_packet_path, current.launch_packet_digest),
-        this.#removeLaunchPreparationFile(root, current.staged_resource_plan_path, current.resource_plan_digest),
+        this.#removeLaunchPreparationFile(
+          root,
+          current.staged_launch_packet_path,
+          current.launch_packet_digest,
+          current.staged_launch_packet_device,
+          current.staged_launch_packet_inode,
+        ),
+        this.#removeLaunchPreparationFile(
+          root,
+          current.staged_resource_plan_path,
+          current.resource_plan_digest,
+          current.staged_resource_plan_device,
+          current.staged_resource_plan_inode,
+        ),
       ];
       if (removed.includes(false)) {
         throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "committed launch preparation staging bytes changed");
       }
       const cleared = this.#database.prepare(`
         UPDATE project_session_launch_preparations
-           SET staged_launch_packet_path=NULL, staged_resource_plan_path=NULL, updated_at=?
+           SET staged_launch_packet_path=NULL, staged_resource_plan_path=NULL,
+               staged_launch_packet_device=NULL, staged_launch_packet_inode=NULL,
+               staged_resource_plan_device=NULL, staged_resource_plan_inode=NULL,
+               updated_at=?
          WHERE operator_id=? AND command_id=? AND status='committed'
            AND staged_launch_packet_path IS ? AND staged_resource_plan_path IS ?
+           AND staged_launch_packet_device IS ? AND staged_launch_packet_inode IS ?
+           AND staged_resource_plan_device IS ? AND staged_resource_plan_inode IS ?
       `).run(
         this.#clock(),
         stringField(current, "operator_id"),
         stringField(current, "command_id"),
         current.staged_launch_packet_path,
         current.staged_resource_plan_path,
+        current.staged_launch_packet_device,
+        current.staged_launch_packet_inode,
+        current.staged_resource_plan_device,
+        current.staged_resource_plan_inode,
       );
       if (cleared.changes !== 1) {
         throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch preparation custody changed during committed cleanup");
@@ -2583,12 +2627,16 @@ export class Fabric {
         row.staged_launch_packet_path,
         row.launch_packet_path,
         row.launch_packet_digest,
+        row.staged_launch_packet_device,
+        row.staged_launch_packet_inode,
       ),
       this.#compensateLaunchPreparationPair(
         root,
         row.staged_resource_plan_path,
         row.resource_plan_path,
         row.resource_plan_digest,
+        row.staged_resource_plan_device,
+        row.staged_resource_plan_inode,
       ),
     ];
     if (removed.includes(false)) {
@@ -2602,6 +2650,8 @@ export class Fabric {
          SET status='claimed', launch_packet_path=NULL, launch_packet_digest=NULL,
              resource_plan_path=NULL, resource_plan_digest=NULL,
              staged_launch_packet_path=NULL, staged_resource_plan_path=NULL,
+             staged_launch_packet_device=NULL, staged_launch_packet_inode=NULL,
+             staged_resource_plan_device=NULL, staged_resource_plan_inode=NULL,
              updated_at=?
        WHERE operator_id=? AND command_id=? AND status='staged'
     `).run(this.#clock(), stringField(row, "operator_id"), stringField(row, "command_id"));
@@ -2771,7 +2821,7 @@ export class Fabric {
         "launch artifacts must remain inside the reviewed run directory and chair artifact scope",
       );
     }
-    const stageSuffix = sha256Digest(`${context.operatorId}:${request.command.commandId}`).slice(7, 23);
+    const stageSuffix = randomBytes(12).toString("hex");
     const stagedLaunchPacketPath = `${request.launchPacketRef.path}.prepare-${stageSuffix}`;
     const stagedResourcePlanPath = `${request.resourcePlanRef.path}.prepare-${stageSuffix}`;
     this.#database.prepare(`
@@ -2792,8 +2842,37 @@ export class Fabric {
       request.command.commandId,
     );
     try {
-      this.#writeClosedLaunchArtifact(root, stagedResourcePlanPath, resourcePlanText);
-      this.#writeClosedLaunchArtifact(root, stagedLaunchPacketPath, launchPacketText);
+      this.#fault("launch-preparation:before-stage-write");
+      const stagedResourcePlanIdentity = this.#writeClosedLaunchArtifact(root, stagedResourcePlanPath, resourcePlanText);
+      this.#fault("launch-preparation:after-resource-stage-write");
+      this.#database.prepare(`
+        UPDATE project_session_launch_preparations
+           SET staged_resource_plan_device=?, staged_resource_plan_inode=?, updated_at=?
+         WHERE operator_id=? AND command_id=? AND status='staged'
+           AND staged_resource_plan_path=?
+      `).run(
+        stagedResourcePlanIdentity.device,
+        stagedResourcePlanIdentity.inode,
+        this.#clock(),
+        context.operatorId,
+        request.command.commandId,
+        stagedResourcePlanPath,
+      );
+      const stagedLaunchPacketIdentity = this.#writeClosedLaunchArtifact(root, stagedLaunchPacketPath, launchPacketText);
+      this.#fault("launch-preparation:after-launch-stage-write");
+      this.#database.prepare(`
+        UPDATE project_session_launch_preparations
+           SET staged_launch_packet_device=?, staged_launch_packet_inode=?, updated_at=?
+         WHERE operator_id=? AND command_id=? AND status='staged'
+           AND staged_launch_packet_path=?
+      `).run(
+        stagedLaunchPacketIdentity.device,
+        stagedLaunchPacketIdentity.inode,
+        this.#clock(),
+        context.operatorId,
+        request.command.commandId,
+        stagedLaunchPacketPath,
+      );
       linkSync(resolve(root, stagedResourcePlanPath), resolve(root, resourcePlanPath));
       this.#fault("launch-preparation:after-resource-publish");
       linkSync(resolve(root, stagedLaunchPacketPath), resolve(root, launchPacketPath));
@@ -2827,6 +2906,7 @@ export class Fabric {
         SELECT * FROM project_session_launch_preparations
          WHERE operator_id=? AND command_id=?
       `).get(context.operatorId, request.command.commandId), "committed launch preparation");
+      this.#fault("launch-preparation:before-committed-stage-cleanup");
       this.#cleanCommittedLaunchPreparationStages(committed);
       this.#fault("launch-preparation:after-commit");
       return result;

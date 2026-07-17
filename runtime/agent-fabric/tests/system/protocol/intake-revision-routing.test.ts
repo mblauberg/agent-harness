@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
+import { link, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -1037,6 +1038,173 @@ describe("intake revision public routing", () => {
     }
   });
 
+  it("preserves same-byte foreign files found at exclusively claimed staging paths", async () => {
+    let request: ProjectSessionLaunchPacketPrepareRequest | undefined;
+    let foreignPaths: readonly [string, string] | undefined;
+    let fixture: RoutingFixture;
+    fixture = await setupRoutingFixture((label) => {
+      if (label !== "launch-preparation:before-stage-write" || request === undefined) return;
+      const database = new Database(fixture.databasePath, { readonly: true });
+      const row = database.prepare(`
+        SELECT staged_launch_packet_path, staged_resource_plan_path
+          FROM project_session_launch_preparations WHERE command_id=?
+      `).get(request.command.commandId) as {
+        staged_launch_packet_path: string;
+        staged_resource_plan_path: string;
+      };
+      database.close();
+      foreignPaths = [row.staged_launch_packet_path, row.staged_resource_plan_path];
+      writeFileSync(join(fixture.directory, row.staged_launch_packet_path), canonicalJson(request.launchPacket));
+      writeFileSync(join(fixture.directory, row.staged_resource_plan_path), canonicalJson(request.resourcePlan));
+    });
+    try {
+      await fixture.fabric.dispatchPublicProtocol(
+        fixture.operatorContext,
+        FABRIC_OPERATIONS.intakeRevise,
+        acceptedRequest(fixture),
+      );
+      request = implementationRequest(fixture, "command_same_byte_foreign_staging");
+      await mkdir(join(fixture.directory, ".agent-run/run_implementation_target"), { recursive: true });
+
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        request,
+      )).rejects.toMatchObject({ code: "DEDUPE_CONFLICT" });
+      expect(foreignPaths).toBeDefined();
+      if (foreignPaths === undefined) throw new Error("foreign staging paths were not captured");
+      await expect(readFile(join(fixture.directory, foreignPaths[0]), "utf8"))
+        .resolves.toBe(canonicalJson(request.launchPacket));
+      await expect(readFile(join(fixture.directory, foreignPaths[1]), "utf8"))
+        .resolves.toBe(canonicalJson(request.resourcePlan));
+    } finally {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("replays exactly after crashing between exclusive stage creation and identity persistence", async () => {
+    let interruptStageIdentity = true;
+    let orphanPath: string | undefined;
+    let fixture: RoutingFixture;
+    fixture = await setupRoutingFixture((label) => {
+      if (!interruptStageIdentity || label !== "launch-preparation:after-resource-stage-write") return;
+      const database = new Database(fixture.databasePath, { readonly: true });
+      const row = database.prepare(`
+        SELECT staged_resource_plan_path FROM project_session_launch_preparations
+         WHERE command_id='command_stage_identity_crash'
+      `).get() as { staged_resource_plan_path: string };
+      database.close();
+      orphanPath = row.staged_resource_plan_path;
+      throw new Error("stage identity persistence interrupted");
+    });
+    try {
+      await fixture.fabric.dispatchPublicProtocol(
+        fixture.operatorContext,
+        FABRIC_OPERATIONS.intakeRevise,
+        acceptedRequest(fixture),
+      );
+      const request = implementationRequest(fixture, "command_stage_identity_crash");
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        request,
+      )).rejects.toThrow("stage identity persistence interrupted");
+      expect(orphanPath).toBeDefined();
+      if (orphanPath === undefined) throw new Error("orphan staging path was not captured");
+      await expect(readFile(join(fixture.directory, orphanPath), "utf8"))
+        .resolves.toBe(canonicalJson(request.resourcePlan));
+
+      interruptStageIdentity = false;
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        request,
+      )).resolves.toMatchObject({ projectSession: { state: "awaiting_launch" } });
+      await expect(readFile(join(fixture.directory, orphanPath), "utf8"))
+        .resolves.toBe(canonicalJson(request.resourcePlan));
+    } finally {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves same-byte foreign stage replacements during committed restart recovery", async () => {
+    let interruptCleanup = true;
+    const fixture = await setupRoutingFixture((label) => {
+      if (interruptCleanup && label === "launch-preparation:before-committed-stage-cleanup") {
+        throw new Error("committed cleanup interrupted");
+      }
+    });
+    let closed = false;
+    let reopened: Fabric | undefined;
+    try {
+      await fixture.fabric.dispatchPublicProtocol(
+        fixture.operatorContext,
+        FABRIC_OPERATIONS.intakeRevise,
+        acceptedRequest(fixture),
+      );
+      const request = implementationRequest(fixture, "command_same_byte_committed_recovery");
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        request,
+      )).rejects.toThrow("committed cleanup interrupted");
+      const custodyDatabase = new Database(fixture.databasePath, { readonly: true });
+      const custody = custodyDatabase.prepare(`
+        SELECT staged_launch_packet_path, staged_resource_plan_path
+          FROM project_session_launch_preparations WHERE command_id=?
+      `).get(request.command.commandId) as {
+        staged_launch_packet_path: string;
+        staged_resource_plan_path: string;
+      };
+      custodyDatabase.close();
+      const replacements = [
+        [custody.staged_launch_packet_path, canonicalJson(request.launchPacket)],
+        [custody.staged_resource_plan_path, canonicalJson(request.resourcePlan)],
+      ] as const;
+      for (const [path, content] of replacements) {
+        await rename(join(fixture.directory, path), join(fixture.directory, `${path}.owned-backup`));
+        await writeFile(join(fixture.directory, path), content);
+      }
+
+      await fixture.fabric.close();
+      closed = true;
+      interruptCleanup = false;
+      reopened = await openFabric({ databasePath: fixture.databasePath, workspaceRoots: [fixture.directory], clock: () => now });
+      for (const [path, content] of replacements) {
+        await expect(readFile(join(fixture.directory, path), "utf8")).resolves.toBe(content);
+      }
+      const database = new Database(fixture.databasePath, { readonly: true });
+      try {
+        expect(database.prepare(`
+          SELECT staged_launch_packet_path, staged_resource_plan_path,
+                 staged_launch_packet_device, staged_launch_packet_inode,
+                 staged_resource_plan_device, staged_resource_plan_inode
+            FROM project_session_launch_preparations WHERE command_id=?
+        `).get(request.command.commandId)).toEqual({
+          staged_launch_packet_path: null,
+          staged_resource_plan_path: null,
+          staged_launch_packet_device: null,
+          staged_launch_packet_inode: null,
+          staged_resource_plan_device: null,
+          staged_resource_plan_inode: null,
+        });
+      } finally {
+        database.close();
+      }
+      await expect(reopened.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        request,
+      )).resolves.toMatchObject({ projectSession: { state: "awaiting_launch" } });
+    } finally {
+      if (!closed) await fixture.fabric.close();
+      if (reopened !== undefined) await reopened.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
   it.each(["resource-only", "both-artifacts"])(
     "recovers %s publication custody after daemon restart",
     async (published) => {
@@ -1071,6 +1239,10 @@ describe("intake revision public routing", () => {
             join(fixture.directory, interrupted.launchPacketRef.path),
           );
         }
+        const stagedResourceIdentity = await stat(join(fixture.directory, stagedResourcePlanPath), { bigint: true });
+        const stagedLaunchIdentity = published === "both-artifacts"
+          ? await stat(join(fixture.directory, stagedLaunchPacketPath), { bigint: true })
+          : null;
         await fixture.fabric.close();
         initialClosed = true;
         const database = new Database(fixture.databasePath);
@@ -1080,10 +1252,12 @@ describe("intake revision public routing", () => {
             session_generation, payload_hash, status, launch_packet_path,
             launch_packet_digest, resource_plan_path, resource_plan_digest,
             staged_launch_packet_path, staged_resource_plan_path,
+            staged_launch_packet_device, staged_launch_packet_inode,
+            staged_resource_plan_device, staged_resource_plan_inode,
             created_at, updated_at
           ) VALUES (
             'operator_routing', ?, 'cap_implementation_routing', ?, ?, 1, ?, 'staged',
-            ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
         `).run(
           interrupted.command.commandId,
@@ -1096,6 +1270,10 @@ describe("intake revision public routing", () => {
           interrupted.resourcePlanRef.digest,
           published === "both-artifacts" ? stagedLaunchPacketPath : null,
           stagedResourcePlanPath,
+          stagedLaunchIdentity?.dev.toString() ?? null,
+          stagedLaunchIdentity?.ino.toString() ?? null,
+          stagedResourceIdentity.dev.toString(),
+          stagedResourceIdentity.ino.toString(),
           now,
           now,
         );
