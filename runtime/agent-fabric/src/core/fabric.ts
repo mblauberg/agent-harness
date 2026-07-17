@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolve, sep } from "node:path";
 
 import type Database from "better-sqlite3";
@@ -1195,6 +1195,7 @@ export class Fabric {
       clock: this.#clock,
     });
     this.#herdrConfigured = options.herdr !== undefined;
+    this.#recoverLaunchPreparations();
   }
 
   /** Trusted in-process daemon composition only; no protocol operation dispatches here. */
@@ -2487,11 +2488,174 @@ export class Fabric {
     renameSync(temporary, destination);
   }
 
+  #removeLaunchPreparationFile(root: string, relativePath: unknown, expectedDigest?: unknown): boolean {
+    if (typeof relativePath !== "string") return true;
+    const destination = resolve(root, canonicalAuthorityPath(root, relativePath));
+    if (!existsSync(destination)) return true;
+    if (typeof expectedDigest === "string") {
+      const observed = sha256Digest(readFileSync(destination, "utf8"));
+      if (observed !== expectedDigest) return false;
+    }
+    unlinkSync(destination);
+    return true;
+  }
+
+  #compensateLaunchPreparationPair(
+    root: string,
+    stagedPath: unknown,
+    publishedPath: unknown,
+    expectedDigest: unknown,
+  ): boolean {
+    if (typeof publishedPath !== "string" || typeof expectedDigest !== "string") {
+      return stagedPath === null && publishedPath === null;
+    }
+    if (typeof stagedPath !== "string") {
+      const published = resolve(root, canonicalAuthorityPath(root, publishedPath));
+      return !existsSync(published);
+    }
+    const staged = resolve(root, canonicalAuthorityPath(root, stagedPath));
+    const published = resolve(root, canonicalAuthorityPath(root, publishedPath));
+    if (!existsSync(staged)) return !existsSync(published);
+    if (sha256Digest(readFileSync(staged, "utf8")) !== expectedDigest) return false;
+    if (existsSync(published)) {
+      const stagedIdentity = statSync(staged);
+      const publishedIdentity = statSync(published);
+      if (
+        stagedIdentity.dev !== publishedIdentity.dev || stagedIdentity.ino !== publishedIdentity.ino ||
+        sha256Digest(readFileSync(published, "utf8")) !== expectedDigest
+      ) return false;
+      unlinkSync(published);
+    }
+    unlinkSync(staged);
+    return true;
+  }
+
+  #cleanCommittedLaunchPreparationStages(row: Row): void {
+    const project = rowOrNotFound(this.#database.prepare(`
+      SELECT canonical_root FROM projects WHERE project_id=?
+    `).get(stringField(row, "project_id")), "project");
+    const root = realpathSync(stringField(project, "canonical_root"));
+    const removed = [
+      this.#removeLaunchPreparationFile(root, row.staged_launch_packet_path, row.launch_packet_digest),
+      this.#removeLaunchPreparationFile(root, row.staged_resource_plan_path, row.resource_plan_digest),
+    ];
+    if (removed.includes(false)) {
+      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "committed launch preparation staging bytes changed");
+    }
+  }
+
+  #compensateLaunchPreparation(row: Row): void {
+    const project = rowOrNotFound(this.#database.prepare(`
+      SELECT canonical_root FROM projects WHERE project_id=?
+    `).get(stringField(row, "project_id")), "project");
+    const root = realpathSync(stringField(project, "canonical_root"));
+    const removed = [
+      this.#compensateLaunchPreparationPair(
+        root,
+        row.staged_launch_packet_path,
+        row.launch_packet_path,
+        row.launch_packet_digest,
+      ),
+      this.#compensateLaunchPreparationPair(
+        root,
+        row.staged_resource_plan_path,
+        row.resource_plan_path,
+        row.resource_plan_digest,
+      ),
+    ];
+    if (removed.includes(false)) {
+      throw new ProjectFabricCoreError(
+        "DEDUPE_CONFLICT",
+        "interrupted launch preparation artifact changed before custody recovery",
+      );
+    }
+    this.#database.prepare(`
+      UPDATE project_session_launch_preparations
+         SET status='claimed', launch_packet_path=NULL, launch_packet_digest=NULL,
+             resource_plan_path=NULL, resource_plan_digest=NULL,
+             staged_launch_packet_path=NULL, staged_resource_plan_path=NULL,
+             updated_at=?
+       WHERE operator_id=? AND command_id=? AND status='staged'
+    `).run(this.#clock(), stringField(row, "operator_id"), stringField(row, "command_id"));
+  }
+
+  #recoverLaunchPreparations(): void {
+    const staged = this.#database.prepare(`
+      SELECT * FROM project_session_launch_preparations WHERE status='staged'
+    `).all() as Row[];
+    for (const row of staged) this.#compensateLaunchPreparation(row);
+    const committed = this.#database.prepare(`
+      SELECT * FROM project_session_launch_preparations WHERE status='committed'
+    `).all() as Row[];
+    for (const row of committed) this.#cleanCommittedLaunchPreparationStages(row);
+  }
+
+  #claimLaunchPreparation(
+    credential: AuthenticatedOperatorCredential,
+    request: ProjectSessionLaunchPacketPrepareRequest,
+  ): ProjectSessionLaunchPacketPreparation | undefined {
+    const commandPayload = {
+      ...request,
+      command: {
+        ...request.command,
+        credential: { capabilityId: request.command.credential.capabilityId },
+      },
+    };
+    const payloadHash = sha256Digest(canonicalJson(commandPayload));
+    this.#operatorStore.authenticateCommand(credential.context, request.command, {
+      projectId: request.projectId,
+      projectSessionId: request.projectSessionId,
+      sessionGeneration: request.expectedSessionGeneration,
+      requiredAction: "decide",
+      commandPayload,
+    });
+    const claim = this.#database.transaction((): Row => {
+      const existing = this.#database.prepare(`
+        SELECT * FROM project_session_launch_preparations
+         WHERE operator_id=? AND command_id=?
+      `).get(credential.context.operatorId, request.command.commandId);
+      if (isRow(existing)) {
+        if (stringField(existing, "payload_hash") !== payloadHash) {
+          throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "Implement command ID was reused with changed input");
+        }
+        return existing;
+      }
+      this.#database.prepare(`
+        INSERT INTO project_session_launch_preparations(
+          operator_id, command_id, capability_id, project_id, project_session_id,
+          session_generation, payload_hash, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'claimed', ?, ?)
+      `).run(
+        credential.context.operatorId,
+        request.command.commandId,
+        request.command.credential.capabilityId,
+        request.projectId,
+        request.projectSessionId,
+        request.expectedSessionGeneration,
+        payloadHash,
+        this.#clock(),
+        this.#clock(),
+      );
+      return rowOrNotFound(this.#database.prepare(`
+        SELECT * FROM project_session_launch_preparations
+         WHERE operator_id=? AND command_id=?
+      `).get(credential.context.operatorId, request.command.commandId), "launch preparation claim");
+    })();
+    if (stringField(claim, "status") === "committed") {
+      this.#cleanCommittedLaunchPreparationStages(claim);
+      return JSON.parse(stringField(claim, "result_json")) as ProjectSessionLaunchPacketPreparation;
+    }
+    if (stringField(claim, "status") === "staged") this.#compensateLaunchPreparation(claim);
+    return undefined;
+  }
+
   #prepareProjectSessionImplementation(
     credential: AuthenticatedOperatorCredential,
     request: ProjectSessionLaunchPacketPrepareRequest,
   ): ProjectSessionLaunchPacketPreparation {
     const context = credential.context;
+    const replay = this.#claimLaunchPreparation(credential, request);
+    if (replay !== undefined) return replay;
     const session = rowOrNotFound(this.#database.prepare(`
       SELECT * FROM project_sessions WHERE project_session_id=? AND project_id=?
     `).get(request.projectSessionId, request.projectId), "project session");
@@ -2578,24 +2742,73 @@ export class Fabric {
         "launch artifacts must remain inside the reviewed run directory and chair artifact scope",
       );
     }
-    this.#writeClosedLaunchArtifact(root, request.resourcePlanRef.path, resourcePlanText);
-    this.#writeClosedLaunchArtifact(root, request.launchPacketRef.path, launchPacketText);
-    const projectSession = this.#projectSessions.transitionProjectSession(context, {
-      command: request.command,
-      projectSessionId: request.projectSessionId,
-      expectedGeneration: request.expectedSessionGeneration,
-      transition: {
-        to: "awaiting_launch",
-        reason: `accepted evidence ${request.acceptedScopeRef.digest}`,
-        launchPacketRef: request.launchPacketRef,
-      },
-    });
-    return {
-      projectSession,
-      launchPacketRef: request.launchPacketRef,
-      resourcePlanRef: request.resourcePlanRef,
-      acceptedScopeRef: request.acceptedScopeRef,
-    };
+    const stageSuffix = sha256Digest(`${context.operatorId}:${request.command.commandId}`).slice(7, 23);
+    const stagedLaunchPacketPath = `${request.launchPacketRef.path}.prepare-${stageSuffix}`;
+    const stagedResourcePlanPath = `${request.resourcePlanRef.path}.prepare-${stageSuffix}`;
+    this.#database.prepare(`
+      UPDATE project_session_launch_preparations
+         SET status='staged', launch_packet_path=?, launch_packet_digest=?,
+             resource_plan_path=?, resource_plan_digest=?, staged_launch_packet_path=?,
+             staged_resource_plan_path=?, updated_at=?
+       WHERE operator_id=? AND command_id=? AND status='claimed'
+    `).run(
+      launchPacketPath,
+      request.launchPacketRef.digest,
+      resourcePlanPath,
+      request.resourcePlanRef.digest,
+      stagedLaunchPacketPath,
+      stagedResourcePlanPath,
+      this.#clock(),
+      context.operatorId,
+      request.command.commandId,
+    );
+    try {
+      this.#writeClosedLaunchArtifact(root, stagedResourcePlanPath, resourcePlanText);
+      this.#writeClosedLaunchArtifact(root, stagedLaunchPacketPath, launchPacketText);
+      linkSync(resolve(root, stagedResourcePlanPath), resolve(root, resourcePlanPath));
+      this.#fault("launch-preparation:after-resource-publish");
+      linkSync(resolve(root, stagedLaunchPacketPath), resolve(root, launchPacketPath));
+      this.#fault("launch-preparation:after-launch-publish");
+      this.#fault("launch-preparation:before-transition");
+      const result = this.#database.transaction((): ProjectSessionLaunchPacketPreparation => {
+        const projectSession = this.#projectSessions.transitionProjectSession(context, {
+          command: request.command,
+          projectSessionId: request.projectSessionId,
+          expectedGeneration: request.expectedSessionGeneration,
+          transition: {
+            to: "awaiting_launch",
+            reason: `accepted evidence ${request.acceptedScopeRef.digest}`,
+            launchPacketRef: request.launchPacketRef,
+          },
+        });
+        const prepared = {
+          projectSession,
+          launchPacketRef: request.launchPacketRef,
+          resourcePlanRef: request.resourcePlanRef,
+          acceptedScopeRef: request.acceptedScopeRef,
+        };
+        this.#database.prepare(`
+          UPDATE project_session_launch_preparations
+             SET status='committed', result_json=?, updated_at=?
+           WHERE operator_id=? AND command_id=? AND status='staged'
+        `).run(canonicalJson(prepared), this.#clock(), context.operatorId, request.command.commandId);
+        return prepared;
+      })();
+      const committed = rowOrNotFound(this.#database.prepare(`
+        SELECT * FROM project_session_launch_preparations
+         WHERE operator_id=? AND command_id=?
+      `).get(context.operatorId, request.command.commandId), "committed launch preparation");
+      this.#cleanCommittedLaunchPreparationStages(committed);
+      this.#fault("launch-preparation:after-commit");
+      return result;
+    } catch (error: unknown) {
+      const stored = rowOrNotFound(this.#database.prepare(`
+        SELECT * FROM project_session_launch_preparations
+         WHERE operator_id=? AND command_id=?
+      `).get(context.operatorId, request.command.commandId), "launch preparation custody");
+      if (stringField(stored, "status") === "staged") this.#compensateLaunchPreparation(stored);
+      throw error;
+    }
   }
 
   async dispatchPublicProtocol(

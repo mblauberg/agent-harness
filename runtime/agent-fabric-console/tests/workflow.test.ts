@@ -582,7 +582,11 @@ describe("typed Console workflow planner", () => {
         actionId: "provider_implement",
         contractDigest: digest,
         inputSchemaId: "provider-launch.v1",
-        input: { model: "claude-opus", prompt: "Reopen docs/accepted-scope.md and implement it." },
+        input: {
+          model: "claude-opus",
+          prompt: "Reopen docs/accepted-scope.md and implement it.",
+          credential: "afc_preview-must-not-leak",
+        },
       },
     };
     const raw = [
@@ -607,6 +611,7 @@ describe("typed Console workflow planner", () => {
       confirmationMode: "explicit",
       details: expect.arrayContaining([
         { label: "Provider route", value: expect.stringContaining("claude-agent-sdk") },
+        { label: "Provider input", value: expect.stringContaining("Reopen docs/accepted-scope.md") },
         { label: "Worktree/write scopes", value: expect.stringContaining("runtime/agent-fabric-console") },
         { label: "Budget", value: expect.stringContaining("concurrent_turns") },
       ]),
@@ -623,7 +628,9 @@ describe("typed Console workflow planner", () => {
     const editedReview = await planner.prepareGuided({
       action: "implement",
       binding,
-      raw: raw.replace("and implement it.", "and implement it, then write the handoff."),
+      raw: raw
+        .replace("and implement it.", "and implement it, then write the handoff.")
+        .replace("claude-opus", "claude-sonnet"),
       dataset: guidedDataset,
       eventId: "implement-edit",
     });
@@ -632,6 +639,12 @@ describe("typed Console workflow planner", () => {
       label: "Launch packet",
       value: expect.stringContaining("sha256:"),
     });
+    expect(editedReview.details).toContainEqual({
+      label: "Provider input",
+      value: expect.stringMatching(/claude-sonnet.*write the handoff/),
+    });
+    expect(JSON.stringify(editedReview.details)).not.toContain("afc_preview-must-not-leak");
+    expect(JSON.stringify(editedReview.details)).toContain("[REDACTED capability]");
 
     await planner.commit({
       review: planner.arm(editedReview, "implement-arm"),
@@ -642,7 +655,10 @@ describe("typed Console workflow planner", () => {
       acceptedScopeRef,
       launchPacket: expect.objectContaining({
         provider: expect.objectContaining({
-          input: expect.objectContaining({ prompt: expect.stringContaining("write the handoff") }),
+          input: expect.objectContaining({
+            model: "claude-sonnet",
+            prompt: expect.stringContaining("write the handoff"),
+          }),
         }),
       }),
     }));

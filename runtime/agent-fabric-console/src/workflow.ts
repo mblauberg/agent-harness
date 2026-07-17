@@ -656,6 +656,7 @@ function implementationDetails(request: Record<string, unknown>): readonly Reado
         inputSchemaId: provider.inputSchemaId,
       })),
     },
+    { label: "Provider input", value: canonical(safeValue(provider.input)) },
     {
       label: "Worktree/write scopes",
       value: canonical({

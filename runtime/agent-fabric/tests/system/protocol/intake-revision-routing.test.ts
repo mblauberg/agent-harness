@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +11,7 @@ import {
   parseIntakeRevisionRequest,
   parseOperatorCapabilityGrant,
   type IntakeRevisionRequest,
+  type ProjectSessionLaunchPacketPrepareRequest,
 } from "@local/agent-fabric-protocol";
 import { describe, expect, it } from "vitest";
 
@@ -38,7 +39,7 @@ type RoutingFixture = {
   chairContext: PublicProtocolContext;
 };
 
-async function setupRoutingFixture(): Promise<RoutingFixture> {
+async function setupRoutingFixture(fault?: (label: string) => void): Promise<RoutingFixture> {
   const directory = await mkdtemp(join(tmpdir(), "fabric-intake-revision-routing-"));
   const databasePath = join(directory, "fabric.sqlite3");
   const initial = await openFabric({ databasePath, workspaceRoots: [directory], clock: () => now });
@@ -210,7 +211,12 @@ async function setupRoutingFixture(): Promise<RoutingFixture> {
     database.close();
   }
 
-  const fabric = await openFabric({ databasePath, workspaceRoots: [directory], clock: () => now });
+  const fabric = await openFabric({
+    databasePath,
+    workspaceRoots: [directory],
+    clock: () => now,
+    ...(fault === undefined ? {} : { fault }),
+  });
   const operator = fabric.verifyProtocolCredential("intake-routing-secret");
   if (operator.principal.kind !== "operator") throw new Error("expected operator principal");
   const chair = fabric.verifyProtocolCredential(created.chairCapability);
@@ -318,6 +324,88 @@ function acceptedRequest(fixture: RoutingFixture): Extract<IntakeRevisionRequest
   });
   if (parsed.origin !== "operator") throw new Error("expected accepted operator revision");
   return parsed;
+}
+
+function implementationRequest(
+  fixture: RoutingFixture,
+  commandId: string,
+  prompt = "Implement accepted routing scope.",
+): ProjectSessionLaunchPacketPrepareRequest {
+  const resourcePlan = parseLaunchResourcePlanV1({
+    schemaVersion: 1,
+    projectId: fixture.projectId,
+    projectSessionId: fixture.implementationSessionId,
+    runId: "run_implementation_target",
+    budgetRef: "budget_implementation",
+    scopes: {
+      project: { scopeId: "scope_implementation_project", limits: { concurrent_turns: 2 } },
+      projectSession: { scopeId: "scope_implementation_session", limits: { concurrent_turns: 2 } },
+      coordinationRun: { scopeId: "scope_implementation_run", limits: { concurrent_turns: 1 } },
+    },
+    launchReservation: { amounts: { concurrent_turns: 1 } },
+  });
+  const resourcePlanRef = {
+    path: ".agent-run/run_implementation_target/launch-resources.json" as never,
+    digest: `sha256:${sha256(canonicalJson(resourcePlan))}` as never,
+  };
+  const launchPacket = parseLaunchPacketV1({
+    schemaVersion: 1,
+    projectId: fixture.projectId,
+    projectSessionId: fixture.implementationSessionId,
+    runId: "run_implementation_target",
+    chairAgentId: "chair_implementation_target",
+    projectRunDirectory: ".agent-run/run_implementation_target",
+    topologyMode: "coordinated",
+    budgetRef: "budget_implementation",
+    resourcePlanRef,
+    chairAuthority: {
+      ...ROOT_AUTHORITY,
+      approval: {
+        ...ROOT_AUTHORITY.approval,
+        evidenceId: "accepted-routing-scope",
+        evidenceDigest: digestB,
+      },
+      sourcePaths: ["runtime/agent-fabric-console"],
+      artifactPaths: [".agent-run/run_implementation_target"],
+      budget: { concurrent_turns: 1 },
+    },
+    provider: {
+      adapterId: "fake",
+      actionId: "provider_implementation_target",
+      contractDigest: digestA,
+      inputSchemaId: "provider-launch.v1",
+      input: { prompt, model: "reviewed-provider-route" },
+    },
+  });
+  return {
+    command: {
+      credential: {
+        capabilityId: "cap_implementation_routing" as never,
+        token: "implementation-routing-secret",
+      },
+      commandId: commandId as never,
+      expectedRevision: 1,
+      actor: "operator_routing" as never,
+      provenance: {
+        kind: "console-direct-input",
+        clientId: "console_implementation" as never,
+        inputEventId: `input_${commandId}` as never,
+      },
+      evidenceRefs: [{ path: "plans/routing.md" as never, digest: digestB as never }],
+    },
+    projectId: fixture.projectId as never,
+    projectSessionId: fixture.implementationSessionId as never,
+    expectedSessionGeneration: 1,
+    intakeId: "intake_routing",
+    acceptedScopeRef: { path: "plans/routing.md" as never, digest: digestB as never },
+    launchPacketRef: {
+      path: ".agent-run/run_implementation_target/launch-packet.json" as never,
+      digest: `sha256:${sha256(canonicalJson(launchPacket))}` as never,
+    },
+    resourcePlanRef,
+    launchPacket,
+    resourcePlan,
+  };
 }
 
 describe("intake revision public routing", () => {
@@ -653,35 +741,36 @@ describe("intake revision public routing", () => {
           resourcePlan,
         },
       )).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+      const preparationRequest = {
+        command: {
+          credential: {
+            capabilityId: "cap_implementation_routing" as never,
+            token: "implementation-routing-secret",
+          },
+          commandId: "command_implementation_prepare" as never,
+          expectedRevision: 1,
+          actor: "operator_routing" as never,
+          provenance: {
+            kind: "console-direct-input" as const,
+            clientId: "console_implementation" as never,
+            inputEventId: "input_implementation_confirm" as never,
+          },
+          evidenceRefs: [{ path: "plans/routing.md" as never, digest: digestB as never }],
+        },
+        projectId: fixture.projectId as never,
+        projectSessionId: fixture.implementationSessionId as never,
+        expectedSessionGeneration: 1,
+        intakeId: "intake_routing",
+        acceptedScopeRef: { path: "plans/routing.md" as never, digest: digestB as never },
+        launchPacketRef,
+        resourcePlanRef,
+        launchPacket,
+        resourcePlan,
+      };
       const prepared = await fixture.fabric.dispatchPublicProtocol(
         fixture.implementationContext,
         FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
-        {
-          command: {
-            credential: {
-              capabilityId: "cap_implementation_routing" as never,
-              token: "implementation-routing-secret",
-            },
-            commandId: "command_implementation_prepare" as never,
-            expectedRevision: 1,
-            actor: "operator_routing" as never,
-            provenance: {
-              kind: "console-direct-input",
-              clientId: "console_implementation" as never,
-              inputEventId: "input_implementation_confirm" as never,
-            },
-            evidenceRefs: [{ path: "plans/routing.md" as never, digest: digestB as never }],
-          },
-          projectId: fixture.projectId as never,
-          projectSessionId: fixture.implementationSessionId as never,
-          expectedSessionGeneration: 1,
-          intakeId: "intake_routing",
-          acceptedScopeRef: { path: "plans/routing.md" as never, digest: digestB as never },
-          launchPacketRef,
-          resourcePlanRef,
-          launchPacket,
-          resourcePlan,
-        },
+        preparationRequest,
       );
       expect(prepared).toMatchObject({
         projectSession: { state: "awaiting_launch", launchPacketRef },
@@ -689,6 +778,11 @@ describe("intake revision public routing", () => {
         resourcePlanRef,
         acceptedScopeRef: { path: "plans/routing.md", digest: digestB },
       });
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        preparationRequest,
+      )).resolves.toEqual(prepared);
       await expect(readFile(join(fixture.directory, launchPacketRef.path), "utf8"))
         .resolves.toBe(canonicalJson(launchPacket));
       await expect(readFile(join(fixture.directory, resourcePlanRef.path), "utf8"))
@@ -710,12 +804,191 @@ describe("intake revision public routing", () => {
           expectedGeneration: 1,
         },
       )).resolves.toMatchObject({ state: "awaiting_launch", launchPacketRef });
+      await expect(reopened.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        preparationRequest,
+      )).resolves.toEqual(prepared);
     } finally {
       if (!initialClosed) await fixture.fabric.close();
       if (reopened !== undefined) await reopened.close();
       await rm(fixture.directory, { recursive: true, force: true });
     }
   });
+
+  it.each([
+    "launch-preparation:after-resource-publish",
+    "launch-preparation:after-launch-publish",
+    "launch-preparation:before-transition",
+  ])("compensates %s so a corrected edit can reuse the reviewed artifact paths", async (faultLabel) => {
+    let armed = true;
+    const fixture = await setupRoutingFixture((label) => {
+      if (armed && label === faultLabel) throw new Error(`fault:${label}`);
+    });
+    try {
+      await fixture.fabric.dispatchPublicProtocol(
+        fixture.operatorContext,
+        FABRIC_OPERATIONS.intakeRevise,
+        acceptedRequest(fixture),
+      );
+      const failed = implementationRequest(fixture, `command_${faultLabel.replaceAll(":", "_")}`);
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        failed,
+      )).rejects.toThrow(`fault:${faultLabel}`);
+      await expect(readFile(join(fixture.directory, failed.launchPacketRef.path), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(join(fixture.directory, failed.resourcePlanRef.path), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      const database = new Database(fixture.databasePath, { readonly: true });
+      expect(database.prepare("SELECT state, revision FROM project_sessions WHERE project_session_id=?")
+        .get(fixture.implementationSessionId)).toEqual({ state: "draft", revision: 1 });
+      expect(database.prepare(`
+        SELECT status FROM project_session_launch_preparations WHERE command_id=?
+      `).get(failed.command.commandId)).toEqual({ status: "claimed" });
+      database.close();
+
+      armed = false;
+      const corrected = implementationRequest(fixture, `corrected_${faultLabel.replaceAll(":", "_")}`, "Implement the corrected scope.");
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        corrected,
+      )).resolves.toMatchObject({ projectSession: { state: "awaiting_launch" } });
+    } finally {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("returns the durable preparation result after the first response is lost", async () => {
+    let loseResponse = true;
+    const fixture = await setupRoutingFixture((label) => {
+      if (loseResponse && label === "launch-preparation:after-commit") throw new Error("lost response");
+    });
+    try {
+      await fixture.fabric.dispatchPublicProtocol(
+        fixture.operatorContext,
+        FABRIC_OPERATIONS.intakeRevise,
+        acceptedRequest(fixture),
+      );
+      const request = implementationRequest(fixture, "command_lost_implementation_response");
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        request,
+      )).rejects.toThrow("lost response");
+      loseResponse = false;
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        request,
+      )).resolves.toMatchObject({
+        projectSession: { state: "awaiting_launch", revision: 2 },
+        launchPacketRef: request.launchPacketRef,
+      });
+      await expect(fixture.fabric.dispatchPublicProtocol(
+        fixture.implementationContext,
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+        implementationRequest(fixture, "command_lost_implementation_response", "Changed after confirmation."),
+      )).rejects.toMatchObject({ code: "DEDUPE_CONFLICT" });
+    } finally {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["resource-only", "both-artifacts"])(
+    "recovers %s publication custody after daemon restart",
+    async (published) => {
+      const fixture = await setupRoutingFixture();
+      let initialClosed = false;
+      let reopened: Fabric | undefined;
+      try {
+        await fixture.fabric.dispatchPublicProtocol(
+          fixture.operatorContext,
+          FABRIC_OPERATIONS.intakeRevise,
+          acceptedRequest(fixture),
+        );
+        const interrupted = implementationRequest(fixture, `interrupted_${published}`);
+        await mkdir(join(fixture.directory, ".agent-run/run_implementation_target"), { recursive: true });
+        const stagedResourcePlanPath = `${interrupted.resourcePlanRef.path}.prepare-crash`;
+        const stagedLaunchPacketPath = `${interrupted.launchPacketRef.path}.prepare-crash`;
+        await writeFile(
+          join(fixture.directory, stagedResourcePlanPath),
+          canonicalJson(interrupted.resourcePlan),
+        );
+        await link(
+          join(fixture.directory, stagedResourcePlanPath),
+          join(fixture.directory, interrupted.resourcePlanRef.path),
+        );
+        if (published === "both-artifacts") {
+          await writeFile(
+            join(fixture.directory, stagedLaunchPacketPath),
+            canonicalJson(interrupted.launchPacket),
+          );
+          await link(
+            join(fixture.directory, stagedLaunchPacketPath),
+            join(fixture.directory, interrupted.launchPacketRef.path),
+          );
+        }
+        await fixture.fabric.close();
+        initialClosed = true;
+        const database = new Database(fixture.databasePath);
+        database.prepare(`
+          INSERT INTO project_session_launch_preparations(
+            operator_id, command_id, capability_id, project_id, project_session_id,
+            session_generation, payload_hash, status, launch_packet_path,
+            launch_packet_digest, resource_plan_path, resource_plan_digest,
+            staged_launch_packet_path, staged_resource_plan_path,
+            created_at, updated_at
+          ) VALUES (
+            'operator_routing', ?, 'cap_implementation_routing', ?, ?, 1, ?, 'staged',
+            ?, ?, ?, ?, ?, ?, ?, ?
+          )
+        `).run(
+          interrupted.command.commandId,
+          fixture.projectId,
+          fixture.implementationSessionId,
+          digestA,
+          interrupted.launchPacketRef.path,
+          interrupted.launchPacketRef.digest,
+          interrupted.resourcePlanRef.path,
+          interrupted.resourcePlanRef.digest,
+          published === "both-artifacts" ? stagedLaunchPacketPath : null,
+          stagedResourcePlanPath,
+          now,
+          now,
+        );
+        database.close();
+
+        reopened = await openFabric({
+          databasePath: fixture.databasePath,
+          workspaceRoots: [fixture.directory],
+          clock: () => now,
+        });
+        await expect(readFile(join(fixture.directory, interrupted.launchPacketRef.path), "utf8"))
+          .rejects.toMatchObject({ code: "ENOENT" });
+        await expect(readFile(join(fixture.directory, interrupted.resourcePlanRef.path), "utf8"))
+          .rejects.toMatchObject({ code: "ENOENT" });
+        const recoveredDatabase = new Database(fixture.databasePath, { readonly: true });
+        expect(recoveredDatabase.prepare(`
+          SELECT status FROM project_session_launch_preparations WHERE command_id=?
+        `).get(interrupted.command.commandId)).toEqual({ status: "claimed" });
+        recoveredDatabase.close();
+
+        const corrected = implementationRequest(fixture, `restart_corrected_${published}`, "Implement after restart recovery.");
+        await expect(reopened.dispatchPublicProtocol(
+          fixture.implementationContext,
+          FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+          corrected,
+        )).resolves.toMatchObject({ projectSession: { state: "awaiting_launch" } });
+      } finally {
+        if (!initialClosed) await fixture.fabric.close();
+        if (reopened !== undefined) await reopened.close();
+        await rm(fixture.directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("rejects an unregistered project file atomically instead of registering during intake binding", async () => {
     const fixture = await setupRoutingFixture();
