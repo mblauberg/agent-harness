@@ -157,13 +157,35 @@ def test_claude_task_class_rejects_caller_authored_capability_claim(tmp_path):
     snapshot = tmp_path / "claude-caps.json"
     snapshot.write_text(json.dumps(capability_snapshot({
         "opus": {"resolved_model": "opus", "supported_efforts": ["high"]},
-    }, source="claude runtime models")))
+    }, source="claude subscription canary")))
     result, route = resolve(
         "--adapter", "claude", "--task-class", "critical-review",
         "--role", "critical-review", "--capabilities-file", str(snapshot),
     )
     assert result.returncode == 1
     assert route["status"] == "capability_snapshot_untrusted"
+
+
+def test_claude_task_class_accepts_subscription_canary_provenance(tmp_path):
+    snapshot = tmp_path / "claude-caps.json"
+    value = capability_snapshot({
+        "opus": {"resolved_model": "claude-opus-4-8", "supported_efforts": ["high"]},
+    }, source="claude subscription canary")
+    value["provenance"] = {
+        "kind": "subscription_runtime_canary",
+        "auth_method": "claude.ai",
+        "subscription_type": "pro",
+    }
+    snapshot.write_text(json.dumps(value))
+
+    result, route = resolve(
+        "--adapter", "claude", "--task-class", "critical-review",
+        "--role", "critical-review", "--capabilities-file", str(snapshot),
+    )
+
+    assert result.returncode == 0
+    assert route["resolved_model"] == "claude-opus-4-8"
+    assert route["requested_effort"] == route["effort"] == "high"
 
 
 def test_task_class_without_trusted_capability_evidence_fails_closed():

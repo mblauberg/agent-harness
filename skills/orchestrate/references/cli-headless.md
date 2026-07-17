@@ -52,6 +52,13 @@ effort support and records that fallback in `effort_capability_source` and
 Discovery/schema failure is `capability_discovery_failed` and cannot certify an
 advanced-effort execution. Direct planning-only resolution without a snapshot
 is visibly marked `effort_capability_source: dated-catalog`.
+Claude task-class routing captures one alias-and-effort capability through
+`claude_capabilities.py`. The producer requires logged-in `claude.ai`
+subscription auth and runs a bounded `--safe-mode`, no-tools,
+no-session-persistence canary. It retains only scrubbed auth class, requested
+alias/effort and the matching runtime model; helper-model usage and account
+identifiers are not retained. The canary has a small provider cost, so callers
+may reuse its file only inside the resolver's five-minute freshness window.
 Broker adapters require a model (`--model` or `CF_DISPATCH_CURSOR_MODEL`,
 `CF_DISPATCH_KIRO_MODEL`, or `CF_DISPATCH_COPILOT_MODEL`); an unprovable provider fails closed as
 `model_required_for_broker` or `model_family_unknown`. Matching provider routes

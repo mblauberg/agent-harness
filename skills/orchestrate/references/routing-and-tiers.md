@@ -30,9 +30,10 @@ must be explicit and recorded, never inferred from an omitted binding.
 Task-class dispatch rejects a mismatched role and requires a fresh, adapter-bound
 runtime capability snapshot that verifies the effective model and effort. Codex
 account-default transport still omits the literal model; its snapshot verifies
-effort while the receipt retains policy identity. Claude task-class dispatch is
-unavailable until an authoritative runtime capability producer exists; a
-caller-authored source label is not capability evidence.
+effort while the receipt retains policy identity. Claude task-class dispatch
+uses a no-tools, no-session subscription canary and rejects caller-authored
+source labels without its scrubbed provenance. The canary has a small provider
+cost; reuse its snapshot only within the router's five-minute freshness window.
 
 ## Tiers (relative, family-agnostic)
 

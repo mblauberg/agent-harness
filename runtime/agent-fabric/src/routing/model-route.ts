@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -29,7 +30,7 @@ type ModelRouteRequest = {
   requireDistinct: boolean;
 } & (
   | { alias: string; taskClass?: never; effort?: string }
-  | { taskClass: string; alias?: never; effort?: never; capabilitiesFile: string }
+  | { taskClass: string; alias?: never; effort?: never; capabilitiesFile?: string }
 );
 
 function nonEmptyString(record: Record<string, unknown>, key: string): boolean {
@@ -39,10 +40,10 @@ function nonEmptyString(record: Record<string, unknown>, key: string): boolean {
 const aliasRank = new Map([["scout", 0], ["workhorse", 1], ["flagship", 2]]);
 const effortRank = new Map([["low", 0], ["medium", 1], ["high", 2], ["xhigh", 3], ["max", 4], ["ultra", 5]]);
 const taskClassPolicy = new Map([
-  ["mechanical", { minimumAlias: "scout", minimumEffort: "low", role: "worker" }],
-  ["legwork", { minimumAlias: "workhorse", minimumEffort: "medium", role: "worker" }],
-  ["critical-review", { minimumAlias: "flagship", minimumEffort: "high", role: "critical-review" }],
-  ["orchestration", { minimumAlias: "flagship", minimumEffort: "high", role: "orchestrator" }],
+  ["mechanical", { minimumAlias: "scout", minimumEffort: "low", role: "worker", claudeAlias: "haiku" }],
+  ["legwork", { minimumAlias: "workhorse", minimumEffort: "medium", role: "worker", claudeAlias: "sonnet" }],
+  ["critical-review", { minimumAlias: "flagship", minimumEffort: "high", role: "critical-review", claudeAlias: "opus" }],
+  ["orchestration", { minimumAlias: "flagship", minimumEffort: "high", role: "orchestrator", claudeAlias: "fable" }],
 ]);
 
 function isValidReceipt(receipt: Record<string, unknown>, request: ModelRouteRequest): boolean {
@@ -90,6 +91,7 @@ function isValidReceipt(receipt: Record<string, unknown>, request: ModelRouteReq
 export async function resolveModelRouteReceipt(input: {
   routerPath: string;
   receiptPath: string;
+  claudeCapabilitiesPath?: string;
   request: ModelRouteRequest;
 }): Promise<{
   receipt: Record<string, unknown>;
@@ -97,6 +99,21 @@ export async function resolveModelRouteReceipt(input: {
 }> {
   if ((input.request.alias === undefined) === (input.request.taskClass === undefined)) {
     throw new TypeError("model route requires exactly one of alias or taskClass");
+  }
+  let capabilitiesFile = input.request.capabilitiesFile;
+  if (input.request.adapter === "claude" && input.request.taskClass !== undefined && capabilitiesFile === undefined) {
+    const policy = taskClassPolicy.get(input.request.taskClass);
+    if (policy !== undefined) {
+      capabilitiesFile = `${input.receiptPath}.claude-capabilities.json`;
+      const producerPath = input.claudeCapabilitiesPath ?? resolve(
+        dirname(input.routerPath), "../skills/orchestrate/scripts/claude_capabilities.py",
+      );
+      await execFileAsync(producerPath, [
+        "--out", capabilitiesFile,
+        "--alias", policy.claudeAlias,
+        "--effort", policy.minimumEffort,
+      ], { encoding: "utf8", timeout: 40_000, maxBuffer: 1024 * 1024 });
+    }
   }
   const argumentsList = [
     "resolve",
@@ -108,7 +125,7 @@ export async function resolveModelRouteReceipt(input: {
     "--role",
     input.request.role,
     ...(input.request.effort === undefined ? [] : ["--effort", input.request.effort]),
-    ...(input.request.capabilitiesFile === undefined ? [] : ["--capabilities-file", input.request.capabilitiesFile]),
+    ...(capabilitiesFile === undefined ? [] : ["--capabilities-file", capabilitiesFile]),
     ...(input.request.model === undefined ? [] : ["--model", input.request.model]),
     "--lead-family",
     input.request.leadFamily,

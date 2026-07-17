@@ -31,6 +31,7 @@ EFFORT_ORDER = {name: index for index, name in enumerate(("low", "medium", "high
 ALIAS_ORDER = {name: index for index, name in enumerate(("scout", "workhorse", "flagship"))}
 TRUSTED_CAPABILITY_SOURCES = {
     "codex debug models": "codex",
+    "claude subscription canary": "claude",
 }
 TASK_CLASS_POLICY = {
     "mechanical": {"minimum_alias": "scout", "minimum_effort": "low", "role": "worker"},
@@ -154,6 +155,16 @@ def load_capabilities(path: str | None, adapter: str) -> tuple[dict[str, Any], s
         return {}, "capability_discovery_failed"
     if TRUSTED_CAPABILITY_SOURCES.get(data.get("source")) != adapter:
         return {}, "capability_snapshot_untrusted"
+    if adapter == "claude":
+        provenance = data.get("provenance")
+        if (
+            not isinstance(provenance, dict)
+            or provenance.get("kind") != "subscription_runtime_canary"
+            or provenance.get("auth_method") != "claude.ai"
+            or not isinstance(provenance.get("subscription_type"), str)
+            or not provenance["subscription_type"]
+        ):
+            return {}, "capability_snapshot_untrusted"
     try:
         observed = datetime.fromisoformat(str(data.get("observed_at", "")).replace("Z", "+00:00"))
     except ValueError:
@@ -167,6 +178,7 @@ def load_capabilities(path: str | None, adapter: str) -> tuple[dict[str, Any], s
     if not models:
         return {}, "capability_discovery_failed"
     normalized_keys: set[str] = set()
+    normalized_models: dict[str, Any] = {}
     for key, item in models.items():
         if not isinstance(key, str) or not key.strip() or not isinstance(item, dict):
             return {}, "capability_discovery_failed"
@@ -179,14 +191,23 @@ def load_capabilities(path: str | None, adapter: str) -> tuple[dict[str, Any], s
         if (
             not isinstance(resolved_model, str)
             or not resolved_model.strip()
-            or resolved_model.casefold() != normalized_key
             or not isinstance(efforts, list)
             or not efforts
         ):
             return {}, "capability_discovery_failed"
+        if adapter == "claude":
+            if (
+                not resolved_model.casefold().startswith("claude-")
+                or normalized_key not in resolved_model.casefold().split("-")
+            ):
+                return {}, "capability_discovery_failed"
+            normalized_models[resolved_model.casefold()] = item
+        elif resolved_model.casefold() != normalized_key:
+            return {}, "capability_discovery_failed"
+        normalized_models[normalized_key] = item
         if any(not isinstance(effort, str) or not effort.strip() for effort in efforts):
             return {}, "capability_discovery_failed"
-    return models, ""
+    return normalized_models, ""
 
 
 def resolve_effort(

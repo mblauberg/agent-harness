@@ -11,6 +11,42 @@ import {
 } from "../../support/primary-adapter-testkit.ts";
 
 describe("FR-015 controlled model routing receipt", () => {
+  it("produces authoritative Claude capability evidence before task-class routing", async () => {
+    const resolveRoute = requirePublicFunction("resolveModelRouteReceipt");
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-claude-capability-"));
+    const receiptPath = join(directory, "model-route.json");
+    const producerPath = join(directory, "fake-claude-capabilities");
+    await writeFile(producerPath, `#!/usr/bin/env node
+const fs = require("node:fs");
+const out = process.argv[process.argv.indexOf("--out") + 1];
+const alias = process.argv[process.argv.indexOf("--alias") + 1];
+const effort = process.argv[process.argv.indexOf("--effort") + 1];
+fs.writeFileSync(out, JSON.stringify({
+  schema_version: 1, source: "claude subscription canary", observed_at: new Date().toISOString(),
+  provenance: { kind: "subscription_runtime_canary", auth_method: "claude.ai", subscription_type: "pro" },
+  models: { [alias]: { resolved_model: "claude-opus-4-8", supported_efforts: [effort] } }
+}));
+`, { mode: 0o700 });
+
+    const resolution = await resolveRoute({
+      routerPath: repositoryPath("scripts/model-route"),
+      receiptPath,
+      claudeCapabilitiesPath: producerPath,
+      request: {
+        adapter: "claude",
+        taskClass: "critical-review",
+        role: "critical-review",
+        leadFamily: "openai",
+        requireDistinct: true,
+      },
+    }) as { receipt: Record<string, unknown> };
+
+    expect(resolution.receipt).toMatchObject({
+      status: "ok", task_class: "critical-review", alias: "flagship",
+      resolved_model: "claude-opus-4-8", requested_effort: "high", effort: "high",
+    });
+  });
+
   it("binds a task class to the router invocation and retained receipt", async () => {
     const resolveRoute = requirePublicFunction("resolveModelRouteReceipt");
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-task-route-receipt-"));
