@@ -227,6 +227,7 @@ def test_binder_materialises_the_post_merge_chain_without_advancing_acceptance(t
     gh = bin_dir / "gh"
     gh.write_text(
         "#!/bin/sh\n"
+        "printf 'invoked\\n' >> \"$GH_MARKER\"\n"
         "case \"$*\" in\n"
         "  *check-runs*) printf '%s\\n' \"$GH_CHECKS_JSON\" ;;\n"
         "  *pulls*) printf '%s\\n' \"$GH_PR_JSON\" ;;\n"
@@ -234,9 +235,11 @@ def test_binder_materialises_the_post_merge_chain_without_advancing_acceptance(t
         "esac\n"
     )
     gh.chmod(0o755)
+    marker = tmp_path / "gh-invocations"
     environment = {
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "GH_MARKER": str(marker),
         "GH_PR_JSON": json.dumps({
             "number": pr["number"], "state": "closed", "merged_at": "2026-07-10T00:08:00Z",
             "html_url": pr["url"], "head": {"sha": pr["head_commit"]},
@@ -253,6 +256,21 @@ def test_binder_materialises_the_post_merge_chain_without_advancing_acceptance(t
         "--pr-number", str(pr["number"]),
         *[argument for source in review_sources for argument in ("--review-artifact", str(source))],
     ]
+    denied_receipt = receipt.read_bytes()
+    denied = subprocess.run(command, env=environment, capture_output=True, text=True)
+    assert denied.returncode == 1
+    assert "allowlist api.github.com" in denied.stdout
+    assert receipt.read_bytes() == denied_receipt
+    assert not marker.exists()
+    assert not (tmp_path / "github").exists()
+    assert not receipt.with_name("RUN.json.lock").exists()
+
+    run["authority"].update({
+        "secrets_access": "use-without-disclosure",
+        "secret_refs": ["github-cli-auth"],
+        "network": {"tool_egress": "allowlist", "allowed_hosts": ["api.github.com"]},
+    })
+    receipt.write_text(json.dumps(run))
     first = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     second = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     results = [first.communicate(), second.communicate()]

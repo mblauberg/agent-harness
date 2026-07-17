@@ -161,7 +161,10 @@ Before queueing merge for a substantial software change, validate its one
 canonical `delivery-run` receipt in `awaiting_acceptance` and retain the entire
 ignored run directory. Do not remove the worktree or discard that directory
 after GitHub merges it. This is a receipt-continuity gate, not user acceptance
-or promotion authority.
+or promotion authority. When post-merge GitHub binding is in scope, its already
+approved Authority V2 envelope must allowlist `api.github.com` tool egress and
+grant use-without-disclosure of the `github-cli-auth` secret reference; the
+binder never infers those grants from the operator's login.
 
 Merge authority is repo-based. This repository is a personal harness, not
 production: by user directive (2026-07-16), repository auto-merge is enabled

@@ -64,3 +64,11 @@ merge commit. Validate the updated receipt with `--verify-hashes` before asking
 for acceptance. Only explicit acceptance advances that same receipt through
 `accepted` to `awaiting_release`; release validation will not accept a legacy
 software receipt or reconstruct this evidence later.
+
+Because binding reads GitHub with the CLI's stored authentication, the approved
+Authority V2 scope must already set `network.tool_egress: allowlist`, include
+`api.github.com` in `network.allowed_hosts`, set
+`secrets_access: use-without-disclosure`, and name the `github-cli-auth` secret
+reference. The binder validates the complete receipt and these explicit grants
+before creating its lock file or invoking `gh`; denied runs leave no receipt or
+artifact mutation.

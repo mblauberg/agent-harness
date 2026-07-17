@@ -68,6 +68,24 @@ def fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+def preflight(run: dict[str, Any], receipt: Path, workspace: Path, validator: Any) -> None:
+    fail(not isinstance(run, dict) or run.get("contract") != "delivery-run" or run.get("schema_version") != 1,
+         "receipt must be a delivery-run v1 object")
+    project_policy = run.get("project_policy") if isinstance(run.get("project_policy"), dict) else {}
+    policy_path = workspace / project_policy["path"] if project_policy.get("path") else None
+    validator.validate(
+        run, ROOT, receipt_dir=receipt.parent, workspace_root=workspace,
+        project_policy_path=policy_path, verify_hashes=True,
+    )
+    authority = run["authority"]
+    network = authority["network"]
+    fail(network.get("tool_egress") != "allowlist" or "api.github.com" not in network.get("allowed_hosts", []),
+         "receipt authority must allowlist api.github.com tool egress")
+    fail(authority.get("secrets_access") != "use-without-disclosure"
+         or "github-cli-auth" not in authority.get("secret_refs", []),
+         "receipt authority must permit the github-cli-auth credential reference")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("receipt", type=Path)
@@ -81,13 +99,14 @@ def main(argv: list[str] | None = None) -> int:
         receipt = args.receipt.resolve()
         receipt.relative_to(workspace)
         fail(args.pr_number < 1 or "/" not in args.repository, "PR identity is invalid")
+        validator = delivery_validator()
+        preflight(json.loads(receipt.read_text()), receipt, workspace, validator)
         lock_path = receipt.with_name(receipt.name + ".lock")
         lock_path.touch(mode=0o600, exist_ok=True)
         with lock_path.open("r+") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             run = json.loads(receipt.read_text())
-            fail(not isinstance(run, dict) or run.get("contract") != "delivery-run" or run.get("schema_version") != 1,
-                 "receipt must be a delivery-run v1 object")
+            preflight(run, receipt, workspace, validator)
             fail(run.get("profile") != "software", "receipt profile must be software")
             fail(run.get("status") != "awaiting_acceptance", "receipt must remain awaiting_acceptance while merge evidence is bound")
             fail(run.get("software_delivery") is not None, "receipt already has a software_delivery binding")
@@ -193,8 +212,7 @@ def main(argv: list[str] | None = None) -> int:
                     if not target.exists():
                         os.replace(stage / f"{artifact_id}.json", target)
                 fsync_directory(target_dir)
-                validator = delivery_validator()
-                validator.validate(run, ROOT, receipt_dir=receipt.parent, workspace_root=workspace, verify_hashes=True)
+                preflight(run, receipt, workspace, validator)
                 os.replace(staged_receipt, receipt)
                 fsync_directory(receipt.parent)
         print(f"PASS: bound merged software artifact {merge_commit} to {receipt}")
