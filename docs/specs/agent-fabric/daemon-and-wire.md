@@ -328,11 +328,9 @@ For `terminal-success`, the active-state CAS and reservation reconciliation are 
 exact resume reference and provider generation. Exact usage consumes each reported amount and releases the remainder. An
 `unknown` dimension marks every affected ancestor unknown and closes the reservation without restoring unproved
 capacity. Usage above the reservation enters `recovery_required` rather than truncating evidence. A `terminal-no-effect`
-result releases every reserved unit; ambiguity settles nothing. A successful launch proves exactly one
-`provider_calls` unit and zero retained `concurrent_turns` units; dimensions not proved by terminal evidence remain
-unknown. Historical launch rows are not rewritten: confirmed chair-abandon may reconcile only those two exact facts
-inside its recovery transaction when the original terminal-success action and loss-bound custody still match. Every
-other genuinely unknown dimension stays unknown.
+result releases every reserved unit; ambiguity settles nothing. A successful launch proves exactly one `provider_calls`
+unit and zero retained `concurrent_turns` units; dimensions not proved by terminal evidence remain unknown. Confirmed
+chair-abandon may reconcile only those facts when exact terminal-success action and loss-bound custody match; historical rows are not rewritten and every other genuinely unknown dimension stays unknown.
 
 `launch_ambiguous` prohibits a retry or second chair. After lookup proves failure, retry requires a fresh current-state
 preview, newly reviewed packet, new run ID, new provider adapter/action pair, next custody attempt generation and exact
