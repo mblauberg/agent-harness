@@ -299,11 +299,17 @@ describe("global idle stop races", () => {
     databases.push(database);
     const root = await mkdtemp(join(tmpdir(), "fabric-idle-stop-cas-race-"));
     directories.push(root);
+    const runtimeDirectory = join(root, "runtime");
     const reopenSocket = vi.fn();
+    let leakedTransition: Awaited<ReturnType<typeof FLOCK_ELECTION_LOCK_PORT.tryAcquire>>;
+    const beforeElectionRelease = vi.fn(async () => {
+      leakedTransition = await FLOCK_ELECTION_LOCK_PORT.tryAcquire(join(runtimeDirectory, "daemon-shutdown.lock"));
+      expect(leakedTransition).toBeDefined();
+    });
 
     await expect(attemptIdleStop({
       actionId: "idle_stop_cas_race_01",
-      election: new BootstrapElection({ runtimeDirectory: join(root, "runtime") }),
+      election: new BootstrapElection({ runtimeDirectory }),
       database,
       daemonInstanceGeneration: 7,
       clock: () => 1_000,
@@ -313,8 +319,14 @@ describe("global idle stop races", () => {
       },
       closeSocket: vi.fn(),
       reopenSocket,
+      beforeElectionRelease,
     })).resolves.toMatchObject({ state: "busy", reason: "state-changed" });
     expect(reopenSocket).toHaveBeenCalledTimes(1);
+    expect(beforeElectionRelease).not.toHaveBeenCalled();
+    const shutdownProbe = await FLOCK_ELECTION_LOCK_PORT.probe(join(runtimeDirectory, "daemon-shutdown.lock"));
+    expect(shutdownProbe.status).toBe("acquired");
+    if (shutdownProbe.status === "acquired") await shutdownProbe.handle.release();
+    await leakedTransition?.release();
     expect(database.prepare("SELECT state, stopped_at FROM daemon_runtime_epochs WHERE instance_generation = 7").get())
       .toEqual({ state: "running", stopped_at: null });
   });
@@ -342,6 +354,37 @@ describe("global idle stop races", () => {
     })).resolves.toMatchObject({ state: "stopped", globalStateRevision: 1 });
     expect(closeSocket).toHaveBeenCalledTimes(1);
     expect(reopenSocket).not.toHaveBeenCalled();
+  });
+
+  it("does not publish a shutdown transition when a drained stop is cancelled", async () => {
+    const database = createLivenessDatabase();
+    databases.push(database);
+    database.prepare(`
+      UPDATE daemon_runtime_epochs SET state='quiescing', observed_global_revision=1
+       WHERE instance_generation=7
+    `).run();
+    const root = await mkdtemp(join(tmpdir(), "fabric-drained-stop-cancelled-"));
+    directories.push(root);
+    const runtimeDirectory = join(root, "runtime");
+    const beforeElectionRelease = vi.fn();
+
+    await expect(attemptDrainedStop({
+      actionId: "drained_stop_cancelled_01",
+      token: { daemonInstanceGeneration: 7, observedGlobalStateRevision: 1 },
+      election: new BootstrapElection({ runtimeDirectory }),
+      database,
+      clock: () => 1_000,
+      beforeStopCommit: async () => {
+        database.prepare("UPDATE daemon_global_state SET revision = revision + 1 WHERE singleton = 1").run();
+      },
+      beforeElectionRelease,
+      closeSocket: vi.fn(),
+      reopenSocket: vi.fn(),
+    })).resolves.toMatchObject({ state: "busy", reason: "state-changed" });
+    expect(beforeElectionRelease).not.toHaveBeenCalled();
+    const shutdownProbe = await FLOCK_ELECTION_LOCK_PORT.probe(join(runtimeDirectory, "daemon-shutdown.lock"));
+    expect(shutdownProbe.status).toBe("acquired");
+    if (shutdownProbe.status === "acquired") await shutdownProbe.handle.release();
   });
 
   it("excludes only the dispatching daemon-stop command from its drained liveness check", async () => {

@@ -392,7 +392,7 @@ export async function attemptIdleStop(options: {
       ...(options.beforeStopCommit === undefined ? {} : { beforeStopCommit: options.beforeStopCommit }),
       reopenSocket: options.reopenSocket,
     });
-    await options.beforeElectionRelease?.();
+    if (stopped.state === "stopped") await options.beforeElectionRelease?.();
     return stopped;
   });
   if (elected.role === "observer") return { state: "busy", reason: "election-active" };
@@ -434,7 +434,7 @@ export async function attemptDrainedStop(options: {
       ...(options.beforeStopCommit === undefined ? {} : { beforeStopCommit: options.beforeStopCommit }),
       reopenSocket: options.reopenSocket,
     });
-    await options.beforeElectionRelease?.();
+    if (stopped.state === "stopped") await options.beforeElectionRelease?.();
     return stopped;
   });
   if (elected.role === "observer") return { state: "busy", reason: "election-active" };
