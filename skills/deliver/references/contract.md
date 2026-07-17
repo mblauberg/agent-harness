@@ -107,6 +107,23 @@ Observation is profile-specific but always names window, signals, thresholds,
 owner, containment, privacy and close condition. `not_applicable` requires a
 profile justification.
 
+## Merged software binding
+
+After a pull request merges, a software receipt may add the closed
+`software_delivery` binding while it remains `awaiting_acceptance`. Its
+canonical artifact uses `git_revision` (`repository`, `commit`, `tree`) and a
+SHA-256 digest of `git archive --format=tar <commit>`, verified against the live
+local repository. The binding also names local, digest-verified JSON artifacts
+with contracts `github-pull-request-evidence`, `github-ci-evidence` and
+`code-review-evidence`. The PR binds reviewed head to merge commit; required
+`ci-status` binds the merge commit; every passing primary review is retained;
+and the merged tree must equal the reviewed head tree.
+
+This is an additive schema-v1 extension: older delivery receipts still
+validate for historical readability, but release rejects software promotion
+without the post-merge binding. A URI or a reconstructed post-acceptance draft
+cannot substitute for these local typed artifacts.
+
 The profile gate uses independently authored positive, negative and boundary
 cases rather than receipts emitted by the reference generator:
 

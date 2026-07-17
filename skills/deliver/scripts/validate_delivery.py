@@ -15,7 +15,6 @@ import re
 import sys
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[3]
 POLICY_VALIDATION_PATH = Path(__file__).with_name("delivery_policy_validation.py")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -133,6 +132,15 @@ def _evaluate_validator():
     return module
 
 
+@lru_cache(maxsize=1)
+def _software_delivery_validator():
+    spec = importlib.util.spec_from_file_location("software_delivery_validation", Path(__file__).with_name("software_delivery_validation.py"))
+    fail(not spec or not spec.loader, "software delivery validator is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_bound_json(raw: bytes, field: str) -> dict[str, Any]:
     def no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -151,7 +159,8 @@ def _load_bound_json(raw: bytes, field: str) -> dict[str, Any]:
 
 def _validate_artifacts(
     artifacts: list[Any], *, workspace_root: Path | None, verify_hashes: bool,
-    allowed_artifact_paths: list[str], profile: dict[str, Any],
+    allowed_artifact_paths: list[str], allowed_source_paths: list[str],
+    profile: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
     by_id: dict[str, dict[str, Any]] = {}
     for index, raw in enumerate(artifacts):
@@ -160,7 +169,10 @@ def _validate_artifacts(
         fail(not isinstance(artifact_id, str) or not artifact_id or artifact_id in by_id, f"artifact {index} id is missing or duplicate")
         path = item.get("path")
         uri = item.get("uri")
-        fail(bool(path) == bool(uri), f"artifact {artifact_id} requires exactly one path or uri")
+        _software_delivery_validator().validate_git_artifact(
+            item, artifact_id, path, uri, workspace_root, allowed_source_paths,
+            verify_hashes, _safe_path, _inside, Invalid,
+        )
         if path:
             clean_path = _safe_path(path, f"artifact {artifact_id}.path")
             fail(not any(_inside(clean_path, scope) for scope in allowed_artifact_paths), f"artifact {artifact_id} is outside authority.allowed_artifact_paths")
@@ -424,7 +436,6 @@ def _validate_evidence(
             fail(not matches or any(item.get("kind") != kind for item in matches), f"profile gate {gate} requires passing {kind} evidence")
     return by_id
 
-
 def _validate_reviews(run: dict[str, Any], evidence: dict[str, dict[str, Any]], *, required: bool) -> None:
     reviews = []
     for index, raw in enumerate(_list(run.get("reviews"), "reviews")):
@@ -464,7 +475,6 @@ def _validate_reviews(run: dict[str, Any], evidence: dict[str, dict[str, Any]], 
         fail(len(bonus) < 1, "crucial run must record one bonus-family attempt")
     if required and run.get("risk_tier") == "terminal":
         fail(len({item.get("provider_family") for item in bonus}) < 2, "terminal run must record two distinct bonus-family attempts")
-
 
 def _validate_security(run: dict[str, Any], registry: dict[str, Any], profile: dict[str, Any], artifacts: dict[str, dict[str, Any]], evidence: dict[str, dict[str, Any]], *, required: bool) -> None:
     security = _mapping(run.get("security"), "security")
@@ -526,7 +536,6 @@ def _validate_security(run: dict[str, Any], registry: dict[str, Any], profile: d
                 fail(not linked or linked.get("kind") != "deterministic" or linked.get("status") != "pass" or linked.get("gate") != f"agentic-risk:{item.get('id')}", "agentic risk pass must link matching passing deterministic evidence")
             else:
                 fail(not item.get("reason"), "agentic risk not_applicable requires reason")
-
 
 def _validate_gates_observation(run: dict[str, Any], evidence: dict[str, dict[str, Any]]) -> None:
     gates = _mapping(run.get("human_gates"), "human_gates")
@@ -604,7 +613,6 @@ def _validate_gates_observation(run: dict[str, Any], evidence: dict[str, dict[st
             closed_transition = next(item for item in run["state_history"] if item["state"] == "closed")
             fail(not set(evidence_ids) <= set(closed_transition["evidence_ids"]), "closed transition must cite its observation evidence")
 
-
 def _validate_high_stakes(run: dict[str, Any], registry: dict[str, Any], evidence: dict[str, dict[str, Any]]) -> None:
     if run.get("high_stakes") is not True:
         return
@@ -625,7 +633,6 @@ def _validate_high_stakes(run: dict[str, Any], registry: dict[str, Any], evidenc
             fail(any(not control.get(field) for field in ("domain", "reviewer", "qualification")), "qualified domain review requires domain, reviewer and qualification")
         elif name == "explicit_human_action_gate":
             fail(not control.get("action") or not control.get("approved_by"), "explicit human action gate requires action and approver")
-
 
 def _validate_measures_assurance(
     run: dict[str, Any], profile: dict[str, Any], evidence: dict[str, dict[str, Any]],
@@ -853,11 +860,13 @@ def validate(
         authority, run, ROOT, invalid_type=Invalid,
     )
     allowed_artifact_paths = [_safe_path(item, "authority.allowed_artifact_paths") for item in authority["allowed_artifact_paths"]]
+    allowed_source_paths = [_safe_path(item, "authority.allowed_source_paths") for item in authority["allowed_source_paths"]]
     artifacts = _validate_artifacts(
         _list(run.get("artifacts"), "artifacts"),
         workspace_root=workspace_root or receipt_dir,
         verify_hashes=verify_hashes,
         allowed_artifact_paths=allowed_artifact_paths,
+        allowed_source_paths=allowed_source_paths,
         profile=profile,
     )
     _validate_history(run)
@@ -868,7 +877,6 @@ def validate(
     reviewing_reached = furthest >= NORMAL_STATES.index("reviewing")
     acceptance_reached = furthest >= NORMAL_STATES.index("awaiting_acceptance")
     required_kinds = ({"deterministic"} if reviewing_reached else set()) | ({"judgement"} if acceptance_reached else set())
-    allowed_source_paths = [_safe_path(item, "authority.allowed_source_paths") for item in authority["allowed_source_paths"]]
     evidence = _validate_evidence(
         run, profile, artifacts, required_kinds, allowed_source_paths,
         artifact_root=workspace_root or receipt_dir, verify_hashes=verify_hashes,
@@ -906,6 +914,9 @@ def validate(
         first_review = next(item for item in run["state_history"] if item["state"] == "reviewing")
         fail(not deterministic_ids <= set(first_review["evidence_ids"]), "reviewing transition lacks deterministic gate evidence")
     _validate_reviews(run, evidence, required=acceptance_reached)
+    _software_delivery_validator().validate_if_software(
+        run, artifacts, workspace_root or receipt_dir, verify_hashes, Invalid,
+    )
     if acceptance_reached:
         profile_evidence = policy_validation.profile_evidence_requirements(profile, artifacts)
         final_transition = next(item for item in run["state_history"] if item["state"] == "awaiting_acceptance")
