@@ -130,6 +130,7 @@ const bootstrapCapability = process.env.AGENT_FABRIC_BOOTSTRAP_CAPABILITY;
 const bootstrapMode = process.env.AGENT_FABRIC_BOOTSTRAP_MODE;
 const bootstrapActionId = process.env.AGENT_FABRIC_BOOTSTRAP_ACTION_ID;
 const bootstrapElectionGeneration = Number(process.env.AGENT_FABRIC_BOOTSTRAP_ELECTION_GENERATION);
+const bootstrapCustody = process.env.AGENT_FABRIC_BOOTSTRAP_CUSTODY;
 const daemonLockPathsValue: unknown = JSON.parse(process.env.AGENT_FABRIC_DAEMON_LOCK_PATHS_JSON ?? "[]");
 const daemonLockPaths = Array.isArray(daemonLockPathsValue) && daemonLockPathsValue.every((value) => typeof value === "string")
   ? daemonLockPathsValue
@@ -162,6 +163,7 @@ if (
   runtimeDirectory === undefined ||
   bootstrapCapability === undefined
   || (bootstrapMode !== "production-election" && bootstrapMode !== "test-forced-process-locks")
+  || bootstrapCustody !== "parent-pipe-v1"
   || (bootstrapMode === "production-election" && (
     bootstrapActionId === undefined ||
     bootstrapActionId.trim().length === 0 ||
@@ -182,6 +184,27 @@ if (
 ) {
   throw new Error("agent fabric daemon environment is incomplete");
 }
+
+let bootstrapCustodyReleased = false;
+let bootstrapCustodyMessage = "";
+let bootstrapSocketOwned = false;
+const releaseBootstrapCustody = "release\n";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk: string) => {
+  if (bootstrapCustodyReleased) return;
+  bootstrapCustodyMessage += chunk;
+  if (!releaseBootstrapCustody.startsWith(bootstrapCustodyMessage)) process.exit(1);
+  if (bootstrapCustodyMessage === releaseBootstrapCustody) bootstrapCustodyReleased = true;
+});
+const failClosedOnBootstrapCustodyLoss = (): void => {
+  if (!bootstrapCustodyReleased) process.exit(1);
+};
+process.stdin.on("end", failClosedOnBootstrapCustodyLoss);
+process.stdin.on("error", failClosedOnBootstrapCustodyLoss);
+process.stdin.resume();
+process.once("exit", () => {
+  if (!bootstrapCustodyReleased && bootstrapSocketOwned) rmSync(socketPath, { force: true });
+});
 
 if (bootstrapMode === "production-election") {
   try {
@@ -621,6 +644,7 @@ const openServingSocket = async (): Promise<void> =>
   await openRecoverableUnixListener(server, socketPath, { admissionFence: servingAdmission });
 
 await openServingSocket();
+bootstrapSocketOwned = true;
 fabric.markDaemonRuntimeRunning(daemonInstanceGeneration);
 
 let shuttingDown = false;

@@ -370,6 +370,7 @@ function childEnvironment(
     AGENT_FABRIC_BOOTSTRAP_MODE: bootstrap.mode,
     AGENT_FABRIC_BOOTSTRAP_ACTION_ID: bootstrap.actionId,
     AGENT_FABRIC_BOOTSTRAP_ELECTION_GENERATION: String(bootstrap.electionGeneration),
+    AGENT_FABRIC_BOOTSTRAP_CUSTODY: "parent-pipe-v1",
     AGENT_FABRIC_DAEMON_INSTANCE_GENERATION: String(bootstrap.daemonInstanceGeneration),
     ...(bootstrap.mode === "test-forced-process-locks"
       ? { AGENT_FABRIC_DAEMON_LOCK_PATHS_JSON: JSON.stringify(lockPaths) }
@@ -611,6 +612,22 @@ function stableBootstrapActionId(options: Pick<DaemonStartOptions, "databasePath
     .digest("hex")}`;
 }
 
+async function holdTestSpawnBeforeDiscovery(pid: number): Promise<void> {
+  const barrierPath = process.env.NODE_ENV === "test"
+    ? process.env.AGENT_FABRIC_TEST_BOOTSTRAP_CUSTODY_BARRIER_PATH
+    : undefined;
+  if (barrierPath === undefined) return;
+  const barrier = await open(barrierPath, "wx", 0o600);
+  try {
+    await barrier.writeFile(`${String(pid)}\n`, "utf8");
+  } finally {
+    await barrier.close();
+  }
+  while (existsSync(barrierPath)) {
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+}
+
 async function spawnDaemonChild(
   options: PreparedDaemonStart,
   bootstrap: DaemonBootstrapEnvironment,
@@ -636,12 +653,13 @@ async function spawnDaemonChild(
       capabilityKey,
       bootstrap,
     ),
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
   });
-  if (child.pid === undefined || child.stdout === null || child.stderr === null) {
+  if (child.pid === undefined || child.stdin === null || child.stdout === null || child.stderr === null) {
     child.kill("SIGKILL");
     throw new Error("failed to start agent fabric daemon process");
   }
+  child.stdin.on("error", () => undefined);
   let stderr = "";
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => {
@@ -696,6 +714,7 @@ async function spawnDaemonChild(
     release(): void {
       if (released) return;
       released = true;
+      child.stdin.end("release\n");
       child.unref();
       const stdout = child.stdout as typeof child.stdout & { unref?: () => void };
       const stderrStream = child.stderr as typeof child.stderr & { unref?: () => void };
@@ -918,6 +937,7 @@ async function spawnProductionDaemon(input: {
   let cleanStopRequested = false;
   const identity = (async (): Promise<PrivateDiscoveryIdentity> => {
     await child.ready;
+    await holdTestSpawnBeforeDiscovery(child.pid);
     return await publishPrivateDiscovery({
       paths: input.paths,
       actionId: input.actionId,
