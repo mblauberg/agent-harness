@@ -108,6 +108,21 @@ describe("provider-session Fabric continuity", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  it("classifies a retained chair grant without mailbox read as unavailable", async () => {
+    const challenge = "09".repeat(32);
+    const close = vi.fn(async () => undefined);
+
+    await expect(createChairLaunchFabricBridge({
+      ...binding(challenge),
+      capability: "missing-chair-mailbox-capability-canary",
+      socketPath: "/private/fabric.sock",
+      attestationChallenge: challenge,
+    }, {
+      connect: vi.fn(async () => protocolTransport(vi.fn(), close, new Set())),
+    })).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it("projects and dispatches the complete generated launch grant over the public protocol", async () => {
     const challenge = "00".repeat(32);
     const allowedOperations = new Set([FABRIC_OPERATIONS.getMailboxState]);
@@ -479,7 +494,7 @@ describe("provider-session Fabric continuity", () => {
           challenge,
         },
       }, transport],
-    )).toThrow(/keepalive requires mailbox read/iu);
+    )).toThrow(expect.objectContaining({ code: "CAPABILITY_UNAVAILABLE" }));
   });
 
   it("cannot succeed after the owning bridge is torn down", async () => {

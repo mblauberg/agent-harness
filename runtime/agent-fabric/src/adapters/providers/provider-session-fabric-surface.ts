@@ -11,6 +11,7 @@ import {
   type ProtocolFeature,
   type ProtocolPrincipal,
 } from "@local/agent-fabric-protocol";
+import { ProviderAdapterError } from "./types.js";
 
 export type ProviderSessionProtocolTransport = {
   readonly features: readonly ProtocolFeature[];
@@ -31,7 +32,10 @@ export class RetainedProviderSessionKeepalive {
 
   constructor(transport: ProviderSessionProtocolTransport) {
     if (!transport.allowedOperations.has(FABRIC_OPERATIONS.getMailboxState)) {
-      throw new TypeError("retained provider-session keepalive requires mailbox read");
+      throw new ProviderAdapterError(
+        "CAPABILITY_UNAVAILABLE",
+        "retained provider-session keepalive requires mailbox read",
+      );
     }
     this.#transport = transport;
     const idleTimeoutMs = transport.idleTimeoutMs ?? PROTOCOL_LIMITS.idleTimeoutMs;
