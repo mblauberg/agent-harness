@@ -250,6 +250,65 @@ describe("Console controller and two-phase actions", () => {
     }));
   });
 
+  it("admits the exact chair recovery action through the controller", async () => {
+    const recoveryIntent: OperatorActionIntent = {
+      kind: "chair-bridge-recovery",
+      schemaVersion: 1,
+      path: "abandon",
+      projectSessionId: sessionId,
+      coordinationRunId: runId,
+      lossId: "loss-1",
+      recoveryManifestDigest: digestA,
+      expectedSessionRevision: 5,
+      expectedSessionGeneration: 1,
+      expectedRunRevision: 3,
+      expectedChairGeneration: 1,
+      expectedPrincipalGeneration: 1,
+      expectedBridgeRevision: 2,
+      expectedLostBridgeGeneration: 1,
+      expectedProviderSessionGeneration: 1,
+      providerAdapterId: "claude-agent-sdk",
+      providerContractDigest: digestB,
+      reason: "operator confirmed terminal retained-chair loss",
+    };
+    const service = actions();
+    const recoveryDataset = dataset();
+    const controller = new ConsoleController({
+      dataset: {
+        ...recoveryDataset,
+        pages: {
+          ...recoveryDataset.pages,
+          attention: {
+            ...recoveryDataset.pages.attention,
+            rows: [{
+              ...row(),
+              actionAvailability: {
+                state: "available",
+                actions: ["chair-bridge-recovery"],
+                requiresPreview: true,
+              },
+            }],
+          },
+        },
+      },
+      actions: service,
+      credential,
+      projectId,
+      projectSessionId: sessionId,
+      confirmationId: () => "confirmation-1",
+    });
+    controller.select("attention", "attention:task-1");
+
+    await expect(controller.beginAction(actionRequest(
+      context("recovery-preview", "event-open", 2),
+      recoveryIntent,
+      "chair-bridge-recovery",
+    ))).resolves.toMatchObject({
+      stage: "review",
+      preview: { intent: recoveryIntent },
+    });
+  });
+
   it("preserves stable selection and scroll anchors while revisions advance", () => {
     const controller = new ConsoleController({
       dataset: dataset(),

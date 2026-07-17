@@ -182,6 +182,9 @@ function intentAvailableAction(
   ) {
     return intent.kind;
   }
+  if (intent.kind === "chair-bridge-recovery") {
+    return "chair-bridge-recovery";
+  }
   if (intent.kind === "git") {
     return "git";
   }
