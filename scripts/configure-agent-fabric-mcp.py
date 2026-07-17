@@ -308,15 +308,37 @@ def _cleanup_recovery_directory(recovery_directory: Path, target_parent: Path) -
     try:
         _fsync_directory(recovery_directory)
     except OSError:
-        pass
+        print(
+            "warning: post-commit recovery cleanup failed "
+            f"operation=recovery-directory-fsync path={recovery_directory}",
+            file=sys.stderr,
+        )
     try:
         recovery_directory.rmdir()
     except OSError:
+        print(
+            "warning: post-commit recovery cleanup failed "
+            f"operation=recovery-directory-rmdir path={recovery_directory}",
+            file=sys.stderr,
+        )
         return
     try:
-        _fsync_directory(target_parent.resolve(strict=True))
+        resolved_target_parent = target_parent.resolve(strict=True)
     except (OSError, RuntimeError):
-        pass
+        print(
+            "warning: post-commit recovery cleanup failed "
+            f"operation=target-parent-resolve path={target_parent}",
+            file=sys.stderr,
+        )
+        return
+    try:
+        _fsync_directory(resolved_target_parent)
+    except OSError:
+        print(
+            "warning: post-commit recovery cleanup failed "
+            f"operation=target-parent-fsync path={resolved_target_parent}",
+            file=sys.stderr,
+        )
 
 
 def write_proposal(proposal: ConfigProposal) -> None:

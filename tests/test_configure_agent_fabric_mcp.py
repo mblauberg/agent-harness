@@ -339,7 +339,7 @@ def test_post_exchange_fsync_error_retains_private_displaced_recovery(tmp_path: 
 @pytest.mark.parametrize("client", ["claude", "codex"])
 @pytest.mark.parametrize("failure_call", [3, 4])
 def test_post_commit_cleanup_fsync_error_does_not_report_conflict(
-    tmp_path: Path, client: str, failure_call: int, monkeypatch,
+    tmp_path: Path, client: str, failure_call: int, monkeypatch, capsys,
 ) -> None:
     configurer = load_configurer()
     desired = configurer.registration(ROOT, tmp_path / "state", client)
@@ -349,11 +349,13 @@ def test_post_commit_cleanup_fsync_error_does_not_report_conflict(
     proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
     fsync_directory = configurer._fsync_directory
     calls = 0
+    failed_path: Path | None = None
 
     def fail_cleanup_fsync(path: Path) -> None:
-        nonlocal calls
+        nonlocal calls, failed_path
         calls += 1
         if calls == failure_call:
+            failed_path = path
             raise OSError("cleanup durability failure")
         fsync_directory(path)
 
@@ -363,6 +365,41 @@ def test_post_commit_cleanup_fsync_error_does_not_report_conflict(
 
     assert "agent-fabric" in requested.read_text()
     assert not list(tmp_path.glob(f".{requested.name}.recovery.*"))
+    operation = "recovery-directory-fsync" if failure_call == 3 else "target-parent-fsync"
+    assert capsys.readouterr().err.strip() == (
+        f"warning: post-commit recovery cleanup failed operation={operation} path={failed_path}"
+    )
+
+
+@pytest.mark.parametrize("client", ["claude", "codex"])
+def test_post_commit_recovery_rmdir_error_warns_without_reporting_conflict(
+    tmp_path: Path, client: str, monkeypatch, capsys,
+) -> None:
+    configurer = load_configurer()
+    desired = configurer.registration(ROOT, tmp_path / "state", client)
+    suffix = "json" if client == "claude" else "toml"
+    requested = tmp_path / f"{client}.{suffix}"
+    requested.write_text('{}\n' if client == "claude" else '[unrelated]\nvalue = "before"\n')
+    proposal = configurer.claude_update(requested, desired) if client == "claude" else configurer.codex_update(requested, desired)
+    rmdir = configurer.Path.rmdir
+    failed_path: Path | None = None
+
+    def fail_recovery_rmdir(path: Path) -> None:
+        nonlocal failed_path
+        if ".recovery." in path.name:
+            failed_path = path
+            raise OSError("cleanup rmdir failure")
+        rmdir(path)
+
+    monkeypatch.setattr(configurer.Path, "rmdir", fail_recovery_rmdir)
+
+    configurer.write_proposal(proposal)
+
+    assert "agent-fabric" in requested.read_text()
+    assert failed_path is not None and failed_path.is_dir()
+    assert capsys.readouterr().err.strip() == (
+        f"warning: post-commit recovery cleanup failed operation=recovery-directory-rmdir path={failed_path}"
+    )
 
 
 @pytest.mark.parametrize("client", ["claude", "codex"])
