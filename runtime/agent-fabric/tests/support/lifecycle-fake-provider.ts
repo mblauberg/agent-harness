@@ -10,6 +10,8 @@ import {
   type LifecycleCheckpoint,
 } from "@local/agent-fabric-protocol";
 
+import { writeJsonFileAtomic } from "./atomic-json-file.ts";
+
 const journalPath = process.env.LIFECYCLE_FAKE_JOURNAL;
 if (journalPath === undefined) {
   throw new Error("LIFECYCLE_FAKE_JOURNAL is required");
@@ -84,7 +86,7 @@ function loadJournal(): Journal {
 }
 
 function saveJournal(journal: Journal): void {
-  writeFileSync(requiredJournalPath, `${JSON.stringify(journal, null, 2)}\n`, { mode: 0o600 });
+  writeJsonFileAtomic(requiredJournalPath, `${JSON.stringify(journal, null, 2)}\n`);
 }
 
 function payloadHash(value: unknown): string {
