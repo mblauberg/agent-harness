@@ -52,7 +52,9 @@ import {
 } from "./gates.js";
 import { parseProjectSession } from "./project-session.js";
 import {
+  LAUNCH_PACKET_V1_CODEC,
   LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC,
+  LAUNCH_RESOURCE_PLAN_V1_CODEC,
   PROJECT_SESSION_LAUNCH_INTENT_CODEC,
 } from "./launch.js";
 import {
@@ -209,6 +211,7 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.projectSessionGet]: object(["projectId", "projectSessionId", "expectedGeneration"]),
   [FABRIC_OPERATIONS.projectSessionTransition]: object(["command", "projectSessionId", "expectedGeneration", "transition"]),
   [FABRIC_OPERATIONS.projectSessionClose]: object(["command", "projectSessionId", "expectedGeneration", "terminalPath"]),
+  [FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare]: object(["command", "projectId", "projectSessionId", "expectedSessionGeneration", "intakeId", "acceptedScopeRef", "launchPacketRef", "resourcePlanRef", "launchPacket", "resourcePlan"]),
   [FABRIC_OPERATIONS.projectSessionLaunchPrepare]: object(["command", "projectId", "projectSessionId", "expectedSessionGeneration", "launchPacketRef"]),
   [FABRIC_OPERATIONS.membershipBind]: object(["origin", "command", "projectSessionId", "coordinationRunId", "expectedMembershipRevision", "members"]),
   [FABRIC_OPERATIONS.operatorAttach]: object(["command", "projectId", "requestedExpiresAt"], ["projectSessionId", "expectedAttachmentGeneration"]),
@@ -360,6 +363,7 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.projectSessionGet]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
   [FABRIC_OPERATIONS.projectSessionTransition]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
   [FABRIC_OPERATIONS.projectSessionClose]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin", "terminalPath"]),
+  [FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare]: object(["projectSession", "launchPacketRef", "resourcePlanRef", "acceptedScopeRef"]),
   [FABRIC_OPERATIONS.membershipBind]: object(["projectSessionId", "coordinationRunId", "membershipRevision", "members"]),
   [FABRIC_OPERATIONS.operatorAttach]: object(["clientId", "projectId", "projectAuthorityGeneration", "projectSessionId", "generation", "expiresAt"]),
   [FABRIC_OPERATIONS.operatorDetach]: object(["detached", "revision"]),
@@ -819,6 +823,24 @@ const projectSessionTransitionInputCodec = objectCodec({
     }),
     objectCodec({ to: literal("awaiting_acceptance"), closureEvidence: artifactRefCodec }),
   ]),
+});
+const projectSessionLaunchPacketPrepareInputCodec = objectCodec({
+  command: operatorMutationCodec,
+  projectId: identifier,
+  projectSessionId: identifier,
+  expectedSessionGeneration: positiveInteger,
+  intakeId: identifier,
+  acceptedScopeRef: artifactRefCodec,
+  launchPacketRef: artifactRefCodec,
+  resourcePlanRef: artifactRefCodec,
+  launchPacket: LAUNCH_PACKET_V1_CODEC,
+  resourcePlan: LAUNCH_RESOURCE_PLAN_V1_CODEC,
+});
+const projectSessionLaunchPacketPreparationCodec = objectCodec({
+  projectSession: projectSessionCodec,
+  launchPacketRef: artifactRefCodec,
+  resourcePlanRef: artifactRefCodec,
+  acceptedScopeRef: artifactRefCodec,
 });
 const projectSessionLaunchPrepareInputCodec = objectCodec({
   command: operatorMutationCodec,
@@ -3431,6 +3453,7 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.projectionDetailRead) return operatorDetailReadInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorRepositoryRead) return gitRepositoryReadInputCodec;
   if (operation === FABRIC_OPERATIONS.projectSessionTransition) return projectSessionTransitionInputCodec;
+  if (operation === FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare) return projectSessionLaunchPacketPrepareInputCodec;
   if (operation === FABRIC_OPERATIONS.projectSessionLaunchPrepare) return projectSessionLaunchPrepareInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionPreview) return operatorActionPreviewInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionCommit) return operatorActionCommitCodec;
@@ -3536,6 +3559,7 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.projectionDetailRead) return operatorDetailReadResultCodec;
   if (operation === FABRIC_OPERATIONS.operatorRepositoryRead) return gitRepositoryReadResultCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionPreview) return operatorActionPreviewCodec;
+  if (operation === FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare) return projectSessionLaunchPacketPreparationCodec;
   if (operation === FABRIC_OPERATIONS.projectSessionLaunchPrepare) return operatorActionPreviewCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionCommit) return operatorActionReceiptCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionStatus || operation === FABRIC_OPERATIONS.operatorActionReconcile) {

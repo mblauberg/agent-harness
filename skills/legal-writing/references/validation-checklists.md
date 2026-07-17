@@ -10,6 +10,7 @@ needs:
 | submissions / written advocacy | `argument-structure-and-paragraphing.md` |
 | forms, affidavits, orders, annexures | `forum-and-document-recipes.md` |
 | correspondence | `legal-correspondence-style.md` |
+| non-filing legal decision overview | `decision-overviews.md` |
 | family-violence or redaction-sensitive material | `family-violence-and-redaction.md` |
 | house style questions | `australian-english-house-style.md` |
 | source anchors and citations | `source-boundary-and-citations.md` |
@@ -27,6 +28,14 @@ Run the checks the task needs, not all of them:
 | affidavit work | Affidavit + Source + Safety |
 | orders/minutes | Document Function + the Orders cut-list in `forum-and-document-recipes.md` |
 | correspondence | Correspondence + Filing-Facing Style |
+| legal decision overview | Decision Overview + Source |
+
+## Decision Overview Check
+
+For a non-filing legal decision overview, apply
+[decision-overviews.md](decision-overviews.md). Check that each issue keeps the
+shared position, source support and remaining decision or professional
+confirmation distinct. Open options retain their material legal consequences.
 
 ## Filing-Facing Style Check
 

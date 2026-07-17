@@ -44,14 +44,18 @@
       "observation_examples": ["decision-follow-up", "assumption-review"]
     },
     "document": {
-      "artifact_types": ["markdown", "docx", "pdf", "slides", "spreadsheet"],
+      "artifact_types": ["markdown", "docx", "pdf", "slides", "spreadsheet", "html", "interactive-document"],
       "required_evidence": {
         "deterministic": ["render"],
         "judgement": ["audience-fit"]
       },
+      "conditional_evidence": {
+        "html": {"deterministic": ["link-integrity"], "judgement": []},
+        "interactive-document": {"deterministic": ["link-integrity", "interaction-smoke"], "judgement": []}
+      },
       "required_measures": {"outcome": ["audience-readiness"], "trajectory": ["render-quality"]},
       "stochastic_policy": {"required": false, "minimum_repetitions": 2, "minimum_sample_size": 1},
-      "security_surface_policy": ["generated-artifact", "sensitive-data"],
+      "security_surface_policy": ["source", "generated-artifact", "sensitive-data"],
       "boundary_checks": ["render"],
       "evidence_policy": {"retention": ["risk-policy", "project-policy"], "redaction": "document-policy"},
       "release_semantics": "send-file-or-publish",
@@ -88,6 +92,8 @@
     "pdf": ["generated-artifact"],
     "slides": ["generated-artifact"],
     "spreadsheet": ["generated-artifact"],
+    "html": ["generated-artifact"],
+    "interactive-document": ["generated-artifact", "source"],
     "prompt": ["agent-tools"],
     "tool": ["source", "agent-tools"],
     "policy": ["source", "agent-tools"],

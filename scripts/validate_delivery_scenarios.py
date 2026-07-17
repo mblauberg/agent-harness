@@ -126,6 +126,7 @@ def _compile_receipt(case: dict[str, Any], fixture: dict[str, Any]) -> dict[str,
         for gate in fixture["security_checks"]
         if (surface, gate) in {
             ("source", "secrets-scan"), ("source", "sast"),
+            ("generated-artifact", "provenance"),
             ("destructive-boundary", "destructive-boundary-tests"),
             ("iac-container-config", "policy-scan"),
             ("agent-tools", "permission-check"), ("agent-tools", "tool-boundary-tests"),
@@ -214,7 +215,7 @@ def _compile_receipt(case: dict[str, Any], fixture: dict[str, Any]) -> dict[str,
             "reason": "" if fixture["security_surfaces"] else "held-out fixture has no changed technical surface",
             "policy_sha256": "sha256:" + hashlib.sha256(policy_path.read_bytes()).hexdigest(),
             "changed_surfaces": fixture["security_surfaces"],
-            "artifact_surfaces": ([{"artifact_id": "outcome", "surfaces": fixture["security_surfaces"]}] if risk in {"substantial", "crucial", "terminal"} and profile in {"software", "agent-product"} else []),
+            "artifact_surfaces": ([{"artifact_id": "outcome", "surfaces": fixture["security_surfaces"]}] if fixture["security_surfaces"] else []),
             "checks": security_checks,
             "agentic_risks": ([
                 {"id": item, "status": "pass", "evidence_id": "agentic-risk-tool-misuse"}
@@ -319,6 +320,8 @@ def _validate_dataset(data: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             tamper = case["tamper"]
             if not isinstance(tamper, dict) or set(tamper) != {"path", "append"}:
                 raise ValueError(f"case {case['id']} tamper instruction is invalid")
+        if "pre_materialize_patches" in case and not isinstance(case["pre_materialize_patches"], list):
+            raise ValueError(f"case {case['id']} pre_materialize_patches must be a list")
     for profile in PROFILES:
         profile_cases = [case for case in cases if case["profile"] == profile]
         if len(profile_cases) < minimum_cases or not {"pass", "fail"} <= {case["expected"] for case in profile_cases}:
@@ -346,6 +349,7 @@ def validate(dataset: Path) -> dict[str, Any]:
             error = ""
             with tempfile.TemporaryDirectory(prefix="delivery-scenario-") as temporary:
                 workspace_root = Path(temporary)
+                _apply_patches(receipt, copy.deepcopy(case.get("pre_materialize_patches", [])))
                 materializer.materialise_reference_run(receipt, workspace_root, ROOT)
                 _apply_patches(receipt, copy.deepcopy(case.get("patches", [])))
                 _apply_tamper(workspace_root, copy.deepcopy(case.get("tamper")))
