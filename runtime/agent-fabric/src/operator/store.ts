@@ -1387,6 +1387,14 @@ export class OperatorStore {
     return execute();
   }
 
+  authenticateCommand(
+    context: AuthenticatedOperatorContext,
+    command: OperatorMutationContext,
+    target: OperatorCommandTarget,
+  ): void {
+    this.#authenticate(context, command, target, false);
+  }
+
   #authenticate(
     context: AuthenticatedOperatorContext,
     command: OperatorMutationContext,

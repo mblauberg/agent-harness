@@ -108,6 +108,7 @@ export type ConsoleWorkflowCapability =
 export type ConsoleWorkflowCapabilities = Readonly<{
   intake: ConsoleWorkflowCapability;
   gate: ConsoleWorkflowCapability;
+  implement?: ConsoleWorkflowCapability;
   launch: ConsoleWorkflowCapability;
   git: ConsoleWorkflowCapability;
   promotion: ConsoleWorkflowCapability;

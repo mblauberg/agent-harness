@@ -24175,6 +24175,7 @@
                   "fabric.v1.project-session.read",
                   "fabric.v1.project-session.transition",
                   "fabric.v1.project-session.close",
+                  "fabric.v1.project-session-launch.packet.prepare",
                   "fabric.v1.project-session-launch.prepare",
                   "fabric.v1.project-session.membership.bind",
                   "fabric.v1.operator.attach",
@@ -24346,7 +24347,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:0064244083a498173a85d95f1630e5713840ab0b9c8999da80f06ab45ef2200f",
+      "inputCodecDigest": "sha256:2926b53d6790adec07ddff2a511e7ddf3cc6518dc503a4c3df39b9fa68c52bfe",
       "outputCodecDigest": "sha256:1a9ee6767166f5f96ee5be2fbca40d47d2e7e46080ce4af47949c460bbe5c373"
     },
     {
@@ -24569,6 +24570,7 @@
                     "fabric.v1.project-session.read",
                     "fabric.v1.project-session.transition",
                     "fabric.v1.project-session.close",
+                    "fabric.v1.project-session-launch.packet.prepare",
                     "fabric.v1.project-session-launch.prepare",
                     "fabric.v1.project-session.membership.bind",
                     "fabric.v1.operator.attach",
@@ -25206,7 +25208,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:a4379a256f3b83e9cf892cbf94d4010ca825678e0017f0a415d9fc79d309f414",
+      "inputCodecDigest": "sha256:35886f3b99f5dec17106313450b27914764d2c82b55d3a1f93d7635a2c34a892",
       "outputCodecDigest": "sha256:e3992f43b189bc13c82f3f427051462f757f9bb664ab3b5545b66dfe805b8d0e"
     },
     {

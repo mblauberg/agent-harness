@@ -153,6 +153,7 @@ export class ProjectSessionStore {
   transitionProjectSession(
     context: AuthenticatedOperatorContext,
     request: ProjectSessionTransitionRequest,
+    requiredAction: "decide" | "launch" = "decide",
   ): ProjectSession {
     const identity = this.#sessionIdentity(request.projectSessionId);
     const targetState: string = request.transition.to;
@@ -180,7 +181,7 @@ export class ProjectSessionStore {
         projectId: identity.projectId,
         projectSessionId: request.projectSessionId,
         sessionGeneration: request.expectedGeneration,
-        requiredAction: "decide",
+        requiredAction,
         commandPayload: {
           projectSessionId: request.projectSessionId,
           expectedGeneration: request.expectedGeneration,

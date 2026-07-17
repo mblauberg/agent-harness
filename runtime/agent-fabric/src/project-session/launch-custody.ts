@@ -37,6 +37,7 @@ import { ProjectFabricCoreError, type AuthenticatedOperatorContext } from "./con
 import { supersedeFinalAcceptanceGates } from "./acceptance-cycle.js";
 import { retireProjectSessionBridges } from "./bridge-retirement.js";
 import { canonicalJson, integer, isRow, row, sha256, text, type Row } from "./store-support.js";
+import { assertSafeLaunchProviderInput } from "./provider-input-safety.js";
 import {
   ProviderActionAdmissionCoordinator,
   type ProviderActionTicket,
@@ -464,7 +465,6 @@ export type AgentDispatchHandle = Readonly<{
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const UNIT_KEY = /^[a-z][a-z0-9_.:-]{0,63}$/u;
 const MAX_ARTIFACT_BYTES = 1024 * 1024;
-const FORBIDDEN_PROVIDER_KEYS = /(?:capability|secret|token|credential|environment|env|executable|command|socket|api[_-]?key)/iu;
 
 function protocol(message: string): never {
   throw new ProjectFabricCoreError("PROTOCOL_INVALID", message);
@@ -712,17 +712,6 @@ function parsePlan(value: unknown): LaunchResourcePlan {
   };
 }
 
-function assertNoTrustedProviderControls(value: unknown, path = "provider.input"): void {
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => assertNoTrustedProviderControls(item, `${path}[${String(index)}]`));
-    return;
-  }
-  if (!isRow(value)) return;
-  for (const [key, item] of Object.entries(value)) {
-    if (FORBIDDEN_PROVIDER_KEYS.test(key)) forbidden(`${path}.${key} is a trusted control field`);
-    assertNoTrustedProviderControls(item, `${path}.${key}`);
-  }
-}
 
 function jsonEvidenceDigest(value: unknown): Digest {
   try {
@@ -3914,7 +3903,7 @@ export class LaunchCustodyService {
       packet.provider.inputSchemaId !== contract.inputSchemaId ||
       `sha256:${sha256(canonicalJson(contract))}` !== intent.providerContractDigest
     ) stale("launch provider contract changed");
-    assertNoTrustedProviderControls(packet.provider.input);
+    assertSafeLaunchProviderInput(packet.provider.input);
     const ajv = new Ajv2020({ allErrors: true, strict: true });
     let validate: ValidateFunction;
     try {
