@@ -226,16 +226,20 @@ Afterwards:
    ```sh
    skills/implement/scripts/bind_merged_delivery.py \
      .agent-run/<id>/RUN.json --workspace-root "$PWD" \
-     --repository owner/repository --pr-number <number> --pr-url <url> \
-     --head-commit <reviewed-head> --merge-commit <merged-commit> \
-     --recorded-at <ci-completed-at>
+     --repository owner/repository --pr-number <number> \
+     --review-artifact <native-review.json> \
+     --review-artifact <other-primary-review.json>
    skills/deliver/scripts/validate_delivery.py \
      .agent-run/<id>/RUN.json --workspace-root "$PWD" --verify-hashes
    ```
 
-   The binder fails if the reviewed and merged trees differ. Do not request
-   acceptance or promotion authority until this validation passes. Explicit
-   user acceptance advances this same receipt to `accepted` and then
+   The binder reads the merged PR and exact merge-commit `ci-status` from the
+   authenticated GitHub API; it does not accept caller-authored success flags.
+   Review arguments are pre-existing typed exact-head artifacts, not verdicts
+   created by the binder. It holds an exclusive receipt lock, stages the whole
+   update and fails if the reviewed and merged trees differ. Do not request
+   acceptance or promotion authority until validation passes. Explicit user
+   acceptance advances this same receipt to `accepted` and then
    `awaiting_release`; release binds it directly and never reconstructs it.
 2. Confirm the issue closed (`Closes #N`) or close it with its terminal reason
    recorded, and confirm Status is `Done`.

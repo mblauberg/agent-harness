@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import os
 
 import pytest
 
@@ -203,6 +204,14 @@ def test_release_refuses_legacy_software_receipt_without_post_merge_binding(tmp_
 def test_binder_materialises_the_post_merge_chain_without_advancing_acceptance(tmp_path):
     run = merged_software_delivery(tmp_path)
     pr = json.loads((tmp_path / "evidence/github-pr.json").read_text())
+    ci = json.loads((tmp_path / "evidence/github-ci.json").read_text())
+    review_sources = []
+    source_dir = tmp_path / "review-source"
+    source_dir.mkdir()
+    for name in ("review-openai", "review-anthropic"):
+        source = source_dir / f"{name}.json"
+        source.write_bytes((tmp_path / "evidence" / f"{name}.json").read_bytes())
+        review_sources.append(source)
     generated = {"merged-source", "github-pr", "github-ci", "review-openai", "review-anthropic"}
     run["artifacts"] = [item for item in run["artifacts"] if item["id"] not in generated]
     run["security"]["artifact_surfaces"] = [
@@ -213,15 +222,41 @@ def test_binder_materialises_the_post_merge_chain_without_advancing_acceptance(t
         (tmp_path / "evidence" / f"{artifact_id}.json").unlink()
     receipt = tmp_path / "RUN.json"
     receipt.write_text(json.dumps(run))
-
-    result = subprocess.run([
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/bin/sh\n"
+        "case \"$*\" in\n"
+        "  *check-runs*) printf '%s\\n' \"$GH_CHECKS_JSON\" ;;\n"
+        "  *pulls*) printf '%s\\n' \"$GH_PR_JSON\" ;;\n"
+        "  *) exit 9 ;;\n"
+        "esac\n"
+    )
+    gh.chmod(0o755)
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "GH_PR_JSON": json.dumps({
+            "number": pr["number"], "state": "closed", "merged_at": "2026-07-10T00:08:00Z",
+            "html_url": pr["url"], "head": {"sha": pr["head_commit"]},
+            "merge_commit_sha": pr["merge_commit"],
+        }),
+        "GH_CHECKS_JSON": json.dumps({"check_runs": [{
+            "name": "ci-status", "head_sha": pr["merge_commit"], "status": "completed",
+            "conclusion": "success", "completed_at": ci["completed_at"],
+        }]}),
+    }
+    command = [
         str(ROOT / "skills/implement/scripts/bind_merged_delivery.py"), str(receipt),
         "--workspace-root", str(tmp_path), "--repository", pr["repository"],
-        "--pr-number", str(pr["number"]), "--pr-url", pr["url"],
-        "--head-commit", pr["head_commit"], "--merge-commit", pr["merge_commit"],
-        "--recorded-at", "2026-07-10T00:08:30Z",
-    ], capture_output=True, text=True)
-    assert result.returncode == 0, result.stdout + result.stderr
+        "--pr-number", str(pr["number"]),
+        *[argument for source in review_sources for argument in ("--review-artifact", str(source))],
+    ]
+    first = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    second = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    results = [first.communicate(), second.communicate()]
+    assert sorted((first.returncode, second.returncode)) == [0, 1], results
     bound = json.loads(receipt.read_text())
     assert bound["status"] == "awaiting_acceptance"
     assert bound["human_gates"]["acceptance"]["status"] == "pending"

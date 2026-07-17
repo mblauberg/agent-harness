@@ -47,8 +47,10 @@ production promotion remain separate gates.
 For a pull-request delivery, retain the complete ignored run directory until
 the merge commit and its `ci-status` check exist. Copy that directory into the
 synced primary checkout before removing the implementation worktree, then run
-`scripts/bind_merged_delivery.py` there. The binder keeps the receipt at
-`awaiting_acceptance` and adds:
+`scripts/bind_merged_delivery.py` there with the pre-existing typed exact-head
+review artifacts. The binder reads PR and `ci-status` truth through the
+authenticated GitHub API, holds an exclusive receipt lock, keeps the receipt
+at `awaiting_acceptance` and adds:
 
 - a canonical `git_revision` artifact whose digest is the exact merged commit's
   Git archive;

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Bind a merged Git artifact and typed GitHub evidence into a software RUN.json."""
+"""Bind live GitHub and exact-head review evidence into a software RUN.json."""
 
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -14,23 +15,28 @@ import tempfile
 from typing import Any
 
 
+ROOT = Path(__file__).resolve().parents[3]
+
+
 def fail(condition: bool, message: str) -> None:
     if condition:
         raise ValueError(message)
 
 
+def command(*argv: str, text: bool = True) -> str | bytes:
+    return subprocess.run(argv, check=True, capture_output=True, text=text).stdout
+
+
 def git(root: Path, *args: str, text: bool = True) -> str | bytes:
-    return subprocess.run(
-        ["git", "-C", str(root), *args], check=True, capture_output=True, text=text,
-    ).stdout
+    return command("git", "-C", str(root), *args, text=text)
 
 
-def utc(value: str) -> None:
-    fail(not value.endswith("Z"), "--recorded-at must be an ISO UTC timestamp")
-    try:
-        datetime.fromisoformat(value[:-1] + "+00:00")
-    except ValueError as exc:
-        raise ValueError("--recorded-at must be an ISO UTC timestamp") from exc
+def github(path: str) -> dict[str, Any]:
+    raw = command("gh", "api", "--method", "GET", path)
+    assert isinstance(raw, str)
+    value = json.loads(raw)
+    fail(not isinstance(value, dict), f"GitHub API {path} returned a non-object")
+    return value
 
 
 def artifact(path: str, artifact_id: str, raw: bytes) -> dict[str, Any]:
@@ -45,115 +51,156 @@ def encode(value: dict[str, Any]) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
+def delivery_validator():
+    path = ROOT / "skills/deliver/scripts/validate_delivery.py"
+    spec = importlib.util.spec_from_file_location("bind_merged_delivery_validator", path)
+    fail(not spec or not spec.loader, "delivery validator is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("receipt", type=Path)
     parser.add_argument("--workspace-root", type=Path, required=True)
     parser.add_argument("--repository", required=True, help="GitHub owner/repository")
     parser.add_argument("--pr-number", type=int, required=True)
-    parser.add_argument("--pr-url", required=True)
-    parser.add_argument("--head-commit", required=True)
-    parser.add_argument("--merge-commit", required=True)
-    parser.add_argument("--recorded-at", required=True)
+    parser.add_argument("--review-artifact", type=Path, action="append", required=True)
     args = parser.parse_args(argv)
     try:
         workspace = args.workspace_root.resolve()
         receipt = args.receipt.resolve()
         receipt.relative_to(workspace)
-        utc(args.recorded_at)
-        fail(args.pr_number < 1 or not args.repository or not args.pr_url, "PR identity is invalid")
-        run = json.loads(receipt.read_text())
-        fail(not isinstance(run, dict) or run.get("contract") != "delivery-run" or run.get("schema_version") != 1,
-             "receipt must be a delivery-run v1 object")
-        fail(run.get("profile") != "software", "receipt profile must be software")
-        fail(run.get("status") != "awaiting_acceptance", "receipt must remain awaiting_acceptance while merge evidence is bound")
-        fail(run.get("software_delivery") is not None, "receipt already has a software_delivery binding")
-        head_tree = str(git(workspace, "rev-parse", f"{args.head_commit}^{{tree}}")).strip()
-        merge_tree = str(git(workspace, "rev-parse", f"{args.merge_commit}^{{tree}}")).strip()
-        fail(head_tree != merge_tree, "merged tree differs from reviewed PR head")
-        archive = git(workspace, "archive", "--format=tar", args.merge_commit, text=False)
-        assert isinstance(archive, bytes)
-        ids = {item.get("id") for item in run.get("artifacts", []) if isinstance(item, dict)}
-        fixed_ids = {"merged-source", "github-pr", "github-ci"}
-        fail(bool(ids & fixed_ids), "receipt already uses a reserved software-delivery artifact id")
+        fail(args.pr_number < 1 or "/" not in args.repository, "PR identity is invalid")
+        lock_path = receipt.with_name(receipt.name + ".lock")
+        lock_path.touch(mode=0o600, exist_ok=True)
+        with lock_path.open("r+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            run = json.loads(receipt.read_text())
+            fail(not isinstance(run, dict) or run.get("contract") != "delivery-run" or run.get("schema_version") != 1,
+                 "receipt must be a delivery-run v1 object")
+            fail(run.get("profile") != "software", "receipt profile must be software")
+            fail(run.get("status") != "awaiting_acceptance", "receipt must remain awaiting_acceptance while merge evidence is bound")
+            fail(run.get("software_delivery") is not None, "receipt already has a software_delivery binding")
 
-        relative_run_dir = receipt.parent.relative_to(workspace)
-        evidence_dir = relative_run_dir / "github"
-        payloads: list[tuple[str, bytes]] = [
-            ("github-pr", encode({
-                "schema_version": 1, "contract": "github-pull-request-evidence",
-                "repository": args.repository, "number": args.pr_number, "url": args.pr_url,
-                "head_commit": args.head_commit, "merge_commit": args.merge_commit, "state": "merged",
-            })),
-            ("github-ci", encode({
-                "schema_version": 1, "contract": "github-ci-evidence",
-                "repository": args.repository, "commit": args.merge_commit,
-                "check": "ci-status", "conclusion": "success", "completed_at": args.recorded_at,
-            })),
-        ]
-        review_ids: list[str] = []
-        for index, review in enumerate(run.get("reviews", []), start=1):
-            if not isinstance(review, dict) or review.get("status") != "pass":
-                continue
-            artifact_id = f"github-review-{index}"
-            fail(artifact_id in ids, f"receipt already uses {artifact_id}")
-            review_ids.append(artifact_id)
-            payloads.append((artifact_id, encode({
-                "schema_version": 1, "contract": "code-review-evidence",
-                "repository": args.repository, "commit": args.head_commit,
-                "provider_family": review.get("provider_family"), "adapter": review.get("adapter"),
-                "model": review.get("model"), "verdict": "pass", "reviewed_at": args.recorded_at,
-            })))
-        fail(not review_ids, "receipt has no passing reviews to retain")
+            pr = github(f"repos/{args.repository}/pulls/{args.pr_number}")
+            head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
+            head_commit = head.get("sha")
+            merge_commit = pr.get("merge_commit_sha")
+            fail(pr.get("number") != args.pr_number or pr.get("state") != "closed" or not pr.get("merged_at"),
+                 "GitHub pull request is not merged")
+            fail(not isinstance(pr.get("html_url"), str) or not isinstance(head_commit, str)
+                 or not isinstance(merge_commit, str), "GitHub pull request identity is incomplete")
+            head_tree = str(git(workspace, "rev-parse", f"{head_commit}^{{tree}}")).strip()
+            merge_tree = str(git(workspace, "rev-parse", f"{merge_commit}^{{tree}}")).strip()
+            fail(head_tree != merge_tree, "merged tree differs from reviewed PR head")
+            archive = git(workspace, "archive", "--format=tar", merge_commit, text=False)
+            assert isinstance(archive, bytes)
 
-        additions = [{
-            "id": "merged-source",
-            "git_revision": {"repository": ".", "commit": args.merge_commit, "tree": merge_tree},
-            "media_type": "application/x-git-archive", "artifact_type": "source",
-            "digest": "sha256:" + hashlib.sha256(archive).hexdigest(),
-            "class": "canonical", "owner": "delivery-chair", "retention": "project-policy",
-        }]
-        for artifact_id, raw in payloads:
-            path = (evidence_dir / f"{artifact_id}.json").as_posix()
-            additions.append(artifact(path, artifact_id, raw))
-        run["artifacts"].extend(additions)
-        run["security"]["artifact_surfaces"].append({"artifact_id": "merged-source", "surfaces": ["source"]})
-        run["software_delivery"] = {
-            "schema_version": 1, "contract": "software-delivery-binding",
-            "canonical_artifact_id": "merged-source", "pull_request_artifact_id": "github-pr",
-            "ci_artifact_id": "github-ci", "review_artifact_ids": review_ids,
-        }
-        run["checkpoint"].update({
-            "generation": run["checkpoint"]["generation"] + 1,
-            "current_slice": "awaiting-acceptance",
-            "next_action": "request human acceptance of the exact merged artifact",
-        })
+            checks = github(
+                f"repos/{args.repository}/commits/{merge_commit}/check-runs"
+                "?check_name=ci-status&filter=latest&per_page=100"
+            ).get("check_runs")
+            fail(not isinstance(checks, list), "GitHub check-runs response is incomplete")
+            matches = [
+                item for item in checks if isinstance(item, dict)
+                and item.get("name") == "ci-status" and item.get("head_sha") == merge_commit
+                and item.get("status") == "completed" and item.get("conclusion") == "success"
+                and isinstance(item.get("completed_at"), str)
+            ]
+            fail(len(matches) != 1, "exact merged commit lacks one successful completed ci-status check")
+            check = matches[0]
 
-        target_dir = workspace / evidence_dir
-        target_dir.mkdir(parents=True, exist_ok=True)
-        for artifact_id, raw in payloads:
-            target = target_dir / f"{artifact_id}.json"
-            fail(target.exists() and target.read_bytes() != raw,
-                 f"refusing to replace conflicting evidence artifact: {target}")
-        for artifact_id, raw in payloads:
-            target = target_dir / f"{artifact_id}.json"
-            if not target.exists():
-                target.write_bytes(raw)
-        fd, temporary = tempfile.mkstemp(prefix=".RUN.", suffix=".json", dir=receipt.parent)
-        try:
-            with os.fdopen(fd, "w") as handle:
-                json.dump(run, handle, indent=2)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, receipt)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+            ids = {item.get("id") for item in run.get("artifacts", []) if isinstance(item, dict)}
+            fail(bool(ids & {"merged-source", "github-pr", "github-ci"}),
+                 "receipt already uses a reserved software-delivery artifact id")
+            relative_run_dir = receipt.parent.relative_to(workspace)
+            evidence_dir = relative_run_dir / "github"
+            payloads: list[tuple[str, bytes]] = [
+                ("github-pr", encode({
+                    "schema_version": 1, "contract": "github-pull-request-evidence",
+                    "repository": args.repository, "number": args.pr_number, "url": pr["html_url"],
+                    "head_commit": head_commit, "merge_commit": merge_commit, "state": "merged",
+                })),
+                ("github-ci", encode({
+                    "schema_version": 1, "contract": "github-ci-evidence",
+                    "repository": args.repository, "commit": merge_commit,
+                    "check": "ci-status", "conclusion": "success", "completed_at": check["completed_at"],
+                })),
+            ]
+            review_ids: list[str] = []
+            for index, source in enumerate(args.review_artifact, start=1):
+                raw = source.resolve().read_bytes()
+                review = json.loads(raw)
+                fail(not isinstance(review, dict) or review.get("contract") != "code-review-evidence"
+                     or review.get("schema_version") != 1 or review.get("repository") != args.repository
+                     or review.get("commit") != head_commit or review.get("verdict") != "pass",
+                     f"review artifact {index} is not a passing exact-head review")
+                artifact_id = f"github-review-{index}"
+                fail(artifact_id in ids, f"receipt already uses {artifact_id}")
+                review_ids.append(artifact_id)
+                payloads.append((artifact_id, raw))
+
+            additions = [{
+                "id": "merged-source",
+                "git_revision": {"repository": ".", "commit": merge_commit, "tree": merge_tree},
+                "media_type": "application/x-git-archive", "artifact_type": "source",
+                "digest": "sha256:" + hashlib.sha256(archive).hexdigest(),
+                "class": "canonical", "owner": "delivery-chair", "retention": "project-policy",
+            }]
+            for artifact_id, raw in payloads:
+                additions.append(artifact((evidence_dir / f"{artifact_id}.json").as_posix(), artifact_id, raw))
+            run["artifacts"].extend(additions)
+            run["security"]["artifact_surfaces"].append({"artifact_id": "merged-source", "surfaces": ["source"]})
+            run["software_delivery"] = {
+                "schema_version": 1, "contract": "software-delivery-binding",
+                "canonical_artifact_id": "merged-source", "pull_request_artifact_id": "github-pr",
+                "ci_artifact_id": "github-ci", "review_artifact_ids": review_ids,
+            }
+            run["checkpoint"].update({
+                "generation": run["checkpoint"]["generation"] + 1,
+                "current_slice": "awaiting-acceptance",
+                "next_action": "request human acceptance of the exact merged artifact",
+            })
+
+            target_dir = workspace / evidence_dir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(prefix=".software-bind-", dir=receipt.parent) as temporary:
+                stage = Path(temporary)
+                for artifact_id, raw in payloads:
+                    target = target_dir / f"{artifact_id}.json"
+                    fail(target.exists() and target.read_bytes() != raw,
+                         f"refusing to replace conflicting evidence artifact: {target}")
+                    staged = stage / f"{artifact_id}.json"
+                    staged.write_bytes(raw)
+                    with staged.open("rb") as handle:
+                        os.fsync(handle.fileno())
+                staged_receipt = stage / "RUN.json"
+                staged_receipt.write_text(json.dumps(run, indent=2) + "\n")
+                with staged_receipt.open("rb") as handle:
+                    os.fsync(handle.fileno())
+                for artifact_id, _ in payloads:
+                    target = target_dir / f"{artifact_id}.json"
+                    if not target.exists():
+                        os.replace(stage / f"{artifact_id}.json", target)
+                fsync_directory(target_dir)
+                validator = delivery_validator()
+                validator.validate(run, ROOT, receipt_dir=receipt.parent, workspace_root=workspace, verify_hashes=True)
+                os.replace(staged_receipt, receipt)
+                fsync_directory(receipt.parent)
+        print(f"PASS: bound merged software artifact {merge_commit} to {receipt}")
     except (OSError, ValueError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
         print(f"FAIL: {exc}")
         return 1
-    print(f"PASS: bound merged software artifact {args.merge_commit} to {receipt}")
     return 0
 
 
