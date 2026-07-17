@@ -45,8 +45,9 @@ or `~/.claude/workflows/` (personal).
 
 - Resolve every stage's task class to tier, catalog identity and effort before
   dispatch. Claude binds the runtime-discovered effective model and effort and
-  records the route receipt from a fresh Claude capability snapshot; inheritance
-  is allowed only when explicit and recorded.
+  records the route receipt from an authoritative runtime capability producer.
+  Claude task-class dispatch remains unavailable until that producer exists;
+  inheritance is allowed only when explicit and recorded.
 - Pilot a small slice first (one directory, one chapter, one claim family) to gauge spend; the
   agent caps bound runaway cost.
 - Pre-add the shell commands agents will need to the allowlist, or a long run stalls on prompts.

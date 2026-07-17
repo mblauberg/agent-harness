@@ -28,15 +28,15 @@ COMPATIBILITY_ADAPTER_IDS = {
     "pi": "pi-rpc",
 }
 EFFORT_ORDER = {name: index for index, name in enumerate(("low", "medium", "high", "xhigh", "max", "ultra"))}
+ALIAS_ORDER = {name: index for index, name in enumerate(("scout", "workhorse", "flagship"))}
 TRUSTED_CAPABILITY_SOURCES = {
     "codex debug models": "codex",
-    "claude runtime models": "claude",
 }
-TASK_CLASS_ROLES = {
-    "mechanical": "worker",
-    "legwork": "worker",
-    "critical-review": "critical-review",
-    "orchestration": "orchestrator",
+TASK_CLASS_POLICY = {
+    "mechanical": {"minimum_alias": "scout", "minimum_effort": "low", "role": "worker"},
+    "legwork": {"minimum_alias": "workhorse", "minimum_effort": "medium", "role": "worker"},
+    "critical-review": {"minimum_alias": "flagship", "minimum_effort": "high", "role": "critical-review"},
+    "orchestration": {"minimum_alias": "flagship", "minimum_effort": "high", "role": "orchestrator"},
 }
 
 
@@ -726,8 +726,9 @@ def main(argv: list[str] | None = None) -> int:
         if bool(args.alias) == bool(args.task_class):
             return reject("route_input_conflict" if args.alias else "route_input_missing")
         if args.task_class:
+            policy = TASK_CLASS_POLICY.get(args.task_class)
             route = catalog.get("task_class_routes", {}).get(args.task_class)
-            if route is None:
+            if policy is None or route is None:
                 return reject("unknown_task_class")
             if not isinstance(route, dict):
                 return reject("task_class_config_invalid")
@@ -735,9 +736,11 @@ def main(argv: list[str] | None = None) -> int:
             route_effort = route.get("effort")
             route_role = route.get("role")
             if (
-                route_alias not in {"flagship", "workhorse", "scout"}
+                route_alias not in ALIAS_ORDER
                 or route_effort not in EFFORT_ORDER
-                or route_role != TASK_CLASS_ROLES.get(args.task_class)
+                or ALIAS_ORDER[route_alias] < ALIAS_ORDER[policy["minimum_alias"]]
+                or EFFORT_ORDER[route_effort] < EFFORT_ORDER[policy["minimum_effort"]]
+                or route_role != policy["role"]
             ):
                 return reject(
                     "task_class_config_invalid",

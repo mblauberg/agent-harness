@@ -36,15 +36,31 @@ function nonEmptyString(record: Record<string, unknown>, key: string): boolean {
   return typeof record[key] === "string" && record[key].length > 0;
 }
 
+const aliasRank = new Map([["scout", 0], ["workhorse", 1], ["flagship", 2]]);
+const effortRank = new Map([["low", 0], ["medium", 1], ["high", 2], ["xhigh", 3], ["max", 4], ["ultra", 5]]);
+const taskClassPolicy = new Map([
+  ["mechanical", { minimumAlias: "scout", minimumEffort: "low", role: "worker" }],
+  ["legwork", { minimumAlias: "workhorse", minimumEffort: "medium", role: "worker" }],
+  ["critical-review", { minimumAlias: "flagship", minimumEffort: "high", role: "critical-review" }],
+  ["orchestration", { minimumAlias: "flagship", minimumEffort: "high", role: "orchestrator" }],
+]);
+
 function isValidReceipt(receipt: Record<string, unknown>, request: ModelRouteRequest): boolean {
   if (
     receipt.schema_version !== 1 || typeof receipt.status !== "string" ||
     receipt.adapter !== request.adapter || receipt.role !== request.role
   ) return false;
   if (request.taskClass !== undefined) {
+    const policy = taskClassPolicy.get(request.taskClass);
+    const receiptAliasRank = aliasRank.get(String(receipt.alias));
+    const receiptEffortRank = effortRank.get(String(receipt.requested_effort));
     if (
       receipt.task_class !== request.taskClass || receipt.route_source !== "task-class" ||
-      (receipt.status === "ok" && !nonEmptyString(receipt, "alias"))
+      (receipt.status === "ok" && (
+        policy === undefined || request.role !== policy.role ||
+        receiptAliasRank === undefined || receiptAliasRank < aliasRank.get(policy.minimumAlias)! ||
+        receiptEffortRank === undefined || receiptEffortRank < effortRank.get(policy.minimumEffort)!
+      ))
     ) {
       return false;
     }
@@ -57,11 +73,14 @@ function isValidReceipt(receipt: Record<string, unknown>, request: ModelRouteReq
   }
   if (receipt.status !== "ok") return true;
   if (
-    !nonEmptyString(receipt, "requested_effort") || typeof receipt.effort !== "string" ||
+    receipt.lead_family !== request.leadFamily ||
+    !nonEmptyString(receipt, "requested_effort") || !nonEmptyString(receipt, "effort") ||
     !nonEmptyString(receipt, "effort_capability_source") || !nonEmptyString(receipt, "endpoint_provider") ||
     !nonEmptyString(receipt, "model_family") || typeof receipt.resolved_model !== "string" ||
     !nonEmptyString(receipt, "identity_source")
   ) return false;
+  const distinctFromLead = receipt.model_family !== request.leadFamily;
+  if (receipt.distinct_from_lead !== distinctFromLead || (request.requireDistinct && !distinctFromLead)) return false;
   if (receipt.model_selection === "account-default") {
     return receipt.resolved_model === "" && nonEmptyString(receipt, "catalog_model");
   }

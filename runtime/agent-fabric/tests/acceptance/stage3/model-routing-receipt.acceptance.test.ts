@@ -149,6 +149,46 @@ console.log(JSON.stringify({ schema_version: 1, status: "ok", adapter: "codex", 
     await expect(readFile(receiptPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it.each([
+    ["downgraded alias", "scout", "high", "high", "openai", "anthropic", true],
+    ["downgraded effort", "flagship", "low", "low", "openai", "anthropic", true],
+    ["same-family reviewer", "flagship", "high", "high", "openai", "openai", false],
+    ["wrong lead family", "flagship", "high", "high", "anthropic", "google", true],
+    ["empty effective effort", "flagship", "high", "", "openai", "anthropic", true],
+  ])("rejects and does not persist a task-class receipt with %s", async (
+    _case, alias, requestedEffort, effectiveEffort, receiptLeadFamily, modelFamily, distinctFromLead,
+  ) => {
+    const resolveRoute = requirePublicFunction("resolveModelRouteReceipt");
+    const directory = await mkdtemp(join(tmpdir(), "agent-fabric-policy-mismatch-"));
+    const receiptPath = join(directory, "model-route.json");
+    const routerPath = join(directory, "fake-router");
+    await writeFile(routerPath, `#!/usr/bin/env node
+console.log(JSON.stringify({
+  schema_version: 1, status: "ok", adapter: "codex", role: "critical-review",
+  task_class: "critical-review", route_source: "task-class", alias: ${JSON.stringify(alias)},
+  requested_effort: ${JSON.stringify(requestedEffort)}, effort: ${JSON.stringify(effectiveEffort)},
+  effort_capability_source: "runtime-model-catalog", endpoint_provider: "openai",
+  lead_family: ${JSON.stringify(receiptLeadFamily)}, model_family: ${JSON.stringify(modelFamily)},
+  distinct_from_lead: ${JSON.stringify(distinctFromLead)}, resolved_model: "reviewer",
+  identity_source: "runtime-capability+catalog"
+}));
+`, { mode: 0o700 });
+
+    await expect(resolveRoute({
+      routerPath,
+      receiptPath,
+      request: {
+        adapter: "codex",
+        taskClass: "critical-review",
+        capabilitiesFile: join(directory, "capabilities.json"),
+        role: "critical-review",
+        leadFamily: "openai",
+        requireDistinct: true,
+      },
+    })).rejects.toThrow(/invalid receipt/u);
+    await expect(readFile(receiptPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("retains the complete rejection receipt and fails closed for a disabled adapter", async () => {
     const resolveRoute = requirePublicFunction("resolveModelRouteReceipt");
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-route-receipt-"));

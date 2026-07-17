@@ -30,7 +30,9 @@ must be explicit and recorded, never inferred from an omitted binding.
 Task-class dispatch rejects a mismatched role and requires a fresh, adapter-bound
 runtime capability snapshot that verifies the effective model and effort. Codex
 account-default transport still omits the literal model; its snapshot verifies
-effort while the receipt retains policy identity.
+effort while the receipt retains policy identity. Claude task-class dispatch is
+unavailable until an authoritative runtime capability producer exists; a
+caller-authored source label is not capability evidence.
 
 ## Tiers (relative, family-agnostic)
 

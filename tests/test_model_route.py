@@ -153,7 +153,7 @@ def test_task_classes_bind_codex_policy_identity_without_transport_model(
     assert route["identity_source"] == "account-default"
 
 
-def test_claude_critical_review_task_class_uses_trusted_runtime_reviewer_route(tmp_path):
+def test_claude_task_class_rejects_caller_authored_capability_claim(tmp_path):
     snapshot = tmp_path / "claude-caps.json"
     snapshot.write_text(json.dumps(capability_snapshot({
         "opus": {"resolved_model": "opus", "supported_efforts": ["high"]},
@@ -162,12 +162,8 @@ def test_claude_critical_review_task_class_uses_trusted_runtime_reviewer_route(t
         "--adapter", "claude", "--task-class", "critical-review",
         "--role", "critical-review", "--capabilities-file", str(snapshot),
     )
-    assert result.returncode == 0
-    assert route["alias"] == "flagship"
-    assert route["requested_effort"] == "high"
-    assert route["resolved_model"] == "opus"
-    assert route["identity_source"] == "runtime-capability+catalog"
-    assert route["effort_capability_source"] == "runtime-model-catalog"
+    assert result.returncode == 1
+    assert route["status"] == "capability_snapshot_untrusted"
 
 
 def test_task_class_without_trusted_capability_evidence_fails_closed():
@@ -247,6 +243,30 @@ def test_task_class_role_policy_cannot_be_reconfigured_to_worker(tmp_path, monke
     result = router.main([
         "resolve", "--adapter", "claude", "--task-class", "critical-review",
         "--role", "worker", "--adapter-gate", "direct-cli",
+    ])
+
+    route = json.loads(capsys.readouterr().out)
+    assert result == 2
+    assert route["status"] == "task_class_config_invalid"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("alias", "scout"), ("effort", "low")),
+)
+def test_critical_review_policy_rejects_valid_vocabulary_downgrade(
+    tmp_path, monkeypatch, capsys, field, value
+):
+    router = load_router()
+    catalog = json.loads((ROOT / "config" / "model-routing.json").read_text())
+    catalog["task_class_routes"]["critical-review"][field] = value
+    catalog_path = tmp_path / "model-routing.json"
+    catalog_path.write_text(json.dumps(catalog))
+    monkeypatch.setattr(router, "CATALOG_PATH", catalog_path)
+
+    result = router.main([
+        "resolve", "--adapter", "claude", "--task-class", "critical-review",
+        "--role", "critical-review", "--adapter-gate", "direct-cli",
     ])
 
     route = json.loads(capsys.readouterr().out)
