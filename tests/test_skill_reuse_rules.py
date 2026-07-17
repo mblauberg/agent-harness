@@ -1,4 +1,5 @@
 import json
+import importlib.util
 from pathlib import Path
 
 import yaml
@@ -30,17 +31,51 @@ def test_reuse_rules_live_in_the_existing_routing_portfolio_not_prose_pair_files
         assert selected
 
 
-def test_global_promotion_boundary_has_one_project_negative_and_two_project_boundary():
-    fixtures = yaml.safe_load(
-        read("skills/skill-craft/evals/boundary_trace_cases.yaml")
-    )["routing_reference_cases"]
-    cases = {case["id"]: case for case in fixtures}
-    one = cases["sc-019"]
-    two = cases["sc-020"]
-    assert "one project" in one["prompt"]
-    assert one["expected"]["promotion_decision"] == "remain-project-local"
-    assert "two unrelated projects" in two["prompt"]
-    assert two["expected"]["promotion_decision"] == "eligible-for-global-promotion"
+def promotion_module():
+    path = ROOT / "skills/skill-craft/scripts/promotion_readiness.py"
+    spec = importlib.util.spec_from_file_location("promotion_readiness", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def project(project_id: str, *, status: str = "proven") -> dict[str, str]:
+    return {
+        "project_id": project_id,
+        "evidence_id": f"evidence-{project_id}",
+        "status": status,
+    }
+
+
+def test_global_promotion_requires_two_distinct_projects_with_proven_evidence():
+    decide = promotion_module().decide
+    assert decide({"schema_version": 1, "project_evidence": [project("alpha")]}) == {
+        "schema_version": 1,
+        "decision": "remain-project-local",
+        "proven_project_count": 1,
+    }
+    assert decide({
+        "schema_version": 1,
+        "project_evidence": [project("alpha"), project("beta")],
+    }) == {
+        "schema_version": 1,
+        "decision": "eligible-for-global-promotion",
+        "proven_project_count": 2,
+    }
+
+
+def test_global_promotion_rejects_duplicate_and_nonproven_evidence_mutations():
+    decide = promotion_module().decide
+    duplicate = [project("alpha"), {**project("alpha"), "evidence_id": "second"}]
+    assert decide({"schema_version": 1, "project_evidence": duplicate})["decision"] == "remain-project-local"
+    mixed = [project("alpha"), project("beta", status="failed")]
+    assert decide({"schema_version": 1, "project_evidence": mixed})["decision"] == "remain-project-local"
+    with __import__("pytest").raises(ValueError, match="duplicate evidence_id"):
+        decide({
+            "schema_version": 1,
+            "project_evidence": [project("alpha"), {**project("beta"), "evidence_id": "evidence-alpha"}],
+        })
 
 
 def test_writing_and_documentation_rules_encode_the_reusable_boundaries():
