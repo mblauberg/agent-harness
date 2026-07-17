@@ -379,6 +379,10 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
     return this.#allowedOperations;
   }
 
+  get idleTimeoutMs(): number {
+    return this.#limits.idleTimeoutMs;
+  }
+
   async call<Operation extends ProtocolOperation>(
     operation: Operation,
     input: OperationInputMap[Operation],

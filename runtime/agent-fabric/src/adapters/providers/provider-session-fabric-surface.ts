@@ -1,6 +1,8 @@
 import {
   buildMcpDescriptorSet,
+  FABRIC_OPERATIONS,
   OPERATION_REGISTRY,
+  PROTOCOL_LIMITS,
   parseOperationInputForPrincipal,
   parseOperationResult,
   renderMcpReceipt,
@@ -9,15 +11,73 @@ import {
   type ProtocolFeature,
   type ProtocolPrincipal,
 } from "@local/agent-fabric-protocol";
+import { ProviderAdapterError } from "./types.js";
 
 export type ProviderSessionProtocolTransport = {
   readonly features: readonly ProtocolFeature[];
   readonly principal: ProtocolPrincipal;
   readonly allowedOperations: ReadonlySet<FabricOperation>;
+  readonly idleTimeoutMs?: number;
   readonly closed?: boolean;
   call(operation: FabricOperation, input: unknown): Promise<unknown>;
   close(): Promise<void>;
 };
+
+/** Keeps an authenticated retained bridge inside its negotiated idle window. */
+export class RetainedProviderSessionKeepalive {
+  readonly #transport: ProviderSessionProtocolTransport;
+  readonly #intervalMs: number;
+  #timer: NodeJS.Timeout | undefined;
+  #inFlight = false;
+
+  constructor(transport: ProviderSessionProtocolTransport) {
+    if (!transport.allowedOperations.has(FABRIC_OPERATIONS.getMailboxState)) {
+      throw new ProviderAdapterError(
+        "CAPABILITY_UNAVAILABLE",
+        "retained provider-session keepalive requires mailbox read",
+      );
+    }
+    this.#transport = transport;
+    const idleTimeoutMs = transport.idleTimeoutMs ?? PROTOCOL_LIMITS.idleTimeoutMs;
+    // Leave one full retry window before the negotiated idle deadline when a
+    // live transport transiently rejects a heartbeat.
+    this.#intervalMs = Math.max(1, Math.floor(idleTimeoutMs / 3));
+  }
+
+  start(): void {
+    if (this.#timer !== undefined) return;
+    this.#timer = setInterval(() => { void this.#tick(); }, this.#intervalMs);
+    this.#timer.unref();
+  }
+
+  stop(): void {
+    if (this.#timer === undefined) return;
+    clearInterval(this.#timer);
+    this.#timer = undefined;
+  }
+
+  async #tick(): Promise<void> {
+    if (this.#inFlight) return;
+    if (Reflect.get(this.#transport, "closed") === true) {
+      this.stop();
+      return;
+    }
+    this.#inFlight = true;
+    try {
+      parseOperationResult(
+        FABRIC_OPERATIONS.getMailboxState,
+        await this.#transport.call(FABRIC_OPERATIONS.getMailboxState, {}),
+      );
+    } catch {
+      if (Reflect.get(this.#transport, "closed") === true) {
+        this.stop();
+        await this.#transport.close().catch(() => undefined);
+      }
+    } finally {
+      this.#inFlight = false;
+    }
+  }
+}
 
 export type ProviderSessionToolResult = Readonly<{
   descriptor: McpToolDescriptor;
