@@ -51,10 +51,7 @@ target; never infer it from the working directory.
    make.
 6. **Project board**: create it with the six standard statuses:
    [references/project-board.md](references/project-board.md).
-7. **Optional agent trigger**: `agent-go` authorises; Project Status records
-   readiness. Dispatch automation is outside this baseline and needs separate
-   authority.
-8. **CODEOWNERS / Dependabot**: stack-specific; `templates/dependabot.yml`
+7. **CODEOWNERS / Dependabot**: stack-specific; `templates/dependabot.yml`
    keeps one durable convention (Dependabot PRs carry only the
    `dependencies` label) with a comment showing where to add ecosystems.
 
