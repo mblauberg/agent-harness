@@ -35,13 +35,12 @@ It is built from three parts:
 Requirements:
 
 - Git and Python 3.11+;
-- Claude Code, Codex, or both;
+- a subscription-authenticated Claude Code or Codex installation for each
+  primary client you install;
 - Node.js `>=24.15.0 <25` and npm `>=11.12.1 <12` to run repository
   verification (the suite shells out to `node`); and
-- PyYAML and pytest for the harness checks. CI installs the versions pinned
-  in `uv.lock`; locally, `uv sync --only-group test` reproduces them, or any
-  interpreter with both packages works (`scripts/check-harness` honours
-  `HARNESS_PYTHON`).
+- PyYAML and pytest for harness checks (`uv sync --only-group test` installs
+  the locked versions; `scripts/check-harness` honours `HARNESS_PYTHON`).
 
 Install either platform independently, or both:
 
@@ -57,21 +56,47 @@ npm ci
 "$AGENTS_HOME/scripts/install-harness" --platform claude
 "$AGENTS_HOME/scripts/install-harness" --platform codex
 
-# verify the harness and Fabric independently
-provenant check --doctor
+# discover commands, then verify Fabric
+provenant help
 provenant doctor
+
+# run the full repository gate when changing Provenant
+provenant check
 ```
 
 Installation links each skill into `~/.claude/skills/` and `~/.codex/skills/`.
 It also links the thin `provenant` command into
 `${PROVENANT_BIN_DIR:-$HOME/.local/bin}` and warns when that directory is not
-on `PATH`; it never edits shell startup files. The command delegates unchanged
-to the existing `route`, `worktree`, `check` and `fabric` scripts. Its `doctor`
-command is exactly `scripts/agent-fabric doctor`.
-It preserves an existing `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md`: the file
-stays, the installer exits 3, and prints one bootstrap line to paste in. Skills
-still link, so exit 3 is expected. `provenant check --doctor` reports which
-routes the config resolves to; `provenant doctor` checks Fabric configuration.
+on `PATH`; it never edits shell startup files. `provenant doctor` delegates to
+the Fabric doctor.
+An instruction symlink or file referencing both shared instructions is
+accepted. Other files are preserved; the installer exits 3 and
+prints the bootstrap line to add. `provenant doctor` checks Fabric configuration
+and enabled adapters; `provenant check` is the full repository gate.
+
+The checked-in profile enables Claude, Codex, Agy and Cursor, so install all four
+CLIs for `provenant doctor`; authenticate through their subscription flows
+before use. Doctor checks identity and non-answer interfaces, not login or
+quota. Provenant does not set or persist provider API keys for Agy or Cursor.
+
+| Client or provider | Current integration |
+|---|---|
+| Claude Code | Primary client and enabled Anthropic provider |
+| Codex | Primary client and enabled OpenAI provider |
+| Agy | Enabled optional Gemini/Claude provider |
+| Cursor | Enabled optional Grok/Composer provider |
+| Kiro | Global MCP client registered; provider disabled ([#265](https://github.com/mblauberg/provenant/issues/265)) |
+| OpenCode | Global instructions only; no Fabric seat/provider ([#253](https://github.com/mblauberg/provenant/issues/253)) |
+
+Provider CLI versions and digests are diagnostic observations, not admission
+locks. Provenant revalidates vendor identity, wrapper provenance and each
+bounded provider interface at point of use, so an ordinary signed CLI update
+does not require a compatibility-table edit.
+
+On first Fabric use in a project, the agent trusts only its exact canonical Git
+root (or current directory outside Git). If no seat exists, it calls the global
+MCP's no-argument `fabric_bootstrap`; the same connection then exposes normal
+Fabric tools. No project onboarding is needed.
 
 <details>
 <summary>Installation details: filesystem layout, Codex config and uninstall</summary>
@@ -141,26 +166,6 @@ acceptance. The loop is [`deliver`](skills/deliver/SKILL.md), the kernel binding
 and [`implement`](skills/implement/SKILL.md) is its software front door. Full
 lifecycle: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-<details>
-<summary>A worked example: add rate limiting to a public API</summary>
-
-```text
-user   add rate limiting to the public API
-scope  writes the spec, acceptance criteria, risk tier and write paths
-       -- STOPS. The user approves, revises or stops.
-user   approved
-impl   tdd for the new behaviour, then the change
-       runs the checks: 41 passed
-       the other primary reviews the diff in a fresh context, having never written it
-       1 blocking finding: the limiter is not per-tenant
-       repairs, re-verifies, re-reviews: clean
-       -- STOPS. The user accepts, rescopes or stops.
-```
-
-Nothing was released. That decision stays with the user.
-
-</details>
-
 ## Important constraints
 
 Coverage scales with the risk tier the work is scoped at:
@@ -182,9 +187,9 @@ Durable boundaries:
 
 - access and credentials never grant authority;
 - creating branches and worktrees for implementation is pre-authorised by the
-  constitution, and agents merge pull requests that pass their tier's review
-  pressure and green CI; deletion, force-removal and pushes to shared branches
-  outside authorised merges stay gated;
+  constitution; merge authority comes from the owning repository (this repo
+  grants it through its [GitHub runbook](docs/runbooks/github-workflow.md));
+  deletion, force-removal and unauthorised shared-branch pushes stay gated;
 - no two agents write one source surface at once; and
 - specification approval, acceptance and release stay separate user decisions
   ([`HARNESS.md`](HARNESS.md)).

@@ -150,9 +150,10 @@ content retains its caller-owned mode. Conflict handling never rolls that object
 back over a pathname that a concurrent writer may have changed. Reconcile both
 the current client configuration and recovery object before rerunning.
 
-Primary provider execution uses the exact Claude Code and Codex packages in
-the root lockfile, not mutable global or Homebrew installations. On the
-supported host, restore and verify that closure with:
+Primary provider execution uses the locked Claude Agent SDK and the installed,
+vendor-signed Claude Code and Codex CLIs through repository-owned wrappers. On
+the supported host, restore the package closure and verify both boundaries
+with:
 
 ```sh
 npm ci --no-audit --no-fund
@@ -241,6 +242,9 @@ predecessor token; the project session, run and chair do not change. If exact
 trust or the generation changed, renewal fails closed. Stop and restart a
 stale proxy after another host completes the cutover. Operator-created runs
 continue to use the explicit `mcp provision` flow below.
+The bounded bootstrap authority currently lasts 365 days; rollover without
+orphaning delegated descendants is tracked in
+[#281](https://github.com/mblauberg/provenant/issues/281).
 
 In production Console, Launch is available only when the dedicated
 `projectSessions.prepareLaunch` operation and explicit operator-action commit
