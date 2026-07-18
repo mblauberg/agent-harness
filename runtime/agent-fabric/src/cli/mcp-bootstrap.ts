@@ -7,7 +7,6 @@ import type { FabricPaths } from "./paths.js";
 import {
   installSeatGeneration,
   parseMcpSeat,
-  readActiveSeatGeneration,
   resolveSeatProject,
   type SeatMetadata,
 } from "./seat-store.js";
@@ -112,14 +111,17 @@ export async function bootstrapMcpSeat(input: {
       installed = await install(stagedSeats(true));
     } catch (cause: unknown) {
       if (cause instanceof Error && cause.message.includes("existing MCP seat generation differs")) {
-        const active = await readActiveSeatGeneration({
-          stateDirectory: input.paths.stateDirectory,
-          projectPath: result.canonicalRoot,
-        });
-        if (active?.generation === result.generation) {
+        try {
           installed = await install(stagedSeats(false));
-        } else {
-          throw cause;
+        } catch (legacyCause: unknown) {
+          if (!(legacyCause instanceof Error) || !legacyCause.message.includes("active MCP seat generation changed")) {
+            throw legacyCause;
+          }
+          throw new McpBootstrapError(
+            "BOOTSTRAP_GENERATION_CHANGED",
+            "Fabric bootstrap seat generation changed during local cutover",
+            { cause: legacyCause },
+          );
         }
       } else {
         if (!(cause instanceof Error) || !cause.message.includes("active MCP seat generation changed")) throw cause;
