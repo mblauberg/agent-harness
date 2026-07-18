@@ -9,11 +9,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install-harness"
 
 
-def run(platform: str, home: Path, **extra_env):
+def run(platform: str, home: Path, *arguments: str, **extra_env):
     env = os.environ.copy()
     env.update({"HOME": str(home), **extra_env})
     return subprocess.run(
-        [str(SCRIPT), "--platform", platform],
+        [str(SCRIPT), "--platform", platform, *arguments],
         cwd=ROOT,
         env=env,
         text=True,
@@ -91,6 +91,49 @@ def test_installs_codex_skills_and_global_instructions(tmp_path):
     second = run("codex", tmp_path, CODEX_HOME=str(config))
     assert second.returncode == 0, second.stderr
     assert codex_config.read_text() == configured
+
+
+def test_all_mcp_clients_are_an_explicit_subscription_native_opt_in(tmp_path):
+    config = tmp_path / "codex-home"
+    config.mkdir()
+
+    result = run("codex", tmp_path, "--mcp-clients", "all", CODEX_HOME=str(config))
+
+    assert result.returncode == 0, result.stderr
+    for client, path in {
+        "cursor": tmp_path / ".cursor/mcp.json",
+        "agy": tmp_path / ".gemini/config/mcp_config.json",
+        "kiro": tmp_path / ".kiro/settings/mcp.json",
+    }.items():
+        registration = json.loads(path.read_text())["mcpServers"]["agent-fabric"]
+        assert registration["env"]["AGENT_FABRIC_SEAT"] == "codex"
+        assert registration["env"]["AGENT_FABRIC_CLIENT_LABEL"] == client
+        assert "AGENT_FABRIC_PROJECT_PATH" not in registration["env"]
+    opencode = json.loads((tmp_path / ".config/opencode/opencode.jsonc").read_text())
+    registration = opencode["mcp"]["agent-fabric"]
+    assert registration["command"] == [str(ROOT / "scripts" / "agent-fabric-mcp")]
+    assert registration["environment"]["AGENT_FABRIC_SEAT"] == "codex"
+    assert registration["environment"]["AGENT_FABRIC_CLIENT_LABEL"] == "opencode"
+    assert all("API_KEY" not in key for key in registration["environment"])
+
+
+def test_primary_mcp_clients_remain_the_default(tmp_path):
+    config = tmp_path / "codex-home"
+    config.mkdir()
+
+    result = run("codex", tmp_path, CODEX_HOME=str(config))
+
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / ".cursor/mcp.json").exists()
+    assert not (tmp_path / ".gemini/config/mcp_config.json").exists()
+    assert not (tmp_path / ".kiro/settings/mcp.json").exists()
+    assert not (tmp_path / ".config/opencode/opencode.jsonc").exists()
+
+
+def test_rejects_unknown_mcp_client_selection(tmp_path):
+    result = run("codex", tmp_path, "--mcp-clients", "optional")
+    assert result.returncode == 2
+    assert "--mcp-clients <primary|all>" in result.stderr
 
 
 def test_codex_skill_override_conflict_fails_without_rewriting_config(tmp_path):

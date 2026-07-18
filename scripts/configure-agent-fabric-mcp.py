@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Configure project-dynamic Agent Fabric MCP entries for primary clients."""
+"""Configure project-dynamic Agent Fabric MCP entries for supported clients."""
 
 from __future__ import annotations
 
@@ -137,11 +137,16 @@ def _text(snapshot: ConfigSnapshot, client: str) -> str:
         raise RegistrationError(f"{client} config is not UTF-8: {exc}") from exc
 
 
-def registration(agents_home: Path, state_directory: Path, seat: str) -> dict[str, Any]:
+def registration(
+    agents_home: Path,
+    state_directory: Path,
+    seat: str,
+    client_label: str | None = None,
+) -> dict[str, Any]:
     environment = {
         "AGENT_FABRIC_STATE_DIRECTORY": str(state_directory),
         "AGENT_FABRIC_SEAT": seat,
-        "AGENT_FABRIC_CLIENT_LABEL": seat,
+        "AGENT_FABRIC_CLIENT_LABEL": client_label or seat,
     }
     result: dict[str, Any] = {
         "command": str(agents_home / "scripts" / "agent-fabric-mcp"),
@@ -153,21 +158,52 @@ def registration(agents_home: Path, state_directory: Path, seat: str) -> dict[st
 
 
 def claude_update(path: Path, desired: dict[str, Any]) -> ConfigProposal:
-    snapshot = _capture(path, "Claude")
-    text = _text(snapshot, "Claude")
+    return json_client_update(path, desired, "claude")
+
+
+def json_client_update(path: Path, desired: dict[str, Any], client: str) -> ConfigProposal:
+    label = client.title()
+    snapshot = _capture(path, label)
+    text = _text(snapshot, label)
     try:
         value: Any = json.loads(text) if snapshot.source_kind != "absent" else {}
     except json.JSONDecodeError as exc:
-        raise RegistrationError(f"Claude config is invalid JSON: {exc}") from exc
+        raise RegistrationError(f"{label} config is invalid JSON: {exc}") from exc
     if not isinstance(value, dict):
-        raise RegistrationError("Claude config root must be an object")
+        raise RegistrationError(f"{label} config root must be an object")
     servers = value.setdefault("mcpServers", {})
     if not isinstance(servers, dict):
-        raise RegistrationError("Claude config mcpServers must be an object")
+        raise RegistrationError(f"{label} config mcpServers must be an object")
     if servers.get(SERVER_NAME) == desired:
-        return ConfigProposal("claude", snapshot, text, "existing")
+        return ConfigProposal(client, snapshot, text, "existing")
     servers[SERVER_NAME] = desired
-    return ConfigProposal("claude", snapshot, json.dumps(value, indent=2, sort_keys=True) + "\n", "ready")
+    return ConfigProposal(client, snapshot, json.dumps(value, indent=2, sort_keys=True) + "\n", "ready")
+
+
+def opencode_update(path: Path, desired: dict[str, Any]) -> ConfigProposal:
+    client = "opencode"
+    label = "OpenCode"
+    snapshot = _capture(path, label)
+    text = _text(snapshot, label)
+    try:
+        value: Any = json.loads(text) if snapshot.source_kind != "absent" else {}
+    except json.JSONDecodeError as exc:
+        raise RegistrationError(f"{label} config is invalid JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise RegistrationError(f"{label} config root must be an object")
+    servers = value.setdefault("mcp", {})
+    if not isinstance(servers, dict):
+        raise RegistrationError(f"{label} config mcp must be an object")
+    entry = {
+        "type": "local",
+        "command": [desired["command"]],
+        "enabled": True,
+        "environment": desired["env"],
+    }
+    if servers.get(SERVER_NAME) == entry:
+        return ConfigProposal(client, snapshot, text, "existing")
+    servers[SERVER_NAME] = entry
+    return ConfigProposal(client, snapshot, json.dumps(value, indent=2, sort_keys=True) + "\n", "ready")
 
 
 def _codex_value(text: str) -> dict[str, Any]:
@@ -431,7 +467,11 @@ def write_proposal(proposal: ConfigProposal) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", choices=("all", "claude", "codex"), default="all")
+    parser.add_argument(
+        "--platform",
+        choices=("all", "claude", "codex", "cursor", "agy", "kiro", "opencode"),
+        default="all",
+    )
     parser.add_argument("--agents-home", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument(
         "--state-directory", type=Path,
@@ -441,6 +481,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--codex-config", type=Path,
         default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "config.toml",
+    )
+    parser.add_argument("--cursor-config", type=Path, default=Path.home() / ".cursor/mcp.json")
+    parser.add_argument("--agy-config", type=Path, default=Path.home() / ".gemini/config/mcp_config.json")
+    parser.add_argument("--kiro-config", type=Path, default=Path.home() / ".kiro/settings/mcp.json")
+    parser.add_argument(
+        "--opencode-config", type=Path,
+        default=Path.home() / ".config/opencode/opencode.jsonc",
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true")
@@ -458,6 +505,23 @@ def main(argv: list[str] | None = None) -> int:
             proposals.append(claude_update(args.claude_config, registration(agents_home, state_directory, "claude")))
         if args.platform in {"all", "codex"}:
             proposals.append(codex_update(args.codex_config, registration(agents_home, state_directory, "codex")))
+        optional_configs = {
+            "cursor": args.cursor_config,
+            "agy": args.agy_config,
+            "kiro": args.kiro_config,
+        }
+        for client, path in optional_configs.items():
+            if args.platform in {"all", client}:
+                proposals.append(json_client_update(
+                    path,
+                    registration(agents_home, state_directory, "codex", client),
+                    client,
+                ))
+        if args.platform in {"all", "opencode"}:
+            proposals.append(opencode_update(
+                args.opencode_config,
+                registration(agents_home, state_directory, "codex", "opencode"),
+            ))
         if args.check:
             missing = [proposal.client for proposal in proposals if proposal.status != "existing"]
             if missing:

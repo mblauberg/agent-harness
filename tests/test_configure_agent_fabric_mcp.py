@@ -31,6 +31,10 @@ def run_configure(tmp_path: Path, *arguments: str) -> subprocess.CompletedProces
             "--state-directory", str(tmp_path / "state"),
             "--claude-config", str(tmp_path / "claude.json"),
             "--codex-config", str(tmp_path / "codex.toml"),
+            "--cursor-config", str(tmp_path / "cursor.json"),
+            "--agy-config", str(tmp_path / "agy.json"),
+            "--kiro-config", str(tmp_path / "kiro.json"),
+            "--opencode-config", str(tmp_path / "opencode.jsonc"),
             *arguments,
         ],
         cwd=ROOT,
@@ -40,9 +44,14 @@ def run_configure(tmp_path: Path, *arguments: str) -> subprocess.CompletedProces
     )
 
 
-def test_configures_both_global_clients_without_a_fixed_project_path(tmp_path: Path) -> None:
+def test_configures_all_global_clients_without_a_fixed_project_path(tmp_path: Path) -> None:
     claude_config = tmp_path / "claude.json"
     codex_config = tmp_path / "codex.toml"
+    json_configs = {
+        client: tmp_path / f"{client}.json"
+        for client in ("cursor", "agy", "kiro")
+    }
+    opencode_config = tmp_path / "opencode.jsonc"
     claude_config.write_text(json.dumps({
         "unrelatedSecret": "never-print-claude",
         "mcpServers": {
@@ -64,6 +73,21 @@ command = "/old/proxy"
 AGENT_FABRIC_PROJECT_PATH = "/wrong/project"
 AGENT_FABRIC_CAPABILITY = "never-print-capability"
 """)
+    for path in json_configs.values():
+        path.write_text(json.dumps({
+            "unrelatedSecret": "never-print-optional",
+            "mcpServers": {
+                "other": {"command": "other"},
+                "agent-fabric": {
+                    "command": "/old/proxy",
+                    "env": {"AGENT_FABRIC_PROJECT_PATH": "/wrong/project"},
+                },
+            },
+        }))
+    opencode_config.write_text(json.dumps({
+        "unrelatedSecret": "never-print-opencode",
+        "mcp": {"other": {"type": "remote", "url": "https://example.invalid"}},
+    }))
 
     result = run_configure(tmp_path)
 
@@ -83,6 +107,27 @@ AGENT_FABRIC_CAPABILITY = "never-print-capability"
         "command": str(ROOT / "scripts" / "agent-fabric-mcp"),
         "env": {**expected_common, "AGENT_FABRIC_SEAT": "codex", "AGENT_FABRIC_CLIENT_LABEL": "codex"},
     }
+    for client, path in json_configs.items():
+        value = json.loads(path.read_text())
+        assert value["mcpServers"]["agent-fabric"] == {
+            "command": str(ROOT / "scripts" / "agent-fabric-mcp"),
+            "env": {**expected_common, "AGENT_FABRIC_SEAT": "codex", "AGENT_FABRIC_CLIENT_LABEL": client},
+        }
+        assert value["mcpServers"]["other"] == {"command": "other"}
+        assert value["unrelatedSecret"] == "never-print-optional"
+    opencode = json.loads(opencode_config.read_text())
+    assert opencode["mcp"]["agent-fabric"] == {
+        "type": "local",
+        "command": [str(ROOT / "scripts" / "agent-fabric-mcp")],
+        "enabled": True,
+        "environment": {
+            **expected_common,
+            "AGENT_FABRIC_SEAT": "codex",
+            "AGENT_FABRIC_CLIENT_LABEL": "opencode",
+        },
+    }
+    assert opencode["mcp"]["other"] == {"type": "remote", "url": "https://example.invalid"}
+    assert opencode["unrelatedSecret"] == "never-print-opencode"
     assert claude["mcpServers"]["other"] == {"command": "other"}
     assert claude["unrelatedSecret"] == "never-print-claude"
     assert codex["custom"] == {"secret": "never-print-codex"}
@@ -93,10 +138,14 @@ AGENT_FABRIC_CAPABILITY = "never-print-capability"
 
     original_claude = claude_config.read_bytes()
     original_codex = codex_config.read_bytes()
+    original_json = {client: path.read_bytes() for client, path in json_configs.items()}
+    original_opencode = opencode_config.read_bytes()
     second = run_configure(tmp_path)
     assert second.returncode == 0, second.stderr
     assert claude_config.read_bytes() == original_claude
     assert codex_config.read_bytes() == original_codex
+    assert {client: path.read_bytes() for client, path in json_configs.items()} == original_json
+    assert opencode_config.read_bytes() == original_opencode
 
 
 def test_check_reports_only_agent_fabric_entry_status(tmp_path: Path) -> None:
@@ -106,7 +155,21 @@ def test_check_reports_only_agent_fabric_entry_status(tmp_path: Path) -> None:
     assert checked.returncode == 0, checked.stderr
     assert "agent-fabric MCP verified platform=claude" in checked.stdout
     assert "agent-fabric MCP verified platform=codex" in checked.stdout
+    for client in ("cursor", "agy", "kiro", "opencode"):
+        assert f"agent-fabric MCP verified platform={client}" in checked.stdout
     assert "AGENT_FABRIC_" not in checked.stdout + checked.stderr
+
+
+def test_opencode_commented_jsonc_fails_closed_without_rewriting(tmp_path: Path) -> None:
+    config = tmp_path / "opencode.jsonc"
+    original = '{\n  // user comment\n  "mcp": {}\n}\n'
+    config.write_text(original)
+
+    result = run_configure(tmp_path, "--platform", "opencode")
+
+    assert result.returncode == 3
+    assert "OpenCode config is invalid JSON" in result.stderr
+    assert config.read_text() == original
 
 
 def test_preflight_rejects_malformed_codex_without_mutating_claude(tmp_path: Path) -> None:

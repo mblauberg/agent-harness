@@ -117,6 +117,7 @@ seat and client label:
 | Codex | `~/.codex/config.toml` |
 | Cursor | `~/.cursor/mcp.json` |
 | Kiro | `~/.kiro/settings/mcp.json` |
+| OpenCode | `~/.config/opencode/opencode.jsonc` |
 
 At proxy start, the client working directory is canonicalised and ancestors are
 searched for the nearest project-keyed seat. An unprovisioned project fails
@@ -124,9 +125,9 @@ closed instead of authenticating into another project's run. Clients that do
 not preserve the workspace working directory need project-scoped registration.
 Subdirectories intentionally inherit the nearest ancestor project's seat.
 
-The harness installer configures the project-dynamic global entry for its
-selected primary client. Configure or verify both Claude Code and Codex from
-the harness checkout with:
+The harness installer configures only its selected primary client by default.
+Pass `--mcp-clients all` to register all six clients. Configure or verify all
+clients, including Claude Code and Codex, from the harness checkout with:
 
 ```sh
 scripts/configure-agent-fabric-mcp.py --platform all
@@ -136,10 +137,11 @@ scripts/configure-agent-fabric-mcp.py --platform all --check
 The command atomically replaces only the `agent-fabric` entry in each client
 configuration and reports only that entry's status. It never prints
 capabilities or unrelated configuration. Its global entries omit
-`AGENT_FABRIC_PROJECT_PATH`; Claude Code and Codex preserve cwd and must use
-nearest-ancestor discovery. A fixed `AGENT_FABRIC_PROJECT_PATH` remains a
-manual, project-scoped compatibility path only for a client that cannot preserve
-its workspace cwd. Never add it to a global Claude Code or Codex entry.
+`AGENT_FABRIC_PROJECT_PATH`; clients must preserve cwd for nearest-ancestor
+discovery. A client that cannot preserve its workspace cwd needs a separately
+managed project-scoped compatibility entry. Optional clients use the supported
+`codex` seat while retaining distinct client labels. OpenCode JSONC containing
+comments fails closed rather than being rewritten.
 Existing files are updated with an atomic exchange: the displaced identity and
 bytes must match the composed snapshot, and the requested direct path or
 symlink must still resolve to the installed inode. On any mismatch the command
