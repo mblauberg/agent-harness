@@ -4,13 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ProviderBoundary } from "../adapter.js";
+import { DEFAULT_PROVIDER_TURN_TIMEOUT_MS } from "../../provider-deadlines.js";
 import { isRecord, ProviderAdapterError, requiredString } from "../types.js";
 import { buildAgyInvocation, buildCursorInvocation, type ProviderInvocation } from "./invocations.js";
 
 export type ProviderCommandResult = { stdout: string; stderr: string; exitCode: number };
 export type ProviderCommandRunner = (invocation: ProviderInvocation) => Promise<ProviderCommandResult>;
 
-const DEFAULT_TIMEOUT_MS = 300_000;
 const MAX_CAPTURE_BYTES = 1_048_576;
 
 function appendBounded(current: string, chunk: Buffer | string, stream: string): string {
@@ -22,7 +22,7 @@ function appendBounded(current: string, chunk: Buffer | string, stream: string):
 }
 
 export const runBoundedProviderCommand: ProviderCommandRunner = async (invocation) => {
-  const timeoutMs = invocation.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = invocation.timeoutMs ?? DEFAULT_PROVIDER_TURN_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new ProviderAdapterError("INVALID_PARAMS", "provider command timeout must be positive");
   }
@@ -175,6 +175,7 @@ function assertTaskBoundOneShot(payload: Record<string, unknown>): void {
 
 export function createAgyCliBoundary(options: OneShotBoundaryOptions): ProviderBoundary {
   const runner = options.runner ?? runBoundedProviderCommand;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_PROVIDER_TURN_TIMEOUT_MS;
   const execute = async (payload: Record<string, unknown>, resume?: string): Promise<Record<string, unknown>> => {
     const logDirectory = await mkdtemp(join(tmpdir(), "agent-fabric-agy-"));
     const logFile = join(logDirectory, "provider.log");
@@ -184,7 +185,7 @@ export function createAgyCliBoundary(options: OneShotBoundaryOptions): ProviderB
         buildAgyInvocation({
           executable: options.executable,
           cwd: typeof payload.cwd === "string" ? payload.cwd : options.cwd,
-          ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+          timeoutMs,
           model: requiredString(payload.model, "model"),
           prompt: requiredString(payload.prompt, "prompt"),
           mode: "plan",
@@ -233,13 +234,14 @@ export function createAgyCliBoundary(options: OneShotBoundaryOptions): ProviderB
 
 export function createCursorCliBoundary(options: OneShotBoundaryOptions): ProviderBoundary {
   const runner = options.runner ?? runBoundedProviderCommand;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_PROVIDER_TURN_TIMEOUT_MS;
   const execute = async (payload: Record<string, unknown>, resume?: string): Promise<Record<string, unknown>> => {
     await options.verifyExecutable?.();
     const result = await runner(
       buildCursorInvocation({
         executable: options.executable,
         cwd: typeof payload.cwd === "string" ? payload.cwd : options.cwd,
-        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+        timeoutMs,
         model: requiredString(payload.model, "model"),
         prompt: requiredString(payload.prompt, "prompt"),
         mode: "ask",
