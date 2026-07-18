@@ -16,7 +16,7 @@ import { trackTestProcess } from "../../support/test-process-registry.ts";
 const roots: string[] = [];
 const daemons: FabricDaemonHandle[] = [];
 const mcpMain = fileURLToPath(new URL("../../../src/mcp/main.ts", import.meta.url));
-const tsxLoader = fileURLToPath(new URL("../../../../../../../node_modules/tsx/dist/loader.mjs", import.meta.url));
+const tsxLoader = fileURLToPath(import.meta.resolve("tsx"));
 
 async function fixture(): Promise<{ projectRoot: string; paths: FabricPaths }> {
   const temporaryRoot = await mkdtemp("/tmp/afb-");
@@ -54,6 +54,7 @@ async function openMcpClient(
   paths: FabricPaths,
   suffix: string = seat,
 ): Promise<Client> {
+  const stderr: string[] = [];
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: ["--import", tsxLoader, mcpMain],
@@ -67,9 +68,15 @@ async function openMcpClient(
       TMPDIR: process.env.TMPDIR ?? "/tmp",
       ...(process.env.HOME === undefined ? {} : { HOME: process.env.HOME }),
     },
+    stderr: "pipe",
   });
+  transport.stderr?.on("data", (chunk: Buffer | string) => stderr.push(String(chunk)));
   const client = new Client({ name: `bootstrap-${suffix}`, version: "0.1.0" });
-  await client.connect(transport);
+  try {
+    await client.connect(transport);
+  } catch (cause: unknown) {
+    throw new Error(`MCP proxy ${suffix} failed to connect: ${stderr.join("").trim() || "no stderr"}`, { cause });
+  }
   return client;
 }
 
