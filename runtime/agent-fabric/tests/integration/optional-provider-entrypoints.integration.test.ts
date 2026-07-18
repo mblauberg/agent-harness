@@ -208,6 +208,16 @@ describe("optional provider executable wrappers", () => {
       });
       await expect(
         transport.request("spawn", {
+          actionId: `${fixture.adapterId}:wrong-family`,
+          payload: {
+            model: fixture.model,
+            modelFamily: "open-weight",
+            prompt: "must not reach provider",
+          },
+        }),
+      ).rejects.toMatchObject({ name: "ADAPTER_FAMILY_FORBIDDEN" });
+      await expect(
+        transport.request("spawn", {
           actionId: `${fixture.adapterId}:spawn:1`,
           payload: {
             model: fixture.model,

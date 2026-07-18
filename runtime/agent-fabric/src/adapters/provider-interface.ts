@@ -67,6 +67,11 @@ const REQUIRED_FLAGS: Record<string, string[]> = {
   "cursor-agent": ["--print", "--output-format", "--model"],
 };
 
+function hasExactOption(helpText: string, option: string): boolean {
+  const escaped = option.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`(?:^|[\\s,|])${escaped}(?=$|[\\s,|=])`, "mu").test(helpText);
+}
+
 /** Runs only bounded version/help or initialize operations; never a model turn. */
 export async function probeProviderInterface(
   input: { adapterId: string; executable: string },
@@ -121,7 +126,7 @@ export async function probeProviderInterface(
       runner({ executable: input.executable, args: ["--version"], timeoutMs: PROBE_TIMEOUT_MS }),
     ]);
     const helpText = `${help.stdout}\n${help.stderr}`;
-    if (help.exitCode !== 0 || version.exitCode !== 0 || flags.some((flag) => !helpText.includes(flag))) {
+    if (help.exitCode !== 0 || version.exitCode !== 0 || flags.some((flag) => !hasExactOption(helpText, flag))) {
       throw new Error("required headless flags are unavailable");
     }
     return {

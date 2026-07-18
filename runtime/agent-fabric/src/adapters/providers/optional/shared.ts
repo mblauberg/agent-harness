@@ -65,8 +65,15 @@ export function createOptionalProviderAdapter(options: {
   capabilities: OptionalProviderCapabilities;
   boundary: OptionalProviderBoundary;
   journal: SqliteAdapterActionJournal;
-  modelPolicy?: ModelPolicy;
+  modelPolicy?: Pick<ModelPolicy, "allowedModelPatterns">;
 }): AdapterRequestHandler {
+  const modelPolicy: ModelPolicy = {
+    adapterId: options.capabilities.adapterId,
+    allowedFamilies: options.capabilities.allowedModelFamilies,
+    ...(options.modelPolicy?.allowedModelPatterns === undefined ? {} : {
+      allowedModelPatterns: options.modelPolicy.allowedModelPatterns,
+    }),
+  };
   const delegate = createProviderAdapter({
     capabilities: options.capabilities,
     boundary: options.boundary,
@@ -74,7 +81,7 @@ export function createOptionalProviderAdapter(options: {
   });
   return {
     async request(method, params) {
-      if (requiresModel(method, params) && options.modelPolicy !== undefined) validateModel(actionPayload(params), options.modelPolicy);
+      if (requiresModel(method, params)) validateModel(actionPayload(params), modelPolicy);
       return await delegate.request(method, params);
     },
   };

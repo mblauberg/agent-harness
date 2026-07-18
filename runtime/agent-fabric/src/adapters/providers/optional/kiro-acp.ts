@@ -140,8 +140,6 @@ export function createKiroAcpAdapter(options: {
     boundary: options.boundary,
     journal: options.journal,
     modelPolicy: {
-      adapterId: "kiro-acp",
-      allowedFamilies: ["open-weight"],
       allowedModelPatterns: ["deepseek-*", "glm-*", "minimax-*", "qwen*"],
     },
   });

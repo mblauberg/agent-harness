@@ -13,6 +13,26 @@ describe("provider non-answer interface conformance", () => {
       .resolves.toMatchObject({ adapterId, conformant: true });
   });
 
+  it("accepts complete option tokens followed by separate or equals values", async () => {
+    const run = vi.fn(async () => ({
+      stdout: "--print=true\n--model=<MODEL>\n--mode MODE\n--log-file=PATH",
+      stderr: "",
+      exitCode: 0,
+    }));
+    await expect(probeProviderInterface({ adapterId: "agy", executable: "/agy" }, run))
+      .resolves.toMatchObject({ adapterId: "agy", conformant: true });
+  });
+
+  it("rejects prefixed and suffixed lookalike option names", async () => {
+    const run = vi.fn(async () => ({
+      stdout: "--sprint prefix--model --mode-extra --log-file-suffix",
+      stderr: "",
+      exitCode: 0,
+    }));
+    await expect(probeProviderInterface({ adapterId: "agy", executable: "/agy" }, run))
+      .rejects.toMatchObject({ code: "ADAPTER_INTERFACE_MISMATCH" });
+  });
+
   it("proves the Codex app-server initialize handshake", async () => {
     const run = vi.fn(async () => ({ stdout: '{"id":1,"result":{"userAgent":"probe"}}\n', stderr: "", exitCode: 0 }));
     await expect(probeProviderInterface({ adapterId: "codex-app-server", executable: "/codex" }, run))

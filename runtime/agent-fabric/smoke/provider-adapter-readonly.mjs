@@ -11,6 +11,7 @@ import { parse } from "yaml";
 const execFileAsync = promisify(execFile);
 
 import { AdapterProcessTransport } from "../dist/adapters/process.js";
+import { providerConformanceEvidence, verifyProviderConformance } from "../dist/adapters/provider-conformance.js";
 
 function option(name, required = true) {
   const index = process.argv.indexOf(name);
@@ -52,8 +53,13 @@ const pinnedExecutable = expandPath(implementation.executable);
 if (await realpath(providerExecutable) !== await realpath(pinnedExecutable)) {
   throw new Error("provider executable does not match the compatibility path");
 }
-const digest = async (path) => createHash("sha256").update(await readFile(path)).digest("hex");
-const executableSha256 = await digest(pinnedExecutable);
+const providerConformance = await verifyProviderConformance({
+  adapterId,
+  executable: pinnedExecutable,
+  ...(implementation.cursor_install_root === undefined ? {} : {
+    cursorInstallRoot: expandPath(implementation.cursor_install_root),
+  }),
+});
 const wrapperPath = resolve(new URL("../src", import.meta.url).pathname, wrapper);
 if (await realpath(wrapperPath) !== await realpath(join(agentsRoot, implementation.wrapper_entrypoint))) {
   throw new Error("wrapper entrypoint does not match the compatibility path");
@@ -173,7 +179,7 @@ try {
     adapterId,
     requestedModel: model,
     modelFamily,
-    executable: { path: pinnedExecutable, sha256: executableSha256 },
+    providerConformance: providerConformanceEvidence(providerConformance),
     wrapper: { path: implementation.wrapper_entrypoint, repositoryCommit: wrapperRepositoryCommit },
     output: "exact-sentinel",
     workspace: "unchanged",
