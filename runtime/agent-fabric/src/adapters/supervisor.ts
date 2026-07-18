@@ -4,6 +4,7 @@ import { isAbsolute } from "node:path";
 import { AdapterProcessTransport, AdapterTransportError } from "./process.js";
 import { verifySpawnWrapperProvenance } from "./compatibility.js";
 import { assessAdapterModelPolicy } from "./model-selection.js";
+import { DEFAULT_PROVIDER_TURN_TIMEOUT_MS, providerTurnResponseTimeoutMs } from "./provider-deadlines.js";
 import { FabricError } from "../errors.js";
 import {
   chairLaunchChallengeDigest,
@@ -87,7 +88,6 @@ export type RetainedChairBridge = Readonly<{
 }>;
 
 const DEFAULT_CONTROL_TIMEOUT_MS = 30_000;
-const DEFAULT_PROVIDER_TURN_TIMEOUT_MS = 30 * 60_000;
 const DEFAULT_BRIDGE_HEALTH_INTERVAL_MS = 250;
 
 function parseBridgeHealth(value: unknown, kind: "chair" | "child"): boolean {
@@ -100,7 +100,7 @@ function parseBridgeHealth(value: unknown, kind: "chair" | "child"): boolean {
 }
 
 function isLongProviderOperation(method: string, params: Record<string, unknown>): boolean {
-  if (method === "spawn" || method === "compact") return true;
+  if (method === "spawn" || method === "attach" || method === "compact") return true;
   return method === "dispatch" && (
     params.operation === "send_turn" ||
     params.operation === "steer" ||
@@ -451,7 +451,9 @@ export class AdapterSupervisor {
     }
     try {
       const result = await transport.request(method, params, {
-        timeoutMs: isLongProviderOperation(method, params) ? this.#providerTurnTimeoutMs : this.#controlTimeoutMs,
+        timeoutMs: isLongProviderOperation(method, params)
+          ? providerTurnResponseTimeoutMs(this.#providerTurnTimeoutMs)
+          : this.#controlTimeoutMs,
       });
       if (retainedChairTransport !== undefined && chairKey !== undefined && isReleaseRequest(method, params)) {
         this.#removeChairBridge(chairKey);

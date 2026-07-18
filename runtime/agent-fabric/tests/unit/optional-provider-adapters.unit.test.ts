@@ -20,6 +20,7 @@ import {
 } from "../../src/adapters/providers/optional/pi-rpc.ts";
 import { SqliteAdapterActionJournal } from "../../src/adapters/providers/journal.ts";
 import { serveAdapter } from "../../src/adapters/providers/server.ts";
+import { ProviderAdapterError } from "../../src/adapters/providers/types.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -194,6 +195,31 @@ describe("optional production provider wrappers", () => {
       }),
     ).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" });
     expect(provider.steer).not.toHaveBeenCalled();
+    actionJournal.close();
+  });
+
+  it("records a timed-out optional-provider action as ambiguous and never redispatches it", async () => {
+    const actionJournal = await journal();
+    const provider = boundary();
+    vi.mocked(provider.spawn).mockRejectedValue(
+      new ProviderAdapterError("PROVIDER_TIMEOUT", "provider CLI exceeded its deadline"),
+    );
+    const adapter = createAgyAdapter({ boundary: provider, journal: actionJournal });
+    const request = {
+      actionId: "agy-timeout-1",
+      payload: { model: "Gemini 3.5 Flash (High)", modelFamily: "google", prompt: "bounded task" },
+    };
+
+    await expect(adapter.request("spawn", request)).rejects.toMatchObject({ code: "PROVIDER_TIMEOUT" });
+    await expect(adapter.request("lookup_action", { actionId: request.actionId })).resolves.toMatchObject({
+      status: "ambiguous",
+      executionCount: 1,
+      effectCount: 0,
+    });
+    await expect(adapter.request("spawn", request)).rejects.toMatchObject({
+      code: "ACTION_RECONCILIATION_REQUIRED",
+    });
+    expect(provider.spawn).toHaveBeenCalledTimes(1);
     actionJournal.close();
   });
 

@@ -1,3 +1,5 @@
+import { DEFAULT_PROVIDER_TURN_TIMEOUT_MS } from "../../provider-deadlines.js";
+
 export type ProviderInvocation = {
   executable: string;
   args: string[];
@@ -42,7 +44,7 @@ export function buildAgyInvocation(input: {
   const resumeReference = input.resumeReference === undefined
     ? undefined
     : safeCliValue(input.resumeReference, "resumeReference");
-  const seconds = Math.max(1, Math.ceil((input.timeoutMs ?? 300_000) / 1000));
+  const seconds = Math.max(1, Math.ceil((input.timeoutMs ?? DEFAULT_PROVIDER_TURN_TIMEOUT_MS) / 1000));
   return {
     executable: input.executable,
     args: [
