@@ -152,6 +152,53 @@ def test_preserves_existing_instructions_and_prints_merge_line(tmp_path):
     assert {path.name for path in (config / "skills").iterdir()} == expected_skills()
 
 
+def test_accepts_claude_instruction_symlink_to_canonical_agents_file(tmp_path):
+    config = tmp_path / "claude-config"
+    config.mkdir()
+    instructions = config / "CLAUDE.md"
+    instructions.symlink_to(ROOT / "AGENTS.md")
+
+    result = run("claude", tmp_path, CLAUDE_CONFIG_DIR=str(config))
+
+    assert result.returncode == 0, result.stderr
+    assert instructions.is_symlink()
+    assert instructions.resolve() == ROOT / "AGENTS.md"
+    assert f"instructions existing={instructions}" in result.stdout
+    assert "add this line" not in result.stderr
+
+
+def test_accepts_codex_instruction_symlink_to_canonical_agents_file(tmp_path):
+    config = tmp_path / "codex-home"
+    config.mkdir()
+    instructions = config / "AGENTS.md"
+    instructions.symlink_to(ROOT / "AGENTS.md")
+
+    result = run("codex", tmp_path, CODEX_HOME=str(config))
+
+    assert result.returncode == 0, result.stderr
+    assert instructions.is_symlink()
+    assert instructions.resolve() == ROOT / "AGENTS.md"
+    assert f"instructions existing={instructions}" in result.stdout
+    assert "add this line" not in result.stderr
+
+
+def test_rejects_instruction_symlink_to_foreign_file(tmp_path):
+    config = tmp_path / "claude-config"
+    config.mkdir()
+    foreign = tmp_path / "foreign-instructions.md"
+    foreign.write_text("# Foreign instructions\n")
+    instructions = config / "CLAUDE.md"
+    instructions.symlink_to(foreign)
+
+    result = run("claude", tmp_path, CLAUDE_CONFIG_DIR=str(config))
+
+    assert result.returncode == 3
+    assert instructions.is_symlink()
+    assert instructions.resolve() == foreign
+    assert foreign.read_text() == "# Foreign instructions\n"
+    assert "add this line" in result.stderr
+
+
 def test_requires_supported_platform(tmp_path):
     result = run("other", tmp_path)
     assert result.returncode == 2
