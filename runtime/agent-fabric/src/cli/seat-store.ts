@@ -13,6 +13,7 @@ export type SeatMetadata = {
   projectPath: string;
   generation: string;
   previousGeneration: string | null;
+  originKind?: "bootstrap" | "provisioned";
   projectSessionId: string;
   sessionRevision: number;
   sessionGeneration: number;

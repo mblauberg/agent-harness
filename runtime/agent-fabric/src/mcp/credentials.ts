@@ -112,6 +112,7 @@ async function resolveProjectSeatFile(
         !("previousGeneration" in metadata) ||
         (metadata.previousGeneration !== null &&
           (typeof metadata.previousGeneration !== "string" || !/^[0-9a-f]{64}$/u.test(metadata.previousGeneration))) ||
+        ("originKind" in metadata && metadata.originKind !== "bootstrap" && metadata.originKind !== "provisioned") ||
         !("seat" in metadata) ||
         metadata.seat !== seat ||
         !("credentialPath" in metadata) ||
@@ -123,9 +124,7 @@ async function resolveProjectSeatFile(
         throw new Error(`agent fabric MCP seat metadata is invalid for project ${candidate}`);
       }
       const remainingMs = Date.parse(metadata.expiresAt) - Date.now();
-      const bootstrapSeat = "projectSessionId" in metadata &&
-        typeof metadata.projectSessionId === "string" &&
-        /^session_bootstrap_[0-9a-f]{32}$/u.test(metadata.projectSessionId);
+      const bootstrapSeat = "originKind" in metadata && metadata.originKind === "bootstrap";
       if (bootstrapSeat && remainingMs <= MCP_SEAT_RENEWAL_WINDOW_MS) {
         throw new McpSeatRenewalRequiredError(
           `agent fabric MCP seat ${seat} ${remainingMs <= 0 ? "expired" : "expires"} at ${metadata.expiresAt}`,

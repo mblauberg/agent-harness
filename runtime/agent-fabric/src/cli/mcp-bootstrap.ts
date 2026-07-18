@@ -75,6 +75,7 @@ export async function bootstrapMcpSeat(input: {
           projectPath: result.canonicalRoot,
           generation: result.generation,
           previousGeneration: result.expectedPreviousGeneration,
+          originKind: "bootstrap",
           projectSessionId: result.projectSessionId,
           sessionRevision: result.sessionRevision,
           sessionGeneration: result.sessionGeneration,
