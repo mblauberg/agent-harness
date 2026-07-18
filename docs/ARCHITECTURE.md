@@ -368,12 +368,16 @@ excluded from context scans.
 
 ## Managed installation
 
-`scripts/manage_installation.py` plans, installs, reconciles and removes only
-harness-owned skill links. A versioned manifest records ownership, source
-tree digests, the bound target and rename history beside the target skills
-directory. Unmanaged paths are never claimed or overwritten; changed managed
-targets fail for user resolution and link
-mutations roll back if the manifest commit fails.
+`scripts/manage_installation.py` plans, checks, installs, reconciles and removes
+only harness-owned skill links. Every normal install repairs missing or stale
+managed links and retires safe managed leftovers. A versioned manifest records
+ownership, source tree digests, the bound target and rename history beside the
+target skills directory. The post-install integrity check verifies catalogue
+presence. Missing or noncanonical required names fail; extra symlinks resolving
+outside the canonical skill tree produce warnings. Unmanaged paths are never
+claimed, overwritten or automatically removed;
+changed managed targets fail for user resolution and link mutations roll back
+if the manifest commit fails.
 Provider bootstraps remain small and share the same precedence sentence.
 
 ## Project Fabric Console
