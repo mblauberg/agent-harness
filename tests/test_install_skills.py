@@ -46,9 +46,69 @@ def test_installer_preserves_existing_entries(tmp_path):
     marker.write_text("owned elsewhere\n")
 
     result = run(target)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 3
+    assert "scope=noncanonical" in result.stderr
     assert marker.read_text() == "owned elsewhere\n"
     assert not existing.is_symlink()
+
+
+def test_installer_reports_foreign_global_skill_without_removing_it(tmp_path):
+    target = tmp_path / "skills"
+    target.mkdir()
+    private = tmp_path / "private-project" / "private-skill"
+    private.mkdir(parents=True)
+    foreign = target / "private-skill"
+    foreign.symlink_to(private)
+
+    result = run(target)
+
+    assert result.returncode == 0
+    assert "warning:" in result.stderr
+    assert "private-skill=foreign" in result.stderr
+    assert foreign.is_symlink()
+    assert foreign.resolve() == private.resolve()
+
+
+def test_check_rejects_empty_directory_at_required_catalogue_name(tmp_path):
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    target.mkdir()
+    (target / "alpha").mkdir()
+
+    result = manager(target, "check", source)
+
+    assert result.returncode == 3
+    assert "alpha=noncanonical" in result.stderr
+    assert (target / "alpha").is_dir()
+
+
+def test_check_rejects_mismatched_skill_at_required_catalogue_name(tmp_path):
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    target.mkdir()
+    collision = target / "alpha"
+    collision.mkdir()
+    (collision / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Different content.\n---\n"
+    )
+
+    result = manager(target, "check", source)
+
+    assert result.returncode == 3
+    assert "alpha=noncanonical" in result.stderr
+    assert "Different content" in (collision / "SKILL.md").read_text()
+
+
+def test_installer_reconciles_previously_managed_link_drift(tmp_path):
+    target = tmp_path / "skills"
+    assert run(target).returncode == 0
+    scope = target / "scope"
+    scope.unlink()
+
+    result = run(target)
+
+    assert result.returncode == 0, result.stderr
+    assert scope.resolve() == (ROOT / "skills" / "scope").resolve()
 
 
 def test_directory_symlink_to_canonical_skills_is_preserved_without_manifest(tmp_path):
@@ -163,6 +223,28 @@ def test_reconcile_repairs_broken_managed_link_and_rejects_conflict(tmp_path):
     assert (target / "beta").is_dir()
 
 
+def test_normal_install_repairs_managed_drift_and_retires_safe_old_links(tmp_path):
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    assert manager(target, "install", source).returncode == 0
+    (source / "beta" / "SKILL.md").write_text(
+        "---\nname: beta\ndescription: Use when changed.\n---\n"
+    )
+    retired_source = source / "alpha"
+    retired_target = target / "alpha"
+    retired_source.rename(source / "gamma")
+
+    result = manager(target, "install", source)
+
+    assert result.returncode == 0, result.stderr
+    manifest = json.loads(manifest_for(target).read_text())
+    assert set(manifest["managed"]) == {"beta", "gamma"}
+    assert not retired_target.exists()
+    assert (target / "beta").resolve() == (source / "beta").resolve()
+    assert manifest["managed"]["beta"]["source_sha256"] != "0" * 64
+    assert (target / "gamma").resolve() == (source / "gamma").resolve()
+
+
 def test_uninstall_managed_removes_only_owned_exact_links(tmp_path):
     source = tiny_source(tmp_path)
     target = tmp_path / "installed"
@@ -222,12 +304,15 @@ def test_plain_install_then_reconcile_merges_an_already_installed_rename(tmp_pat
     target = tmp_path / "installed"
     assert manager(target, "install", source).returncode == 0
     (source / "alpha").rename(source / "gamma")
-    assert manager(target, "install", source).returncode == 0
+    installed = manager(target, "install", source)
+    assert installed.returncode == 0
+    assert not (target / "alpha").exists()
+    assert (target / "gamma").resolve() == (source / "gamma").resolve()
     renames = tmp_path / "renames.json"
     renames.write_text(json.dumps({"schema_version": 1, "renames": [{"from": "alpha", "to": "gamma"}]}))
     result = manager(target, "reconcile", source, renames)
     assert result.returncode == 0, result.stderr
-    assert "gamma" in json.loads(result.stdout)["changed"]
+    assert json.loads(result.stdout)["changed"] == []
     manifest = json.loads(manifest_for(target).read_text())
     assert set(manifest["managed"]) == {"beta", "gamma"}
     assert not (target / "alpha").exists()
@@ -274,6 +359,42 @@ def test_full_skill_tree_digest_marks_executable_mode_change_stale(tmp_path):
     helper.chmod(0o644)
     plan = json.loads(manager(target, "plan", source).stdout)
     assert {item["name"]: item["state"] for item in plan["items"]}["alpha"] == "stale"
+
+
+def test_check_reports_foreign_resolving_link_without_deleting_it(tmp_path):
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    assert manager(target, "install", source).returncode == 0
+    private_skill = tmp_path / "private-project" / "secret-skill"
+    private_skill.mkdir(parents=True)
+    foreign = target / "secret-skill"
+    foreign.symlink_to(private_skill)
+
+    result = manager(target, "check", source)
+
+    assert result.returncode == 0
+    report = json.loads(result.stdout)
+    assert {item["name"]: item["state"] for item in report["items"]}["secret-skill"] == "foreign"
+    assert foreign.is_symlink()
+    assert foreign.resolve() == private_skill.resolve()
+
+
+def test_check_verifies_canonical_catalogue_and_ignores_ds_store(tmp_path):
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    assert manager(target, "install", source).returncode == 0
+    (target / ".DS_Store").write_bytes(b"metadata")
+    (target / "alpha").unlink()
+
+    missing = manager(target, "check", source)
+
+    assert missing.returncode == 3
+    report = json.loads(missing.stdout)
+    assert {item["name"]: item["state"] for item in report["items"]}["alpha"] == "missing"
+    assert ".DS_Store" not in {item["name"] for item in report["items"]}
+
+    assert manager(target, "install", source).returncode == 0
+    assert manager(target, "check", source).returncode == 0
 
 
 def test_manifest_commit_failure_rolls_back_link_mutations(tmp_path, monkeypatch):

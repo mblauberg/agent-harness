@@ -37,7 +37,12 @@ if [[ -L "$TARGET" ]] \
   exit 0
 fi
 
-exec "$ROOT/scripts/manage_installation.py" install \
+"$ROOT/scripts/manage_installation.py" install \
+  --source "$ROOT/skills" \
+  --target "$TARGET" \
+  --summary
+
+exec "$ROOT/scripts/manage_installation.py" check \
   --source "$ROOT/skills" \
   --target "$TARGET" \
   --summary
