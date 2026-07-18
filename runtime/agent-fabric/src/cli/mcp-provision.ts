@@ -281,6 +281,7 @@ export async function provisionMcpSeats(arguments_: string[], paths: FabricPaths
         projectPath,
         generation,
         previousGeneration: expectedPreviousGeneration,
+        originKind: "provisioned",
         projectSessionId,
         sessionRevision,
         sessionGeneration,

@@ -1,9 +1,9 @@
 import { realpath } from "node:fs/promises";
 
-import { connectFabricDaemon } from "../daemon/client.js";
+import { connectFabricDaemon, startFabricDaemon } from "../daemon/client.js";
 import type { BootstrapMcpSeatResult } from "../core/contracts.js";
+import { defaultDaemonStartOptions } from "./default-daemon-options.js";
 import type { FabricPaths } from "./paths.js";
-import { readDiscoveryReceipt } from "./mcp-provision.js";
 import { installSeatGeneration, parseMcpSeat, resolveSeatProject, type SeatMetadata } from "./seat-store.js";
 import { trustedWorkspaceIdentity } from "./workspace-trust.js";
 
@@ -44,12 +44,15 @@ export async function bootstrapMcpSeat(input: {
       { cause },
     );
   }
-  const discovery = await readDiscoveryReceipt(input.paths);
-  const daemon = await connectFabricDaemon({
-    socketPath: discovery.socketPath,
-    capability: discovery.bootstrapCapability,
-  });
+  const daemonHandle = await startFabricDaemon(
+    defaultDaemonStartOptions(input.paths, input.environment.AGENTS_HOME),
+  );
+  let daemon: Awaited<ReturnType<typeof connectFabricDaemon>> | undefined;
   try {
+    daemon = await connectFabricDaemon({
+      socketPath: daemonHandle.address.path,
+      capability: daemonHandle.bootstrapCapability,
+    });
     const result = await daemon.bootstrapMcpSeat({
       canonicalRoot: identity.canonicalRoot,
       trustRecordDigest: identity.trustRecordDigest,
@@ -72,6 +75,7 @@ export async function bootstrapMcpSeat(input: {
           projectPath: result.canonicalRoot,
           generation: result.generation,
           previousGeneration: result.expectedPreviousGeneration,
+          originKind: "bootstrap",
           projectSessionId: result.projectSessionId,
           sessionRevision: result.sessionRevision,
           sessionGeneration: result.sessionGeneration,
@@ -110,6 +114,10 @@ export async function bootstrapMcpSeat(input: {
     if (selected === undefined || selectedCredential === undefined) throw new Error("bootstrap did not install the caller seat");
     return { ...result, credential: selectedCredential };
   } finally {
-    await daemon.close();
+    try {
+      await daemon?.close();
+    } finally {
+      daemonHandle.release();
+    }
   }
 }

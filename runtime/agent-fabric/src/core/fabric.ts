@@ -2429,6 +2429,24 @@ export class Fabric {
     })();
   }
 
+  bootstrapTrustedCurrentMcpSeat(
+    input: BootstrapMcpSeatInput,
+    revalidatedWorkspace: { canonicalRoot: string; trustRecordDigest: string },
+  ): BootstrapMcpSeatResult {
+    if (
+      canonicalWorkspaceRoot(revalidatedWorkspace.canonicalRoot) !== input.canonicalRoot ||
+      revalidatedWorkspace.canonicalRoot !== input.canonicalRoot ||
+      revalidatedWorkspace.trustRecordDigest !== input.trustRecordDigest
+    ) {
+      throw new FabricError("AUTHENTICATION_FAILED", "revalidated MCP workspace binding changed");
+    }
+    if (!this.#workspaceRoots.includes(revalidatedWorkspace.canonicalRoot)) {
+      this.#workspaceRoots.push(revalidatedWorkspace.canonicalRoot);
+      this.#workspaceRoots.sort();
+    }
+    return this.bootstrapCurrentMcpSeat(input);
+  }
+
   bootstrapCurrentMcpSeat(input: BootstrapMcpSeatInput): BootstrapMcpSeatResult {
     return bootstrapMcpSeatCustody({
       database: this.#database,

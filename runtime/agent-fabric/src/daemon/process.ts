@@ -440,8 +440,14 @@ const servePrivateControlConnection = (socket: Socket): void => {
       switch (request.method) {
         case "bindCurrentMcpSeats":
           return fabric.bindCurrentMcpSeats(bindCurrentMcpSeatsInput(request.params));
-        case "bootstrapMcpSeat":
-          return fabric.bootstrapCurrentMcpSeat(bootstrapMcpSeatInput(request.params));
+        case "bootstrapMcpSeat": {
+          const bootstrapInput = bootstrapMcpSeatInput(request.params);
+          const trustedInput = await withTrustedLocalSubject(bootstrapInput);
+          return fabric.bootstrapTrustedCurrentMcpSeat(bootstrapInput, {
+            canonicalRoot: trustedInput.canonicalRoot,
+            trustRecordDigest: trustedInput.trustRecordDigest,
+          });
+        }
         case "provisionLocalOperator":
           return fabric.provisionLocalOperator(await withTrustedLocalSubject(
             provisionLocalOperatorInput(request.params),

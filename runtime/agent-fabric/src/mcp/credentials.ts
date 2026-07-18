@@ -5,6 +5,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { MCP_SEATS, projectKey, resolveSeatPaths } from "../cli/seat-store.js";
 
 const CAPABILITY_PATTERN = /^af[bc]_[A-Za-z0-9_-]{43}$/u;
+const MCP_SEAT_RENEWAL_WINDOW_MS = 60 * 60 * 1_000;
 
 export class McpSeatNotProvisionedError extends Error {
   readonly code = "MCP_SEAT_NOT_PROVISIONED" as const;
@@ -12,6 +13,15 @@ export class McpSeatNotProvisionedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "McpSeatNotProvisionedError";
+  }
+}
+
+export class McpSeatRenewalRequiredError extends Error {
+  readonly code = "MCP_SEAT_RENEWAL_REQUIRED" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "McpSeatRenewalRequiredError";
   }
 }
 
@@ -102,6 +112,7 @@ async function resolveProjectSeatFile(
         !("previousGeneration" in metadata) ||
         (metadata.previousGeneration !== null &&
           (typeof metadata.previousGeneration !== "string" || !/^[0-9a-f]{64}$/u.test(metadata.previousGeneration))) ||
+        ("originKind" in metadata && metadata.originKind !== "bootstrap" && metadata.originKind !== "provisioned") ||
         !("seat" in metadata) ||
         metadata.seat !== seat ||
         !("credentialPath" in metadata) ||
@@ -113,8 +124,14 @@ async function resolveProjectSeatFile(
         throw new Error(`agent fabric MCP seat metadata is invalid for project ${candidate}`);
       }
       const remainingMs = Date.parse(metadata.expiresAt) - Date.now();
+      const bootstrapSeat = "originKind" in metadata && metadata.originKind === "bootstrap";
+      if (bootstrapSeat && remainingMs <= MCP_SEAT_RENEWAL_WINDOW_MS) {
+        throw new McpSeatRenewalRequiredError(
+          `agent fabric MCP seat ${seat} ${remainingMs <= 0 ? "expired" : "expires"} at ${metadata.expiresAt}`,
+        );
+      }
       if (remainingMs <= 0) throw new Error(`agent fabric MCP seat ${seat} expired at ${metadata.expiresAt}`);
-      if (remainingMs <= 7 * 24 * 60 * 60 * 1_000) {
+      if (!bootstrapSeat && remainingMs <= 7 * 24 * 60 * 60 * 1_000) {
         warn(`agent fabric MCP seat ${seat} expires at ${metadata.expiresAt}; coordinate a full-roster renewal`);
       }
       return credentialPath;
@@ -153,4 +170,19 @@ export async function resolveMcpCapability(
   const capability = (await readPrivateRegularFile(file)).trim();
   if (!CAPABILITY_PATTERN.test(capability)) throw new Error("agent fabric MCP capability file is invalid");
   return capability;
+}
+
+export async function resolveRenewableMcpCapability(
+  environment: NodeJS.ProcessEnv,
+  cwd: string,
+  renew: () => Promise<unknown>,
+  warn: (message: string) => void = () => undefined,
+): Promise<string> {
+  try {
+    return await resolveMcpCapability(environment, cwd, warn);
+  } catch (error: unknown) {
+    if (!(error instanceof McpSeatRenewalRequiredError)) throw error;
+    await renew();
+    return await resolveMcpCapability(environment, cwd, warn);
+  }
 }
