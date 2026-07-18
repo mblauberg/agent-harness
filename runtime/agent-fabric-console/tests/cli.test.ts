@@ -33,16 +33,20 @@ describe("standalone Console executable", () => {
     });
   });
 
-  it("maps the package bin to the compiled shebang entrypoint", async () => {
+  it("maps the package bin to the tracked wrapper and compiled entrypoint", async () => {
     const packageValue: unknown = JSON.parse(
       await readFile(new URL("../package.json", import.meta.url), "utf8"),
     );
     const fabricPackageValue: unknown = JSON.parse(
       await readFile(new URL("../../agent-fabric/package.json", import.meta.url), "utf8"),
     );
+    const wrapper = await readFile(
+      new URL("../bin/agent-fabric-console.js", import.meta.url),
+      "utf8",
+    );
     const source = await readFile(new URL("../src/bin.ts", import.meta.url), "utf8");
     expect(packageValue).toMatchObject({
-      bin: { "agent-fabric-console": "dist/bin.js" },
+      bin: { "agent-fabric-console": "bin/agent-fabric-console.js" },
       dependencies: { "@local/agent-fabric": "file:../agent-fabric" },
     });
     expect(fabricPackageValue).toMatchObject({
@@ -50,7 +54,8 @@ describe("standalone Console executable", () => {
         ".": { types: "./dist/index.d.ts", import: "./dist/index.js" },
       },
     });
-    expect(source.startsWith("#!/usr/bin/env node\n")).toBe(true);
+    expect(wrapper.startsWith("#!/usr/bin/env node\n")).toBe(true);
+    expect(wrapper).toContain("../dist/bin.js");
     expect(source).toContain("runConsoleCli(process.argv.slice(2))");
   });
 
