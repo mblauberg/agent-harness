@@ -71,10 +71,10 @@ describe("adapter supervisor timeout selection", () => {
       await supervisor.close();
     }
 
-    expect(transportFixture.requestedTimeouts).toEqual([30 * 60_000]);
+    expect(transportFixture.requestedTimeouts).toEqual([(30 * 60_000) + 5_000]);
   });
 
-  it("keeps provider turns beyond the control deadline but enforces their own deadline", async () => {
+  it("keeps the outer response envelope beyond the provider deadline but still bounds adapter settlement", async () => {
     const supervisor = new AdapterSupervisor(
       { fake: { command: ["unused-by-timeout-fixture"], environment: {} } },
       { controlTimeoutMs: 5, providerTurnTimeoutMs: 20 },
@@ -89,12 +89,17 @@ describe("adapter supervisor timeout selection", () => {
       await expect(supervisor.request("fake", "dispatch", {
         operation: "send_turn",
         fixtureDurationMs: 21,
+      })).resolves.toEqual({ method: "dispatch" });
+
+      await expect(supervisor.request("fake", "dispatch", {
+        operation: "send_turn",
+        fixtureDurationMs: 5_021,
       })).rejects.toMatchObject({ code: "ADAPTER_RESPONSE_TIMEOUT" });
     } finally {
       await supervisor.close();
     }
 
-    expect(transportFixture.requestedTimeouts).toEqual([20, 20]);
+    expect(transportFixture.requestedTimeouts).toEqual([5_020, 5_020, 5_020]);
     expect(transportFixture.closes).toBe(1);
   });
 });

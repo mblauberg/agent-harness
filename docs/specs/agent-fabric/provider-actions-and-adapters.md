@@ -38,12 +38,15 @@ adapter_operations:
 
 Every side-effecting adapter command uses a fabric-generated `action_id`, exact `adapter_id`, lease generation and immutable payload hash. The daemon-global provider action identity is the pair `(adapter_id, action_id)`; an action ID may repeat on another adapter but the same pair may not identify another run or input. The adapter durably records `prepared`, `dispatched`, `accepted`, `terminal` or `ambiguous`. The core calls `lookup_action` after ambiguity and never automatically replays a side-effecting command unless downstream idempotency for that action ID is proven. Otherwise the task is quarantined for explicit recovery. The action record commits before dispatch; its terminal result commits before message acknowledgement.
 
-Answer-bearing Agy and Cursor commands use the supervisor's canonical 30-minute
-provider-turn deadline at both the outer adapter request and inner CLI process
-boundary. Control requests retain their shorter deadline. Tests may inject a
-shorter positive provider-turn deadline. Expiry after dispatch is ambiguous:
-the process is cleaned up, the journal requires reconciliation and Fabric does
-not automatically retry or substitute another provider.
+Answer-bearing Agy and Cursor CLIs use the canonical 30-minute provider-turn
+deadline. The outer adapter response envelope derives from that deadline plus
+a fixed five-second settlement and cleanup grace, so the inner boundary can
+persist its result before an unresponsive adapter transport is killed. This
+grace is not an operator setting. Control requests retain their shorter
+deadline, while tests may inject a shorter positive provider-turn deadline.
+Expiry after dispatch is ambiguous: the process is cleaned up, the journal
+requires reconciliation and Fabric does not automatically retry or substitute
+another provider.
 
 `lookup_action` applies to every adapter operation with external effects, including provider-mutating release or wake-up implementations. An adapter may declare an operation core-only and idempotent only when it does not mutate the provider session or external state; that declaration is contract-tested.
 

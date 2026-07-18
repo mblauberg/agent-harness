@@ -4,7 +4,7 @@ import { isAbsolute } from "node:path";
 import { AdapterProcessTransport, AdapterTransportError } from "./process.js";
 import { verifySpawnWrapperProvenance } from "./compatibility.js";
 import { assessAdapterModelPolicy } from "./model-selection.js";
-import { DEFAULT_PROVIDER_TURN_TIMEOUT_MS } from "./provider-deadlines.js";
+import { DEFAULT_PROVIDER_TURN_TIMEOUT_MS, providerTurnResponseTimeoutMs } from "./provider-deadlines.js";
 import { FabricError } from "../errors.js";
 import {
   chairLaunchChallengeDigest,
@@ -451,7 +451,9 @@ export class AdapterSupervisor {
     }
     try {
       const result = await transport.request(method, params, {
-        timeoutMs: isLongProviderOperation(method, params) ? this.#providerTurnTimeoutMs : this.#controlTimeoutMs,
+        timeoutMs: isLongProviderOperation(method, params)
+          ? providerTurnResponseTimeoutMs(this.#providerTurnTimeoutMs)
+          : this.#controlTimeoutMs,
       });
       if (retainedChairTransport !== undefined && chairKey !== undefined && isReleaseRequest(method, params)) {
         this.#removeChairBridge(chairKey);
