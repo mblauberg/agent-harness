@@ -101,20 +101,49 @@ const agentFeatures = Object.freeze([...new Set(
   ],
 )].sort()) as readonly ProtocolFeature[];
 
-function errorPayload(error: unknown): { code: string; message: string } {
+type McpErrorPayload = { code: string; message: string; action?: string };
+
+class ReconnectRequiredError extends Error {
+  readonly code = "RECONNECT_REQUIRED";
+
+  constructor(message: string, readonly action = "Retry the Fabric request after the daemon is available.") {
+    super(message);
+  }
+}
+
+export function errorPayload(error: unknown): McpErrorPayload {
   if (error instanceof ProtocolRemoteError) return { code: error.code, message: error.message };
   if (error instanceof ProtocolTransportError) {
     return { code: error.code, message: "Agent Fabric protocol request failed" };
   }
   if (error instanceof TypeError) return { code: "MCP_INPUT_INVALID", message: error.message };
   if (isRecord(error) && typeof error.code === "string" && typeof error.message === "string") {
-    return { code: error.code, message: error.message };
+    return {
+      code: error.code,
+      message: error.message,
+      ...(typeof error.action === "string" ? { action: error.action } : {}),
+    };
   }
   return { code: "FABRIC_MCP_REQUEST_FAILED", message: "Agent Fabric MCP request failed" };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasStableReplayIdentity(input: unknown): boolean {
+  return isRecord(input) && typeof input.commandId === "string" && input.commandId.length > 0;
+}
+
+export async function retryRecoveredProtocolCall<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (retryError: unknown) {
+    if (retryError instanceof ProtocolTransportError && retryError.code === "PROTOCOL_DISCONNECTED") {
+      throw new ReconnectRequiredError("Agent Fabric lost its recovered daemon connection");
+    }
+    throw retryError;
+  }
 }
 
 function resourceCall(
@@ -168,24 +197,68 @@ async function connectAgentProtocol(options: FabricMcpServerOptions, capability:
 
 async function configureFabricMcpServer(server: Server, options: FabricMcpServerOptions): Promise<() => Promise<void>> {
   let protocol = await connectAgentProtocol(options, options.capability);
+  let currentCapability = options.capability;
   let refreshInFlight: Promise<void> | undefined;
-  const call = async (operation: FabricOperation, input: unknown): Promise<unknown> => {
+  let reconnectInFlight: Promise<void> | undefined;
+  const replaceProtocol = async (capability: string): Promise<void> => {
+    const replacement = await connectAgentProtocol(options, capability);
+    const previous = protocol;
+    protocol = replacement;
+    currentCapability = capability;
+    await previous.close().catch(() => undefined);
+  };
+  const refreshProtocol = async (): Promise<void> => {
+    if (options.refreshCapability === undefined) throw new Error("MCP seat credential refresh is unavailable");
+    refreshInFlight ??= (async () => {
+      const capability = await options.refreshCapability?.();
+      if (capability === undefined) throw new Error("MCP seat credential refresh is unavailable");
+      await replaceProtocol(capability);
+    })().finally(() => { refreshInFlight = undefined; });
+    await refreshInFlight;
+  };
+  const callWithAuthenticationRefresh = async (operation: FabricOperation, input: unknown): Promise<unknown> => {
     try {
       return await protocol.call(operation as never, input as never);
     } catch (error: unknown) {
-      if (!(error instanceof ProtocolRemoteError) || error.code !== "AUTHENTICATION_FAILED" || options.refreshCapability === undefined) {
-        throw error;
-      }
-      refreshInFlight ??= (async () => {
-        const capability = await options.refreshCapability?.();
-        if (capability === undefined) throw new Error("MCP seat credential refresh is unavailable");
-        const replacement = await connectAgentProtocol(options, capability);
-        const previous = protocol;
-        protocol = replacement;
-        await previous.close().catch(() => undefined);
-      })().finally(() => { refreshInFlight = undefined; });
-      await refreshInFlight;
+      if (
+        !(error instanceof ProtocolRemoteError) ||
+        error.code !== "AUTHENTICATION_FAILED" ||
+        options.refreshCapability === undefined
+      ) throw error;
+      await refreshProtocol();
       return await protocol.call(operation as never, input as never);
+    }
+  };
+  const call = async (operation: FabricOperation, input: unknown): Promise<unknown> => {
+    const attemptedProtocol = protocol;
+    try {
+      return await callWithAuthenticationRefresh(operation, input);
+    } catch (error: unknown) {
+      if (!(error instanceof ProtocolTransportError) || error.code !== "PROTOCOL_DISCONNECTED") throw error;
+      try {
+        if (protocol === attemptedProtocol) {
+          reconnectInFlight ??= (async () => {
+            try {
+              await replaceProtocol(currentCapability);
+            } catch (reconnectError: unknown) {
+              if (!(reconnectError instanceof ProtocolRemoteError) || reconnectError.code !== "AUTHENTICATION_FAILED") {
+                throw reconnectError;
+              }
+              await refreshProtocol();
+            }
+          })().finally(() => { reconnectInFlight = undefined; });
+          await reconnectInFlight;
+        }
+      } catch {
+        throw new ReconnectRequiredError("Agent Fabric could not reconnect to the daemon");
+      }
+      if (!hasStableReplayIdentity(input)) {
+        throw new ReconnectRequiredError(
+          "Agent Fabric reconnected but did not replay a request without a stable command identity",
+          "Reconcile the operation outcome before retrying the Fabric request.",
+        );
+      }
+      return await retryRecoveredProtocolCall(async () => await callWithAuthenticationRefresh(operation, input));
     }
   };
   const descriptors = buildMcpDescriptorSet(protocol.allowedOperations);
