@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,27 @@ afterEach(async () => {
 });
 
 describe("zero-state MCP bootstrap", () => {
+  it("rejects a bootstrap seat expiry beyond the fixed 24-hour bound", async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "fabric-zero-state-overlong-"));
+    roots.push(temporaryRoot);
+    const root = await realpath(temporaryRoot);
+    const fabric = new Fabric({
+      databasePath: join(root, "fabric.sqlite3"),
+      workspaceRoots: [root],
+      clock: () => Date.parse("2026-07-18T00:00:00.000Z"),
+    });
+    try {
+      expect(() => fabric.bootstrapCurrentMcpSeat({
+        canonicalRoot: root,
+        trustRecordDigest: `sha256:${"d".repeat(64)}`,
+        seat: "codex",
+        expiresAt: "2026-07-19T00:00:00.001Z",
+      })).toThrow(expect.objectContaining({ code: "AUTHENTICATION_FAILED" }));
+    } finally {
+      await fabric.close();
+    }
+  });
+
   it("rejects an untrusted exact root before daemon discovery", async () => {
     const temporaryRoot = await mkdtemp(join(tmpdir(), "fabric-untrusted-bootstrap-"));
     roots.push(temporaryRoot);
@@ -102,6 +124,151 @@ describe("zero-state MCP bootstrap", () => {
       expect(database.prepare("SELECT count(*) AS count FROM mcp_active_seat_generations").get()).toEqual({ count: 1 });
     } finally {
       database.close();
+      await fabric.close();
+    }
+  });
+
+  it("renews an expiring bootstrap roster in place and revokes its predecessor", async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "fabric-zero-state-renewal-"));
+    roots.push(temporaryRoot);
+    const root = await realpath(temporaryRoot);
+    let now = Date.parse("2026-07-18T00:00:00.000Z");
+    const databasePath = join(root, "fabric.sqlite3");
+    const fabric = new Fabric({
+      databasePath,
+      workspaceRoots: [root],
+      clock: () => now,
+    });
+    const trust = {
+      canonicalRoot: root,
+      trustRecordDigest: `sha256:${"b".repeat(64)}`,
+    } as const;
+
+    try {
+      const first = fabric.bootstrapCurrentMcpSeat({
+        ...trust,
+        seat: "codex",
+        expiresAt: "2026-07-19T00:00:00.000Z",
+      });
+      const roster = fabric.bootstrapCurrentMcpSeat({
+        ...trust,
+        seat: "claude",
+        expiresAt: first.expiresAt,
+      });
+      const predecessor = roster.credentials.find(({ seat }) => seat === "codex")?.capability;
+      expect(predecessor).toBeDefined();
+      const childAgentId = "delegated-reviewer";
+      const childAuthorityId = "delegated-reviewer-authority";
+      const childCapability = `afc_${"z".repeat(43)}`;
+      const setup = new Database(databasePath);
+      try {
+        const chairAuthority = setup.prepare(`
+          SELECT authority_id,authority_json,authority_hash FROM authorities
+           WHERE run_id=? AND parent_authority_id IS NULL
+        `).get(roster.runId) as { authority_id: string; authority_json: string; authority_hash: string };
+        setup.prepare(`
+          INSERT INTO authorities(authority_id,run_id,parent_authority_id,authority_json,authority_hash,created_at)
+          VALUES (?,?,?,?,?,?)
+        `).run(
+          childAuthorityId,
+          roster.runId,
+          chairAuthority.authority_id,
+          chairAuthority.authority_json,
+          chairAuthority.authority_hash,
+          now,
+        );
+        setup.prepare(`
+          INSERT INTO agents(run_id,agent_id,parent_agent_id,authority_id,provider_session_ref,lifecycle)
+          VALUES (?,?,?,?,NULL,'ready')
+        `).run(roster.runId, childAgentId, roster.chairAgentId, childAuthorityId);
+        setup.prepare(`
+          INSERT INTO capabilities(token_hash,run_id,agent_id,principal_generation,expires_at)
+          VALUES (?,?,?,1,?)
+        `).run(
+          createHash("sha256").update(childCapability).digest("hex"),
+          roster.runId,
+          childAgentId,
+          Date.parse((JSON.parse(chairAuthority.authority_json) as { expiresAt: string }).expiresAt),
+        );
+      } finally {
+        setup.close();
+      }
+
+      now = Date.parse("2026-07-18T23:30:00.000Z");
+      const renewed = fabric.bootstrapCurrentMcpSeat({
+        ...trust,
+        seat: "codex",
+        expiresAt: "2026-07-19T23:30:00.000Z",
+      });
+
+      expect(renewed.generation).not.toBe(roster.generation);
+      expect(renewed.expectedPreviousGeneration).toBe(roster.generation);
+      expect(renewed.projectSessionId).toBe(roster.projectSessionId);
+      expect(renewed.runId).toBe(roster.runId);
+      expect(renewed.chairAgentId).toBe(roster.chairAgentId);
+      expect(() => fabric.connect(predecessor!)).toThrow(expect.objectContaining({ code: "AUTHENTICATION_FAILED" }));
+      expect(fabric.connect(renewed.credentials.find(({ seat }) => seat === "codex")!.capability)).toBeDefined();
+
+      const database = new Database(databasePath, { readonly: true });
+      try {
+        expect(database.prepare(`
+          SELECT count(*) AS count FROM capabilities
+           WHERE revoked_at IS NOT NULL AND token_hash IN (
+             SELECT token_hash FROM mcp_seat_generation_members WHERE generation=?
+           )
+        `).get(roster.generation)).toEqual({ count: 2 });
+        expect(database.prepare(`
+          SELECT authority_id FROM agents WHERE run_id=? AND agent_id=?
+        `).get(roster.runId, childAgentId)).toEqual({ authority_id: childAuthorityId });
+        expect(database.prepare(`
+          SELECT revoked_at FROM capabilities WHERE token_hash=?
+        `).get(createHash("sha256").update(childCapability).digest("hex"))).toEqual({ revoked_at: null });
+      } finally {
+        database.close();
+      }
+    } finally {
+      await fabric.close();
+    }
+  });
+
+  it("renews an expired single-seat roster before adding the other primary", async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "fabric-zero-state-transitional-renewal-"));
+    roots.push(temporaryRoot);
+    const root = await realpath(temporaryRoot);
+    let now = Date.parse("2026-07-18T00:00:00.000Z");
+    const fabric = new Fabric({
+      databasePath: join(root, "fabric.sqlite3"),
+      workspaceRoots: [root],
+      clock: () => now,
+    });
+    const trust = {
+      canonicalRoot: root,
+      trustRecordDigest: `sha256:${"c".repeat(64)}`,
+    } as const;
+
+    try {
+      const codexOnly = fabric.bootstrapCurrentMcpSeat({
+        ...trust,
+        seat: "codex",
+        expiresAt: "2026-07-19T00:00:00.000Z",
+      });
+      const predecessor = codexOnly.credentials[0]!.capability;
+      now = Date.parse("2026-07-19T00:30:00.000Z");
+
+      const renewed = fabric.bootstrapCurrentMcpSeat({
+        ...trust,
+        seat: "claude",
+        expiresAt: "2026-07-20T00:30:00.000Z",
+      });
+
+      expect(renewed.projectSessionId).toBe(codexOnly.projectSessionId);
+      expect(renewed.runId).toBe(codexOnly.runId);
+      expect(renewed.chairAgentId).toBe(codexOnly.chairAgentId);
+      expect(renewed.expectedPreviousGeneration).toBe(codexOnly.generation);
+      expect(renewed.credentials.map(({ seat }) => seat).sort()).toEqual(["claude", "codex"]);
+      expect(() => fabric.connect(predecessor)).toThrow(expect.objectContaining({ code: "AUTHENTICATION_FAILED" }));
+      expect(fabric.connect(renewed.credentials.find(({ seat }) => seat === "claude")!.capability)).toBeDefined();
+    } finally {
       await fabric.close();
     }
   });

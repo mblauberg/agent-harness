@@ -5,7 +5,7 @@ import {
   createUnprovisionedMcpServer,
   type FabricMcpServerHandle,
 } from "./server.js";
-import { McpSeatNotProvisionedError, resolveMcpCapability } from "./credentials.js";
+import { McpSeatNotProvisionedError, resolveMcpCapability, resolveRenewableMcpCapability } from "./credentials.js";
 import { resolveFabricPaths } from "../cli/paths.js";
 import { bootstrapMcpSeat } from "../cli/mcp-bootstrap.js";
 
@@ -17,20 +17,31 @@ import { bootstrapMcpSeat } from "../cli/mcp-bootstrap.js";
 const paths = resolveFabricPaths();
 const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH ?? paths.socketPath;
 const effectivePaths = { ...paths, socketPath };
+const renewCurrentSeat = async (): Promise<void> => {
+  await bootstrapMcpSeat({
+    environment: process.env,
+    cwd: process.cwd(),
+    paths: effectivePaths,
+  });
+};
+const resolveCurrentCapability = async (): Promise<string> => process.env.AGENT_FABRIC_SEAT === undefined
+  ? await resolveMcpCapability(process.env, process.cwd())
+  : await resolveRenewableMcpCapability(
+    process.env,
+    process.cwd(),
+    renewCurrentSeat,
+    (message) => process.stderr.write(`warning: ${message}\n`),
+  );
 
 let handle: FabricMcpServerHandle;
 try {
-  const capability = await resolveMcpCapability(
-    process.env,
-    process.cwd(),
-    (message) => process.stderr.write(`warning: ${message}\n`),
-  );
+  const capability = await resolveCurrentCapability();
   handle = await createFabricMcpServer({
     socketPath,
     capability,
     ...(process.env.AGENT_FABRIC_SEAT === undefined
       ? {}
-      : { refreshCapability: async () => await resolveMcpCapability(process.env, process.cwd()) }),
+      : { refreshCapability: resolveCurrentCapability }),
     ...(process.env.AGENT_FABRIC_CLIENT_LABEL === undefined
       ? {}
       : { clientLabel: process.env.AGENT_FABRIC_CLIENT_LABEL }),
@@ -51,7 +62,7 @@ try {
       return {
         socketPath,
         capability: bootstrapped.credential,
-        refreshCapability: async () => await resolveMcpCapability(process.env, process.cwd()),
+        refreshCapability: resolveCurrentCapability,
         ...(process.env.AGENT_FABRIC_CLIENT_LABEL === undefined
           ? {}
           : { clientLabel: process.env.AGENT_FABRIC_CLIENT_LABEL }),

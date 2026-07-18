@@ -102,9 +102,21 @@ async function openMcpClient(
 }
 
 afterEach(async () => {
-  await Promise.allSettled([...daemonPids].map(async (pid) => terminateTrackedTestProcess(pid)));
+  const currentRoots = roots.splice(0);
+  const cleanupPids = new Set(daemonPids);
+  await Promise.allSettled(currentRoots.map(async (root) => {
+    const discovery = JSON.parse(await readFile(join(root, "runtime", "fabric-v1.discovery.json"), "utf8")) as { pid?: unknown };
+    if (typeof discovery.pid === "number") {
+      cleanupPids.add(discovery.pid);
+      trackTestProcess(discovery.pid, "zero-state-bootstrap-discovered-daemon");
+    }
+  }));
+  await Promise.allSettled([...cleanupPids].map(async (pid) => terminateTrackedTestProcess(pid)));
+  for (const pid of cleanupPids) {
+    expect(() => process.kill(pid, 0)).toThrow();
+  }
   daemonPids.clear();
-  await Promise.allSettled(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+  await Promise.allSettled(currentRoots.map(async (root) => rm(root, { recursive: true, force: true })));
 });
 
 describe("fresh Agent Fabric launch bootstrap", () => {
