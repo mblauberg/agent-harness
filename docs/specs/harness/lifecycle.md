@@ -1,8 +1,8 @@
 # Adaptive agent harness lifecycle
 
-[Issue #23](https://github.com/mblauberg/provenant/issues/23) and its Project
-Status field own delivery state, owner, dependencies and user gates for these
-requirements.
+[Issue #23](https://github.com/mblauberg/provenant/issues/23) records the
+completed delivery that established these requirements. A change to them
+requires a current linked GitHub issue and Project Status.
 
 The current contract permits direct read-only analysis of local session history, keeps sharing and export separately gated, and treats unsupported or unattributable evidence as `N/A`, never zero. It does not retain the synthetic collector, which had no provider-native adapter or producer. Route evaluation remains task-local, receipt-bound and content-free; it does not approve a learned or Pareto router.
 

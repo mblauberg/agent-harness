@@ -36,8 +36,8 @@ below. Follow their linked GitHub issues for delivery state.
 ## Project Fabric Console
 
 The Console requirements are owned by the specifications below. [Issue
-#23](https://github.com/mblauberg/provenant/issues/23), its linked pull requests
-and its Project Status field own delivery state and user gates.
+#141](https://github.com/mblauberg/provenant/issues/141) and its Project Status
+field own current Console delivery state and user gates.
 
 - [Scope and projections](console/scope-and-projections.md)
 - [Sessions and chair](console/sessions-and-chair.md)
