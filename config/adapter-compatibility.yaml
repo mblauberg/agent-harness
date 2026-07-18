@@ -206,7 +206,7 @@ adapters:
     unresolved_pins: []
 
   kiro-acp:
-    enabled: false
+    enabled: true
     delivery_stage: 4
     implementation:
       kind: native-cli

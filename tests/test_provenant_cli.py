@@ -173,5 +173,5 @@ def test_help_is_concise_and_names_existing_command_owners(tmp_path):
     assert result.stderr == ""
     assert "route" in result.stdout and "scripts/model-route" in result.stdout
     assert "doctor" in result.stdout and "scripts/agent-fabric doctor" in result.stdout
-    assert "Kiro provider activation: issue #265" in result.stdout
-    assert "OpenCode provider: enabled for explicit opencode/* account models" in result.stdout
+    assert "Kiro: optional subscription-native provider (ACP v1)." in result.stdout
+    assert "OpenCode: optional provider for explicit opencode/* account models (ACP v1)." in result.stdout

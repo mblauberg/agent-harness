@@ -7,12 +7,43 @@ const scenario = process.argv[2] ?? "happy";
 const transcriptPath = process.argv[3];
 let permissionRequestId = 90;
 let pendingPromptId: unknown;
+let selectedModel = "opencode/default-free";
+let selectedEffort = "low";
 
-function record(direction: "in" | "out", value: unknown): void {
+function configOptions(): unknown[] {
+  return [
+    {
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: selectedModel,
+      options: [
+        { value: "opencode/default-free", name: "Default" },
+        { value: "opencode/deepseek-v4-flash-free", name: "DeepSeek" },
+      ],
+    },
+    {
+      id: "effort",
+      name: "Effort",
+      category: "thought_level",
+      type: "select",
+      currentValue: selectedEffort,
+      options: [
+        { value: "low", name: "Low" },
+        { value: "high", name: "High" },
+      ],
+    },
+  ];
+}
+
+function record(direction: "argv" | "in" | "out", value: unknown): void {
   if (transcriptPath !== undefined) {
     appendFileSync(transcriptPath, `${JSON.stringify({ direction, value })}\n`);
   }
 }
+
+record("argv", process.argv.slice(4));
 
 function send(value: unknown): void {
   record("out", value);
@@ -45,33 +76,15 @@ input.on("line", (line) => {
   if (value.method === "session/new") {
     result(value.id, {
       sessionId: "kiro-session-1",
-      ...(scenario === "config-model" ? {
-        configOptions: [{
-          id: "model",
-          name: "Model",
-          category: "model",
-          type: "select",
-          currentValue: "opencode/default-free",
-          options: [
-            { value: "opencode/default-free", name: "Default" },
-            { value: "opencode/deepseek-v4-flash-free", name: "DeepSeek" },
-          ],
-        }],
-      } : {}),
+      ...(["config-model", "misapply-effort"].includes(scenario) ? { configOptions: configOptions() } : {}),
     });
     return;
   }
   if (value.method === "session/set_config_option") {
-    result(value.id, {
-      configOptions: [{
-        id: "model",
-        name: "Model",
-        category: "model",
-        type: "select",
-        currentValue: (value.params as JsonObject).value,
-        options: [],
-      }],
-    });
+    const params = value.params as JsonObject;
+    if (params.configId === "model") selectedModel = String(params.value);
+    if (params.configId === "effort") selectedEffort = scenario === "misapply-effort" ? "low" : String(params.value);
+    result(value.id, { configOptions: configOptions() });
     return;
   }
   if (value.method === "session/load") {

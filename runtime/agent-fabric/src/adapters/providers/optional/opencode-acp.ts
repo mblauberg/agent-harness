@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { verifyProviderConformance } from "../../provider-conformance.js";
 import { SqliteAdapterActionJournal } from "../journal.js";
 import { journalPathFromArguments, serveAdapter } from "../server.js";
-import { actionPayload, ProviderAdapterError, requiredString, type AdapterRequestHandler } from "../types.js";
+import { actionPayload, ProviderAdapterError, type AdapterRequestHandler } from "../types.js";
 import { KiroAcpStdioClient } from "./kiro-acp-client.js";
 import { createManagedAcpBoundary, type KiroAcpBoundary } from "./kiro-acp.js";
 import {
@@ -12,6 +12,16 @@ import {
 } from "./shared.js";
 
 export type OpenCodeAcpBoundary = KiroAcpBoundary;
+
+const OPENCODE_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max", "ultra"]);
+
+function openCodeEffort(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !OPENCODE_EFFORTS.has(value)) {
+    throw new ProviderAdapterError("INVALID_PARAMS", "OpenCode ACP effort must be one of low, medium, high, xhigh, max, ultra");
+  }
+  return value;
+}
 
 export function createOpenCodeAcpAdapter(options: {
   boundary: OpenCodeAcpBoundary;
@@ -33,18 +43,7 @@ export function createOpenCodeAcpAdapter(options: {
   return {
     async request(method, params) {
       if (method === "spawn" || (method === "dispatch" && (params.operation === "send_turn" || params.operation === "steer"))) {
-        const payload = actionPayload(params);
-        if (payload.effort !== undefined) {
-          const effort = requiredString(payload.effort, "effort");
-          const model = requiredString(payload.model, "model");
-          if (model.split("/").at(-1) !== effort) {
-            throw new ProviderAdapterError(
-              "ADAPTER_EFFORT_FORBIDDEN",
-              "OpenCode effort must be encoded in the advertised ACP model variant",
-              { effort, model },
-            );
-          }
-        }
+        openCodeEffort(actionPayload(params).effort);
       }
       return await delegate.request(method, params);
     },
@@ -64,18 +63,21 @@ export async function runOpenCodeAcpAdapter(
   const maximumOutputBytes = positiveIntegerArgument(arguments_, "--maximum-output-bytes");
   const boundary = createManagedAcpBoundary({
     providerName: "OpenCode ACP",
+    parseEffort: openCodeEffort,
     verifyExecutable: async () => await (dependencies.verifyProvider ?? verifyProviderConformance)({
       adapterId: "opencode-acp",
       executable: providerExecutable,
       providerInstallRoot,
     }),
-    clientFactory({ model, cwd }) {
+    clientFactory({ model, effort, cwd }) {
       return new KiroAcpStdioClient({
         executable: providerExecutable,
         args: ["acp", "--pure", "--cwd", cwd],
         cwd,
         model,
+        ...(effort === undefined ? {} : { effort }),
         configureModelOnSessionStart: true,
+        configureEffortOnSessionStart: effort !== undefined,
         ...(requestTimeoutMs === undefined ? {} : { requestTimeoutMs }),
         ...(closeTimeoutMs === undefined ? {} : { closeTimeoutMs }),
         ...(maximumLineBytes === undefined ? {} : { maximumLineBytes }),

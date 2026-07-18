@@ -18,6 +18,7 @@ activeAdapters:
   - agy
   - cursor-agent
   - opencode-acp
+  - kiro-acp
 
 allowedProfiles:
   - headless

@@ -80,6 +80,7 @@ function compatibilityEntry(input: {
           }
         : {
           allowed: ["open-weight"],
+          allowed_model_patterns: ["deepseek-*", "glm-*", "minimax-*", "qwen*"],
           requires_explicit_model: true,
           route_role: "open-model-worker",
         },

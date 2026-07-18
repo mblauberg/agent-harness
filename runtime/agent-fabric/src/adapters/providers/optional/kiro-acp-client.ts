@@ -32,12 +32,14 @@ export type KiroAcpClientOptions = {
   args?: string[];
   cwd: string;
   model?: string;
+  effort?: string;
   environment?: Record<string, string>;
   requestTimeoutMs?: number;
   closeTimeoutMs?: number;
   maximumLineBytes?: number;
   maximumOutputBytes?: number;
   configureModelOnSessionStart?: boolean;
+  configureEffortOnSessionStart?: boolean;
 };
 
 function positiveInteger(value: number, name: string): number {
@@ -186,37 +188,45 @@ export class KiroAcpStdioClient {
   async newSession(cwd: string): Promise<{ sessionId: string }> {
     const result = await this.#send("session/new", { cwd: requireAbsoluteCwd(cwd), mcpServers: [] });
     const sessionId = requireString(result.sessionId, "session/new sessionId");
+    let configOptions = result.configOptions;
     if (this.#options.configureModelOnSessionStart === true) {
       const model = requireString(this.#options.model, "configured model");
-      this.#requireSelectableModel(result.configOptions, model);
+      this.#requireSelectableConfig(configOptions, "model", model, "ADAPTER_MODEL_FORBIDDEN");
       const configured = await this.#send("session/set_config_option", { sessionId, configId: "model", value: model });
-      this.#requireCurrentModel(configured.configOptions, model);
+      this.#requireCurrentConfig(configured.configOptions, "model", model);
+      configOptions = configured.configOptions;
+    }
+    if (this.#options.configureEffortOnSessionStart === true) {
+      const effort = requireString(this.#options.effort, "configured effort");
+      this.#requireSelectableConfig(configOptions, "effort", effort, "ADAPTER_EFFORT_FORBIDDEN");
+      const configured = await this.#send("session/set_config_option", { sessionId, configId: "effort", value: effort });
+      this.#requireCurrentConfig(configured.configOptions, "effort", effort);
     }
     return { sessionId };
   }
 
-  #requireSelectableModel(value: unknown, model: string): void {
-    const option = this.#modelOption(value);
+  #requireSelectableConfig(value: unknown, configId: string, selected: string, code: string): void {
+    const option = this.#selectOption(value, configId);
     const options = option.options;
-    if (!Array.isArray(options) || !options.some((candidate) => isRecord(candidate) && candidate.value === model)) {
-      throw new ProviderAdapterError("ADAPTER_MODEL_FORBIDDEN", "ACP provider did not advertise the requested model", { model });
+    if (!Array.isArray(options) || !options.some((candidate) => isRecord(candidate) && candidate.value === selected)) {
+      throw new ProviderAdapterError(code, `ACP provider did not advertise the requested ${configId}`, { [configId]: selected });
     }
   }
 
-  #requireCurrentModel(value: unknown, model: string): void {
-    const option = this.#modelOption(value);
-    if (option.currentValue !== model) {
-      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "ACP provider did not activate the requested model", { model });
+  #requireCurrentConfig(value: unknown, configId: string, selected: string): void {
+    const option = this.#selectOption(value, configId);
+    if (option.currentValue !== selected) {
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", `ACP provider did not activate the requested ${configId}`, { [configId]: selected });
     }
   }
 
-  #modelOption(value: unknown): JsonObject {
+  #selectOption(value: unknown, configId: string): JsonObject {
     if (!Array.isArray(value)) {
-      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "ACP provider model config options are missing");
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "ACP provider config options are missing");
     }
-    const option = value.find((candidate) => isRecord(candidate) && candidate.id === "model" && candidate.type === "select");
+    const option = value.find((candidate) => isRecord(candidate) && candidate.id === configId && candidate.type === "select");
     if (!isRecord(option)) {
-      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "ACP provider model selector is missing");
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", `ACP provider ${configId} selector is missing`);
     }
     return option;
   }

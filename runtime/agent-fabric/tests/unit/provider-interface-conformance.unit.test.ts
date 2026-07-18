@@ -40,7 +40,9 @@ describe("provider non-answer interface conformance", () => {
   });
 
   it("proves the Kiro ACP v1 initialize handshake", async () => {
-    const run = vi.fn(async () => ({ stdout: '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}\n', stderr: "", exitCode: 0 }));
+    const run = vi.fn(async (input: { args: string[] }) => input.args.includes("--help")
+      ? { stdout: "--model <MODEL> --effort <EFFORT> --agent-engine <ENGINE>", stderr: "", exitCode: 0 }
+      : { stdout: '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}\n', stderr: "", exitCode: 0 });
     await expect(probeProviderInterface({ adapterId: "kiro-acp", executable: "/kiro" }, run))
       .resolves.toMatchObject({ adapterId: "kiro-acp", conformant: true, probe: "acp-v1-initialize" });
   });
@@ -54,6 +56,14 @@ describe("provider non-answer interface conformance", () => {
     await expect(probeProviderInterface({ adapterId: "opencode-acp", executable: "/opencode" }, run))
       .resolves.toMatchObject({ adapterId: "opencode-acp", conformant: true, probe: "acp-v1-initialize", version: "1.17.18" });
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ args: ["acp"] }));
+  });
+
+  it("rejects Kiro ACP when the effort interface disappears", async () => {
+    const run = vi.fn(async (input: { args: string[] }) => input.args.includes("--help")
+      ? { stdout: "--model <MODEL> --agent-engine <ENGINE>", stderr: "", exitCode: 0 }
+      : { stdout: '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}\n', stderr: "", exitCode: 0 });
+    await expect(probeProviderInterface({ adapterId: "kiro-acp", executable: "/kiro" }, run))
+      .rejects.toMatchObject({ code: "ADAPTER_INTERFACE_MISMATCH" });
   });
 
   it("fails closed when a required interface disappears", async () => {

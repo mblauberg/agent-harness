@@ -106,12 +106,18 @@ export async function probeProviderInterface(
           clientInfo: { name: "agent-fabric-probe", version: "1" },
         },
       })}\n`;
-      const args = input.adapterId === "kiro-acp" ? ["acp", "--agent-engine", "v2"] : ["acp"];
-      const result = await runner({ executable: input.executable, args, stdin: request, closeOnFirstLine: true, timeoutMs: PROBE_TIMEOUT_MS });
+      const kiro = input.adapterId === "kiro-acp";
+      const [result, help] = kiro
+        ? await Promise.all([
+            runner({ executable: input.executable, args: ["acp", "--agent-engine", "v2"], stdin: request, closeOnFirstLine: true, timeoutMs: PROBE_TIMEOUT_MS }),
+            runner({ executable: input.executable, args: ["acp", "--help"], timeoutMs: PROBE_TIMEOUT_MS }),
+          ])
+        : [await runner({ executable: input.executable, args: ["acp"], stdin: request, closeOnFirstLine: true, timeoutMs: PROBE_TIMEOUT_MS }), undefined];
       const line = result.stdout.split(/\r?\n/u).find((item) => item.trim().length > 0);
       const response: unknown = line === undefined ? undefined : JSON.parse(line);
       const negotiated = typeof response === "object" && response !== null ? Reflect.get(response, "result") : undefined;
-      if (typeof negotiated !== "object" || negotiated === null || Reflect.get(negotiated, "protocolVersion") !== 1) {
+      if (typeof negotiated !== "object" || negotiated === null || Reflect.get(negotiated, "protocolVersion") !== 1 ||
+          (kiro && (help === undefined || help.exitCode !== 0 || !hasExactOption(`${help.stdout}\n${help.stderr}`, "--effort")))) {
         throw new Error(`${input.adapterId} ACP v1 initialize response is invalid`);
       }
       const agentInfo = Reflect.get(negotiated, "agentInfo");

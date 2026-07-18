@@ -34,13 +34,16 @@ describe("OpenCode ACP adapter", () => {
         payload: { model: "opencode/deepseek-v4-flash-free", modelFamily: "anthropic" },
       })).rejects.toMatchObject({ code: "ADAPTER_FAMILY_FORBIDDEN" });
       await expect(adapter.request("spawn", {
-        actionId: "dropped-effort",
+        actionId: "supported-effort",
         payload: { model: "opencode/deepseek-v4-flash-free", modelFamily: "generic-open", effort: "high" },
-      })).rejects.toMatchObject({ code: "ADAPTER_EFFORT_FORBIDDEN" });
-      await expect(adapter.request("spawn", {
-        actionId: "variant-effort",
-        payload: { model: "opencode/example/high", modelFamily: "generic-open", effort: "high" },
       })).resolves.toMatchObject({ resumeReference: "session-1" });
+      await expect(adapter.request("spawn", {
+        actionId: "unsupported-effort",
+        payload: { model: "opencode/deepseek-v4-flash-free", modelFamily: "generic-open", effort: "turbo" },
+      })).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+      await expect(adapter.request("lookup_action", {
+        actionId: "unsupported-effort",
+      })).rejects.toMatchObject({ code: "ACTION_NOT_FOUND" });
     } finally {
       journal.close();
       await rm(directory, { recursive: true, force: true });
