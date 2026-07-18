@@ -255,29 +255,54 @@ export async function runWorkspaceTrust(
   }
   if (action !== "trust") throw new Error("workspace command must be trust, inspect, list or revoke");
   const profileValue = option(arguments_, "--profiles");
-  const allowedProfiles = (profileValue === undefined ? DEFAULT_PROFILES : profileValue.split(","))
+  const requestedProfiles = profileValue?.split(",")
     .map((profile) => profile.trim())
     .filter((profile) => profile.length > 0);
-  if (allowedProfiles.length === 0 || allowedProfiles.some((profile) => !PROFILE_PATTERN.test(profile))) throw new Error("workspace profiles are invalid");
+  if (requestedProfiles !== undefined &&
+    (requestedProfiles.length === 0 || requestedProfiles.some((profile) => !PROFILE_PATTERN.test(profile)))) {
+    throw new Error("workspace profiles are invalid");
+  }
   const expiresAt = option(arguments_, "--expires-at");
   if (expiresAt !== undefined && timestamp(expiresAt, "workspace expiry") <= now.getTime()) throw new Error("workspace trust expiry must be in the future");
-  const entry: WorkspaceTrustEntry = {
-    canonicalPath,
-    approvedAt: now.toISOString(),
-    approvedBy: "local-operator",
-    device: identity.device,
-    inode: identity.inode,
-    ...(expiresAt === undefined ? {} : { expiresAt }),
-    allowedProfiles: [...new Set(allowedProfiles)].sort(),
-  };
-  await withRegistryMutationLock(paths.stateDirectory, async () => {
+  return await withRegistryMutationLock(paths.stateDirectory, async () => {
     const current = await readRegistry(registryPath);
-    const broadened = current.entries.find((item) => item.canonicalPath !== canonicalPath && item.canonicalPath.startsWith(`${canonicalPath}${sep}`));
-    if (broadened !== undefined) throw new Error(`workspace trust refuses ancestor broadening over ${broadened.canonicalPath}`);
+    const currentEntry = current.entries.find((item) => item.canonicalPath === canonicalPath);
+    const currentEntryIdentityMatches = currentEntry !== undefined && await identityMatches(currentEntry);
+    const currentEntryIsLive = currentEntry !== undefined &&
+      (currentEntry.expiresAt === undefined || timestamp(currentEntry.expiresAt, "workspace expiry") > now.getTime()) &&
+      currentEntryIdentityMatches;
+    if (currentEntryIsLive && profileValue === undefined && expiresAt === undefined) {
+      return {
+        schemaVersion: 1,
+        trusted: true,
+        alreadyTrusted: true,
+        entry: { ...currentEntry, allowedProfiles: [...currentEntry.allowedProfiles] },
+      };
+    }
+    if (currentEntry === undefined || !currentEntryIdentityMatches) {
+      const broadened = current.entries.find((item) => item.canonicalPath.startsWith(`${canonicalPath}${sep}`));
+      if (broadened !== undefined) throw new Error(`workspace trust refuses ancestor broadening over ${broadened.canonicalPath}`);
+    }
+    const allowedProfiles = requestedProfiles ?? currentEntry?.allowedProfiles ?? DEFAULT_PROFILES;
+    const currentExpiryIsLive = currentEntry?.expiresAt !== undefined &&
+      timestamp(currentEntry.expiresAt, "workspace expiry") > now.getTime();
+    const effectiveExpiry = expiresAt ?? (currentExpiryIsLive ? currentEntry.expiresAt : undefined);
+    if (effectiveExpiry !== undefined && timestamp(effectiveExpiry, "workspace expiry") <= now.getTime()) {
+      throw new Error("workspace trust expiry must be in the future");
+    }
+    const entry: WorkspaceTrustEntry = {
+      canonicalPath,
+      approvedAt: now.toISOString(),
+      approvedBy: "local-operator",
+      device: identity.device,
+      inode: identity.inode,
+      ...(effectiveExpiry === undefined ? {} : { expiresAt: effectiveExpiry }),
+      allowedProfiles: [...new Set(allowedProfiles)].sort(),
+    };
     await writeRegistry(registryPath, {
       schemaVersion: 1,
       entries: [...current.entries.filter((item) => item.canonicalPath !== canonicalPath), entry],
     });
+    return { schemaVersion: 1, trusted: true, entry };
   });
-  return { schemaVersion: 1, trusted: true, entry };
 }

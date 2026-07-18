@@ -67,6 +67,15 @@ def test_first_use_fabric_trust_uses_the_global_home_launcher():
     assert '`scripts/agent-fabric workspace trust "$project_root"`' not in runbook
 
 
+def test_first_use_fabric_docs_explain_bootstrap_trust_recovery():
+    agents = " ".join((ROOT / "AGENTS.md").read_text().split())
+    readme = " ".join((ROOT / "README.md").read_text().split())
+    assert "WORKSPACE_NOT_TRUSTED" in agents
+    assert "retry `fabric_bootstrap`" in agents
+    assert "WORKSPACE_NOT_TRUSTED" in readme
+    assert "$HOME/.agents/scripts/agent-fabric workspace trust" in readme
+
+
 def test_subagent_dispatch_contract_requires_task_class_bound_route_and_receipt():
     harness = (ROOT / "HARNESS.md").read_text()
     skill = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text()
