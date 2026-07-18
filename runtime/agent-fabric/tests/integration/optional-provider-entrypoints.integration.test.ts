@@ -306,7 +306,7 @@ describe("optional provider executable wrappers", () => {
       type: "private_provider_content",
       private_provider_content: "must not cross the adapter boundary",
     });
-    const wrapperPath = fileURLToPath(new URL("../../src/adapters/providers/optional/cursor-agent.ts", import.meta.url));
+    const wrapperPath = fileURLToPath(new URL("../support/provider-wrapper-entrypoint.ts", import.meta.url));
     const transport = new AdapterProcessTransport({
       command: [
         process.execPath,
@@ -317,10 +317,12 @@ describe("optional provider executable wrappers", () => {
         join(directory, "adapter.sqlite3"),
         "--provider-executable",
         providerExecutable,
+        "--provider-install-root",
+        directory,
         "--cwd",
         directory,
       ],
-      environment: {},
+      environment: { AGENT_FABRIC_TEST_ADAPTER: "cursor-agent" },
       responseTimeoutMs: 2_000,
     });
     const actionId = "cursor-agent:unsupported-record:1";
