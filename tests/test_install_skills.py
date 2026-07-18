@@ -2,8 +2,10 @@ from pathlib import Path
 import importlib.util
 import json
 import shutil
+import stat
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -11,6 +13,35 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install-skills"
 MANAGER = ROOT / "scripts" / "manage_installation.py"
+LOCK_NAME = ".agent-harness-installation.lock"
+
+WORKER = r'''
+import importlib.util
+from pathlib import Path
+import sys
+import time
+
+manager_path, action, source, target, ready, release, fail = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("managed_installation_worker", manager_path)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+assert spec.loader
+spec.loader.exec_module(module)
+if ready != "-":
+    original = module._write_manifest
+    def controlled_write(target_path, manifest):
+        Path(ready).write_text("ready\n")
+        deadline = time.monotonic() + 10
+        while not Path(release).exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("worker release timed out")
+            time.sleep(0.01)
+        if fail == "true":
+            raise OSError("injected manifest failure")
+        original(target_path, manifest)
+    module._write_manifest = controlled_write
+module.execute(action, Path(source), Path(target))
+'''
 
 
 def load_manager_module(name: str):
@@ -158,6 +189,52 @@ def tiny_source(tmp_path: Path):
     return source
 
 
+def named_source(root: Path, names: tuple[str, ...]):
+    source = root / "source"
+    for name in names:
+        skill = source / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"---\nname: {name}\ndescription: Use when testing.\n---\n")
+    return source
+
+
+def start_worker(
+    action: str,
+    source: Path,
+    target: Path,
+    *,
+    ready: Path | None = None,
+    release: Path | None = None,
+    fail: bool = False,
+):
+    return subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            WORKER,
+            str(MANAGER),
+            action,
+            str(source),
+            str(target),
+            str(ready) if ready else "-",
+            str(release) if release else "-",
+            "true" if fail else "false",
+        ],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def wait_for(path: Path) -> None:
+    deadline = time.monotonic() + 5
+    while not path.exists():
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"timed out waiting for {path}")
+        time.sleep(0.01)
+
+
 def test_plan_is_read_only_and_distinguishes_missing_and_unmanaged(tmp_path):
     source = tiny_source(tmp_path)
     target = tmp_path / "installed"
@@ -183,6 +260,91 @@ def test_check_treats_only_exact_unmanaged_links_as_compatible(tmp_path):
     assert result.returncode == 0, result.stderr
     states = {item["name"]: item["state"] for item in json.loads(result.stdout)["items"]}
     assert states == {"alpha": "compatible", "beta": "compatible"}
+    assert not manifest_for(target).exists()
+
+
+def test_installation_lock_is_private_regular_and_rejects_symlink_collision(tmp_path):
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    victim = tmp_path / "victim"
+    victim.write_text("untouched\n")
+    lock = target.parent / LOCK_NAME
+    lock.symlink_to(victim)
+
+    rejected = manager(target, "install", source)
+
+    assert rejected.returncode == 3
+    assert "installation lock" in rejected.stderr
+    assert victim.read_text() == "untouched\n"
+    lock.unlink()
+    installed = manager(target, "install", source)
+    assert installed.returncode == 0, installed.stderr
+    info = lock.lstat()
+    assert stat.S_ISREG(info.st_mode)
+    assert stat.S_IMODE(info.st_mode) == 0o600
+    assert info.st_nlink == 1
+
+
+def test_cross_process_lock_serializes_forward_reconcile_on_same_name(tmp_path):
+    first_source = named_source(tmp_path / "first", ("alpha",))
+    second_source = named_source(tmp_path / "second", ("alpha",))
+    target = tmp_path / "installed"
+    ready = tmp_path / "ready"
+    release = tmp_path / "release"
+    first = start_worker("install", first_source, target, ready=ready, release=release)
+    wait_for(ready)
+    second = start_worker("reconcile", second_source, target)
+    time.sleep(0.2)
+    assert second.poll() is None, second.communicate(timeout=1)
+    release.write_text("release\n")
+    first_output = first.communicate(timeout=10)
+    second_output = second.communicate(timeout=10)
+
+    assert first.returncode == 0, first_output
+    assert second.returncode == 0, second_output
+    assert (target / "alpha").resolve() == (second_source / "alpha").resolve()
+    manifest = json.loads(manifest_for(target).read_text())
+    assert manifest["managed"]["alpha"]["source_target"] == str((second_source / "alpha").resolve())
+
+
+def test_cross_process_lock_prevents_disjoint_manifest_lost_update(tmp_path):
+    alpha_source = named_source(tmp_path / "alpha-owner", ("alpha",))
+    beta_source = named_source(tmp_path / "beta-owner", ("beta",))
+    target = tmp_path / "installed"
+    ready = tmp_path / "ready"
+    release = tmp_path / "release"
+    first = start_worker("install", alpha_source, target, ready=ready, release=release)
+    wait_for(ready)
+    second = start_worker("install", beta_source, target)
+    time.sleep(0.2)
+    assert second.poll() is None, second.communicate(timeout=1)
+    release.write_text("release\n")
+    first_output = first.communicate(timeout=10)
+    second_output = second.communicate(timeout=10)
+
+    assert first.returncode == 0, first_output
+    assert second.returncode == 0, second_output
+    manifest = json.loads(manifest_for(target).read_text())
+    assert set(manifest["managed"]) == {"alpha", "beta"}
+
+
+def test_subprocess_rollback_preserves_external_path_changed_during_commit(tmp_path):
+    source = named_source(tmp_path / "owner", ("alpha",))
+    target = tmp_path / "installed"
+    ready = tmp_path / "ready"
+    release = tmp_path / "release"
+    worker = start_worker("install", source, target, ready=ready, release=release, fail=True)
+    wait_for(ready)
+    installed = target / "alpha"
+    external = tmp_path / "external"
+    external.mkdir()
+    installed.unlink()
+    installed.symlink_to(external)
+    release.write_text("release\n")
+    output = worker.communicate(timeout=10)
+
+    assert worker.returncode != 0, output
+    assert installed.resolve() == external
     assert not manifest_for(target).exists()
 
 
@@ -412,22 +574,72 @@ def test_stale_reconcile_rejects_path_race_without_overwriting_newer_entry(tmp_p
     stale.symlink_to(tmp_path / "missing")
     external = tmp_path / "external"
     external.mkdir()
-    original_assert = module._assert_path_unchanged
+    original_exchange = module.atomic_exchange
     raced = False
 
-    def race(path, snapshot):
+    def race(candidate, path):
         nonlocal raced
         if path == stale and not raced:
             raced = True
             stale.unlink()
             stale.symlink_to(external)
-        return original_assert(path, snapshot)
+        return original_exchange(candidate, path)
 
-    monkeypatch.setattr(module, "_assert_path_unchanged", race)
-    with pytest.raises(module.InstallError, match="changed before managed mutation"):
+    monkeypatch.setattr(module, "atomic_exchange", race)
+    with pytest.raises(module.InstallError, match="restored newer path"):
         module.execute("reconcile", source, target)
     assert stale.resolve() == external
     assert json.loads(manifest_for(target).read_text())["managed"]["alpha"]
+
+
+def test_stale_reconcile_preserves_writer_after_exchange_and_displaced_recovery(tmp_path, monkeypatch):
+    module = load_manager_module("managed_installer_post_exchange_race")
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    module.execute("install", source, target)
+    stale = target / "alpha"
+    stale.unlink()
+    stale.symlink_to(tmp_path / "missing")
+    external = tmp_path / "external"
+    external.mkdir()
+    original_exchange = module.atomic_exchange
+    raced = False
+
+    def race(candidate, path):
+        nonlocal raced
+        original_exchange(candidate, path)
+        if path == stale and not raced:
+            raced = True
+            stale.unlink()
+            stale.symlink_to(external)
+
+    monkeypatch.setattr(module, "atomic_exchange", race)
+    with pytest.raises(module.InstallError, match=r"preserve recovery path (.+)") as raised:
+        module.execute("reconcile", source, target)
+
+    recovery = Path(str(raised.value).split("preserve recovery path ", 1)[1])
+    assert stale.resolve() == external
+    assert recovery.is_symlink()
+    assert recovery.resolve(strict=False) == (tmp_path / "missing").resolve(strict=False)
+    assert json.loads(manifest_for(target).read_text())["managed"]["alpha"]
+
+
+def test_manifest_parent_fsync_failure_keeps_committed_manifest_and_links_aligned(tmp_path, monkeypatch):
+    module = load_manager_module("managed_installer_post_commit_fsync")
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+
+    def fail_parent_fsync(_path):
+        raise OSError("injected directory fsync failure")
+
+    monkeypatch.setattr(module, "_fsync_directory", fail_parent_fsync)
+    with pytest.raises(module.ManifestCommitUncertainError, match="manifest replaced"):
+        module.execute("install", source, target)
+
+    manifest = json.loads(manifest_for(target).read_text())
+    assert set(manifest["managed"]) == {"alpha", "beta"}
+    assert (target / "alpha").resolve() == (source / "alpha").resolve()
+    assert (target / "beta").resolve() == (source / "beta").resolve()
 
 
 def test_rename_reconcile_rolls_back_created_target_but_preserves_raced_source(tmp_path, monkeypatch):
@@ -441,19 +653,19 @@ def test_rename_reconcile_rolls_back_created_target_but_preserves_raced_source(t
     old = target / "alpha"
     external = tmp_path / "external"
     external.mkdir()
-    original_assert = module._assert_path_unchanged
+    original_rename = module.os.rename
     raced = False
 
-    def race(path, snapshot):
+    def race(path, destination):
         nonlocal raced
         if path == old and not raced:
             raced = True
             old.unlink()
             old.symlink_to(external)
-        return original_assert(path, snapshot)
+        return original_rename(path, destination)
 
-    monkeypatch.setattr(module, "_assert_path_unchanged", race)
-    with pytest.raises(module.InstallError, match="changed before managed mutation"):
+    monkeypatch.setattr(module.os, "rename", race)
+    with pytest.raises(module.InstallError, match="restored newer path"):
         module.execute("reconcile", source, target, renames)
     assert old.resolve() == external
     assert not (target / "gamma").exists()

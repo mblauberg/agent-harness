@@ -372,8 +372,12 @@ excluded from context scans.
 harness-owned skill links. A versioned manifest records ownership, source
 tree digests, the bound target and rename history beside the target skills
 directory. Unmanaged paths are never claimed or overwritten; changed managed
-targets fail for user resolution and link
-mutations roll back if the manifest commit fails.
+targets fail for user resolution. A bounded owner-only installation lock
+serializes manifest read through parent-directory fsync, while atomic link
+exchange/link/move operations preserve or retain recovery for an uncooperative
+writer. Link mutations roll back only before manifest replacement; a later
+durability failure reports an uncertain committed state without making the
+manifest and links knowingly inconsistent.
 Provider bootstraps remain small and share the same precedence sentence.
 
 ## Project Fabric Console

@@ -77,6 +77,12 @@ or check an installed tree with `scripts/install-skills --target PATH --check`.
 The ordinary installer reconciles stale managed links and the rename registry.
 Never claim or overwrite an unmanaged target.
 
+Each target parent has one owner-only, bounded `flock` transaction covering
+manifest read through durable replacement. Managed-link replacement uses atomic
+exchange/link/move operations and retains a private recovery path whenever an
+uncooperative writer wins a race; never hand-edit the lock, manifest or recovery
+paths. A stale process cannot retain the kernel lock.
+
 ## Change the delivery kernel
 
 Keep profile policy in `config/delivery-profiles.json`, surface-selected checks
