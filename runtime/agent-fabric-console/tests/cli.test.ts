@@ -40,9 +40,9 @@ describe("standalone Console executable", () => {
     const fabricPackageValue: unknown = JSON.parse(
       await readFile(new URL("../../agent-fabric/package.json", import.meta.url), "utf8"),
     );
-    const source = await readFile(new URL("../src/cli.ts", import.meta.url), "utf8");
+    const source = await readFile(new URL("../src/bin.ts", import.meta.url), "utf8");
     expect(packageValue).toMatchObject({
-      bin: { "agent-fabric-console": "dist/cli.js" },
+      bin: { "agent-fabric-console": "dist/bin.js" },
       dependencies: { "@local/agent-fabric": "file:../agent-fabric" },
     });
     expect(fabricPackageValue).toMatchObject({
@@ -51,11 +51,7 @@ describe("standalone Console executable", () => {
       },
     });
     expect(source.startsWith("#!/usr/bin/env node\n")).toBe(true);
-    expect(source).toContain("createConsoleCliBootstrap()");
-    expect(source).toContain(
-      "typedEntryPlannerFactory: createProductionConsoleTypedEntryPlanner",
-    );
-    expect(source).not.toContain("unavailableBootstrap");
+    expect(source).toContain("runConsoleCli(process.argv.slice(2))");
   });
 
   it("rejects a non-TTY before starting or attaching Fabric", async () => {

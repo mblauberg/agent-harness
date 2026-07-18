@@ -51,8 +51,8 @@ def test_documented_fresh_checkout_sequence_produces_runnable_doctor(tmp_path):
         "printf '%s\\n' 'export {};' > \"$AGENTS_HOME/runtime/agent-fabric-protocol/dist/index.js\"\n"
         "printf '%s\\n' 'process.stdout.write(JSON.stringify({argv: process.argv.slice(2), cwd: process.cwd()}));' > \"$AGENTS_HOME/runtime/agent-fabric/dist/cli/main.js\"\n"
         "printf '%s\\n' 'export {};' > \"$AGENTS_HOME/runtime/agent-fabric/dist/mcp/main.js\"\n"
-        "printf '%s\\n' 'export {};' > \"$AGENTS_HOME/runtime/agent-fabric-herdr/dist/cli.js\"\n"
-        "printf '%s\\n' 'export {};' > \"$AGENTS_HOME/runtime/agent-fabric-console/dist/cli.js\"\n"
+        "printf '%s\\n' 'export {};' > \"$AGENTS_HOME/runtime/agent-fabric-herdr/dist/bin.js\"\n"
+        "printf '%s\\n' 'export {};' > \"$AGENTS_HOME/runtime/agent-fabric-console/dist/bin.js\"\n"
     )
     fake_npm.chmod(0o755)
     env = {
