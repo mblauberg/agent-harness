@@ -150,7 +150,7 @@ describe("daemon single-instance ownership", () => {
     }
   });
 
-  it("keeps ownership in the daemon child after its launcher is killed", async () => {
+  it("keeps ownership in the released daemon child after its launcher is killed", async () => {
     const directory = await mkdtemp(join(tmpdir(), "afdb-launcher-death-"));
     const options = {
       databasePath: join(directory, "state", "fabric.sqlite3"),
