@@ -3,6 +3,8 @@ import { lstat, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { verifyAdapterCompatibility } from "../adapters/compatibility.js";
+import { verifyProviderConformance } from "../adapters/provider-conformance.js";
+import { loadAdapterModelConstraints } from "../adapters/model-selection.js";
 import { loadFabricConfig } from "../config/index.js";
 import { assertDatabaseIntegrity } from "../persistence/invariants.js";
 import { BootstrapElection, FLOCK_ELECTION_LOCK_PORT } from "../daemon/bootstrap-election.js";
@@ -322,7 +324,11 @@ async function doctorDaemonState(paths: FabricPaths): Promise<DoctorDaemonState>
   }
 }
 
-export async function fabricDoctor(arguments_: string[], paths: FabricPaths): Promise<Record<string, unknown>> {
+export async function fabricDoctor(
+  arguments_: string[],
+  paths: FabricPaths,
+  dependencies: { verifyProvider?: typeof verifyProviderConformance } = {},
+): Promise<Record<string, unknown>> {
   const selected = pathsFor(arguments_);
   let adapterIds: string[] = [];
   let adapterCommands: string[][] = [];
@@ -352,6 +358,27 @@ export async function fabricDoctor(arguments_: string[], paths: FabricPaths): Pr
     return verification.wrapperProvenance
       .map((item) => `${item.adapterId}=${item.repositoryCommit}:${item.wrapperPath}`)
       .join(" ");
+  }));
+  checks.push(await check("provider-conformance", async () => {
+    const verification = await verifyAdapterCompatibility({ compatibilityPath: selected.compatibility, schemaPath: selected.compatibilitySchema, adapterIds, requireEnabled: true });
+    const observations = [];
+    for (const adapterId of adapterIds) {
+      const executable = verification.resolvedExecutables[adapterId];
+      if (executable === undefined) throw new Error(`provider executable is missing: ${adapterId}`);
+      const policy = await loadAdapterModelConstraints({
+        compatibilityPath: selected.compatibility,
+        schemaPath: selected.compatibilitySchema,
+        adapterId,
+      });
+      if (policy.providerIdentity === undefined) continue;
+      const observation = await (dependencies.verifyProvider ?? verifyProviderConformance)({
+        adapterId,
+        executable,
+        ...(policy.cursorInstallRoot === undefined ? {} : { cursorInstallRoot: policy.cursorInstallRoot }),
+      });
+      observations.push(`${adapterId}=${observation.interface.version}:${observation.identity.sha256}:${observation.identity.assurance}`);
+    }
+    return observations.join(" ");
   }));
   for (const [id, path, expectedKind] of [
     ["state-directory", paths.stateDirectory, "directory"],

@@ -56,6 +56,7 @@ function compatibilityAdapter(options: {
       installed_version: "1.0.0-fixture",
       executable: options.implementationPath,
       executable_sha256: options.implementationHash,
+      provider_identity: "apple-designated",
     },
     contract: {
       adapter_version: 1,

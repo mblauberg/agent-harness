@@ -2,7 +2,10 @@
 
 ## Active
 
-None.
+- [Consolidated harness CLI](consolidated-harness-cli.md) is the reviewed,
+  user-requested proposal from 18 July 2026. It owns only the pending decision
+  on a thin discovery front door; GitHub issues #253, #264 and #265 own the
+  provider work it references.
 
 [GitHub Issues](https://github.com/mblauberg/provenant/issues) own the current
 owner, dependencies and user gates; Project Status owns workflow state. Read

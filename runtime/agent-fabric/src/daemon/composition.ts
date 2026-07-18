@@ -4,6 +4,7 @@ import { verifyAdapterCompatibility, wrapperCommandEntrypointIndex } from "../ad
 import { loadAdapterModelConstraints } from "../adapters/model-selection.js";
 import { loadFabricConfig } from "../config/index.js";
 import { trustedWorkspaceRoots } from "../cli/workspace-trust.js";
+import { verifyProviderConformance } from "../adapters/provider-conformance.js";
 
 type AdapterMap = NonNullable<FabricOpenOptions["adapters"]>;
 
@@ -80,6 +81,7 @@ export async function composeDaemonConfiguration(options: {
   compatibilitySchemaPath: string;
   agentsHome: string;
   stateDirectory?: string;
+  verifyProvider?: typeof verifyProviderConformance;
 }): Promise<{ adapters: AdapterMap; executionProfile: string; maximumConcurrentProviderTurns: number; workspaceRoots: string[] }> {
   const trustedConfigOptions = {
     globalPath: options.globalConfigPath,
@@ -118,6 +120,14 @@ export async function composeDaemonConfiguration(options: {
       adapterId,
       requireEnabled: true,
     });
+    if (policy.providerExecutable === undefined || policy.providerIdentity === undefined) {
+      throw new TypeError(`${adapterId} compatibility entry has no mandatory provider identity`);
+    }
+    await (options.verifyProvider ?? verifyProviderConformance)({
+      adapterId,
+      executable: policy.providerExecutable,
+      ...(policy.cursorInstallRoot === undefined ? {} : { cursorInstallRoot: policy.cursorInstallRoot }),
+    });
     let resolvedCommand = command.map((part) => expandTrustedCommandPart(part, options.agentsHome, options.stateDirectory));
     if (policy.wrapperEntrypoint === undefined) throw new TypeError(`${adapterId} compatibility entry has no pinned fabric wrapper`);
     const provenance = provenanceByAdapter.get(adapterId);
@@ -137,6 +147,12 @@ export async function composeDaemonConfiguration(options: {
     if (policy.providerExecutable !== undefined) {
       if (!isAbsolute(policy.providerExecutable)) throw new TypeError(`${adapterId} provider executable must be absolute`);
       resolvedCommand = replaceUniqueOption(resolvedCommand, "--provider-executable", policy.providerExecutable);
+      if (policy.providerIdentity !== undefined) {
+        resolvedCommand = replaceUniqueOption(resolvedCommand, "--provider-identity-policy", policy.providerIdentity);
+      }
+      if (policy.cursorInstallRoot !== undefined) {
+        resolvedCommand = replaceUniqueOption(resolvedCommand, "--provider-install-root", policy.cursorInstallRoot);
+      }
     } else if (adapterId !== "claude-agent-sdk") {
       throw new TypeError(`${adapterId} compatibility entry has no pinned provider executable`);
     }

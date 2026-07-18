@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
 
 import { isRecord, ProviderAdapterError } from "./types.js";
+import { verifyProviderConformance } from "../provider-conformance.js";
 
 type PendingRequest = {
   resolve(value: unknown): void;
@@ -288,4 +289,14 @@ export class CodexJsonRpcConnection {
     for (const waiter of [...this.#waiters]) waiter.reject(error);
     this.#waiters.clear();
   }
+}
+
+export async function openVerifiedCodexJsonRpcConnection(
+  command: string[],
+  environment: Record<string, string> = {},
+): Promise<CodexJsonRpcConnection> {
+  const executable = command[0];
+  if (executable === undefined) throw new ProviderAdapterError("PROVIDER_COMMAND_INVALID", "Codex command is empty");
+  await verifyProviderConformance({ adapterId: "codex-app-server", executable });
+  return new CodexJsonRpcConnection(command, environment);
 }

@@ -42,8 +42,9 @@ python3 skills/deliver/scripts/validate_delivery.py \
   '<canonical-run>/RUN.json' --workspace-root "$PWD" --verify-hashes
 ```
 
-Then verify the selected compatibility entries. External executable, package
-and schema artifacts are checked against their pinned hashes.
+Then verify the selected compatibility entries. Fabric library and protocol
+schema artifacts are checked against their pinned hashes. Provider CLI versions
+and digests are observed evidence, not admission locks.
 Repository-owned wrapper code carries Git provenance instead of a hash pin
 (`runtime/agent-fabric/src/adapters/compatibility.ts`): the wrapper
 entrypoint must resolve inside a Git repository, be tracked at HEAD and
@@ -51,10 +52,10 @@ byte-identical to its committed content, and its first-party source spans
 (the owning workspace package's src tree, local workspace dependency src
 trees and every consulted package manifest) must be diff-clean against HEAD.
 An empty or truncated span discovery is a hard verification failure, never a
-skip. Provenance is re-derived immediately before every adapter process
-spawn and must match the provenance verified at composition. Unresolved
-pins, missing artifacts, disabled entries or any provenance mismatch fail
-closed.
+skip. Provenance, adapter-specific vendor identity and the bounded non-answer
+provider interface are required at activation and revalidated at point of use.
+Unresolved contract gaps, missing artifacts, disabled entries or any
+provenance/identity/interface mismatch fail closed.
 
 ## Keep the CLI dist warm
 
@@ -148,6 +149,21 @@ is inspected without following symlinks and is not chmodded, so hard-linked
 content retains its caller-owned mode. Conflict handling never rolls that object
 back over a pathname that a concurrent writer may have changed. Reconcile both
 the current client configuration and recovery object before rerunning.
+
+Primary provider execution uses the exact Claude Code and Codex packages in
+the root lockfile, not mutable global or Homebrew installations. On the
+supported host, restore and verify that closure with:
+
+```sh
+npm ci --no-audit --no-fund
+npm run compatibility:check:primary
+```
+
+The verifier checks the stable provider launchers, native signing identity,
+non-answer interface, protocol schemas and Fabric wrapper provenance. Each
+provider wrapper revalidates its launcher, safe path and vendor identity
+immediately before a new provider process. Normal signed CLI updates need no
+registry edit; wrapper or protocol changes remain fail closed.
 
 The resolved `.cap` file must remain a private regular file with mode `0600`.
 The adjacent `.json` file is secret-free metadata and is checked against the
@@ -257,7 +273,7 @@ evidence; use another already-admitted review family or record the bonus leg as
 unavailable. Never bypass the gate with a direct CLI and claim Fabric evidence.
 
 Real provider smokes are local-only, consume subscription quota and require
-current provider-use authority. They traverse the pinned Fabric adapter
+current provider-use authority. They traverse the verified Fabric adapter
 request protocol, require exact spawn/turn/release sentinels and prove the
 isolated workspace stayed unchanged:
 
@@ -275,8 +291,8 @@ node smoke/provider-adapter-readonly.mjs \
 
 `adapter executable` prints only the validated executable path from the active
 adapter's compatibility entry. It fails closed before the provider smoke if the
-adapter is inactive, the pinned executable is missing or any compatibility
-artifact no longer matches its recorded hash.
+adapter is inactive, the stable executable is missing or its compatibility
+contract no longer conforms.
 
 Claude reviewers and one-task workers start fresh and release when done. For a
 retained Claude pair, checkpoint and compact at each stage or work-unit

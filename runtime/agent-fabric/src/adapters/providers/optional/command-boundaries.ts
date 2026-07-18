@@ -92,6 +92,14 @@ export const runBoundedProviderCommand: ProviderCommandRunner = async (invocatio
 };
 
 function agyCommandResult(result: ProviderCommandResult, fallbackReference?: string): Record<string, unknown> {
+  const output = result.stdout.trim();
+  if (output.length === 0) {
+    throw new ProviderAdapterError(
+      "PROVIDER_RESPONSE_INVALID",
+      "Agy CLI exited successfully without answer output; verify subscription model access and headless print compatibility",
+      { exitCode: result.exitCode, stderr: result.stderr.slice(-4096) },
+    );
+  }
   if (fallbackReference === undefined) {
     throw new ProviderAdapterError(
       "PROVIDER_RESPONSE_INVALID",
@@ -100,7 +108,7 @@ function agyCommandResult(result: ProviderCommandResult, fallbackReference?: str
   }
   return {
     resumeReference: fallbackReference,
-    result: result.stdout.trim(),
+    result: output,
     providerRecordCount: 0,
   };
 }
@@ -153,6 +161,7 @@ type OneShotBoundaryOptions = {
   cwd: string;
   timeoutMs?: number;
   runner?: ProviderCommandRunner;
+  verifyExecutable?: () => Promise<unknown>;
 };
 
 function assertTaskBoundOneShot(payload: Record<string, unknown>): void {
@@ -170,6 +179,7 @@ export function createAgyCliBoundary(options: OneShotBoundaryOptions): ProviderB
     const logDirectory = await mkdtemp(join(tmpdir(), "agent-fabric-agy-"));
     const logFile = join(logDirectory, "provider.log");
     try {
+      await options.verifyExecutable?.();
       const result = await runner(
         buildAgyInvocation({
           executable: options.executable,
@@ -224,6 +234,7 @@ export function createAgyCliBoundary(options: OneShotBoundaryOptions): ProviderB
 export function createCursorCliBoundary(options: OneShotBoundaryOptions): ProviderBoundary {
   const runner = options.runner ?? runBoundedProviderCommand;
   const execute = async (payload: Record<string, unknown>, resume?: string): Promise<Record<string, unknown>> => {
+    await options.verifyExecutable?.();
     const result = await runner(
       buildCursorInvocation({
         executable: options.executable,

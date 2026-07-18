@@ -23,6 +23,7 @@ import {
 } from "@local/agent-fabric-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { NotificationOutbox } from "../../src/attention/outbox.ts";
 import { applyMigrations } from "../../src/core/migrations.ts";
 import {
   OperatorActionStore,
@@ -216,6 +217,51 @@ afterEach(() => {
 });
 
 describe("operator projection store", () => {
+  it("keeps revision-bound snapshot, page, and detail bytes stable across an identical availability refresh", () => {
+    const fixture = setupProjection();
+    let checkedAt = now - 200;
+    const outbox = new NotificationOutbox({ database: fixture.database, clock: () => checkedAt });
+    const worker = { workerInstanceId: "native-worker", integrationId: "native-desktop" };
+    const availability = {
+      state: "available" as const,
+      discoveredContract: { generation: 1, detail: "Native desktop available" },
+    };
+    outbox.setIntegrationAvailability(worker, availability);
+
+    const request = {
+      credential: fixture.credential,
+      projectId: identifier<"ProjectId">("project_01"),
+      projectSessionId: identifier<"ProjectSessionId">("session_01"),
+    };
+    const beforeSnapshot = fixture.projections.snapshot(request, "include");
+    const pageRequest: OperatorViewPageRequest<"system"> = {
+      ...request,
+      view: "system",
+      snapshotRevision: beforeSnapshot.snapshotRevision,
+      cursor: 0,
+      limit: 10,
+    };
+    const beforePage = fixture.projections.viewPage(pageRequest, "include");
+    if (beforePage.status !== "page") throw new Error("expected current system page");
+    const nativeRow = beforePage.rows.find((candidate) => candidate.itemId === "native-desktop");
+    if (nativeRow?.fact.freshness !== "live") throw new Error("expected live native integration row");
+    const detailRequest: OperatorDetailReadRequest = {
+      ...request,
+      snapshotRevision: beforeSnapshot.snapshotRevision,
+      detailRef: nativeRow.fact.value.detailRef,
+    };
+    const beforeDetail = fixture.projections.detail(detailRequest);
+
+    checkedAt = now - 100;
+    outbox.setIntegrationAvailability(worker, availability);
+
+    const afterSnapshot = fixture.projections.snapshot(request, "include");
+    expect(afterSnapshot.snapshotRevision).toBe(beforeSnapshot.snapshotRevision);
+    expect(afterSnapshot.stateDigest).toBe(beforeSnapshot.stateDigest);
+    expect(fixture.projections.viewPage(pageRequest, "include")).toEqual(beforePage);
+    expect(fixture.projections.detail(detailRequest)).toEqual(beforeDetail);
+  });
+
   it("discovers the selected project and returns one authoritative revisioned snapshot", () => {
     const fixture = setupProjection();
     const projectId = identifier<"ProjectId">("project_01");

@@ -13,8 +13,28 @@ import {
   buildKiroAcpInvocation,
   buildPiRpcLaunch,
 } from "../../src/adapters/providers/optional/invocations.ts";
+import { FabricError } from "../../src/errors.ts";
 
 describe("optional provider command boundaries", () => {
+  it("revalidates interface conformance immediately before every provider process", async () => {
+    const runner = vi.fn(async () => ({
+      stdout: '{"type":"result","subtype":"success","is_error":false,"session_id":"s","result":"done"}\n',
+      stderr: "",
+      exitCode: 0,
+    }));
+    const verifyExecutable = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new FabricError("ADAPTER_INTERFACE_MISMATCH", "headless interface changed"));
+    const cursor = createCursorCliBoundary({ executable: "/cursor", cwd: "/workspace", runner, verifyExecutable });
+
+    await expect(cursor.spawn({ model: "grok", prompt: "one" })).resolves.toMatchObject({ result: "done" });
+    await expect(cursor.spawn({ model: "grok", prompt: "two" })).rejects.toMatchObject({
+      code: "ADAPTER_INTERFACE_MISMATCH",
+    });
+    expect(verifyExecutable).toHaveBeenCalledTimes(2);
+    expect(runner).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts only one explicitly bounded turn for task-bound one-shot Agy and Cursor spawns", async () => {
     const runner = vi.fn(async () => {
       throw new Error("provider runner must not start for an invalid turn contract");
@@ -57,6 +77,31 @@ describe("optional provider command boundaries", () => {
         resumeReference: "3cbfa155-fc5f-4c6e-aa99-3a44d48262b4",
         result: '{"conversationId":"forged-by-model","result":"model answer"}',
         providerRecordCount: 0,
+      });
+  });
+
+  it("rejects a successful Agy process that returns no answer output", async () => {
+    const runner = vi.fn(async (invocation: { args: string[] }) => {
+      const logIndex = invocation.args.indexOf("--log-file");
+      const logPath = invocation.args[logIndex + 1];
+      if (logPath === undefined) throw new Error("missing log path");
+      await writeFile(logPath, "Created conversation 3cbfa155-fc5f-4c6e-aa99-3a44d48262b4\n");
+      return {
+        stdout: "",
+        stderr: "Agy completed without printable output",
+        exitCode: 0,
+      };
+    });
+    const boundary = createAgyCliBoundary({ executable: "/agy", cwd: "/workspace", runner });
+
+    await expect(boundary.spawn({ model: "Gemini 3.1 Pro (High)", prompt: "read only" }))
+      .rejects.toMatchObject({
+        code: "PROVIDER_RESPONSE_INVALID",
+        message: "Agy CLI exited successfully without answer output; verify subscription model access and headless print compatibility",
+        details: {
+          exitCode: 0,
+          stderr: "Agy completed without printable output",
+        },
       });
   });
 

@@ -19,6 +19,7 @@
     "build:types": "tsc -b tsconfig.json",
     "schema:write": "node runtime/agent-fabric-protocol/scripts/write-schema.mjs --write",
     "schema:check:generated": "node runtime/agent-fabric-protocol/scripts/write-schema.mjs --check",
+    "compatibility:check:primary": "tsx runtime/agent-fabric/scripts/verify-primary-compatibility.ts",
     "build": "tsc -b tsconfig.json && npm run schema:write",
     "pretypecheck": "npm run build",
     "typecheck": "npm run typecheck:workspaces",

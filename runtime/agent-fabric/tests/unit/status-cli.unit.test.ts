@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { fabricDoctor, fabricStatus } from "../../src/cli/status.ts";
+import { fabricDoctor as realFabricDoctor, fabricStatus } from "../../src/cli/status.ts";
 import type { FabricPaths } from "../../src/cli/paths.ts";
 import { FLOCK_ELECTION_LOCK_PORT } from "../../src/daemon/bootstrap-election.ts";
 import { openFabric, startFabricDaemon } from "../../src/index.ts";
@@ -12,6 +12,25 @@ import { createPortableActivatedPrimaryFixture } from "../support/primary-adapte
 
 const cleanup: string[] = [];
 afterEach(async () => Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
+
+async function fabricDoctor(arguments_: string[], value: FabricPaths): ReturnType<typeof realFabricDoctor> {
+  return realFabricDoctor(arguments_, value, {
+    verifyProvider: async ({ adapterId, executable }) => ({
+      identity: {
+        adapterId,
+        executable,
+        canonicalPath: executable,
+        regularFile: true,
+        ownerUid: process.getuid?.() ?? 0,
+        mode: 0o755,
+        sha256: "a".repeat(64),
+        assurance: "full-vendor-identity",
+        signing: [],
+      },
+      interface: { adapterId, conformant: true, probe: "fixture", version: "fixture" },
+    }),
+  });
+}
 
 async function paths(): Promise<FabricPaths> {
   const root = await mkdtemp(join(tmpdir(), "fabric-status-"));

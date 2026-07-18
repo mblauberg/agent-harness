@@ -801,6 +801,12 @@ def test_clean_ci_builds_locked_protocol_before_daemon_typecheck() -> None:
     root_dev_dependencies = root_package.get("devDependencies")
     assert isinstance(root_dev_dependencies, dict)
     assert root_dev_dependencies.get("tsx") == "4.23.1"
+    # Subscription provider CLIs are host tools admitted by identity and
+    # interface, not repository dependencies or version locks.
+    assert root_package.get("dependencies") is None
+    assert root_scripts.get("compatibility:check:primary") == (
+        "tsx runtime/agent-fabric/scripts/verify-primary-compatibility.ts"
+    )
 
     package = json.loads(FABRIC_PACKAGE.read_text(encoding="utf-8"))
     scripts = package.get("scripts")
@@ -915,14 +921,9 @@ def test_repository_policy_covers_sensitive_fabric_surfaces() -> None:
         assert evidence in template
 
 
-def test_dependabot_automerge_excludes_the_pinned_claude_agent_sdk() -> None:
-    # Issue #195: config/adapter-compatibility.yaml pins
-    # @anthropic-ai/claude-agent-sdk by version, artifact, lock integrity,
-    # entrypoint and schema, and CI's portable-fixtures mode bypasses those
-    # pins, so a semver-patch SDK bump can merge green while leaving enabled
-    # Claude activation fail-closed. The auto-merge step must gate on both
-    # the patch-level update type and the SDK exclusion, and the skip step
-    # must be its exact complement so an excluded PR is logged, never queued.
+def test_dependabot_automerge_excludes_pinned_primary_provider_packages() -> None:
+    # Issues #195 and #208: these packages participate in the exact executable
+    # and protocol closure, so even patch updates require compatibility review.
     document = _parse_workflow_text(
         (ROOT / ".github" / "workflows" / "dependabot-automerge.yml").read_text(encoding="utf-8")
     )
@@ -930,18 +931,19 @@ def test_dependabot_automerge_excludes_the_pinned_claude_agent_sdk() -> None:
     merge_step = next(step for step in steps if "gh pr merge" in str(step.get("run", "")))
     merge_condition = str(merge_step.get("if", ""))
     assert "steps.metadata.outputs.update-type == 'version-update:semver-patch'" in merge_condition
-    assert (
-        "!contains(steps.metadata.outputs.dependency-names, '@anthropic-ai/claude-agent-sdk')"
-        in merge_condition
+    excluded = (
+        "@anthropic-ai/claude-agent-sdk",
+        "@anthropic-ai/claude-code",
+        "@openai/codex",
     )
+    for dependency in excluded:
+        assert f"!contains(steps.metadata.outputs.dependency-names, '{dependency}')" in merge_condition
     skip_step = next(step for step in steps if "Skipping auto-merge" in str(step.get("run", "")))
     skip_condition = str(skip_step.get("if", ""))
     assert "steps.metadata.outputs.update-type != 'version-update:semver-patch'" in skip_condition
-    assert not skip_condition.count("!contains")
-    assert (
-        "contains(steps.metadata.outputs.dependency-names, '@anthropic-ai/claude-agent-sdk')"
-        in skip_condition
-    )
+    assert "!contains" not in skip_condition
+    for dependency in excluded:
+        assert f"contains(steps.metadata.outputs.dependency-names, '{dependency}')" in skip_condition
 
 
 def test_github_work_item_and_runbook_cover_the_intake_contract() -> None:

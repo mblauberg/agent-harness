@@ -200,7 +200,6 @@ export function createPiRpcAdapter(options: {
     }),
     boundary: options.boundary,
     journal: options.journal,
-    modelPolicy: { adapterId: "pi-rpc", allowedFamilies: ["generic-open", "open-weight"] },
   });
 }
 

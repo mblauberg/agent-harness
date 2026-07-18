@@ -1629,6 +1629,7 @@ describe("installed Claude chair launch boundary", () => {
     });
     const boundary = Reflect.construct(InstalledClaudeAgentSdkBoundary, [{
       executable: "/trusted/claude",
+      verifyExecutable: vi.fn(async () => undefined),
       query: queryFactory,
       bridgeFactory: async (input: Parameters<typeof createChairLaunchFabricBridge>[0]) => {
         bridge = await createChairLaunchFabricBridge(input);

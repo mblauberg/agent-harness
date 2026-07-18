@@ -168,7 +168,7 @@ describe("optional production provider wrappers", () => {
     actionJournal.close();
   });
 
-  it("keeps Agy Google-only and fails closed for unsupported session controls", async () => {
+  it("advertises Agy Google and Anthropic support while unsupported controls fail closed", async () => {
     const actionJournal = await journal();
     const provider = boundary();
     const adapter = createAgyAdapter({ boundary: provider, journal: actionJournal });
@@ -179,18 +179,13 @@ describe("optional production provider wrappers", () => {
         payload: { model: "Gemini 3.5 Flash (High)", modelFamily: "google", prompt: "bounded task" },
       }),
     ).resolves.toEqual({ resumeReference: "session-1" });
-    await expect(
-      adapter.request("spawn", {
-        actionId: "agy-openai",
-        payload: { model: "gpt-5", modelFamily: "openai", prompt: "wrong family" },
-      }),
-    ).rejects.toMatchObject({ code: "ADAPTER_FAMILY_FORBIDDEN" });
-    await expect(
-      adapter.request("spawn", {
-        actionId: "agy-google-non-gemini",
-        payload: { model: "gpt-5", modelFamily: "google", prompt: "wrong model" },
-      }),
-    ).rejects.toMatchObject({ code: "ADAPTER_MODEL_FORBIDDEN" });
+    await expect(adapter.request("capabilities", {})).resolves.toMatchObject({
+      allowedModelFamilies: ["google", "anthropic"],
+    });
+    await expect(adapter.request("spawn", {
+      actionId: "agy-anthropic",
+      payload: { model: "claude-opus", modelFamily: "anthropic", prompt: "bounded task" },
+    })).resolves.toEqual({ resumeReference: "session-1" });
     await expect(
       adapter.request("dispatch", {
         actionId: "agy-steer-1",
@@ -202,7 +197,7 @@ describe("optional production provider wrappers", () => {
     actionJournal.close();
   });
 
-  it("accepts Cursor Composer and Grok patterns but rejects branded family rebroadcasts", async () => {
+  it("advertises Cursor-preferred and supported fallback families without model-name locks", async () => {
     const actionJournal = await journal();
     const provider = boundary();
     const adapter = createCursorAgentAdapter({ boundary: provider, journal: actionJournal });
@@ -210,6 +205,9 @@ describe("optional production provider wrappers", () => {
     for (const selection of [
       { model: "composer-2.5", modelFamily: "cursor-composer" },
       { model: "cursor-grok-4.5-high", modelFamily: "xai" },
+      { model: "claude-opus", modelFamily: "anthropic" },
+      { model: "gpt-5", modelFamily: "openai" },
+      { model: "gemini-pro", modelFamily: "google" },
     ]) {
       await expect(
         adapter.request("spawn", {
@@ -218,18 +216,9 @@ describe("optional production provider wrappers", () => {
         }),
       ).resolves.toEqual({ resumeReference: "session-1" });
     }
-    await expect(
-      adapter.request("spawn", {
-        actionId: "cursor-gpt",
-        payload: { model: "gpt-5", modelFamily: "openai", prompt: "wrong model" },
-      }),
-    ).rejects.toMatchObject({ code: "ADAPTER_FAMILY_FORBIDDEN" });
-    await expect(
-      adapter.request("spawn", {
-        actionId: "cursor-pattern",
-        payload: { model: "sonnet-4", modelFamily: "cursor-composer", prompt: "wrong pattern" },
-      }),
-    ).rejects.toMatchObject({ code: "ADAPTER_MODEL_FORBIDDEN" });
+    await expect(adapter.request("capabilities", {})).resolves.toMatchObject({
+      allowedModelFamilies: ["cursor-composer", "xai", "anthropic", "openai", "google"],
+    });
     actionJournal.close();
   });
 

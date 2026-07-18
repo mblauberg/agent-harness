@@ -2,6 +2,7 @@ import type { Readable, Writable } from "node:stream";
 
 import { BoundedNdjsonReader, BoundedNdjsonWriter, FABRIC_PROTOCOL_LIMITS } from "../../transport/bounded-ndjson.js";
 import { isRecord, ProviderAdapterError, type AdapterRequestHandler } from "./types.js";
+import { FabricError } from "../../errors.js";
 
 type AdapterRequest = {
   id: string;
@@ -29,6 +30,7 @@ function errorEnvelope(error: unknown): { code: string; message: string; details
       ...(error.details === undefined ? {} : { details: error.details }),
     };
   }
+  if (error instanceof FabricError) return { code: error.code, message: error.message };
   return {
     code: "ADAPTER_INTERNAL_ERROR",
     message: error instanceof Error ? error.message : "adapter operation failed",
