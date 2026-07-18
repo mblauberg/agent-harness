@@ -135,6 +135,18 @@ describe("Kiro ACP stdio client", () => {
     await client.stop();
   });
 
+  it.each(["wrong-session-update", "malformed-update", "unsupported-update"])(
+    "fails closed on %s during an answer-bearing turn",
+    async (scenario) => {
+      const { client, directory } = await fixture(scenario);
+      await client.start();
+      await client.newSession(directory);
+      await expect(client.prompt("kiro-session-1", "bounded task"))
+        .rejects.toMatchObject({ code: "PROVIDER_PROTOCOL_INVALID" });
+      await client.stop();
+    },
+  );
+
   it.each([
     ["read-permission", "permission:allow"],
     ["edit-permission", "permission:reject"],

@@ -33,6 +33,7 @@ const wrapper = {
   agy: "adapters/providers/optional/agy.ts",
   "cursor-agent": "adapters/providers/optional/cursor-agent.ts",
   "kiro-acp": "adapters/providers/optional/kiro-acp.ts",
+  "opencode-acp": "adapters/providers/optional/opencode-acp.ts",
 }[adapterId];
 if (wrapper === undefined) throw new Error(`unsupported adapter ${adapterId}`);
 const agentsRoot = resolve(new URL("../../../", import.meta.url).pathname);
@@ -58,6 +59,9 @@ const providerConformance = await verifyProviderConformance({
   executable: pinnedExecutable,
   ...(implementation.cursor_install_root === undefined ? {} : {
     cursorInstallRoot: expandPath(implementation.cursor_install_root),
+  }),
+  ...(implementation.provider_install_root === undefined ? {} : {
+    providerInstallRoot: expandPath(implementation.provider_install_root),
   }),
 });
 const wrapperPath = resolve(new URL("../src", import.meta.url).pathname, wrapper);
@@ -121,7 +125,9 @@ const args = [
   "--journal", join(directory, "journal.sqlite3"),
   "--provider-executable", pinnedExecutable,
   ...(implementation.provider_identity === undefined ? [] : ["--provider-identity-policy", implementation.provider_identity]),
-  ...(implementation.cursor_install_root === undefined ? [] : ["--provider-install-root", expandPath(implementation.cursor_install_root)]),
+  ...((implementation.provider_install_root ?? implementation.cursor_install_root) === undefined
+    ? []
+    : ["--provider-install-root", expandPath(implementation.provider_install_root ?? implementation.cursor_install_root)]),
   ...(provider === undefined ? [] : ["--allowed-provider", provider]),
 ];
 const transport = new AdapterProcessTransport({ command: [process.execPath, ...args], environment: {}, responseTimeoutMs: 120_000 });
@@ -161,7 +167,7 @@ try {
   });
   if (typeof turn !== "object" || turn === null || turn.status !== "terminal") throw new Error("adapter smoke turn was not terminal");
   const providerResult = turn.result;
-  const outputField = adapterId === "kiro-acp" || adapterId === "pi-rpc" ? "text" : "result";
+  const outputField = adapterId === "kiro-acp" || adapterId === "opencode-acp" || adapterId === "pi-rpc" ? "text" : "result";
   const output = typeof providerResult === "object" && providerResult !== null ? providerResult[outputField] : undefined;
   if (typeof output !== "string" || output.trim() !== "FABRIC_SMOKE_TURN_OK") {
     throw new Error("adapter smoke turn did not return the exact sentinel");

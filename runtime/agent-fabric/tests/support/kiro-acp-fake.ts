@@ -9,6 +9,14 @@ let permissionRequestId = 90;
 let pendingPromptId: unknown;
 let selectedModel = "opencode/default-free";
 let selectedEffort = "low";
+const configScenarios = new Set([
+  "config-model",
+  "misapply-effort",
+  "empty-answer",
+  "unsupported-update",
+  "partial-answer",
+  "timeout",
+]);
 
 function configOptions(): unknown[] {
   return [
@@ -76,7 +84,7 @@ input.on("line", (line) => {
   if (value.method === "session/new") {
     result(value.id, {
       sessionId: "kiro-session-1",
-      ...(["config-model", "misapply-effort"].includes(scenario) ? { configOptions: configOptions() } : {}),
+      ...(configScenarios.has(scenario) ? { configOptions: configOptions() } : {}),
     });
     return;
   }
@@ -92,6 +100,56 @@ input.on("line", (line) => {
     return;
   }
   if (value.method === "session/prompt") {
+    if (scenario === "empty-answer") {
+      result(value.id, { stopReason: "end_turn" });
+      return;
+    }
+    if (scenario === "timeout") return;
+    if (scenario === "wrong-session-update") {
+      send({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "another-session",
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "wrong session" } },
+        },
+      });
+      result(value.id, { stopReason: "end_turn" });
+      return;
+    }
+    if (scenario === "malformed-update") {
+      send({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "kiro-session-1",
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text" } },
+        },
+      });
+      result(value.id, { stopReason: "end_turn" });
+      return;
+    }
+    if (scenario === "unsupported-update") {
+      send({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: { sessionId: "kiro-session-1", update: { sessionUpdate: "future_unknown_update" } },
+      });
+      result(value.id, { stopReason: "end_turn" });
+      return;
+    }
+    if (scenario === "partial-answer") {
+      send({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "kiro-session-1",
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "partial" } },
+        },
+      });
+      setTimeout(() => process.exit(0), 20);
+      return;
+    }
     if (scenario === "oversized-output") {
       send({
         jsonrpc: "2.0",

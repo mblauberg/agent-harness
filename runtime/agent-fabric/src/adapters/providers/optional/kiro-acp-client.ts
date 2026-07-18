@@ -27,6 +27,27 @@ type ActiveTurn = {
   outputBytes: number;
 };
 
+const ACP_V1_NON_ANSWER_SESSION_UPDATES = new Set([
+  "user_message_chunk",
+  "agent_thought_chunk",
+  "tool_call",
+  "tool_call_update",
+  "plan",
+  "available_commands_update",
+  "current_mode_update",
+  "config_option_update",
+  "session_info_update",
+  "usage_update",
+]);
+
+const ACP_V1_STOP_REASONS = new Set([
+  "end_turn",
+  "max_tokens",
+  "max_turn_requests",
+  "refusal",
+  "cancelled",
+]);
+
 export type KiroAcpClientOptions = {
   executable: string;
   args?: string[];
@@ -259,10 +280,15 @@ export class KiroAcpStdioClient {
         sessionId: requireString(sessionId, "sessionId"),
         prompt: [{ type: "text", text: requireString(prompt, "prompt") }],
       });
-      return {
-        stopReason: requireString(result.stopReason, "session/prompt stopReason"),
-        text: activeTurn.chunks.join(""),
-      };
+      const stopReason = requireString(result.stopReason, "session/prompt stopReason");
+      if (!ACP_V1_STOP_REASONS.has(stopReason)) {
+        throw protocolError("PROVIDER_RESPONSE_INVALID", "Kiro ACP session/prompt stopReason is unsupported");
+      }
+      const text = activeTurn.chunks.join("");
+      if (text.trim().length === 0) {
+        throw protocolError("PROVIDER_RESPONSE_INVALID", "Kiro ACP session/prompt completed without a valid answer");
+      }
+      return { stopReason, text };
     } finally {
       if (this.#activeTurn === activeTurn) this.#activeTurn = undefined;
     }
@@ -405,9 +431,22 @@ export class KiroAcpStdioClient {
   #receiveNotification(method: string, params: JsonObject): void {
     if (method !== "session/update") return;
     const active = this.#activeTurn;
-    if (active === undefined || params.sessionId !== active.sessionId || !isRecord(params.update)) return;
+    if (active === undefined) return;
+    if (params.sessionId !== active.sessionId) {
+      this.#fail(protocolError("PROVIDER_PROTOCOL_INVALID", "Kiro ACP session update targeted the wrong active session"));
+      return;
+    }
+    if (!isRecord(params.update)) {
+      this.#fail(protocolError("PROVIDER_PROTOCOL_INVALID", "Kiro ACP session update is invalid"));
+      return;
+    }
     const update = params.update;
-    if (update.sessionUpdate !== "agent_message_chunk") return;
+    if (update.sessionUpdate !== "agent_message_chunk") {
+      if (typeof update.sessionUpdate !== "string" || !ACP_V1_NON_ANSWER_SESSION_UPDATES.has(update.sessionUpdate)) {
+        this.#fail(protocolError("PROVIDER_PROTOCOL_INVALID", "Kiro ACP session update kind is unsupported"));
+      }
+      return;
+    }
     if (!isRecord(update.content) || update.content.type !== "text" || typeof update.content.text !== "string") {
       this.#fail(protocolError("PROVIDER_PROTOCOL_INVALID", "Kiro ACP agent message chunk is invalid"));
       return;
