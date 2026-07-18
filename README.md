@@ -52,15 +52,21 @@ export AGENTS_HOME="$HOME/.agents"   # skills read this at runtime; persist it i
 "$AGENTS_HOME/scripts/install-harness" --platform claude
 "$AGENTS_HOME/scripts/install-harness" --platform codex
 
-# verify: run the gate, then print the routes the config resolves to
-"$AGENTS_HOME/scripts/check-harness" --doctor
+# verify the harness and Fabric independently
+provenant check --doctor
+provenant doctor
 ```
 
 Installation links each skill into `~/.claude/skills/` and `~/.codex/skills/`.
+It also links the thin `provenant` command into
+`${PROVENANT_BIN_DIR:-$HOME/.local/bin}` and warns when that directory is not
+on `PATH`; it never edits shell startup files. The command delegates unchanged
+to the existing `route`, `worktree`, `check` and `fabric` scripts. Its `doctor`
+command is exactly `scripts/agent-fabric doctor`.
 It preserves an existing `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md`: the file
 stays, the installer exits 3, and prints one bootstrap line to paste in. Skills
-still link, so exit 3 is expected. `--doctor` reports which routes the config
-resolves to, not whether a provider is reachable or signed in.
+still link, so exit 3 is expected. `provenant check --doctor` reports which
+routes the config resolves to; `provenant doctor` checks Fabric configuration.
 
 <details>
 <summary>Installation details: filesystem layout, Codex config and uninstall</summary>

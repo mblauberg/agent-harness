@@ -1,6 +1,6 @@
 # Consolidated harness CLI
 
-**Status:** reviewed and reduced; proposal only
+**Status:** reviewed and accepted for implementation in issue #266
 
 **Date:** 18 July 2026
 
@@ -18,6 +18,7 @@ provenant help
 provenant doctor
 provenant route [existing model-route arguments]
 provenant worktree [existing worktree arguments]
+provenant check [existing check-harness arguments]
 provenant fabric [existing agent-fabric arguments]
 ```
 
@@ -26,15 +27,16 @@ remain the sole behavioural owners:
 
 | Front-door command | Existing owner |
 | --- | --- |
-| `doctor` | `scripts/check-harness --doctor` |
+| `doctor` | `scripts/agent-fabric doctor` |
 | `route` | `scripts/model-route` |
 | `worktree` | `scripts/worktree` |
+| `check` | `scripts/check-harness` |
 | `fabric` | `scripts/agent-fabric` |
 
-The wrapper must locate these commands through `${AGENTS_HOME:-$HOME/.agents}`
-without changing the caller's working directory. `doctor` delegates the fixed
-argument vector `scripts/check-harness --doctor`. `route`, `worktree` and
-`fabric` pass every argument after the subcommand unchanged. Each delegation
+The installed symlink must resolve the wrapper's real checkout without changing
+the caller's working directory. `doctor` delegates the fixed
+argument vector `scripts/agent-fabric doctor`. `route`, `worktree`, `check`
+and `fabric` pass every argument after the subcommand unchanged. Each delegation
 must preserve the caller's environment, standard input and signals, preserve
 stdout and stderr byte-for-byte, and return the existing command's exit code.
 
@@ -90,13 +92,13 @@ their callers.
 
 Accept the experiment only if it meets all of these measurements:
 
-1. All four delegated commands execute the documented existing owner.
+1. All five delegated commands execute the documented existing owner.
 2. Representative success, usage-error and downstream-failure cases preserve
    stdout, stderr and exit status exactly.
 3. The same tests pass from the Provenant root, an unrelated Git repository and
    a non-repository temporary directory.
 4. Existing direct command tests and calls remain unchanged.
-5. `provenant help` identifies the four behavioural owners and distinguishes
+5. `provenant help` identifies the five behavioural owners and distinguishes
    Fabric clients from providers.
 
 Stop after this experiment and assess whether agents actually use the front
