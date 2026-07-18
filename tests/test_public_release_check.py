@@ -16,17 +16,7 @@ from scripts.public_release_check import publication_range_errors, scan_paths, t
 
 
 def seed_required(root: Path) -> None:
-    for relative in (
-        "ACKNOWLEDGEMENTS.md",
-        "README.md",
-        "LICENSE",
-        "NOTICE",
-        "MAINTAINING.md",
-        "SECURITY.md",
-        "THIRD_PARTY_NOTICES.md",
-        "docs/ARCHITECTURE.md",
-        "docs/worktrees.md",
-    ):
+    for relative in release_check.REQUIRED:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("safe\n")
@@ -1287,6 +1277,7 @@ def test_public_scan_rejects_private_paths_secrets_and_unlicensed_skill(tmp_path
     token.write_text("github" + "_pat_abcdefghijklmnopqrstuvwxyz123456\n")
     errors = scan_paths(
         [
+            *release_check.REQUIRED,
             "notes.md",
             "token.txt",
             "skills/clean-writing/SKILL.md",
@@ -1304,7 +1295,16 @@ def test_public_scan_rejects_private_paths_secrets_and_unlicensed_skill(tmp_path
 def test_public_scan_accepts_portable_text_tree(tmp_path):
     seed_required(tmp_path)
     (tmp_path / "safe.md").write_text("Use ${AGENTS_HOME:-$HOME/.agents}.\n")
-    assert scan_paths(["safe.md"], tmp_path) == []
+    assert scan_paths([*release_check.REQUIRED, "safe.md"], tmp_path) == []
+
+
+def test_public_scan_rejects_untracked_required_legal_file(tmp_path):
+    seed_required(tmp_path)
+    tracked = release_check.REQUIRED - {"NOTICE"}
+
+    assert scan_paths(list(tracked), tmp_path) == [
+        "required public file is not tracked: NOTICE"
+    ]
 
 
 def test_public_scan_rejects_delivery_receipt_when_tracked(tmp_path):
@@ -1315,7 +1315,10 @@ def test_public_scan_rejects_delivery_receipt_when_tracked(tmp_path):
         '{"schema_version":1,"contract":"delivery-run","run_id":"DEL-999"}\n'
     )
 
-    assert scan_paths([".agent-run/DEL-999/RUN.json"], tmp_path) == [
+    assert scan_paths([
+        *release_check.REQUIRED,
+        ".agent-run/DEL-999/RUN.json",
+    ], tmp_path) == [
         "forbidden tracked path: .agent-run/DEL-999/RUN.json"
     ]
 
