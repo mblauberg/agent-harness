@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { isAbsolute } from "node:path";
 
-import { ProviderAdapterError, requiredString, type AdapterRequestHandler } from "../types.js";
+import { actionPayload, ProviderAdapterError, requiredString, type AdapterRequestHandler } from "../types.js";
 import { SqliteAdapterActionJournal } from "../journal.js";
 import { journalPathFromArguments, serveAdapter } from "../server.js";
 import { KiroAcpStdioClient } from "./kiro-acp-client.js";
@@ -142,7 +142,7 @@ export function createKiroAcpAdapter(options: {
   boundary: KiroAcpBoundary;
   journal: SqliteAdapterActionJournal;
 }): AdapterRequestHandler {
-  return createOptionalProviderAdapter({
+  const delegate = createOptionalProviderAdapter({
     capabilities: optionalCapabilities({
       adapterId: "kiro-acp",
       operations: ["spawn", "send_turn", "release"],
@@ -157,6 +157,14 @@ export function createKiroAcpAdapter(options: {
       allowedModelPatterns: ["deepseek-*", "glm-*", "minimax-*", "qwen*"],
     },
   });
+  return {
+    async request(method, params) {
+      if (method === "spawn" || (method === "dispatch" && params.operation === "send_turn")) {
+        kiroEffort(actionPayload(params).effort);
+      }
+      return await delegate.request(method, params);
+    },
+  };
 }
 
 export async function runKiroAcpAdapter(

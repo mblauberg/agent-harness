@@ -140,6 +140,32 @@ describe("Kiro adapter model policy", () => {
     })).rejects.toMatchObject({ code: "ADAPTER_MODEL_FORBIDDEN" });
     journal.close();
   });
+
+  it("rejects unsupported effort before journaling or dispatch", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "kiro-acp-adapter-effort-"));
+    temporaryDirectories.push(directory);
+    const journal = new SqliteAdapterActionJournal(join(directory, "actions.sqlite3"));
+    const spawn = vi.fn(async () => ({ resumeReference: "must-not-exist" }));
+    const adapter = createKiroAcpAdapter({
+      boundary: {
+        status: async () => ({ healthy: true }),
+        spawn,
+        attach: async ({ resumeReference }: { resumeReference: string }) => ({ resumeReference }),
+        sendTurn: async () => ({ resumeReference: "must-not-exist" }),
+        interrupt: async () => ({ interrupted: true }),
+        release: async () => ({ released: true }),
+      },
+      journal,
+    });
+    const actionId = "kiro:invalid-effort";
+    await expect(adapter.request("spawn", {
+      actionId,
+      payload: { cwd: directory, model: "qwen3-coder", modelFamily: "open-weight", effort: "ultra" },
+    })).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(spawn).not.toHaveBeenCalled();
+    await expect(adapter.request("lookup_action", { actionId })).rejects.toMatchObject({ code: "ACTION_NOT_FOUND" });
+    journal.close();
+  });
 });
 
 describe("Kiro ACP managed session boundary", () => {
