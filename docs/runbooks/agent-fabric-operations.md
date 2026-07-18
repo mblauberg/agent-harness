@@ -556,13 +556,20 @@ as one team.
 
 ## Recovery
 
-- A retained MCP proxy reconnects after a daemon restart with its current seat,
-  refreshing that seat only when authentication rejects it. Concurrent requests
-  share that reconnect attempt. Only a request carrying a stable `commandId` is
-  replayed automatically; commandless stateful requests return
-  `RECONNECT_REQUIRED` so their outcome can be reconciled before an explicit
-  retry. The same typed error and single action report an unavailable daemon or
-  seat.
+- A retained MCP proxy reconnects after a daemon restart or a terminal protocol
+  timeout with its current seat, refreshing that seat only when authentication
+  rejects it. The negotiated five-minute idle limit bounds an unused transport,
+  not the duration of a provider turn or review: the next Fabric call reconnects
+  transparently when the old transport had already closed, because that call was
+  never submitted. Concurrent requests share that reconnect attempt. An
+  in-flight request is replayed only with a durable identity: a stable
+  `commandId`, or `dedupeKey` for `fabric_message_send`. An ambiguous
+  commandless in-flight request reconnects but returns `RECONNECT_REQUIRED` with
+  the reconciliation action before an explicit retry. A second timeout or
+  disconnect after replay returns the same typed recovery class instead of a
+  raw `PROTOCOL_TIMEOUT`. The same typed error and one action report an
+  unavailable daemon or seat; a healthy `doctor` does not repair an already
+  terminal proxy transport.
 - A second daemon for the same socket or canonical database is rejected by an
   OS-backed SQLite exclusive owner lock held for the daemon lifetime. Process
   death releases the kernel lock without pathname deletion or stale-takeover

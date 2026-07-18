@@ -424,10 +424,15 @@ The hard projection limits are 96 tools, 32 KiB canonical JSON per descriptor an
 set. The complete authorised set must fit and match across projections; exceeding any bound rejects MCP connection or
 chair launch with the exact excess descriptor names. It is never truncated. Arguments/results use the negotiated 1 MiB
 frame, 32 pending-call, 16 in-flight, 30-second request and five-minute idle maxima from the public protocol. The
-runtime shall bound buffered output and error detail. It shall never forward terminal control, credentials, raw
-transport failures or unvalidated provider output. Duplicate tool calls retain the underlying protocol command identity
-and idempotency behavior; a proxy or provider crash cannot blindly replay a side effect. Closing one MCP proxy or
-provider bridge does not stop the shared daemon while any authoritative liveness predicate remains.
+idle maximum bounds an unused connection, not a provider turn. A terminal idle transport reconnects before the next
+operation and can replay that never-submitted operation. An in-flight timeout or disconnect may replay only a durable
+protocol identity: a command ID or the message-send dedupe key. Other ambiguous operations return typed
+`RECONNECT_REQUIRED` after reconnect, with reconciliation guidance; a terminal proxy never remains in a raw
+`PROTOCOL_TIMEOUT` retry loop. The runtime shall bound buffered output and error detail. It shall never forward terminal
+control, credentials, raw transport failures or unvalidated provider output. Duplicate tool calls retain the underlying
+protocol command identity and idempotency behavior; a proxy or provider crash cannot blindly replay a side effect.
+Closing one MCP proxy or provider bridge does not stop the shared daemon while any authoritative liveness predicate
+remains.
 
 Deterministic acceptance adds:
 

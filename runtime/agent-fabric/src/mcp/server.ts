@@ -11,6 +11,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import {
   AGENT_RESULT_SHAPE_FEATURES,
+  FABRIC_OPERATIONS,
   NdjsonRpcTransport,
   OPERATION_REGISTRY,
   ProtocolRemoteError,
@@ -131,16 +132,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function hasStableReplayIdentity(input: unknown): boolean {
-  return isRecord(input) && typeof input.commandId === "string" && input.commandId.length > 0;
+function hasStableReplayIdentity(operation: FabricOperation, input: unknown): boolean {
+  if (!isRecord(input)) return false;
+  if (typeof input.commandId === "string" && input.commandId.length > 0) return true;
+  return operation === FABRIC_OPERATIONS.sendMessage &&
+    typeof input.dedupeKey === "string" && input.dedupeKey.length > 0;
 }
 
 export async function retryRecoveredProtocolCall<T>(call: () => Promise<T>): Promise<T> {
   try {
     return await call();
   } catch (retryError: unknown) {
-    if (retryError instanceof ProtocolTransportError && retryError.code === "PROTOCOL_DISCONNECTED") {
-      throw new ReconnectRequiredError("Agent Fabric lost its recovered daemon connection");
+    if (
+      retryError instanceof ProtocolTransportError &&
+      (retryError.code === "PROTOCOL_DISCONNECTED" || retryError.code === "PROTOCOL_TIMEOUT")
+    ) {
+      throw new ReconnectRequiredError(
+        "Agent Fabric lost its recovered daemon connection",
+        "Reconcile the operation outcome before retrying the Fabric request.",
+      );
     }
     throw retryError;
   }
@@ -231,10 +241,15 @@ async function configureFabricMcpServer(server: Server, options: FabricMcpServer
   };
   const call = async (operation: FabricOperation, input: unknown): Promise<unknown> => {
     const attemptedProtocol = protocol;
+    const requestWasNeverSubmitted = attemptedProtocol.closed;
     try {
       return await callWithAuthenticationRefresh(operation, input);
     } catch (error: unknown) {
-      if (!(error instanceof ProtocolTransportError) || error.code !== "PROTOCOL_DISCONNECTED") throw error;
+      if (
+        !(error instanceof ProtocolTransportError) ||
+        (error.code !== "PROTOCOL_DISCONNECTED" && error.code !== "PROTOCOL_TIMEOUT") ||
+        !attemptedProtocol.closed
+      ) throw error;
       try {
         if (protocol === attemptedProtocol) {
           reconnectInFlight ??= (async () => {
@@ -252,9 +267,9 @@ async function configureFabricMcpServer(server: Server, options: FabricMcpServer
       } catch {
         throw new ReconnectRequiredError("Agent Fabric could not reconnect to the daemon");
       }
-      if (!hasStableReplayIdentity(input)) {
+      if (!requestWasNeverSubmitted && !hasStableReplayIdentity(operation, input)) {
         throw new ReconnectRequiredError(
-          "Agent Fabric reconnected but did not replay a request without a stable command identity",
+          "Agent Fabric reconnected but did not replay a request without a stable replay identity",
           "Reconcile the operation outcome before retrying the Fabric request.",
         );
       }

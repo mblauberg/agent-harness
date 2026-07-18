@@ -383,6 +383,10 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
     return this.#limits.idleTimeoutMs;
   }
 
+  get closed(): boolean {
+    return this.#closed;
+  }
+
   async call<Operation extends ProtocolOperation>(
     operation: Operation,
     input: OperationInputMap[Operation],
