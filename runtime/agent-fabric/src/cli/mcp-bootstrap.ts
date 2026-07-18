@@ -12,7 +12,11 @@ export type InstalledBootstrapMcpSeat = BootstrapMcpSeatResult & {
 };
 
 export class McpBootstrapError extends Error {
-  constructor(readonly code: "WORKSPACE_NOT_TRUSTED", message: string, options?: ErrorOptions) {
+  constructor(
+    readonly code: "WORKSPACE_NOT_TRUSTED" | "BOOTSTRAP_GENERATION_CHANGED",
+    message: string,
+    options?: ErrorOptions,
+  ) {
     super(message, options);
     this.name = "McpBootstrapError";
   }
@@ -83,13 +87,23 @@ export async function bootstrapMcpSeat(input: {
           expiresAt: result.expiresAt,
         },
       }));
-    const installed = await installSeatGeneration({
-      stateDirectory: input.paths.stateDirectory,
-      projectPath: result.canonicalRoot,
-      generation: result.generation,
-      expectedPreviousGeneration: result.expectedPreviousGeneration,
-      seats: stagedSeats,
-    });
+    let installed: Awaited<ReturnType<typeof installSeatGeneration>>;
+    try {
+      installed = await installSeatGeneration({
+        stateDirectory: input.paths.stateDirectory,
+        projectPath: result.canonicalRoot,
+        generation: result.generation,
+        expectedPreviousGeneration: result.expectedPreviousGeneration,
+        seats: stagedSeats,
+      });
+    } catch (cause: unknown) {
+      if (!(cause instanceof Error) || !cause.message.includes("active MCP seat generation changed")) throw cause;
+      throw new McpBootstrapError(
+        "BOOTSTRAP_GENERATION_CHANGED",
+        "Fabric bootstrap seat generation changed during local cutover",
+        { cause },
+      );
+    }
     const selected = installed.find((candidate) => candidate.seat === seat);
     const selectedCredential = result.credentials.find((candidate) => candidate.seat === seat)?.capability;
     if (selected === undefined || selectedCredential === undefined) throw new Error("bootstrap did not install the caller seat");

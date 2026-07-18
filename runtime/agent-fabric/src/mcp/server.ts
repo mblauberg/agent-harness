@@ -57,7 +57,13 @@ export function createUnprovisionedMcpServer(options?: {
     const args = request.params.arguments ?? {};
     if (Object.keys(args).length !== 0) throw new TypeError("fabric_bootstrap accepts no arguments");
     try {
-      let activated = await options.bootstrap();
+      let activated: FabricMcpServerOptions;
+      try {
+        activated = await options.bootstrap();
+      } catch (error: unknown) {
+        if (!isRecord(error) || error.code !== "BOOTSTRAP_GENERATION_CHANGED") throw error;
+        activated = await options.bootstrap();
+      }
       try {
         protocolClose = await configureFabricMcpServer(server, activated);
       } catch (error: unknown) {
