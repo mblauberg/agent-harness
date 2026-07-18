@@ -44,7 +44,10 @@ function requiredArgument(arguments_: string[], name: string): string {
 
 export async function runAgyAdapter(
   arguments_: string[] = process.argv.slice(2),
-  dependencies: { verifyProvider?: typeof verifyProviderConformance } = {},
+  dependencies: {
+    verifyProvider?: typeof verifyProviderConformance;
+    providerTurnTimeoutMs?: number;
+  } = {},
 ): Promise<void> {
   const journal = new SqliteAdapterActionJournal(journalPathFromArguments("agy", arguments_));
   const executable = requiredArgument(arguments_, "--provider-executable");
@@ -53,6 +56,9 @@ export async function runAgyAdapter(
       createAgyAdapter({
         boundary: createAgyCliBoundary({
           executable,
+          ...(dependencies.providerTurnTimeoutMs === undefined
+            ? {}
+            : { timeoutMs: dependencies.providerTurnTimeoutMs }),
           verifyExecutable: async () => await (dependencies.verifyProvider ?? verifyProviderConformance)({ adapterId: "agy", executable }),
           cwd: argument(arguments_, "--cwd") ?? process.cwd(),
         }),

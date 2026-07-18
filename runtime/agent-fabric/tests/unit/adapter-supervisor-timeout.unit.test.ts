@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const transportFixture = vi.hoisted(() => ({
   closes: 0,
@@ -52,13 +52,39 @@ vi.mock("../../src/adapters/process.ts", () => {
 import { AdapterSupervisor } from "../../src/adapters/supervisor.ts";
 
 describe("adapter supervisor timeout selection", () => {
-  it("keeps provider turns beyond the control deadline but enforces their own deadline", async () => {
+  beforeEach(() => {
+    transportFixture.closes = 0;
+    transportFixture.requestedTimeouts.length = 0;
+  });
+
+  it("uses the canonical 30-minute default for answer-bearing provider turns", async () => {
+    const supervisor = new AdapterSupervisor({
+      fake: { command: ["unused-by-timeout-fixture"], environment: {} },
+    });
+
+    try {
+      await expect(supervisor.request("fake", "dispatch", {
+        operation: "send_turn",
+        fixtureDurationMs: 300_001,
+      })).resolves.toEqual({ method: "dispatch" });
+    } finally {
+      await supervisor.close();
+    }
+
+    expect(transportFixture.requestedTimeouts).toEqual([(30 * 60_000) + 5_000]);
+  });
+
+  it("keeps the outer response envelope beyond the provider deadline but still bounds adapter settlement", async () => {
     const supervisor = new AdapterSupervisor(
       { fake: { command: ["unused-by-timeout-fixture"], environment: {} } },
       { controlTimeoutMs: 5, providerTurnTimeoutMs: 20 },
     );
 
     try {
+      await expect(supervisor.request("fake", "attach", {
+        fixtureDurationMs: 6,
+      })).resolves.toEqual({ method: "attach" });
+
       await expect(supervisor.request("fake", "dispatch", {
         operation: "send_turn",
         fixtureDurationMs: 6,
@@ -67,12 +93,17 @@ describe("adapter supervisor timeout selection", () => {
       await expect(supervisor.request("fake", "dispatch", {
         operation: "send_turn",
         fixtureDurationMs: 21,
+      })).resolves.toEqual({ method: "dispatch" });
+
+      await expect(supervisor.request("fake", "dispatch", {
+        operation: "send_turn",
+        fixtureDurationMs: 5_021,
       })).rejects.toMatchObject({ code: "ADAPTER_RESPONSE_TIMEOUT" });
     } finally {
       await supervisor.close();
     }
 
-    expect(transportFixture.requestedTimeouts).toEqual([20, 20]);
+    expect(transportFixture.requestedTimeouts).toEqual([5_020, 5_020, 5_020, 5_020]);
     expect(transportFixture.closes).toBe(1);
   });
 });

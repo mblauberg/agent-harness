@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { stat, writeFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -14,6 +14,7 @@ import {
   buildPiRpcLaunch,
 } from "../../src/adapters/providers/optional/invocations.ts";
 import { FabricError } from "../../src/errors.ts";
+import { ProviderAdapterError } from "../../src/adapters/providers/types.ts";
 
 describe("optional provider command boundaries", () => {
   it("revalidates interface conformance immediately before every provider process", async () => {
@@ -182,6 +183,32 @@ describe("optional provider command boundaries", () => {
     );
   });
 
+  it("defaults answer-bearing optional provider commands to the 30-minute provider-turn deadline", async () => {
+    const agyRunner: ProviderCommandRunner = vi.fn(async (invocation) => {
+      const logIndex = invocation.args.indexOf("--log-file");
+      const logPath = invocation.args[logIndex + 1];
+      if (logPath === undefined) throw new Error("missing log path");
+      await writeFile(logPath, "Created conversation 3cbfa155-fc5f-4c6e-aa99-3a44d48262b4\n");
+      return { stdout: "done", stderr: "", exitCode: 0 };
+    });
+    const cursorRunner: ProviderCommandRunner = vi.fn(async () => ({
+      stdout: `${JSON.stringify({ type: "result", subtype: "success", is_error: false, session_id: "cursor-session", result: "done" })}\n`,
+      stderr: "",
+      exitCode: 0,
+    }));
+
+    await createAgyCliBoundary({ executable: "/trusted/agy", cwd: "/workspace", runner: agyRunner })
+      .spawn({ model: "Gemini 3.5 Flash (High)", prompt: "review" });
+    await createCursorCliBoundary({ executable: "/trusted/cursor", cwd: "/workspace", runner: cursorRunner })
+      .spawn({ model: "cursor-grok-4.5-high", prompt: "review" });
+
+    expect(agyRunner).toHaveBeenCalledWith(expect.objectContaining({
+      timeoutMs: 30 * 60_000,
+      args: expect.arrayContaining(["--print-timeout", "1800s"]),
+    }));
+    expect(cursorRunner).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 30 * 60_000 }));
+  });
+
   it("uses the admitted cwd for each Cursor action and normalises provider output", async () => {
     const runner: ProviderCommandRunner = vi.fn(async () => ({
       stdout: [
@@ -303,6 +330,25 @@ describe("optional provider command boundaries", () => {
         timeoutMs: 1000,
       }),
     ).rejects.toMatchObject({ code: "PROVIDER_EXIT_NONZERO", details: { exitCode: 7 } });
+  });
+
+  it("removes Agy's private invocation log after a timed-out command", async () => {
+    let logPath: string | undefined;
+    const boundary = createAgyCliBoundary({
+      executable: "/trusted/agy",
+      cwd: "/workspace",
+      timeoutMs: 20,
+      runner: async (invocation) => {
+        const logIndex = invocation.args.indexOf("--log-file");
+        logPath = invocation.args[logIndex + 1];
+        throw new ProviderAdapterError("PROVIDER_TIMEOUT", "provider CLI exceeded 20ms");
+      },
+    });
+
+    await expect(boundary.spawn({ model: "Gemini 3.5 Flash (High)", prompt: "review" }))
+      .rejects.toMatchObject({ code: "PROVIDER_TIMEOUT" });
+    if (logPath === undefined) throw new Error("provider runner did not receive the private log path");
+    await expect(stat(logPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("does not forward ambient provider API keys to subscription-authenticated CLIs", async () => {
