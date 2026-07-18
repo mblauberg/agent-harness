@@ -12,7 +12,7 @@ import {
   type ChairLaunchFabricBridge,
   type ChairLaunchFabricBridgeInput,
 } from "./chair-launch-continuity.js";
-import { CodexJsonRpcConnection } from "./codex-json-rpc.js";
+import { CodexJsonRpcConnection, openVerifiedCodexJsonRpcConnection } from "./codex-json-rpc.js";
 import { SqliteAdapterActionJournal } from "./journal.js";
 import { journalPathFromArguments, serveAdapter } from "./server.js";
 import {
@@ -241,7 +241,7 @@ type CodexConnection = Pick<
   "initialize" | "request" | "waitForNotification" | "setServerRequestHandler" | "close" | "closed"
 >;
 
-type ConnectionFactory = (environment?: Record<string, string>) => CodexConnection;
+type ConnectionFactory = (environment?: Record<string, string>) => CodexConnection | Promise<CodexConnection>;
 type BridgeFactory = (input: ChairLaunchFabricBridgeInput) => Promise<ChairLaunchFabricBridge>;
 type AgentBridgeFactory = (input: AgentSessionFabricBridgeInput) => Promise<AgentSessionFabricBridge>;
 
@@ -311,7 +311,7 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   }
 
   async #withConnection<T>(operation: (connection: CodexConnection) => Promise<T>): Promise<T> {
-    const connection = this.#connectionFactory();
+    const connection = await this.#connectionFactory();
     try {
       await connection.initialize();
       return await operation(connection);
@@ -321,7 +321,7 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   }
 
   async #openConnection(environment?: Record<string, string>): Promise<CodexConnection> {
-    const connection = this.#connectionFactory(environment);
+    const connection = await this.#connectionFactory(environment);
     await connection.initialize();
     return connection;
   }
@@ -803,9 +803,16 @@ export async function runCodexAppServerAdapter(arguments_: string[] = process.ar
   const agentBridgeHandoff = takeAgentBridgeHandoff(process.env);
   const providerIndex = arguments_.indexOf("--provider-executable");
   const providerExecutable = providerIndex === -1 ? undefined : arguments_[providerIndex + 1];
+  const providerDigestIndex = arguments_.indexOf("--provider-executable-sha256");
+  const providerExecutableSha256 = providerDigestIndex === -1 ? undefined : arguments_[providerDigestIndex + 1];
   if (providerExecutable === undefined) throw new Error("codex-app-server adapter requires --provider-executable");
+  if (providerExecutableSha256 === undefined) throw new Error("codex-app-server adapter requires --provider-executable-sha256");
   const boundary = new InstalledCodexAppServerBoundary(
-    (environment) => new CodexJsonRpcConnection(codexAppServerCommand(providerExecutable), environment),
+    async (environment) => await openVerifiedCodexJsonRpcConnection(
+      codexAppServerCommand(providerExecutable),
+      providerExecutableSha256,
+      environment,
+    ),
   );
   try {
     await serveAdapter(

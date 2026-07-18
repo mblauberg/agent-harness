@@ -93,7 +93,14 @@ describe("daemon trusted adapter composition", () => {
         agentsHome: fixture.directory,
       });
       expect(composed["codex-app-server"]).toMatchObject({
-        command: [process.execPath, fixture.artifactPaths[0], "--provider-executable", fixture.artifactPaths[0]],
+        command: [
+          process.execPath,
+          fixture.artifactPaths[0],
+          "--provider-executable",
+          fixture.artifactPaths[0],
+          "--provider-executable-sha256",
+          executableHash,
+        ],
         modelPolicy: { allowedFamilies: ["openai"], requiresExplicitModel: true },
         wrapperProvenance: {
           repositoryCommit: fixtureCommit,

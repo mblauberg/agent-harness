@@ -56,6 +56,7 @@ import {
   parseWorkspaceWriteOfflineProjection,
   WORKSPACE_WRITE_OFFLINE_TOOLS,
 } from "./workspace-write-offline.js";
+import { verifyProviderExecutableDigest } from "../compatibility.js";
 
 export type ClaudeAgentSdkBoundary = ProviderBoundary;
 
@@ -595,6 +596,8 @@ type ClaudeMcpBridgeFactory = (session: ClaudeChairSession) => ClaudeChairMcpBri
 
 export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
   readonly #executable: string | undefined;
+  readonly #executableSha256: string | undefined;
+  readonly #verifyExecutable: typeof verifyProviderExecutableDigest;
   readonly #query: typeof query;
   readonly #bridgeFactory: BridgeFactory;
   readonly #mcpBridgeFactory: ClaudeMcpBridgeFactory;
@@ -603,6 +606,8 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
 
   constructor(options?: string | {
     executable?: string;
+    executableSha256?: string;
+    verifyExecutable?: typeof verifyProviderExecutableDigest;
     query?: typeof query;
     bridgeFactory?: BridgeFactory;
     mcpBridgeFactory?: ClaudeMcpBridgeFactory;
@@ -610,17 +615,31 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
   }) {
     if (typeof options === "string" || options === undefined) {
       this.#executable = options;
+      this.#executableSha256 = undefined;
+      this.#verifyExecutable = verifyProviderExecutableDigest;
       this.#query = query;
       this.#bridgeFactory = createChairLaunchFabricBridge;
       this.#mcpBridgeFactory = createClaudeChairMcpBridge;
       this.#agentBridgeFactory = AgentSessionFabricBridge.create;
     } else {
       this.#executable = options.executable;
+      this.#executableSha256 = options.executableSha256;
+      this.#verifyExecutable = options.verifyExecutable ?? verifyProviderExecutableDigest;
       this.#query = options.query ?? query;
       this.#bridgeFactory = options.bridgeFactory ?? createChairLaunchFabricBridge;
       this.#mcpBridgeFactory = options.mcpBridgeFactory ?? createClaudeChairMcpBridge;
       this.#agentBridgeFactory = options.agentBridgeFactory ?? AgentSessionFabricBridge.create;
     }
+  }
+
+  async #verifiedQuery(input: Parameters<typeof query>[0]): Promise<ReturnType<typeof query>> {
+    if (this.#executable !== undefined) {
+      if (this.#executableSha256 === undefined) {
+        throw new ProviderAdapterError("PROVIDER_COMMAND_INVALID", "Claude executable digest is missing");
+      }
+      await this.#verifyExecutable(this.#executable, this.#executableSha256);
+    }
+    return this.#query(input);
   }
 
   async status(input: { resumeReference?: string }): Promise<Record<string, unknown>> {
@@ -659,7 +678,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
 
   async spawn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const prior = optionalString(payload.priorResumeReference, "priorResumeReference");
-    const completed = await consumeClaudeQuery(this.#query({
+    const completed = await consumeClaudeQuery(await this.#verifiedQuery({
       prompt: prompt(payload),
       options: claudeProviderOptions(payload, prior, this.#executable),
     }));
@@ -691,7 +710,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
     const mcp = this.#mcpBridgeFactory(session);
     session.mcp = mcp;
     try {
-      const completed = await consumeClaudeQuery(this.#query({
+      const completed = await consumeClaudeQuery(await this.#verifiedQuery({
         prompt: `Before continuing, invoke ${mcp.attestationToolName} exactly once with {"challengeResponse":"${bridge.challengeResponse}"}. ${prompt(input.payload)}`,
         options: claudeChairOptions(input.payload, this.#executable, undefined, mcp),
       }), (sessionId) => {
@@ -742,7 +761,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
     const mcp = this.#mcpBridgeFactory(session);
     session.mcp = mcp;
     try {
-      const completed = await consumeClaudeQuery(this.#query({
+      const completed = await consumeClaudeQuery(await this.#verifiedQuery({
         prompt: `Before continuing, invoke ${mcp.attestationToolName} exactly once with {"challengeResponse":"${bridge.challengeResponse}"}. Re-establish the retained Agent Fabric chair bridge.`,
         options: claudeChairOptions(input.payload, this.#executable, input.resumeReference, mcp),
       }), (sessionId) => {
@@ -811,7 +830,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
           ? requestedPrompt
           : "Establish the retained Agent Fabric bridge."
       }`;
-      const completed = await consumeClaudeQuery(this.#query({
+      const completed = await consumeClaudeQuery(await this.#verifiedQuery({
         prompt: activationPrompt,
         options: claudeChairOptions(input.payload, this.#executable, resume, mcp),
       }), (sessionId) => {
@@ -843,7 +862,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
     const resumeReference = requiredString(payload.resumeReference, "resumeReference");
     const session = this.#chairSessions.get(resumeReference);
     if (session === undefined) {
-      return await consumeClaudeQuery(this.#query({ prompt: prompt(payload), options: claudeProviderOptions(payload, resumeReference, this.#executable) }));
+      return await consumeClaudeQuery(await this.#verifiedQuery({ prompt: prompt(payload), options: claudeProviderOptions(payload, resumeReference, this.#executable) }));
     }
     const mcp = session.mcp;
     if (mcp === undefined) {
@@ -855,7 +874,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
     session.busy = true;
     session.nativeFabricInvocations.length = 0;
     try {
-      return await consumeClaudeQuery(this.#query({
+      return await consumeClaudeQuery(await this.#verifiedQuery({
         prompt: prompt(payload),
         options: claudeChairOptions(payload, this.#executable, resumeReference, mcp),
       }), (sessionId) => session.bridge.bindProviderSession(sessionId, session.providerSessionGeneration),
@@ -927,7 +946,14 @@ export async function runClaudeAgentSdkAdapter(arguments_: string[] = process.ar
   const agentBridgeHandoff = takeAgentBridgeHandoff(process.env);
   const providerIndex = arguments_.indexOf("--provider-executable");
   const providerExecutable = providerIndex === -1 ? undefined : arguments_[providerIndex + 1];
-  const boundary = new InstalledClaudeAgentSdkBoundary(providerExecutable);
+  const providerDigestIndex = arguments_.indexOf("--provider-executable-sha256");
+  const providerExecutableSha256 = providerDigestIndex === -1 ? undefined : arguments_[providerDigestIndex + 1];
+  if (providerExecutable === undefined) throw new Error("claude-agent-sdk adapter requires --provider-executable");
+  if (providerExecutableSha256 === undefined) throw new Error("claude-agent-sdk adapter requires --provider-executable-sha256");
+  const boundary = new InstalledClaudeAgentSdkBoundary({
+    executable: providerExecutable,
+    executableSha256: providerExecutableSha256,
+  });
   try {
     await serveAdapter(
       createClaudeAgentSdkAdapter({
