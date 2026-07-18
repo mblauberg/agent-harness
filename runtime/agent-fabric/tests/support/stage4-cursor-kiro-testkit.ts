@@ -11,7 +11,7 @@ import { runAdapterConformance } from "../../src/index.ts";
 
 import { commitFixtureRepository, writeWrapperPackageScaffold } from "./fixture-repository.ts";
 
-export type Stage4AdapterId = "cursor-agent" | "kiro-acp";
+export type Stage4AdapterId = "cursor-agent" | "kiro-acp" | "opencode-acp";
 export type PublicFunction = (...arguments_: unknown[]) => unknown;
 
 const fixtureAdapter = fileURLToPath(new URL("./stage4-cursor-kiro-fake-adapter.ts", import.meta.url));
@@ -41,6 +41,7 @@ function compatibilityEntry(input: {
   unresolved: boolean;
 }): Record<string, unknown> {
   const cursor = input.adapterId === "cursor-agent";
+  const openCode = input.adapterId === "opencode-acp";
   return {
     enabled: true,
     delivery_stage: 4,
@@ -49,13 +50,14 @@ function compatibilityEntry(input: {
       installed_version: "1.0.0-fixture",
       executable: fixtureAdapter,
       executable_sha256: input.executableHash,
-      provider_identity: input.adapterId === "cursor-agent" ? "cursor-partial-signed-helpers" : "apple-designated",
+      provider_identity: cursor ? "cursor-partial-signed-helpers" : openCode ? "owner-controlled-install-root" : "apple-designated",
       ...(input.adapterId === "cursor-agent" ? { cursor_install_root: dirname(fixtureAdapter) } : {}),
+      ...(openCode ? { provider_install_root: dirname(fixtureAdapter) } : {}),
       wrapper_entrypoint: input.wrapperPath,
     },
     contract: {
       adapter_version: 1,
-      protocol: cursor ? "cursor-fixture-jsonl" : "kiro-fixture-acp",
+      protocol: cursor ? "cursor-fixture-jsonl" : "fixture-acp",
       protocol_version: input.unresolved ? null : "1",
       schema_source: input.unresolved ? null : input.schemaPath,
       schema_sha256: input.unresolved ? null : input.schemaHash,
@@ -69,7 +71,14 @@ function compatibilityEntry(input: {
           allowed_model_patterns: ["composer-*", "cursor-grok-*"],
           requires_explicit_model: true,
         }
-      : {
+      : openCode
+        ? {
+            allowed: ["generic-open"],
+            allowed_model_patterns: ["opencode/*"],
+            requires_explicit_model: true,
+            route_role: "optional-free-account-worker",
+          }
+        : {
           allowed: ["open-weight"],
           allowed_model_patterns: ["deepseek-*", "glm-*", "minimax-*", "qwen*"],
           requires_explicit_model: true,
@@ -100,7 +109,7 @@ export async function createCursorKiroCompatibilityFixture(options: {
   const schemaHash = digest(protocolSchema);
   const unresolved = new Set(options.unresolvedAdapters ?? []);
   const adapters = Object.fromEntries(
-    (["cursor-agent", "kiro-acp"] as const).map((adapterId) => [
+    (["cursor-agent", "kiro-acp", "opencode-acp"] as const).map((adapterId) => [
       adapterId,
       compatibilityEntry({
         adapterId,

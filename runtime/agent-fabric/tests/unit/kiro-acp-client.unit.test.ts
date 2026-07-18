@@ -41,6 +41,51 @@ async function fixture(scenario = "happy", overrides: Partial<KiroAcpClientOptio
 }
 
 describe("Kiro ACP stdio client", () => {
+  it("selects an explicitly advertised OpenCode model and effort through ACP before the first turn", async () => {
+    const { client, directory, transcript } = await fixture("config-model", {
+      model: "opencode/deepseek-v4-flash-free",
+      effort: "high",
+      configureModelOnSessionStart: true,
+      configureEffortOnSessionStart: true,
+    });
+    await client.start();
+    await expect(client.newSession(directory)).resolves.toEqual({ sessionId: "kiro-session-1" });
+    await expect(client.prompt("kiro-session-1", "bounded task")).resolves.toMatchObject({ text: "bounded response" });
+    await client.stop();
+
+    const text = await readFile(transcript, "utf8");
+    expect(text).toContain('"method":"session/set_config_option"');
+    expect(text).toContain('"configId":"model","value":"opencode/deepseek-v4-flash-free"');
+    expect(text).toContain('"configId":"effort","value":"high"');
+    expect(text.indexOf('"configId":"model"')).toBeLessThan(text.indexOf('"configId":"effort"'));
+    expect(text.indexOf('"configId":"effort"')).toBeLessThan(text.indexOf('"method":"session/prompt"'));
+  });
+
+  it("rejects an unadvertised OpenCode effort before the first turn", async () => {
+    const { client, directory, transcript } = await fixture("config-model", {
+      model: "opencode/deepseek-v4-flash-free",
+      effort: "ultra",
+      configureModelOnSessionStart: true,
+      configureEffortOnSessionStart: true,
+    });
+    await client.start();
+    await expect(client.newSession(directory)).rejects.toMatchObject({ code: "ADAPTER_EFFORT_FORBIDDEN" });
+    await client.stop();
+    expect(await readFile(transcript, "utf8")).not.toContain('"configId":"effort","value":"ultra"');
+  });
+
+  it("fails closed when OpenCode does not apply the selected effort", async () => {
+    const { client, directory } = await fixture("misapply-effort", {
+      model: "opencode/deepseek-v4-flash-free",
+      effort: "high",
+      configureModelOnSessionStart: true,
+      configureEffortOnSessionStart: true,
+    });
+    await client.start();
+    await expect(client.newSession(directory)).rejects.toMatchObject({ code: "PROVIDER_RESPONSE_INVALID" });
+    await client.stop();
+  });
+
   it("negotiates ACP v1, creates a session with an absolute cwd, streams bounded text, and closes it", async () => {
     const { client, directory, transcript } = await fixture();
     await client.start();
@@ -87,6 +132,46 @@ describe("Kiro ACP stdio client", () => {
     await client.start();
     await client.newSession(directory);
     await expect(client.prompt("kiro-session-1", "too much")).rejects.toMatchObject({ code: "PROVIDER_OUTPUT_LIMIT" });
+    await client.stop();
+  });
+
+  it.each(["wrong-session-update", "malformed-update", "unsupported-update"])(
+    "fails closed on %s during an answer-bearing turn",
+    async (scenario) => {
+      const { client, directory } = await fixture(scenario);
+      await client.start();
+      await client.newSession(directory);
+      await expect(client.prompt("kiro-session-1", "bounded task"))
+        .rejects.toMatchObject({ code: "PROVIDER_PROTOCOL_INVALID" });
+      await client.stop();
+    },
+  );
+
+  it.each([
+    "user_message_chunk",
+    "agent_thought_chunk",
+    "tool_call",
+    "tool_call_update",
+    "plan",
+    "available_commands_update",
+    "current_mode_update",
+    "config_option_update",
+    "usage_update",
+  ])("fails closed on malformed known %s", async (updateKind) => {
+    const { client, directory } = await fixture(`malformed-known:${updateKind}`);
+    await client.start();
+    await client.newSession(directory);
+    await expect(client.prompt("kiro-session-1", "bounded task"))
+      .rejects.toMatchObject({ code: "PROVIDER_PROTOCOL_INVALID" });
+    await client.stop();
+  });
+
+  it("does not treat valid non-answer ACP updates as a terminal answer", async () => {
+    const { client, directory } = await fixture("valid-non-answer-updates");
+    await client.start();
+    await client.newSession(directory);
+    await expect(client.prompt("kiro-session-1", "bounded task"))
+      .rejects.toMatchObject({ code: "PROVIDER_RESPONSE_INVALID" });
     await client.stop();
   });
 

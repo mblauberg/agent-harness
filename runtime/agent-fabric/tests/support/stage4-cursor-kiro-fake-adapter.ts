@@ -4,10 +4,10 @@ import { createInterface } from "node:readline";
 
 const adapterId = process.argv[2];
 const journalPath = process.env.STAGE4_FAKE_ADAPTER_JOURNAL;
-if ((adapterId !== "cursor-agent" && adapterId !== "kiro-acp") || journalPath === undefined) {
-  throw new Error("fixture requires cursor-agent|kiro-acp and STAGE4_FAKE_ADAPTER_JOURNAL");
+if ((adapterId !== "cursor-agent" && adapterId !== "kiro-acp" && adapterId !== "opencode-acp") || journalPath === undefined) {
+  throw new Error("fixture requires cursor-agent|kiro-acp|opencode-acp and STAGE4_FAKE_ADAPTER_JOURNAL");
 }
-const selectedAdapter: "cursor-agent" | "kiro-acp" = adapterId;
+const selectedAdapter: "cursor-agent" | "kiro-acp" | "opencode-acp" = adapterId;
 const requiredJournalPath: string = journalPath;
 
 type Action = {
@@ -55,6 +55,9 @@ function allowedModel(payload: Record<string, unknown>): boolean {
     return (model.startsWith("composer-") && family === "cursor-composer") ||
       (model.startsWith("cursor-grok-") && family === "xai");
   }
+  if (selectedAdapter === "opencode-acp") {
+    return model.startsWith("opencode/") && family === "generic-open";
+  }
   return family === "open-weight";
 }
 
@@ -73,7 +76,7 @@ input.on("line", (line) => {
       adapterId: selectedAdapter,
       actionJournal: true,
       requiresExplicitModel: true,
-      modelFamilies: selectedAdapter === "cursor-agent" ? ["cursor-composer", "xai"] : ["open-weight"],
+      modelFamilies: selectedAdapter === "cursor-agent" ? ["cursor-composer", "xai"] : selectedAdapter === "opencode-acp" ? ["generic-open"] : ["open-weight"],
     });
     return;
   }

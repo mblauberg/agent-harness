@@ -27,16 +27,71 @@ type ActiveTurn = {
   outputBytes: number;
 };
 
+const ACP_V1_STOP_REASONS = new Set([
+  "end_turn",
+  "max_tokens",
+  "max_turn_requests",
+  "refusal",
+  "cancelled",
+]);
+
+function validContentBlock(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.type !== "string") return false;
+  switch (value.type) {
+    case "text": return typeof value.text === "string";
+    case "image":
+    case "audio": return typeof value.data === "string" && typeof value.mimeType === "string";
+    case "resource_link": return typeof value.name === "string" && typeof value.uri === "string";
+    case "resource": return isRecord(value.resource);
+    default: return false;
+  }
+}
+
+function validNullableString(value: unknown): boolean {
+  return value === null || typeof value === "string";
+}
+
+function validNonAnswerSessionUpdate(update: JsonObject): boolean {
+  switch (update.sessionUpdate) {
+    case "user_message_chunk":
+    case "agent_thought_chunk":
+      return validContentBlock(update.content);
+    case "tool_call":
+      return typeof update.toolCallId === "string" && typeof update.title === "string";
+    case "tool_call_update":
+      return typeof update.toolCallId === "string";
+    case "plan":
+      return Array.isArray(update.entries);
+    case "available_commands_update":
+      return Array.isArray(update.availableCommands);
+    case "current_mode_update":
+      return typeof update.currentModeId === "string";
+    case "config_option_update":
+      return Array.isArray(update.configOptions);
+    case "session_info_update":
+      return (!Object.hasOwn(update, "title") || validNullableString(update.title)) &&
+        (!Object.hasOwn(update, "updatedAt") || validNullableString(update.updatedAt));
+    case "usage_update":
+      return Number.isSafeInteger(update.used) && Number(update.used) >= 0 &&
+        Number.isSafeInteger(update.size) && Number(update.size) >= 0;
+    default:
+      return false;
+  }
+}
+
 export type KiroAcpClientOptions = {
   executable: string;
   args?: string[];
   cwd: string;
   model?: string;
+  effort?: string;
   environment?: Record<string, string>;
   requestTimeoutMs?: number;
   closeTimeoutMs?: number;
   maximumLineBytes?: number;
   maximumOutputBytes?: number;
+  configureModelOnSessionStart?: boolean;
+  configureEffortOnSessionStart?: boolean;
 };
 
 function positiveInteger(value: number, name: string): number {
@@ -184,7 +239,48 @@ export class KiroAcpStdioClient {
 
   async newSession(cwd: string): Promise<{ sessionId: string }> {
     const result = await this.#send("session/new", { cwd: requireAbsoluteCwd(cwd), mcpServers: [] });
-    return { sessionId: requireString(result.sessionId, "session/new sessionId") };
+    const sessionId = requireString(result.sessionId, "session/new sessionId");
+    let configOptions = result.configOptions;
+    if (this.#options.configureModelOnSessionStart === true) {
+      const model = requireString(this.#options.model, "configured model");
+      this.#requireSelectableConfig(configOptions, "model", model, "ADAPTER_MODEL_FORBIDDEN");
+      const configured = await this.#send("session/set_config_option", { sessionId, configId: "model", value: model });
+      this.#requireCurrentConfig(configured.configOptions, "model", model);
+      configOptions = configured.configOptions;
+    }
+    if (this.#options.configureEffortOnSessionStart === true) {
+      const effort = requireString(this.#options.effort, "configured effort");
+      this.#requireSelectableConfig(configOptions, "effort", effort, "ADAPTER_EFFORT_FORBIDDEN");
+      const configured = await this.#send("session/set_config_option", { sessionId, configId: "effort", value: effort });
+      this.#requireCurrentConfig(configured.configOptions, "effort", effort);
+    }
+    return { sessionId };
+  }
+
+  #requireSelectableConfig(value: unknown, configId: string, selected: string, code: string): void {
+    const option = this.#selectOption(value, configId);
+    const options = option.options;
+    if (!Array.isArray(options) || !options.some((candidate) => isRecord(candidate) && candidate.value === selected)) {
+      throw new ProviderAdapterError(code, `ACP provider did not advertise the requested ${configId}`, { [configId]: selected });
+    }
+  }
+
+  #requireCurrentConfig(value: unknown, configId: string, selected: string): void {
+    const option = this.#selectOption(value, configId);
+    if (option.currentValue !== selected) {
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", `ACP provider did not activate the requested ${configId}`, { [configId]: selected });
+    }
+  }
+
+  #selectOption(value: unknown, configId: string): JsonObject {
+    if (!Array.isArray(value)) {
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "ACP provider config options are missing");
+    }
+    const option = value.find((candidate) => isRecord(candidate) && candidate.id === configId && candidate.type === "select");
+    if (!isRecord(option)) {
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", `ACP provider ${configId} selector is missing`);
+    }
+    return option;
   }
 
   async loadSession(sessionId: string, cwd: string): Promise<{ sessionId: string }> {
@@ -215,10 +311,15 @@ export class KiroAcpStdioClient {
         sessionId: requireString(sessionId, "sessionId"),
         prompt: [{ type: "text", text: requireString(prompt, "prompt") }],
       });
-      return {
-        stopReason: requireString(result.stopReason, "session/prompt stopReason"),
-        text: activeTurn.chunks.join(""),
-      };
+      const stopReason = requireString(result.stopReason, "session/prompt stopReason");
+      if (!ACP_V1_STOP_REASONS.has(stopReason)) {
+        throw protocolError("PROVIDER_RESPONSE_INVALID", "Kiro ACP session/prompt stopReason is unsupported");
+      }
+      const text = activeTurn.chunks.join("");
+      if (text.trim().length === 0) {
+        throw protocolError("PROVIDER_RESPONSE_INVALID", "Kiro ACP session/prompt completed without a valid answer");
+      }
+      return { stopReason, text };
     } finally {
       if (this.#activeTurn === activeTurn) this.#activeTurn = undefined;
     }
@@ -361,9 +462,22 @@ export class KiroAcpStdioClient {
   #receiveNotification(method: string, params: JsonObject): void {
     if (method !== "session/update") return;
     const active = this.#activeTurn;
-    if (active === undefined || params.sessionId !== active.sessionId || !isRecord(params.update)) return;
+    if (active === undefined) return;
+    if (params.sessionId !== active.sessionId) {
+      this.#fail(protocolError("PROVIDER_PROTOCOL_INVALID", "Kiro ACP session update targeted the wrong active session"));
+      return;
+    }
+    if (!isRecord(params.update)) {
+      this.#fail(protocolError("PROVIDER_PROTOCOL_INVALID", "Kiro ACP session update is invalid"));
+      return;
+    }
     const update = params.update;
-    if (update.sessionUpdate !== "agent_message_chunk") return;
+    if (update.sessionUpdate !== "agent_message_chunk") {
+      if (!validNonAnswerSessionUpdate(update)) {
+        this.#fail(protocolError("PROVIDER_PROTOCOL_INVALID", "Kiro ACP session update kind is unsupported"));
+      }
+      return;
+    }
     if (!isRecord(update.content) || update.content.type !== "text" || typeof update.content.text !== "string") {
       this.#fail(protocolError("PROVIDER_PROTOCOL_INVALID", "Kiro ACP agent message chunk is invalid"));
       return;

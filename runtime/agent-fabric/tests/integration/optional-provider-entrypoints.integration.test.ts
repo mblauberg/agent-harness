@@ -136,6 +136,44 @@ describe("optional provider executable wrappers", () => {
     }
   });
 
+  it("reports OpenCode ACP capabilities without eagerly spawning the provider", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "fabric-opencode-entrypoint-"));
+    temporaryDirectories.push(directory);
+    const markerPath = join(directory, "provider-spawned");
+    const providerExecutable = join(directory, "opencode-provider-fixture.mjs");
+    await writeFile(providerExecutable, `#!/usr/bin/env node\nrequire("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "spawned");\n`);
+    await chmod(providerExecutable, 0o700);
+    const wrapperPath = fileURLToPath(new URL("../../src/adapters/providers/optional/opencode-acp.ts", import.meta.url));
+    const transport = new AdapterProcessTransport({
+      command: [
+        process.execPath,
+        "--import",
+        "tsx",
+        wrapperPath,
+        "--journal",
+        join(directory, "adapter.sqlite3"),
+        "--provider-executable",
+        providerExecutable,
+        "--provider-install-root",
+        directory,
+      ],
+      environment: {},
+      responseTimeoutMs: 2_000,
+    });
+    try {
+      await expect(transport.request("capabilities", {})).resolves.toMatchObject({
+        adapterId: "opencode-acp",
+        operations: ["spawn", "send_turn", "release"],
+        allowedModelFamilies: ["generic-open"],
+        persistentSession: false,
+        recoveryOperations: ["lookup_action"],
+      });
+      await expect(access(markerPath)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await transport.close();
+    }
+  });
+
   it("serves Pi through one persistent bounded JSONL RPC process without inheriting the full environment", async () => {
     const directory = await mkdtemp(join(tmpdir(), "fabric-pi-entrypoint-"));
     temporaryDirectories.push(directory);

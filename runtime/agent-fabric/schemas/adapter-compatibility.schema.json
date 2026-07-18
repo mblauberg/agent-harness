@@ -50,7 +50,8 @@
         "bundle_entrypoint": {"type": "string"},
         "bundle_entrypoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "cursor_install_root": {"type": "string"},
-        "provider_identity": {"enum": ["apple-designated", "cursor-partial-signed-helpers"]},
+        "provider_install_root": {"type": "string"},
+        "provider_identity": {"enum": ["apple-designated", "cursor-partial-signed-helpers", "owner-controlled-install-root"]},
         "package_manifest": {"type": "string"},
         "package_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
@@ -125,7 +126,7 @@
                 "type": "object",
                 "properties": {
                   "wrapper_entrypoint": {"type": "string", "minLength": 1},
-                  "provider_identity": {"enum": ["apple-designated", "cursor-partial-signed-helpers"]}
+                  "provider_identity": {"enum": ["apple-designated", "cursor-partial-signed-helpers", "owner-controlled-install-root"]}
                 },
                 "required": ["wrapper_entrypoint", "provider_identity"]
               },
@@ -162,6 +163,27 @@
                 "type": "object",
                 "properties": {"cursor_install_root": {"type": "string"}},
                 "required": ["cursor_install_root"]
+              }
+            }
+          }
+        }
+        ,
+        {
+          "if": {
+            "properties": {
+              "implementation": {
+                "type": "object",
+                "properties": {"provider_identity": {"const": "owner-controlled-install-root"}},
+                "required": ["provider_identity"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "implementation": {
+                "type": "object",
+                "properties": {"provider_install_root": {"type": "string"}},
+                "required": ["provider_install_root"]
               }
             }
           }

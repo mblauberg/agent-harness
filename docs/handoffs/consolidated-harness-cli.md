@@ -75,9 +75,8 @@ Current work is tracked separately:
   than executable version or hash. The front door does not alter that policy.
 - Kiro is registered as a Fabric MCP client and its optional open-weight ACP
   provider is active through the CLI's existing subscription session.
-- OpenCode loads the global harness instructions, but is not yet a Fabric MCP
-  seat or provider. [#253](https://github.com/mblauberg/provenant/issues/253)
-  owns the optional subscription/free-account provider integration.
+- OpenCode loads the global harness instructions and its optional ACP provider
+  admits only explicit `opencode/*` account models. It is not a Fabric MCP seat.
 
 `provenant help` reports these distinctions and names unresolved owning issues. It
 must not present installed, configured or proposed integrations as active.

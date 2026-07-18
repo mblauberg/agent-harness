@@ -699,6 +699,27 @@ def test_agy_accepts_only_explicit_gemini_routing():
     assert forbidden_route["status"] == "adapter_family_forbidden"
 
 
+def test_opencode_accepts_only_explicit_account_catalogue_models():
+    allowed, route = resolve(
+        "--adapter", "opencode", "--model", "opencode/deepseek-v4-flash-free",
+        "--alias", "scout", "--role", "worker", "--adapter-gate", "fabric",
+        "--effort", "high",
+    )
+    assert allowed.returncode == 0
+    assert route["status"] == "ok"
+    assert route["model_family"] == "generic-open"
+    assert route["compatibility_adapter"] == "opencode-acp"
+    assert route["adapter_active"] is True
+    assert route["effort"] == "high"
+
+    forbidden, forbidden_route = resolve(
+        "--adapter", "opencode", "--model", "anthropic/claude-opus",
+        "--alias", "scout", "--role", "worker", "--adapter-gate", "fabric",
+    )
+    assert forbidden.returncode == 1
+    assert forbidden_route["status"] in {"adapter_family_mismatch", "adapter_model_forbidden"}
+
+
 def test_optional_adapter_preference_policy_is_ordered_and_native_first_for_fallbacks():
     catalog = json.loads((ROOT / "config" / "model-routing.json").read_text())
 

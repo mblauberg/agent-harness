@@ -21,7 +21,7 @@ export async function loadAdapterModelConstraints(input: {
   schemaPath: string;
   adapterId: string;
   requireEnabled?: boolean;
-}): Promise<{ enabled: boolean; allowed: string[]; patterns: string[]; requiresExplicitModel: boolean; wrapperEntrypoint?: string; providerExecutable?: string; cursorInstallRoot?: string; providerIdentity?: string }> {
+}): Promise<{ enabled: boolean; allowed: string[]; patterns: string[]; requiresExplicitModel: boolean; wrapperEntrypoint?: string; providerExecutable?: string; cursorInstallRoot?: string; providerInstallRoot?: string; providerIdentity?: string }> {
   await verifyAdapterCompatibility({
     compatibilityPath: input.compatibilityPath,
     schemaPath: input.schemaPath,
@@ -49,6 +49,9 @@ export async function loadAdapterModelConstraints(input: {
   const cursorInstallRoot = typeof implementation.cursor_install_root === "string"
     ? resolveCompatibilityArtifact(input.compatibilityPath, implementation.cursor_install_root)
     : undefined;
+  const providerInstallRoot = typeof implementation.provider_install_root === "string"
+    ? resolveCompatibilityArtifact(input.compatibilityPath, implementation.provider_install_root)
+    : undefined;
   const providerIdentity = typeof implementation.provider_identity === "string"
     ? implementation.provider_identity
     : undefined;
@@ -64,6 +67,7 @@ export async function loadAdapterModelConstraints(input: {
     ...(wrapperEntrypoint === undefined ? {} : { wrapperEntrypoint }),
     ...(providerExecutable === undefined ? {} : { providerExecutable }),
     ...(cursorInstallRoot === undefined ? {} : { cursorInstallRoot }),
+    ...(providerInstallRoot === undefined ? {} : { providerInstallRoot }),
     ...(providerIdentity === undefined ? {} : { providerIdentity }),
   };
 }

@@ -82,6 +82,7 @@ export async function resolveAdapterExecutableCli(
     adapterId,
     executable,
     ...(policy.cursorInstallRoot === undefined ? {} : { cursorInstallRoot: policy.cursorInstallRoot }),
+    ...(policy.providerInstallRoot === undefined ? {} : { providerInstallRoot: policy.providerInstallRoot }),
   });
   return executable;
 }

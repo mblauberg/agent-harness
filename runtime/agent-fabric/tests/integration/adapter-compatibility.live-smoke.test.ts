@@ -10,13 +10,13 @@ describe.skipIf(!liveSmokeEnabled)("live workstation adapter compatibility smoke
     const result = await verifyAdapterCompatibility({
       compatibilityPath: repositoryPath("config/adapter-compatibility.yaml"),
       schemaPath: repositoryPath("runtime/agent-fabric/schemas/adapter-compatibility.schema.json"),
-      adapterIds: ["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent"],
+      adapterIds: ["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent", "opencode-acp"],
       requireEnabled: true,
     });
 
     expect(result).toMatchObject({
       valid: true,
-      adapterIds: ["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent"],
+      adapterIds: ["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent", "opencode-acp"],
     });
   }, 30_000);
 });

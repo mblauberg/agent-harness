@@ -28,7 +28,7 @@ Thin front door; each command delegates to its existing owner:
 
 Fabric clients and providers are separate roles.
 Kiro: optional subscription-native provider (ACP v1).
-OpenCode provider registration: issue #253.
+OpenCode: optional provider for explicit opencode/* account models (ACP v1).
 EOF
 }
 
