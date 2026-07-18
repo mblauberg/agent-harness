@@ -156,7 +156,6 @@ describe("Kiro ACP stdio client", () => {
     "available_commands_update",
     "current_mode_update",
     "config_option_update",
-    "session_info_update",
     "usage_update",
   ])("fails closed on malformed known %s", async (updateKind) => {
     const { client, directory } = await fixture(`malformed-known:${updateKind}`);

@@ -122,7 +122,8 @@ input.on("line", (line) => {
         { sessionUpdate: "available_commands_update", availableCommands: [] },
         { sessionUpdate: "current_mode_update", currentModeId: "default" },
         { sessionUpdate: "config_option_update", configOptions: [] },
-        { sessionUpdate: "session_info_update", title: "Fixture" },
+        { sessionUpdate: "session_info_update" },
+        { sessionUpdate: "session_info_update", _meta: { fixture: true } },
         { sessionUpdate: "usage_update", used: 1, size: 2 },
       ]) {
         send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "kiro-session-1", update } });

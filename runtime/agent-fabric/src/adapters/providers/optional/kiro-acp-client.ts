@@ -69,8 +69,8 @@ function validNonAnswerSessionUpdate(update: JsonObject): boolean {
     case "config_option_update":
       return Array.isArray(update.configOptions);
     case "session_info_update":
-      return (Object.hasOwn(update, "title") && validNullableString(update.title)) ||
-        (Object.hasOwn(update, "updatedAt") && validNullableString(update.updatedAt));
+      return (!Object.hasOwn(update, "title") || validNullableString(update.title)) &&
+        (!Object.hasOwn(update, "updatedAt") || validNullableString(update.updatedAt));
     case "usage_update":
       return Number.isSafeInteger(update.used) && Number(update.used) >= 0 &&
         Number.isSafeInteger(update.size) && Number(update.size) >= 0;
