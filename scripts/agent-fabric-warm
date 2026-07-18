@@ -18,11 +18,6 @@ agents_home=${AGENTS_HOME:-"$(dirname -- "$script_dir")"}
 case "$agents_home" in /*) ;; *) echo "AGENTS_HOME must be absolute" >&2; exit 2 ;; esac
 package_root="$agents_home/runtime/agent-fabric"
 
-# Preserve an exact, signed optional-provider build before its subscription CLI
-# auto-updates in place. Absence is non-fatal: compatibility still fails closed
-# when that optional adapter is selected.
-"$script_dir/provision-agy-cli" --if-available
-
 dist_cli="$package_root/dist/cli/main.js"
 dist_mcp="$package_root/dist/mcp/main.js"
 protocol_root="$agents_home/runtime/agent-fabric-protocol"

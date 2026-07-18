@@ -177,21 +177,21 @@ adapters:
     implementation:
       kind: native-cli
       command: agy
-      installed_version: "1.1.4"
+      installed_version: "1.1.3"
       source_build: null
-      executable: ".runtime/provider-clis/agy/1.1.4/agy"
-      executable_sha256: "604c3fff9ce2f82f40f8049f0c0e311c1f51483e77e5e6b31cdfcc4aff2dbf37"
+      executable: "${USER_HOME}/.local/bin/agy"
+      executable_sha256: "fbfbad6da2f1e40daf6f7100d1967e40daeb004892ace250141d2445acc99038"
       wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/optional/agy.ts"
     contract:
       adapter_version: 1
       protocol: agy-cli
-      protocol_version: "cli-1.1.4"
+      protocol_version: "cli-1.1.3"
       schema_source: "runtime/agent-fabric/schemas/normalised-provider-output.v1.schema.json"
       schema_sha256: "7fffad0b2a9eceee814cd04bc80cd5141f47fcc5a0eb056919b33983c168868c"
       capability_fixture_version: 1
     runtime_range:
       supported_cli_versions:
-        - "1.1.4"
+        - "1.1.3"
       platforms:
         - darwin-arm64
     model_family_constraints:

@@ -119,12 +119,12 @@ describe("Stage 1 versioned JSON Schemas", () => {
     }
     expect(adapters.agy).toMatchObject({
       implementation: {
-        installed_version: "1.1.4",
-        executable: ".runtime/provider-clis/agy/1.1.4/agy",
-        executable_sha256: "604c3fff9ce2f82f40f8049f0c0e311c1f51483e77e5e6b31cdfcc4aff2dbf37",
+        installed_version: "1.1.3",
+        executable: "${USER_HOME}/.local/bin/agy",
+        executable_sha256: "fbfbad6da2f1e40daf6f7100d1967e40daeb004892ace250141d2445acc99038",
       },
-      contract: { protocol_version: "cli-1.1.4" },
-      runtime_range: { supported_cli_versions: ["1.1.4"] },
+      contract: { protocol_version: "cli-1.1.3" },
+      runtime_range: { supported_cli_versions: ["1.1.3"] },
     });
     expect(adapters["cursor-agent"]).toMatchObject({
       implementation: {
