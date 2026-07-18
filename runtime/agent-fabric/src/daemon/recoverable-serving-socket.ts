@@ -23,6 +23,7 @@ export async function openRecoverableUnixListener(
   options: {
     setMode?(path: string, mode: number): void;
     admissionFence?: RecoverableServingAdmissionFence;
+    onListening?(): Promise<void> | void;
   } = {},
 ): Promise<void> {
   if (server.listening) {
@@ -32,11 +33,12 @@ export async function openRecoverableUnixListener(
   const setMode = options.setMode ?? chmodSync;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(socketPath, () => {
+    server.listen(socketPath, async () => {
       server.off("error", reject);
       try {
         setMode(socketPath, 0o600);
         options.admissionFence?.reopen();
+        await options.onListening?.();
         resolve();
       } catch (error: unknown) {
         server.close((closeError) => {
