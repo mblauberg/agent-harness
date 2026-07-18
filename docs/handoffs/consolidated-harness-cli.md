@@ -1,17 +1,17 @@
 # Consolidated harness CLI
 
-**Status:** reviewed and accepted for implementation in issue #266
+**Status:** accepted thin CLI; implemented by issue #266
 
 **Date:** 18 July 2026
 
-**Canonical owner:** this document owns the proposal until it is accepted,
-rejected or moved to an issue or design record.
+**Canonical owner:** this document records the accepted surface and its
+expansion boundary.
 
-## Recommendation
+## Decision
 
-Test a thin `provenant` front door for command discovery. It should expose only
-the existing harness entry points and transfer control without changing their
-contracts:
+Use a thin installed `provenant` front door for command discovery. It exposes
+only the existing harness entry points and transfers control without changing
+their contracts:
 
 ```text
 provenant help
@@ -22,8 +22,8 @@ provenant check [existing check-harness arguments]
 provenant fabric [existing agent-fabric arguments]
 ```
 
-`provenant` would own command names and help text. The existing commands would
-remain the sole behavioural owners:
+`provenant` owns command names and help text. The existing commands remain the
+sole behavioural owners:
 
 | Front-door command | Existing owner |
 | --- | --- |
@@ -72,7 +72,7 @@ Current work is tracked separately:
 
 - [#264](https://github.com/mblauberg/provenant/issues/264) owns
   update-tolerant provider admission by identity and interface contract rather
-  than executable version or hash. The proposed front door does not alter that
+  than executable version or hash. The front door does not alter that
   policy.
 - Kiro is registered as a Fabric MCP client and its ACP provider adapter exists,
   but the provider is not active. [#265](https://github.com/mblauberg/provenant/issues/265)
@@ -81,16 +81,15 @@ Current work is tracked separately:
   seat or provider. [#253](https://github.com/mblauberg/provenant/issues/253)
   owns the optional subscription/free-account provider integration.
 
-`provenant help` may report these distinctions and link to the owning issues. It
+`provenant help` reports these distinctions and names the owning issues. It
 must not present installed, configured or proposed integrations as active.
 
-## Lowest-cost experiment
+## Accepted slice and expansion gate
 
-Before adopting the name or expanding the surface, implement one disposable
-shell wrapper and focused contract tests. Do not modify the existing commands or
-their callers.
+The accepted slice is one installed shell wrapper plus focused contract tests.
+It does not modify the existing commands or their callers.
 
-Accept the experiment only if it meets all of these measurements:
+The slice is required to retain these measurements:
 
 1. All five delegated commands execute the documented existing owner.
 2. Representative success, usage-error and downstream-failure cases preserve
@@ -101,9 +100,9 @@ Accept the experiment only if it meets all of these measurements:
 5. `provenant help` identifies the five behavioural owners and distinguishes
    Fabric clients from providers.
 
-Stop after this experiment and assess whether agents actually use the front
-door. If discovery does not improve, retain the existing scripts and add no
-permanent command.
+Any expansion beyond these commands or ownership boundaries requires a separate
+decision. Usage evidence may justify improving discovery text, but does not by
+itself authorise execution, fallback, scheduling or state behaviour here.
 
 ## Alternatives and trade-offs
 
@@ -111,8 +110,8 @@ permanent command.
 ownership obvious, but agents must already know several command names.
 
 **Add documentation without a command.** A short command index is cheaper than
-a wrapper and may solve discovery. It is the preferred fallback if the
-experiment shows little use.
+a wrapper, but the accepted slice keeps the installed front door discoverable
+from any working directory.
 
 **Build a unified execution CLI.** Normalised launching, fallback, scheduling
 and waiting look convenient, but duplicate Fabric, routing and Herdr semantics.

@@ -4,6 +4,8 @@ import os
 import shutil
 import subprocess
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "scripts" / "provenant"
@@ -96,6 +98,39 @@ def test_worktree_runs_from_arbitrary_cwd_without_changing_it(tmp_path):
     payload = json.loads(result.stdout)
     assert payload["argv"][1:] == ["check"]
     assert payload["cwd"] == str(caller_cwd)
+
+
+@pytest.mark.parametrize(
+    ("subcommand", "arguments"),
+    [
+        ("route", ["resolve"]),
+        ("worktree", ["check"]),
+        ("check", ["--doctor"]),
+        ("fabric", ["workspace", "inspect"]),
+        ("doctor", []),
+    ],
+)
+@pytest.mark.parametrize("cwd_kind", ["provenant-root", "unrelated-git", "nonrepo"])
+def test_every_delegated_command_preserves_each_supported_caller_cwd(
+    tmp_path, subcommand, arguments, cwd_kind
+):
+    checkout, command = make_checkout(tmp_path)
+    if cwd_kind == "provenant-root":
+        caller_cwd = checkout
+    elif cwd_kind == "unrelated-git":
+        caller_cwd = tmp_path / "unrelated-git"
+        caller_cwd.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=caller_cwd, check=True)
+        assert (caller_cwd / ".git").is_dir()
+    else:
+        caller_cwd = tmp_path / "nonrepo"
+        caller_cwd.mkdir()
+        assert not (caller_cwd / ".git").exists()
+
+    result = invoke(command, subcommand, *arguments, cwd=caller_cwd)
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["cwd"] == str(caller_cwd)
 
 
 def test_doctor_is_owned_by_agent_fabric_with_fixed_doctor_argument(tmp_path):
