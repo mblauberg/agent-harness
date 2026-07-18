@@ -128,6 +128,36 @@ describe("zero-state MCP bootstrap", () => {
     }
   });
 
+  it("replays an active tagged generation with its stored immutable identity after session revision advances", async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "fabric-zero-state-revision-replay-"));
+    roots.push(temporaryRoot);
+    const root = await realpath(temporaryRoot);
+    const databasePath = join(root, "fabric.sqlite3");
+    const now = Date.parse("2026-07-18T00:00:00.000Z");
+    const fabric = new Fabric({ databasePath, workspaceRoots: [root], clock: () => now });
+    const request = {
+      canonicalRoot: root,
+      trustRecordDigest: `sha256:${"e".repeat(64)}`,
+      seat: "codex" as const,
+      expiresAt: "2026-07-19T00:00:00.000Z",
+    };
+
+    try {
+      const first = fabric.bootstrapCurrentMcpSeat(request);
+      const database = new Database(databasePath);
+      try {
+        database.prepare("UPDATE project_sessions SET revision=revision+1 WHERE project_session_id=?")
+          .run(first.projectSessionId);
+      } finally {
+        database.close();
+      }
+
+      expect(fabric.bootstrapCurrentMcpSeat(request)).toEqual(first);
+    } finally {
+      await fabric.close();
+    }
+  });
+
   it("renews an expiring bootstrap roster in place and revokes its predecessor", async () => {
     const temporaryRoot = await mkdtemp(join(tmpdir(), "fabric-zero-state-renewal-"));
     roots.push(temporaryRoot);

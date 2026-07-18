@@ -221,7 +221,10 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
          WHERE session.project_session_id=? AND run.run_id=?
       `).get(projectSessionId, runId), "bootstrap run");
       const active = custody.database.prepare(`
-        SELECT active.generation,generation.previous_generation,generation.expires_at
+        SELECT active.generation,generation.previous_generation,generation.expires_at,
+               generation.project_session_id,generation.session_revision,generation.session_generation,
+               generation.run_id,generation.run_revision,generation.chair_agent_id,
+               generation.chair_generation,generation.chair_lease_id
           FROM mcp_active_seat_generations active JOIN mcp_seat_generations generation ON generation.generation=active.generation
          WHERE active.project_id=?
       `).get(projectId);
@@ -238,30 +241,33 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
         ).get(active.generation, input.seat);
         if (member !== undefined && !activeGenerationNeedsRenewal) {
           const generation = stringField(active, "generation");
+          const storedProjectSessionId = stringField(active, "project_session_id");
+          const storedRunId = stringField(active, "run_id");
+          const storedChairAgentId = stringField(active, "chair_agent_id");
           const bindings = custody.database.prepare(`
             SELECT seat,agent_id AS agentId,principal_generation AS expectedPrincipalGeneration
               FROM mcp_seat_generation_members WHERE generation=? ORDER BY seat
           `).all(generation) as CurrentMcpSeatBindingInput["bindings"];
           const expiresAt = new Date(numberField(active, "expires_at")).toISOString();
-          const sessionRevision = numberField(run, "session_revision");
-          const sessionGeneration = numberField(run, "session_generation");
-          const runRevision = numberField(run, "run_revision");
-          const chairGeneration = numberField(run, "chair_generation");
-          const currentChairLeaseId = stringField(run, "chair_lease_id");
+          const sessionRevision = numberField(active, "session_revision");
+          const sessionGeneration = numberField(active, "session_generation");
+          const runRevision = numberField(active, "run_revision");
+          const chairGeneration = numberField(active, "chair_generation");
+          const storedChairLeaseId = stringField(active, "chair_lease_id");
           const credentials = bindings.map((binding) => ({
             ...binding,
             capability: `afc_${createHmac("sha256", custody.capabilityKey)
               .update(canonicalJson({
                 kind: "current-mcp-seat",
                 canonicalRoot,
-                projectSessionId,
+                projectSessionId: storedProjectSessionId,
                 sessionRevision,
                 sessionGeneration,
-                runId,
+                runId: storedRunId,
                 runRevision,
-                chairAgentId: currentChairAgentId,
+                chairAgentId: storedChairAgentId,
                 chairGeneration,
-                chairLeaseId: currentChairLeaseId,
+                chairLeaseId: storedChairLeaseId,
                 generation,
                 expiresAt,
                 ...binding,
@@ -273,14 +279,14 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
               ? null
               : stringField(active, "previous_generation"),
             generation,
-            projectSessionId,
+            projectSessionId: storedProjectSessionId,
             sessionRevision,
             sessionGeneration,
-            runId,
+            runId: storedRunId,
             runRevision,
-            chairAgentId: currentChairAgentId,
+            chairAgentId: storedChairAgentId,
             chairGeneration,
-            chairLeaseId: currentChairLeaseId,
+            chairLeaseId: storedChairLeaseId,
             expiresAt,
             credentials,
             projectId,
