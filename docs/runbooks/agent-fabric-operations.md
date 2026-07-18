@@ -281,6 +281,10 @@ node smoke/provider-adapter-readonly.mjs \
 adapter's compatibility entry. It fails closed before the provider smoke if the
 adapter is inactive, the pinned executable is missing or any compatibility
 artifact no longer matches its recorded hash.
+`agent-fabric-warm` also preserves the exact Google-signed Agy build in the
+ignored `.runtime/provider-clis/` slot before the subscription CLI auto-updates;
+Fabric resolves that versioned copy rather than the mutable global install.
+Changing Agy versions remains a deliberate compatibility-manifest update.
 
 Claude reviewers and one-task workers start fresh and release when done. For a
 retained Claude pair, checkpoint and compact at each stage or work-unit

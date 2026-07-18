@@ -53,6 +53,21 @@ describe("adapter executable resolver CLI", () => {
     expect(result.stdout).toBe(`${executable}\n`);
   });
 
+  it("keeps resolving the managed executable after the mutable global source changes", async () => {
+    const fixture = await createResolvedStage4Compatibility("agy");
+    fixtures.push(fixture);
+    const executable = await fixtureExecutable(fixture);
+    const mutableGlobalSource = join(fixture.directory, "global-agy");
+    await writeFile(mutableGlobalSource, await readFile(executable));
+
+    const before = await resolveFixtureExecutable(fixture);
+    await writeFile(mutableGlobalSource, "auto-updated global build\n");
+    const after = await resolveFixtureExecutable(fixture);
+
+    expect(before).toMatchObject({ exitCode: 0, stderr: "", stdout: `${executable}\n` });
+    expect(after).toEqual(before);
+  });
+
   it("fails closed when the pinned executable hash drifts", async () => {
     const fixture = await createResolvedStage4Compatibility("agy");
     fixtures.push(fixture);
