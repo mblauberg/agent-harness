@@ -486,6 +486,16 @@ def _report(proposal: ConfigProposal, verb: str) -> None:
         raise RegistrationOutputError(f"agent-fabric MCP receipt output failed: {exc}") from exc
 
 
+def _neutralize_failed_stream(name: str) -> None:
+    try:
+        replacement = open(os.devnull, "w", encoding="utf-8")
+    except OSError:
+        return
+    # Do not close the failed stream: closing can retry the same buffered write.
+    # Replacing the interpreter-owned reference lets shutdown flush a clean sink.
+    setattr(sys, name, replacement)
+
+
 def _report_partial_state(
     *,
     cause: str,
@@ -506,7 +516,7 @@ def _report_partial_state(
     except (OSError, ValueError):
         # Exit code 4 remains the machine-readable partial-state signal when
         # the diagnostic stream is unavailable too.
-        pass
+        _neutralize_failed_stream("stderr")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -587,6 +597,7 @@ def main(argv: list[str] | None = None) -> int:
                     except RegistrationOutputError as exc:
                         if not committed:
                             raise
+                        _neutralize_failed_stream("stdout")
                         _report_partial_state(
                             cause="receipt-output",
                             committed=committed,
@@ -621,6 +632,7 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     _report(proposal, "configured")
                 except RegistrationOutputError as exc:
+                    _neutralize_failed_stream("stdout")
                     _report_partial_state(
                         cause="receipt-output",
                         committed=committed,

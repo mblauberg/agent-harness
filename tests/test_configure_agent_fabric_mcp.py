@@ -396,6 +396,55 @@ def test_committed_receipt_output_failure_reports_partial_state_and_stops(
     assert "recovery=restore stdout, inspect the committed configuration, then rerun --platform all" in diagnostic
 
 
+def test_closed_stdout_reader_exits_with_typed_partial_state_without_shutdown_override(
+    tmp_path: Path,
+) -> None:
+    paths = {
+        "claude": tmp_path / "claude.json",
+        "codex": tmp_path / "codex.toml",
+        "cursor": tmp_path / "cursor.json",
+        "agy": tmp_path / "agy.json",
+        "kiro": tmp_path / "kiro.json",
+        "opencode": tmp_path / "opencode.jsonc",
+    }
+    paths["claude"].write_text('{}\n')
+    paths["codex"].write_text('[unrelated]\nvalue = "before"\n')
+    for client in ("cursor", "agy", "kiro", "opencode"):
+        paths[client].write_text('{}\n')
+    read_descriptor, write_descriptor = os.pipe()
+    os.close(read_descriptor)
+    process = subprocess.Popen(
+        [
+            str(SCRIPT),
+            "--agents-home", str(ROOT),
+            "--state-directory", str(tmp_path / "state"),
+            "--claude-config", str(paths["claude"]),
+            "--codex-config", str(paths["codex"]),
+            "--cursor-config", str(paths["cursor"]),
+            "--agy-config", str(paths["agy"]),
+            "--kiro-config", str(paths["kiro"]),
+            "--opencode-config", str(paths["opencode"]),
+        ],
+        cwd=ROOT,
+        stdout=write_descriptor,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    os.close(write_descriptor)
+    _, error_output = process.communicate(timeout=10)
+
+    assert process.returncode == 4
+    assert "agent-fabric" in paths["claude"].read_text()
+    assert paths["codex"].read_text() == '[unrelated]\nvalue = "before"\n'
+    assert "partial-state: agent-fabric MCP registration" in error_output
+    assert "cause=receipt-output" in error_output
+    assert "committed=claude" in error_output
+    assert "remaining=codex,cursor,agy,kiro,opencode" in error_output
+    assert f"config={paths['claude']}" in error_output
+    assert "recovery=restore stdout, inspect the committed configuration, then rerun --platform all" in error_output
+    assert "Exception ignored" not in error_output
+
+
 @pytest.mark.parametrize("client", ["claude", "codex"])
 def test_existing_direct_config_under_symlinked_parent_binds_installed_inode(tmp_path: Path, client: str) -> None:
     configurer = load_configurer()
