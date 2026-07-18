@@ -39,10 +39,8 @@ Requirements:
   primary client you install;
 - Node.js `>=24.15.0 <25` and npm `>=11.12.1 <12` to run repository
   verification (the suite shells out to `node`); and
-- PyYAML and pytest for the harness checks. CI installs the versions pinned
-  in `uv.lock`; locally, `uv sync --only-group test` reproduces them, or any
-  interpreter with both packages works (`scripts/check-harness` honours
-  `HARNESS_PYTHON`).
+- PyYAML and pytest for harness checks (`uv sync --only-group test` installs
+  the locked versions; `scripts/check-harness` honours `HARNESS_PYTHON`).
 
 Install either platform independently, or both:
 
@@ -69,9 +67,8 @@ provenant check
 Installation links each skill into `~/.claude/skills/` and `~/.codex/skills/`.
 It also links the thin `provenant` command into
 `${PROVENANT_BIN_DIR:-$HOME/.local/bin}` and warns when that directory is not
-on `PATH`; it never edits shell startup files. The command delegates unchanged
-to the existing `route`, `worktree`, `check` and `fabric` scripts. Its `doctor`
-command is exactly `scripts/agent-fabric doctor`.
+on `PATH`; it never edits shell startup files. `provenant doctor` delegates to
+the Fabric doctor.
 A canonical instruction symlink to `~/.agents/AGENTS.md` is accepted. A regular
 or foreign instruction file is preserved; the installer exits 3 and prints the
 bootstrap line to add. `provenant doctor` checks Fabric configuration and its
@@ -95,6 +92,11 @@ Provider CLI versions and digests are diagnostic observations, not admission
 locks. Provenant revalidates vendor identity, wrapper provenance and each
 bounded provider interface at point of use, so an ordinary signed CLI update
 does not require a compatibility-table edit.
+
+On first Fabric use in a project, the agent trusts only its exact canonical Git
+root (or current directory outside Git). If no seat exists, it calls the global
+MCP's no-argument `fabric_bootstrap`; the same connection then exposes normal
+Fabric tools. No project onboarding is needed.
 
 <details>
 <summary>Installation details: filesystem layout, Codex config and uninstall</summary>
