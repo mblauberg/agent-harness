@@ -8,7 +8,8 @@ Applies to: `runtime/agent-fabric` and `scripts/agent-fabric*`
 The following remain separate approvals. One does not imply another:
 
 1. build or install the local runtime outside an active implementation envelope;
-2. trust a project root or provision/rotate its operator and agent seats;
+2. trust any parent, wildcard, home, sibling collection or other root beyond
+   the exact current project, or provision/rotate operator and agent seats;
 3. enable a provider adapter after compatibility verification;
 4. install an auto-start/login service for the daemon;
 5. log into or consume quota from a provider;
@@ -16,9 +17,15 @@ The following remain separate approvals. One does not imply another:
 7. run a smoke that invokes a real provider adapter;
 8. accept the implementation, release it or publish Git state.
 
+Standing global harness authority covers only automatic trust registration for
+the exact current project's canonical Git root, or its canonical current
+directory when no repository exists. This trust grants no task, write,
+credential, provider, provisioning, acceptance or release authority. Seat
+provisioning remains separately gated.
+
 Read the active authority before acting. Prior activation evidence does not
-authorise a new root, login, registry mutation, provider call, acceptance,
-release or publication.
+authorise a different or broader root, login, registry mutation, provider call,
+acceptance, release or publication.
 
 ## Preflight
 
@@ -259,12 +266,17 @@ cd runtime/agent-fabric
 node smoke/provider-adapter-readonly.mjs \
   --adapter agy --model 'Gemini 3.1 Pro (High)' \
   --model-family google --effort high \
-  --provider-executable "$(command -v agy)"
+  --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter agy)"
 node smoke/provider-adapter-readonly.mjs \
   --adapter cursor-agent --model cursor-grok-4.5-high \
   --model-family xai --effort high \
-  --provider-executable "$(command -v cursor-agent)"
+  --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter cursor-agent)"
 ```
+
+`adapter executable` prints only the validated executable path from the active
+adapter's compatibility entry. It fails closed before the provider smoke if the
+adapter is inactive, the pinned executable is missing or any compatibility
+artifact no longer matches its recorded hash.
 
 Claude reviewers and one-task workers start fresh and release when done. For a
 retained Claude pair, checkpoint and compact at each stage or work-unit
@@ -296,8 +308,13 @@ stop a project session or daemon.
 Use this path when a reviewed project artifact is accepted and a new draft
 project session is ready to launch:
 
-1. Trust the canonical project root with `scripts/agent-fabric workspace trust
-   "$PWD"`, then open the Console for that exact root.
+1. Resolve the owning Git root (`git rev-parse --show-toplevel`), or the
+   canonical current project directory when no repository exists. Inspect that
+   exact root and, when absent, establish trust with
+   `$HOME/.agents/scripts/agent-fabric workspace trust "$project_root"` before
+   opening the Console. This first-use step is automatic under the global
+   harness; never substitute a parent, wildcard, home directory or sibling
+   collection.
 2. Create or select the draft project session. If several sessions are
    attachable, pass its stable ID with `--session`.
 3. Open the complete, verified accepted-evidence row and choose

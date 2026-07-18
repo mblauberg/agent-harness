@@ -66,6 +66,10 @@ export function createProviderAdapter(options: {
     validatePayload(payload: Record<string, unknown>): Record<string, unknown>;
   };
   agentBridge?: { handoff?: AgentBridgeHandoff };
+  noEffect?: {
+    classify(error: unknown): Record<string, unknown> | undefined;
+    throwIfResult(result: Record<string, unknown>): void;
+  };
 }): AdapterRequestHandler {
   const capabilities: ProviderAdapterCapabilities = {
     ...options.capabilities,
@@ -637,6 +641,11 @@ export function createProviderAdapter(options: {
       const record = options.journal.markTerminal(actionId, value, false);
       return { record, result: value };
     } catch (error: unknown) {
+      const noEffect = options.noEffect?.classify(error);
+      if (noEffect !== undefined) {
+        const record = options.journal.markTerminal(actionId, noEffect, true);
+        return { record, result: noEffect };
+      }
       const current = options.journal.get(actionId);
       if (current.status === "dispatched") options.journal.markAmbiguous(actionId);
       throw error;
@@ -831,6 +840,7 @@ export function createProviderAdapter(options: {
             { actionId: executed.record.actionId, status: executed.record.status },
           );
         }
+        options.noEffect?.throwIfResult(executed.result);
         return executed.result;
       }
       capabilityUnavailable(method);

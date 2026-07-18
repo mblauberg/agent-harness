@@ -10,9 +10,7 @@ import {
   getSessionInfo,
   query,
   type Options,
-  type Query,
   type SDKMessage,
-  type SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
@@ -22,6 +20,11 @@ import {
 import type { McpToolDescriptor } from "@local/agent-fabric-protocol";
 
 import { createProviderAdapter, type ProviderBoundary } from "./adapter.js";
+import {
+  claudeSubscriptionNoEffectResult,
+  consumeClaudeQuery,
+  throwClaudeSubscriptionNoEffect,
+} from "./claude-agent-sdk-query.js";
 import {
   chairLaunchContinuityUnproven,
   createChairLaunchFabricBridge,
@@ -330,41 +333,6 @@ export function claudeProviderOptions(
 
 function prompt(payload: Record<string, unknown>): string {
   return requiredString(payload.prompt ?? payload.instruction ?? payload.initialPrompt, "prompt");
-}
-
-async function consumeQuery(
-  active: Query,
-  onSession?: (sessionId: string) => void,
-  onMessage?: (message: SDKMessage) => void,
-): Promise<{ resumeReference: string; result: string; usage: unknown; costUsd: number; numTurns: unknown }> {
-  let sessionId: string | undefined;
-  let terminal: SDKResultMessage | undefined;
-  try {
-    for await (const message of active) {
-      sessionId = message.session_id;
-      if (typeof message.session_id === "string") onSession?.(message.session_id);
-      onMessage?.(message);
-      if (message.type === "result") terminal = message;
-    }
-  } finally {
-    active.close();
-  }
-  if (terminal === undefined || sessionId === undefined) {
-    throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Claude Agent SDK ended without a terminal result");
-  }
-  if (terminal.subtype !== "success") {
-    throw new ProviderAdapterError("PROVIDER_TURN_FAILED", terminal.errors.join("; "), {
-      resumeReference: sessionId,
-      subtype: terminal.subtype,
-    });
-  }
-  return {
-    resumeReference: sessionId,
-    result: terminal.result,
-    usage: terminal.usage,
-    costUsd: terminal.total_cost_usd,
-    numTurns: terminal.num_turns,
-  };
 }
 
 function claudeResourceUsage(completed: {
@@ -691,7 +659,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
 
   async spawn(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const prior = optionalString(payload.priorResumeReference, "priorResumeReference");
-    const completed = await consumeQuery(this.#query({
+    const completed = await consumeClaudeQuery(this.#query({
       prompt: prompt(payload),
       options: claudeProviderOptions(payload, prior, this.#executable),
     }));
@@ -723,7 +691,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
     const mcp = this.#mcpBridgeFactory(session);
     session.mcp = mcp;
     try {
-      const completed = await consumeQuery(this.#query({
+      const completed = await consumeClaudeQuery(this.#query({
         prompt: `Before continuing, invoke ${mcp.attestationToolName} exactly once with {"challengeResponse":"${bridge.challengeResponse}"}. ${prompt(input.payload)}`,
         options: claudeChairOptions(input.payload, this.#executable, undefined, mcp),
       }), (sessionId) => {
@@ -774,7 +742,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
     const mcp = this.#mcpBridgeFactory(session);
     session.mcp = mcp;
     try {
-      const completed = await consumeQuery(this.#query({
+      const completed = await consumeClaudeQuery(this.#query({
         prompt: `Before continuing, invoke ${mcp.attestationToolName} exactly once with {"challengeResponse":"${bridge.challengeResponse}"}. Re-establish the retained Agent Fabric chair bridge.`,
         options: claudeChairOptions(input.payload, this.#executable, input.resumeReference, mcp),
       }), (sessionId) => {
@@ -843,7 +811,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
           ? requestedPrompt
           : "Establish the retained Agent Fabric bridge."
       }`;
-      const completed = await consumeQuery(this.#query({
+      const completed = await consumeClaudeQuery(this.#query({
         prompt: activationPrompt,
         options: claudeChairOptions(input.payload, this.#executable, resume, mcp),
       }), (sessionId) => {
@@ -875,7 +843,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
     const resumeReference = requiredString(payload.resumeReference, "resumeReference");
     const session = this.#chairSessions.get(resumeReference);
     if (session === undefined) {
-      return await consumeQuery(this.#query({ prompt: prompt(payload), options: claudeProviderOptions(payload, resumeReference, this.#executable) }));
+      return await consumeClaudeQuery(this.#query({ prompt: prompt(payload), options: claudeProviderOptions(payload, resumeReference, this.#executable) }));
     }
     const mcp = session.mcp;
     if (mcp === undefined) {
@@ -887,7 +855,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
     session.busy = true;
     session.nativeFabricInvocations.length = 0;
     try {
-      return await consumeQuery(this.#query({
+      return await consumeClaudeQuery(this.#query({
         prompt: prompt(payload),
         options: claudeChairOptions(payload, this.#executable, resumeReference, mcp),
       }), (sessionId) => session.bridge.bindProviderSession(sessionId, session.providerSessionGeneration),
@@ -939,6 +907,10 @@ export function createClaudeAgentSdkAdapter(options: {
     capabilities: CAPABILITIES,
     boundary: options.boundary,
     journal: options.journal,
+    noEffect: {
+      classify: claudeSubscriptionNoEffectResult,
+      throwIfResult: throwClaudeSubscriptionNoEffect,
+    },
     chairLaunch: {
       ...(options.chairLaunchHandoff === undefined ? {} : { handoff: options.chairLaunchHandoff }),
       validatePayload: validateClaudeChairLaunchPayload,
