@@ -42,8 +42,9 @@ duplicates within or across the two arrays reject.
 The current baseline adds `AFTER INSERT`, `AFTER UPDATE` and `AFTER DELETE` triggers on `notification_deliveries` that
 increment `daemon_global_state.revision` in the mutating transaction. They follow the existing projection-trigger
 policy, compose with the evidence-registry constraints in the same schema and do not create events, Attention mutations
-or delivery retries. Existing `integration_availability` triggers remain mandatory and are verified rather than
-duplicated. Baseline catalogue verification rejects missing trigger coverage before the result-shape feature is
+or delivery retries. Existing `integration_availability` triggers advance the revision for inserts, deletes and
+material state or discovered-contract changes; a freshness-only `checked_at` refresh does not invalidate an otherwise
+identical projection. Baseline catalogue verification rejects missing trigger coverage before the result-shape feature is
 advertised.
 
 Multiple row-trigger increments in one SQLite transaction are valid. The Console preserves stable IDs, focus, scroll,

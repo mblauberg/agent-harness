@@ -449,6 +449,40 @@ function insertProviderAction(
 }
 
 describe("current database baseline invariants", () => {
+  it("advances global revision only for material integration availability changes", () => {
+    const database = openDatabase();
+    const revision = (): number => (database.prepare(`
+      SELECT revision FROM daemon_global_state WHERE singleton=1
+    `).get() as { revision: number }).revision;
+
+    database.prepare(`
+      INSERT INTO integration_availability(
+        integration_id,state,discovered_contract_json,checked_at
+      ) VALUES (?,?,?,?)
+    `).run("native-desktop", "available", '{"version":1}', 100);
+    const afterInsert = revision();
+
+    const refresh = database.prepare(`
+      INSERT INTO integration_availability(
+        integration_id,state,discovered_contract_json,checked_at
+      ) VALUES (?,?,?,?)
+      ON CONFLICT(integration_id) DO UPDATE SET
+        state=excluded.state,
+        discovered_contract_json=excluded.discovered_contract_json,
+        checked_at=excluded.checked_at
+    `);
+    refresh.run("native-desktop", "available", '{"version":1}', 200);
+    expect(revision()).toBe(afterInsert);
+
+    refresh.run("native-desktop", "stale", '{"version":1}', 300);
+    expect(revision()).toBe(afterInsert + 1);
+
+    refresh.run("native-desktop", "stale", '{"version":2}', 400);
+    expect(revision()).toBe(afterInsert + 2);
+
+    database.close();
+  });
+
   it("installs the complete strict lifecycle rotation persistence graph", () => {
     const database = openDatabase();
     const lifecycleTables = [
