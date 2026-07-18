@@ -332,6 +332,10 @@ node smoke/provider-adapter-readonly.mjs \
   --adapter kiro-acp --model qwen3-coder-next \
   --model-family open-weight --effort low \
   --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter kiro-acp)"
+node smoke/provider-adapter-readonly.mjs \
+  --adapter opencode-acp --model opencode/deepseek-v4-flash-free \
+  --model-family generic-open \
+  --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter opencode-acp)"
 ```
 
 For Kiro, first replace the example model when the account's current list has
@@ -339,6 +343,14 @@ changed; the name is smoke input, not an admission lock. The activation proof
 for issue #265 returned `status: pass`, `output: exact-sentinel`, `workspace:
 unchanged` and `session: spawn-turn-release` through Kiro 2.13.0 with Amazon
 Team ID `94KV3E626L`. Version and digest in that receipt are observations only.
+
+The issue #253 OpenCode acceptance returned `status: pass`, `output:
+exact-sentinel`, `workspace: unchanged`, `providerConfig: unchanged`,
+`credentialInput: subscription-session`, `fabricCapability: not-provided` and
+`session: spawn-turn-release` for the advertised
+`opencode/deepseek-v4-flash-free` model. It observed OpenCode 1.17.18 at the
+canonical owner-controlled Homebrew Cellar path; version and digest remain
+observations, not admission bounds.
 
 `adapter executable` prints only the validated executable path from the active
 adapter's compatibility entry. It fails closed before the provider smoke if the

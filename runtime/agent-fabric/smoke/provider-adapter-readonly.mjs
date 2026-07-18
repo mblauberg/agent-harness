@@ -117,7 +117,20 @@ async function workspaceDigest(root) {
   return createHash("sha256").update(JSON.stringify(entries)).digest("hex");
 }
 
+async function optionalTreeDigest(root) {
+  try {
+    return await workspaceDigest(root);
+  } catch (error) {
+    if (error?.code === "ENOENT") return "missing";
+    throw error;
+  }
+}
+
 const beforeDigest = await workspaceDigest(workspace);
+const providerConfigRoot = adapterId === "opencode-acp"
+  ? join(process.env.XDG_CONFIG_HOME ?? join(process.env.HOME ?? "", ".config"), "opencode")
+  : undefined;
+const providerConfigBefore = providerConfigRoot === undefined ? undefined : await optionalTreeDigest(providerConfigRoot);
 const args = [
   "--import", join(agentsRoot, "node_modules/tsx/dist/loader.mjs"),
   "--conditions=source",
@@ -180,6 +193,9 @@ try {
   phase = "read-only-verification";
   const afterDigest = await workspaceDigest(workspace);
   if (afterDigest !== beforeDigest) throw new Error("provider smoke modified the isolated workspace");
+  if (providerConfigRoot !== undefined && await optionalTreeDigest(providerConfigRoot) !== providerConfigBefore) {
+    throw new Error("provider smoke modified provider configuration");
+  }
   process.stdout.write(`${JSON.stringify({
     status: "pass",
     adapterId,
@@ -189,6 +205,9 @@ try {
     wrapper: { path: implementation.wrapper_entrypoint, repositoryCommit: wrapperRepositoryCommit },
     output: "exact-sentinel",
     workspace: "unchanged",
+    ...(providerConfigRoot === undefined ? {} : { providerConfig: "unchanged" }),
+    credentialInput: "subscription-session",
+    fabricCapability: "not-provided",
     session: "spawn-turn-release",
   })}\n`);
 } catch (error) {
