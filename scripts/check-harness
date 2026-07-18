@@ -10,22 +10,28 @@ fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [[ -x "${HARNESS_PYTHON:-}" ]]; then
-  PYTHON="$HARNESS_PYTHON"
+  PYTHON=("$HARNESS_PYTHON")
 elif [[ -x "$ROOT/.venv/bin/python" ]]; then
-  PYTHON="$ROOT/.venv/bin/python"
+  PYTHON=("$ROOT/.venv/bin/python")
+elif PYTHON3="$(command -v python3 2>/dev/null)" &&
+     "$PYTHON3" -c 'import pytest, yaml' >/dev/null 2>&1; then
+  PYTHON=("$PYTHON3")
+elif command -v uv >/dev/null 2>&1; then
+  PYTHON=(uv run --frozen --only-group test python)
 else
-  PYTHON="$(command -v python3)"
+  echo "check-harness: no Python with pytest and PyYAML found; install uv or set HARNESS_PYTHON" >&2
+  exit 3
 fi
 
 cd "$ROOT"
-"$PYTHON" scripts/check_harness.py
-"$PYTHON" scripts/check_specs.py
-"$PYTHON" skills/orchestrate/evals/check_skill_triggers.py
+"${PYTHON[@]}" scripts/check_harness.py
+"${PYTHON[@]}" scripts/check_specs.py
+"${PYTHON[@]}" skills/orchestrate/evals/check_skill_triggers.py
 # Lifecycle-skill alignment is a deterministic current-tree gate. Historical
 # provider routing evidence stays immutable under docs/archive and is not
 # rewritten or treated as a live-catalogue result.
-"$PYTHON" skills/orchestrate/evals/lifecycle_skill_evaluation.py validate-inputs
-"$PYTHON" skills/orchestrate/evals/lifecycle_skill_evaluation.py probe
+"${PYTHON[@]}" skills/orchestrate/evals/lifecycle_skill_evaluation.py validate-inputs
+"${PYTHON[@]}" skills/orchestrate/evals/lifecycle_skill_evaluation.py probe
 
 while IFS= read -r -d '' script; do
   case "$script" in
@@ -41,13 +47,13 @@ if [[ -d "$HOME/.claude/workflows" ]]; then
   done < <(find "$HOME/.claude/workflows" -maxdepth 1 -type f -name '*.js' -print0)
 fi
 
-"$PYTHON" scripts/public_release_check.py
-"$PYTHON" scripts/static-security-check.py
-"$PYTHON" scripts/validate_delivery_scenarios.py
-"$PYTHON" scripts/render_skill_catalogue.py --check
+"${PYTHON[@]}" scripts/public_release_check.py
+"${PYTHON[@]}" scripts/static-security-check.py
+"${PYTHON[@]}" scripts/validate_delivery_scenarios.py
+"${PYTHON[@]}" scripts/render_skill_catalogue.py --check
 # House style is gated on the root documents and on every skill front door.
 # skills/*/references/ and docs/ are not yet clean and are not gated.
-"$PYTHON" skills/engineering-writing/scripts/check_engineering_style.py \
+"${PYTHON[@]}" skills/engineering-writing/scripts/check_engineering_style.py \
   README.md \
   HARNESS.md \
   MAINTAINING.md \
@@ -55,7 +61,7 @@ fi
   docs/ARCHITECTURE.md \
   skills/*/SKILL.md
 
-"$PYTHON" -m pytest -q \
+"${PYTHON[@]}" -m pytest -q \
   tests \
   skills/implement/tests/test_checkpoint_run.py \
   skills/orchestrate/evals/test_cf_dispatch.py
