@@ -1,16 +1,17 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ProviderBoundary } from "../adapter.js";
+import { DEFAULT_PROVIDER_TURN_TIMEOUT_MS } from "../../provider-deadlines.js";
 import { isRecord, ProviderAdapterError, requiredString } from "../types.js";
 import { buildAgyInvocation, buildCursorInvocation, type ProviderInvocation } from "./invocations.js";
 
 export type ProviderCommandResult = { stdout: string; stderr: string; exitCode: number };
 export type ProviderCommandRunner = (invocation: ProviderInvocation) => Promise<ProviderCommandResult>;
 
-const DEFAULT_TIMEOUT_MS = 300_000;
 const MAX_CAPTURE_BYTES = 1_048_576;
 
 function appendBounded(current: string, chunk: Buffer | string, stream: string): string {
@@ -22,7 +23,7 @@ function appendBounded(current: string, chunk: Buffer | string, stream: string):
 }
 
 export const runBoundedProviderCommand: ProviderCommandRunner = async (invocation) => {
-  const timeoutMs = invocation.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = invocation.timeoutMs ?? DEFAULT_PROVIDER_TURN_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new ProviderAdapterError("INVALID_PARAMS", "provider command timeout must be positive");
   }
@@ -92,6 +93,14 @@ export const runBoundedProviderCommand: ProviderCommandRunner = async (invocatio
 };
 
 function agyCommandResult(result: ProviderCommandResult, fallbackReference?: string): Record<string, unknown> {
+  const output = result.stdout.trim();
+  if (output.length === 0) {
+    throw new ProviderAdapterError(
+      "PROVIDER_RESPONSE_INVALID",
+      "Agy CLI exited successfully without answer output; verify subscription model access and headless print compatibility",
+      { exitCode: result.exitCode, stderr: result.stderr.slice(-4096) },
+    );
+  }
   if (fallbackReference === undefined) {
     throw new ProviderAdapterError(
       "PROVIDER_RESPONSE_INVALID",
@@ -100,16 +109,18 @@ function agyCommandResult(result: ProviderCommandResult, fallbackReference?: str
   }
   return {
     resumeReference: fallbackReference,
-    result: result.stdout.trim(),
+    result: output,
     providerRecordCount: 0,
   };
 }
 
 const CURSOR_RECORD_TYPES = new Set(["system", "user", "thinking", "assistant", "result"]);
+const CURSOR_SAFE_RECORD_FIELDS = new Set(["is_error", "message", "result", "session_id", "subtype", "type"]);
 
 function cursorCommandResult(result: ProviderCommandResult): Record<string, unknown> {
   const records: Record<string, unknown>[] = [];
-  for (const line of result.stdout.split(/\r?\n/u).filter((item) => item.trim().length > 0)) {
+  const lines = result.stdout.split(/\r?\n/u).filter((item) => item.trim().length > 0);
+  for (const [recordIndex, line] of lines.entries()) {
     let value: unknown;
     try {
       value = JSON.parse(line);
@@ -122,7 +133,21 @@ function cursorCommandResult(result: ProviderCommandResult): Record<string, unkn
       );
     }
     if (!isRecord(value) || typeof value.type !== "string" || !CURSOR_RECORD_TYPES.has(value.type)) {
-      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Cursor stream contained an unknown record type");
+      const recordType = isRecord(value) && typeof value.type === "string" ? value.type : "";
+      throw new ProviderAdapterError(
+        "PROVIDER_RESPONSE_INVALID",
+        "Cursor stream contained an unsupported record type",
+        {
+          recordIndex,
+          recordTypeSha256: createHash("sha256").update(recordType).digest("hex"),
+          recordTypeLength: Buffer.byteLength(recordType),
+          recordFields: isRecord(value)
+            ? Object.keys(value)
+              .filter((field) => CURSOR_SAFE_RECORD_FIELDS.has(field))
+              .sort()
+            : [],
+        },
+      );
     }
     records.push(value);
   }
@@ -153,6 +178,7 @@ type OneShotBoundaryOptions = {
   cwd: string;
   timeoutMs?: number;
   runner?: ProviderCommandRunner;
+  verifyExecutable?: () => Promise<unknown>;
 };
 
 function assertTaskBoundOneShot(payload: Record<string, unknown>): void {
@@ -166,15 +192,17 @@ function assertTaskBoundOneShot(payload: Record<string, unknown>): void {
 
 export function createAgyCliBoundary(options: OneShotBoundaryOptions): ProviderBoundary {
   const runner = options.runner ?? runBoundedProviderCommand;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_PROVIDER_TURN_TIMEOUT_MS;
   const execute = async (payload: Record<string, unknown>, resume?: string): Promise<Record<string, unknown>> => {
     const logDirectory = await mkdtemp(join(tmpdir(), "agent-fabric-agy-"));
     const logFile = join(logDirectory, "provider.log");
     try {
+      await options.verifyExecutable?.();
       const result = await runner(
         buildAgyInvocation({
           executable: options.executable,
           cwd: typeof payload.cwd === "string" ? payload.cwd : options.cwd,
-          ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+          timeoutMs,
           model: requiredString(payload.model, "model"),
           prompt: requiredString(payload.prompt, "prompt"),
           mode: "plan",
@@ -223,12 +251,14 @@ export function createAgyCliBoundary(options: OneShotBoundaryOptions): ProviderB
 
 export function createCursorCliBoundary(options: OneShotBoundaryOptions): ProviderBoundary {
   const runner = options.runner ?? runBoundedProviderCommand;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_PROVIDER_TURN_TIMEOUT_MS;
   const execute = async (payload: Record<string, unknown>, resume?: string): Promise<Record<string, unknown>> => {
+    await options.verifyExecutable?.();
     const result = await runner(
       buildCursorInvocation({
         executable: options.executable,
         cwd: typeof payload.cwd === "string" ? payload.cwd : options.cwd,
-        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+        timeoutMs,
         model: requiredString(payload.model, "model"),
         prompt: requiredString(payload.prompt, "prompt"),
         mode: "ask",

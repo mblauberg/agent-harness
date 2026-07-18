@@ -40,11 +40,25 @@ fail closed as `invalid_orchestrator_family`, and missing values fail closed as
 The receipt's resolved `effort` is authoritative for the adapter invocation.
 GPT-5.6 efforts are capability-gated per model. The Codex execution adapter
 captures `codex debug models` through `codex_capabilities.py` and supplies the
-snapshot to the resolver. Explicit unsupported requests fail as
+snapshot to the resolver. The ChatGPT-subscription Codex route is
+`account-default`: it selects the dated catalogue candidate for effort and
+audit independently of the runtime-selectable model list, records that ID as
+`catalog_model`, records `model_selection: account-default`, leaves
+`resolved_model` empty and omits `-m` from `codex exec`. If a valid runtime
+snapshot omits the catalogue candidate, the resolver uses dated-catalogue
+effort support and records that fallback in `effort_capability_source` and
+`effort_substitution`. Explicit unsupported requests fail as
 `effort_unsupported`; a role default may degrade with `effort_substitution`.
 Discovery/schema failure is `capability_discovery_failed` and cannot certify an
 advanced-effort execution. Direct planning-only resolution without a snapshot
 is visibly marked `effort_capability_source: dated-catalog`.
+Claude task-class routing captures one alias-and-effort capability through
+`claude_capabilities.py`. The producer requires logged-in `claude.ai`
+subscription auth and runs a bounded `--safe-mode`, no-tools,
+no-session-persistence canary. It retains only scrubbed auth class, requested
+alias/effort and the matching runtime model; helper-model usage and account
+identifiers are not retained. The canary has a small provider cost, so callers
+may reuse its file only inside the resolver's five-minute freshness window.
 Broker adapters require a model (`--model` or `CF_DISPATCH_CURSOR_MODEL`,
 `CF_DISPATCH_KIRO_MODEL`, or `CF_DISPATCH_COPILOT_MODEL`); an unprovable provider fails closed as
 `model_required_for_broker` or `model_family_unknown`. Matching provider routes
@@ -61,7 +75,8 @@ or `oauth_safe_mode`.
   see auth and `claude auth status` confirms a logged-in `claude.ai` account, retry with `--safe-mode`,
   `--disable-slash-commands`, `--no-session-persistence`, `--permission-mode plan`, the same safe read tools, and
   the same verifier system prompt.
-- `codex`: `exec -s read-only --ephemeral`.
+- `codex`: `exec -s read-only --ephemeral`; the account-default route omits
+  `-m` and passes only the resolved reasoning-effort control.
 - `cursor`: `--mode ask --sandbox enabled`; current help documents ask as
   read-only, while current headless plan mode can exit without an answer.
 - `kiro`: disabled by default in the dispatcher. Enable only with `CF_DISPATCH_ENABLE_KIRO=1`; no hard
@@ -127,7 +142,9 @@ Examples:
 
 - non-Claude orchestrator needing Claude verifier -> dispatcher-managed `claude` route; prefer `--bare`
   when `ANTHROPIC_API_KEY`/`apiKeyHelper` exists, otherwise OAuth safe mode if already logged in.
-- Codex verifier -> `codex exec -s read-only -m <model> -c model_reasoning_effort=<level>`.
+- Codex verifier -> account-default `codex exec -s read-only -c
+  model_reasoning_effort=<level>`; `catalog_model` is audit metadata, not an
+  argument.
 - Cursor scout -> `cursor-agent -p --mode ask --sandbox enabled --model <model>`.
 - Gemini-family scout -> an `orchestrate` task through the activated Agent
   Fabric `agy` adapter; retain its route/action receipt.
@@ -141,7 +158,7 @@ Each CLI emits different wrappers: banners, JSONL, token footers, ANSI, stats, o
 dispatcher should produce:
 
 ```
-{"tool":"...","adapter":"...","model":"...","resolved_model":"...","requested_effort":"...","effort":"...","effort_source":"...","effort_capability_source":"...","effort_substitution":"...","substitution":"...","status":"...","exit":0,"output_path":"...","read_only_guarantee":"enforced|oauth_safe_mode|best_effort|prompt_only|none","orchestrator_family":"...","provider_family":"...","model_family":"...","endpoint_provider":"...","identity_source":"...","cross_family":true,"certification_eligible":true}
+{"tool":"...","adapter":"...","model":"...","resolved_model":"...","catalog_model":"...","model_selection":"...","requested_effort":"...","effort":"...","effort_source":"...","effort_capability_source":"...","effort_substitution":"...","substitution":"...","status":"...","exit":0,"output_path":"...","read_only_guarantee":"enforced|oauth_safe_mode|best_effort|prompt_only|none","orchestrator_family":"...","provider_family":"...","model_family":"...","endpoint_provider":"...","identity_source":"...","cross_family":true,"certification_eligible":true}
 ```
 
 `status` is the resolver/dispatcher vocabulary, not a hand-maintained subset:

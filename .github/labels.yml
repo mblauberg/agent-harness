@@ -2,9 +2,9 @@
 #
 # Synced by .github/workflows/labels.yml (crazy-max/ghaction-github-labeler)
 # with pruning enabled: a label that is not in this file is deleted from the
-# live repository on the next sync. Native issue types say what an item is,
-# Project Status carries progress; labels carry only signal and automation
-# switches. Do not add status labels here.
+# live repository on the next sync. Project Status carries progress; labels
+# carry type, governance signals and automation switches until native issue
+# types are configured for this repository. Do not add status labels here.
 
 - name: bug
   color: "d73a4a"

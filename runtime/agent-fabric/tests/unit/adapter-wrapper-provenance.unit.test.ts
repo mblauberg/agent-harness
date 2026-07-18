@@ -63,6 +63,7 @@ async function writeCompatibility(
             installed_version: "1",
             executable: fixture.executablePath,
             executable_sha256: sha256("provider executable\n"),
+            provider_identity: "apple-designated",
             wrapper_entrypoint: wrapperEntrypoint,
           },
           contract: {
@@ -74,7 +75,7 @@ async function writeCompatibility(
             capability_fixture_version: 1,
           },
           runtime_range: { platforms: [process.platform] },
-          model_family_constraints: { allowed: ["fixture"] },
+          model_family_constraints: { allowed: ["fixture"], requires_explicit_model: true },
           official_source_url: "https://example.invalid",
           unresolved_pins: [],
         },
@@ -146,9 +147,9 @@ describe("adapter wrapper Git provenance", () => {
     });
   });
 
-  it("still fails closed when a pinned external artifact changes", async () => {
+  it("still fails closed when a pinned protocol artifact changes", async () => {
     const fixture = await createProvenanceFixture();
-    await writeFile(fixture.executablePath, "tampered provider executable\n");
+    await writeFile(join(fixture.directory, "protocol.json"), '{"schema_version":2}\n');
 
     await expect(verify(fixture)).rejects.toMatchObject({ code: "ADAPTER_HASH_MISMATCH" });
   });

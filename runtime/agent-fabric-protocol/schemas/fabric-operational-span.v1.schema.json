@@ -177,6 +177,7 @@
         "fabric.v1.project-session.read",
         "fabric.v1.project-session.transition",
         "fabric.v1.project-session.close",
+        "fabric.v1.project-session-launch.packet.prepare",
         "fabric.v1.project-session-launch.prepare",
         "fabric.v1.project-session.membership.bind",
         "fabric.v1.operator.attach",

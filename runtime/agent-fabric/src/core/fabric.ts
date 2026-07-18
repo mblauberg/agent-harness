@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolve, sep } from "node:path";
 
 import type Database from "better-sqlite3";
@@ -24,6 +24,8 @@ import {
   type LifecycleCurrentStateV1,
   type LifecycleGenerationLossRowV1,
   type OperationInputMap,
+  type ProjectSessionLaunchPacketPreparation,
+  type ProjectSessionLaunchPacketPrepareRequest,
   type ProtocolOperation,
   type VerifiedProtocolCredential,
 } from "@local/agent-fabric-protocol";
@@ -85,6 +87,8 @@ import {
   type LocalOperatorProvisioningResult,
   type LocalOperatorSessionCapabilityInput,
   type LocalOperatorSessionCapabilityResult,
+  type LocalOperatorTakeoverCapabilityInput,
+  type LocalOperatorTakeoverCapabilityResult,
 } from "../operator/store.js";
 import { OperatorProjectionStore } from "../operator/projection-store.js";
 import {
@@ -143,6 +147,7 @@ import { ProjectSessionMembershipStore } from "../project-session/membership-sto
 import { CoordinatedWorkstreamStore } from "../project-session/workstream-store.js";
 import {
   LaunchCustodyService,
+  normaliseLaunchChairAuthority,
   parseLaunchAdapterContract,
   type LaunchAdapterContract,
   type AgentBridgeContract,
@@ -151,6 +156,7 @@ import {
   type ChairRecoveryDispatchHandle,
 } from "../project-session/launch-custody.js";
 import { IntakeStore } from "../project-session/intake-store.js";
+import { assertSafeLaunchProviderInput } from "../project-session/provider-input-safety.js";
 import {
   ProjectFabricCoreError,
   type AuthenticatedAgentContext,
@@ -178,6 +184,8 @@ import type {
   ArtifactResult,
   AuthorityResult,
   BarrierResult,
+  BootstrapMcpSeatInput,
+  BootstrapMcpSeatResult,
   BudgetDimensionResult,
   BudgetResult,
   CapabilityRotationResult,
@@ -198,6 +206,7 @@ import type {
   TeamResult,
 } from "./contracts.js";
 import { currentMcpSeatGeneration } from "./mcp-seat-generation.js";
+import { bootstrapCurrentMcpSeat as bootstrapMcpSeatCustody } from "./bootstrap-mcp-custody.js";
 import { FabricReadPolicy } from "./read-policy.js";
 import { ArtifactRegistry } from "../artifacts/registry.js";
 import { resolveRunArtifactRoot } from "../artifacts/run-root.js";
@@ -747,7 +756,6 @@ function providerAnswerFromAdapterResult(value: unknown): string {
 function isTaskBoundEphemeralProviderPayload(value: unknown): value is Record<string, unknown> {
   return isRow(value) &&
     typeof value.taskId === "string" &&
-    typeof value.model === "string" &&
     typeof value.modelFamily === "string" &&
     typeof value.prompt === "string";
 }
@@ -1194,6 +1202,7 @@ export class Fabric {
       clock: this.#clock,
     });
     this.#herdrConfigured = options.herdr !== undefined;
+    this.#recoverLaunchPreparations();
   }
 
   /** Trusted in-process daemon composition only; no protocol operation dispatches here. */
@@ -1238,6 +1247,7 @@ export class Fabric {
     actionId: string;
     daemonInstanceGeneration: number;
     election: IdleElectionPort;
+    beforeElectionRelease?: () => Promise<void>;
     closeSocket(): Promise<void>;
     reopenSocket(): Promise<void>;
   }): Promise<IdleStopResult> {
@@ -1261,6 +1271,7 @@ export class Fabric {
     token: QuiesceToken;
     excludeOperatorEffectCustodyId?: string;
     election: IdleElectionPort;
+    beforeElectionRelease?: () => Promise<void>;
     closeSocket(): Promise<void>;
     reopenSocket(): Promise<void>;
   }): Promise<IdleStopResult> {
@@ -1406,6 +1417,12 @@ export class Fabric {
     input: Omit<LocalOperatorSessionCapabilityInput, "fresh">,
   ): LocalOperatorConsoleSessionCapabilityResult {
     return this.#operatorStore.openLocalOperatorConsoleSessionCapability(input);
+  }
+
+  openLocalOperatorConsoleTakeoverCapability(
+    input: LocalOperatorTakeoverCapabilityInput,
+  ): LocalOperatorTakeoverCapabilityResult {
+    return this.#operatorStore.openLocalOperatorConsoleTakeoverCapability(input);
   }
 
   rotateLocalOperatorPrincipal(
@@ -1708,7 +1725,10 @@ export class Fabric {
       : 1;
   }
 
-  #launchResourceUsage(providerAdapterId: string, providerActionId: string): Record<string, "unknown"> {
+  #launchResourceUsage(
+    providerAdapterId: string,
+    providerActionId: string,
+  ): Record<string, number | "unknown"> {
     const reservation = rowOrNotFound(this.#database.prepare(`
       SELECT r.amounts_json
         FROM project_session_launch_custody c
@@ -1719,7 +1739,12 @@ export class Fabric {
     if (!isRow(amounts) || Object.values(amounts).some((value) => !Number.isSafeInteger(value) || Number(value) < 0)) {
       throw new Error("launch reservation amounts are invalid");
     }
-    return Object.fromEntries(Object.keys(amounts).sort().map((unit) => [unit, "unknown"]));
+    return Object.fromEntries(Object.keys(amounts).sort().map((unit) => [
+      unit,
+      unit === "provider_calls" ? 1
+        : unit === "concurrent_turns" ? 0
+          : "unknown",
+    ]));
   }
 
   #terminalLaunchOutcome(
@@ -2405,6 +2430,36 @@ export class Fabric {
     })();
   }
 
+  bootstrapTrustedCurrentMcpSeat(
+    input: BootstrapMcpSeatInput,
+    revalidatedWorkspace: { canonicalRoot: string; trustRecordDigest: string },
+  ): BootstrapMcpSeatResult {
+    if (
+      canonicalWorkspaceRoot(revalidatedWorkspace.canonicalRoot) !== input.canonicalRoot ||
+      revalidatedWorkspace.canonicalRoot !== input.canonicalRoot ||
+      revalidatedWorkspace.trustRecordDigest !== input.trustRecordDigest
+    ) {
+      throw new FabricError("AUTHENTICATION_FAILED", "revalidated MCP workspace binding changed");
+    }
+    if (!this.#workspaceRoots.includes(revalidatedWorkspace.canonicalRoot)) {
+      this.#workspaceRoots.push(revalidatedWorkspace.canonicalRoot);
+      this.#workspaceRoots.sort();
+    }
+    return this.bootstrapCurrentMcpSeat(input);
+  }
+
+  bootstrapCurrentMcpSeat(input: BootstrapMcpSeatInput): BootstrapMcpSeatResult {
+    return bootstrapMcpSeatCustody({
+      database: this.#database,
+      clock: this.#clock,
+      workspaceRoots: this.#workspaceRoots,
+      capabilityKey: this.#capabilityKey,
+      canonicalWorkspaceRoot,
+      normaliseAuthority,
+      bindCurrentMcpSeats: (binding) => this.bindCurrentMcpSeats(binding),
+    }, input);
+  }
+
   connect(token: string): FabricClient {
     const row = rowOrNotFound(
       this.#database
@@ -2470,6 +2525,480 @@ export class Fabric {
       },
       grantedOperations: authority.actions.filter((operation) => !denied.has(operation)),
     };
+  }
+
+  #writeClosedLaunchArtifact(
+    root: string,
+    relativePath: string,
+    content: string,
+  ): Readonly<{ device: string; inode: string }> {
+    const destination = resolve(root, canonicalAuthorityPath(root, relativePath));
+    mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+    try {
+      writeFileSync(destination, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    } catch (error: unknown) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST") {
+        throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch staging path is already occupied");
+      }
+      throw error;
+    }
+    const identity = statSync(destination, { bigint: true });
+    return { device: identity.dev.toString(), inode: identity.ino.toString() };
+  }
+
+  #removeLaunchPreparationFile(
+    root: string,
+    relativePath: unknown,
+    expectedDigest: unknown,
+    expectedDevice: unknown,
+    expectedInode: unknown,
+  ): boolean {
+    if (typeof relativePath !== "string") return true;
+    const destination = this.#quarantineLaunchPreparationFile(
+      root,
+      relativePath,
+      "launch-preparation:before-committed-stage-quarantine",
+    );
+    if (destination === null) return true;
+    if (
+      typeof expectedDigest !== "string" || typeof expectedDevice !== "string" ||
+      typeof expectedInode !== "string"
+    ) return true;
+    const identity = statSync(destination, { bigint: true });
+    if (identity.dev.toString() !== expectedDevice || identity.ino.toString() !== expectedInode) return true;
+    if (sha256Digest(readFileSync(destination, "utf8")) !== expectedDigest) return true;
+    unlinkSync(destination);
+    return true;
+  }
+
+  #quarantineLaunchPreparationFile(root: string, relativePath: string, faultLabel: string): string | null {
+    const source = resolve(root, canonicalAuthorityPath(root, relativePath));
+    const quarantineDirectory = resolve(root, canonicalAuthorityPath(root, ".agent-run/.fabric-custody"));
+    mkdirSync(quarantineDirectory, { recursive: true, mode: 0o700 });
+    const destination = resolve(
+      quarantineDirectory,
+      `custody-${randomBytes(16).toString("hex")}`,
+    );
+    this.#fault(faultLabel);
+    try {
+      renameSync(source, destination);
+      return destination;
+    } catch (error: unknown) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  #compensateLaunchPreparationPair(
+    root: string,
+    stagedPath: unknown,
+    publishedPath: unknown,
+    expectedDigest: unknown,
+    expectedDevice: unknown,
+    expectedInode: unknown,
+  ): boolean {
+    if (typeof publishedPath !== "string" || typeof expectedDigest !== "string") {
+      return stagedPath === null && publishedPath === null;
+    }
+    if (typeof stagedPath !== "string") {
+      const published = resolve(root, canonicalAuthorityPath(root, publishedPath));
+      return !existsSync(published);
+    }
+    const published = resolve(root, canonicalAuthorityPath(root, publishedPath));
+    const staged = this.#quarantineLaunchPreparationFile(
+      root,
+      stagedPath,
+      "launch-preparation:before-compensation-stage-quarantine",
+    );
+    if (typeof expectedDevice !== "string" || typeof expectedInode !== "string") {
+      return !existsSync(published);
+    }
+    if (staged === null) return !existsSync(published);
+    const stagedIdentity = statSync(staged, { bigint: true });
+    if (
+      stagedIdentity.dev.toString() !== expectedDevice ||
+      stagedIdentity.ino.toString() !== expectedInode
+    ) return false;
+    if (sha256Digest(readFileSync(staged, "utf8")) !== expectedDigest) return false;
+    const quarantinedPublished = this.#quarantineLaunchPreparationFile(
+      root,
+      publishedPath,
+      "launch-preparation:before-compensation-published-quarantine",
+    );
+    if (quarantinedPublished !== null) {
+      const publishedIdentity = statSync(quarantinedPublished, { bigint: true });
+      if (
+        stagedIdentity.dev !== publishedIdentity.dev || stagedIdentity.ino !== publishedIdentity.ino ||
+        sha256Digest(readFileSync(quarantinedPublished, "utf8")) !== expectedDigest
+      ) return false;
+      unlinkSync(quarantinedPublished);
+    }
+    unlinkSync(staged);
+    return true;
+  }
+
+  #cleanCommittedLaunchPreparationStages(row: Row): void {
+    this.#database.transaction(() => {
+      const current = rowOrNotFound(this.#database.prepare(`
+        SELECT * FROM project_session_launch_preparations
+         WHERE operator_id=? AND command_id=?
+      `).get(stringField(row, "operator_id"), stringField(row, "command_id")), "committed launch preparation");
+      if (stringField(current, "status") !== "committed") {
+        throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch preparation custody changed during committed cleanup");
+      }
+      if (current.staged_launch_packet_path === null && current.staged_resource_plan_path === null) return;
+      const project = rowOrNotFound(this.#database.prepare(`
+        SELECT canonical_root FROM projects WHERE project_id=?
+      `).get(stringField(current, "project_id")), "project");
+      const root = realpathSync(stringField(project, "canonical_root"));
+      const removed = [
+        this.#removeLaunchPreparationFile(
+          root,
+          current.staged_launch_packet_path,
+          current.launch_packet_digest,
+          current.staged_launch_packet_device,
+          current.staged_launch_packet_inode,
+        ),
+        this.#removeLaunchPreparationFile(
+          root,
+          current.staged_resource_plan_path,
+          current.resource_plan_digest,
+          current.staged_resource_plan_device,
+          current.staged_resource_plan_inode,
+        ),
+      ];
+      if (removed.includes(false)) {
+        throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "committed launch preparation staging bytes changed");
+      }
+      const cleared = this.#database.prepare(`
+        UPDATE project_session_launch_preparations
+           SET staged_launch_packet_path=NULL, staged_resource_plan_path=NULL,
+               staged_launch_packet_device=NULL, staged_launch_packet_inode=NULL,
+               staged_resource_plan_device=NULL, staged_resource_plan_inode=NULL,
+               updated_at=?
+         WHERE operator_id=? AND command_id=? AND status='committed'
+           AND staged_launch_packet_path IS ? AND staged_resource_plan_path IS ?
+           AND staged_launch_packet_device IS ? AND staged_launch_packet_inode IS ?
+           AND staged_resource_plan_device IS ? AND staged_resource_plan_inode IS ?
+      `).run(
+        this.#clock(),
+        stringField(current, "operator_id"),
+        stringField(current, "command_id"),
+        current.staged_launch_packet_path,
+        current.staged_resource_plan_path,
+        current.staged_launch_packet_device,
+        current.staged_launch_packet_inode,
+        current.staged_resource_plan_device,
+        current.staged_resource_plan_inode,
+      );
+      if (cleared.changes !== 1) {
+        throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch preparation custody changed during committed cleanup");
+      }
+    })();
+  }
+
+  #compensateLaunchPreparation(row: Row): void {
+    const project = rowOrNotFound(this.#database.prepare(`
+      SELECT canonical_root FROM projects WHERE project_id=?
+    `).get(stringField(row, "project_id")), "project");
+    const root = realpathSync(stringField(project, "canonical_root"));
+    const removed = [
+      this.#compensateLaunchPreparationPair(
+        root,
+        row.staged_launch_packet_path,
+        row.launch_packet_path,
+        row.launch_packet_digest,
+        row.staged_launch_packet_device,
+        row.staged_launch_packet_inode,
+      ),
+      this.#compensateLaunchPreparationPair(
+        root,
+        row.staged_resource_plan_path,
+        row.resource_plan_path,
+        row.resource_plan_digest,
+        row.staged_resource_plan_device,
+        row.staged_resource_plan_inode,
+      ),
+    ];
+    if (removed.includes(false)) {
+      throw new ProjectFabricCoreError(
+        "DEDUPE_CONFLICT",
+        "interrupted launch preparation artifact changed before custody recovery",
+      );
+    }
+    this.#database.prepare(`
+      UPDATE project_session_launch_preparations
+         SET status='claimed', launch_packet_path=NULL, launch_packet_digest=NULL,
+             resource_plan_path=NULL, resource_plan_digest=NULL,
+             staged_launch_packet_path=NULL, staged_resource_plan_path=NULL,
+             staged_launch_packet_device=NULL, staged_launch_packet_inode=NULL,
+             staged_resource_plan_device=NULL, staged_resource_plan_inode=NULL,
+             updated_at=?
+       WHERE operator_id=? AND command_id=? AND status='staged'
+    `).run(this.#clock(), stringField(row, "operator_id"), stringField(row, "command_id"));
+  }
+
+  #recoverLaunchPreparations(): void {
+    const staged = this.#database.prepare(`
+      SELECT * FROM project_session_launch_preparations WHERE status='staged'
+    `).all() as Row[];
+    for (const row of staged) this.#compensateLaunchPreparation(row);
+    const committed = this.#database.prepare(`
+      SELECT * FROM project_session_launch_preparations WHERE status='committed'
+    `).all() as Row[];
+    for (const row of committed) this.#cleanCommittedLaunchPreparationStages(row);
+  }
+
+  #claimLaunchPreparation(
+    credential: AuthenticatedOperatorCredential,
+    request: ProjectSessionLaunchPacketPrepareRequest,
+  ): ProjectSessionLaunchPacketPreparation | undefined {
+    const commandPayload = {
+      ...request,
+      command: {
+        ...request.command,
+        credential: { capabilityId: request.command.credential.capabilityId },
+      },
+    };
+    const payloadHash = sha256Digest(canonicalJson(commandPayload));
+    this.#operatorStore.authenticateCommand(credential.context, request.command, {
+      projectId: request.projectId,
+      projectSessionId: request.projectSessionId,
+      sessionGeneration: request.expectedSessionGeneration,
+      requiredAction: "launch",
+      commandPayload,
+    });
+    const claim = this.#database.transaction((): Row => {
+      const existing = this.#database.prepare(`
+        SELECT * FROM project_session_launch_preparations
+         WHERE operator_id=? AND command_id=?
+      `).get(credential.context.operatorId, request.command.commandId);
+      if (isRow(existing)) {
+        if (stringField(existing, "payload_hash") !== payloadHash) {
+          throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "Implement command ID was reused with changed input");
+        }
+        return existing;
+      }
+      this.#database.prepare(`
+        INSERT INTO project_session_launch_preparations(
+          operator_id, command_id, capability_id, project_id, project_session_id,
+          session_generation, payload_hash, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'claimed', ?, ?)
+      `).run(
+        credential.context.operatorId,
+        request.command.commandId,
+        request.command.credential.capabilityId,
+        request.projectId,
+        request.projectSessionId,
+        request.expectedSessionGeneration,
+        payloadHash,
+        this.#clock(),
+        this.#clock(),
+      );
+      return rowOrNotFound(this.#database.prepare(`
+        SELECT * FROM project_session_launch_preparations
+         WHERE operator_id=? AND command_id=?
+      `).get(credential.context.operatorId, request.command.commandId), "launch preparation claim");
+    })();
+    if (stringField(claim, "status") === "committed") {
+      this.#cleanCommittedLaunchPreparationStages(claim);
+      return JSON.parse(stringField(claim, "result_json")) as ProjectSessionLaunchPacketPreparation;
+    }
+    if (stringField(claim, "status") === "staged") this.#compensateLaunchPreparation(claim);
+    return undefined;
+  }
+
+  #prepareProjectSessionImplementation(
+    credential: AuthenticatedOperatorCredential,
+    request: ProjectSessionLaunchPacketPrepareRequest,
+  ): ProjectSessionLaunchPacketPreparation {
+    const context = credential.context;
+    assertSafeLaunchProviderInput(request.launchPacket.provider.input);
+    const replay = this.#claimLaunchPreparation(credential, request);
+    if (replay !== undefined) return replay;
+    const session = rowOrNotFound(this.#database.prepare(`
+      SELECT * FROM project_sessions WHERE project_session_id=? AND project_id=?
+    `).get(request.projectSessionId, request.projectId), "project session");
+    if (
+      request.projectId !== context.projectId ||
+      credential.projectSessionId !== request.projectSessionId ||
+      credential.sessionGeneration !== request.expectedSessionGeneration ||
+      numberField(session, "generation") !== request.expectedSessionGeneration ||
+      numberField(session, "revision") !== request.command.expectedRevision
+    ) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "Implement requires the exact current project-session binding");
+    }
+    if (stringField(session, "state") !== "draft") {
+      throw new ProjectFabricCoreError("LIFECYCLE_PRECONDITION_FAILED", "Implement requires a draft project session");
+    }
+    const accepted = this.#database.prepare(`
+      SELECT 1 FROM intakes intake
+      JOIN artifacts artifact ON artifact.artifact_id=intake.accepted_scope_artifact_id
+       WHERE intake.intake_id=? AND intake.project_id=?
+         AND intake.state='accepted' AND intake.accepted_scope_state='bound'
+         AND artifact.registry_state='active'
+         AND artifact.relative_path=? AND artifact.sha256=?
+    `).get(
+      request.intakeId,
+      request.projectId,
+      request.acceptedScopeRef.path,
+      request.acceptedScopeRef.digest,
+    );
+    if (accepted === undefined) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "Implement requires the exact current accepted scope artifact");
+    }
+    const packet = request.launchPacket;
+    const plan = request.resourcePlan;
+    if (
+      packet.projectId !== request.projectId || packet.projectSessionId !== request.projectSessionId ||
+      plan.projectId !== request.projectId || plan.projectSessionId !== request.projectSessionId ||
+      packet.runId !== plan.runId || packet.topologyMode !== stringField(session, "mode") ||
+      packet.budgetRef !== stringField(session, "budget_ref") || plan.budgetRef !== packet.budgetRef
+    ) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "launch packet, resource plan and project session identities differ");
+    }
+    if (packet.chairAuthority.approval.evidenceDigest !== request.acceptedScopeRef.digest) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair authority is not bound to the accepted scope digest");
+    }
+    if (Date.parse(packet.chairAuthority.expiresAt) <= this.#clock()) {
+      throw new ProjectFabricCoreError("CAPABILITY_EXPIRED", "chair authority expired before Implement confirmation");
+    }
+    if (canonicalJson(packet.chairAuthority.budget) !== canonicalJson(plan.scopes.coordinationRun.limits)) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair authority budget must equal coordination-run limits");
+    }
+    const resourcePlanText = canonicalJson(plan);
+    const resourcePlanDigest = sha256Digest(resourcePlanText);
+    if (
+      packet.resourcePlanRef.path !== request.resourcePlanRef.path ||
+      packet.resourcePlanRef.digest !== request.resourcePlanRef.digest ||
+      request.resourcePlanRef.digest !== resourcePlanDigest
+    ) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "resource plan digest changed since review");
+    }
+    const launchPacketText = canonicalJson(packet);
+    const launchPacketDigest = sha256Digest(launchPacketText);
+    if (request.launchPacketRef.digest !== launchPacketDigest) {
+      throw new ProjectFabricCoreError("STALE_REVISION", "launch packet digest changed since review");
+    }
+    if (request.launchPacketRef.path === request.resourcePlanRef.path) {
+      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "launch packet and resource plan require distinct artifact paths");
+    }
+    const project = rowOrNotFound(this.#database.prepare(`
+      SELECT canonical_root FROM projects WHERE project_id=?
+    `).get(request.projectId), "project");
+    const root = realpathSync(stringField(project, "canonical_root"));
+    const authority = normaliseLaunchChairAuthority(packet.chairAuthority, root);
+    const projectRunDirectory = canonicalAuthorityPath(root, packet.projectRunDirectory);
+    const launchPacketPath = canonicalAuthorityPath(root, request.launchPacketRef.path);
+    const resourcePlanPath = canonicalAuthorityPath(root, request.resourcePlanRef.path);
+    const artifactPaths = [launchPacketPath, resourcePlanPath];
+    if (
+      artifactPaths.some((path) => !pathContains(projectRunDirectory, path)) ||
+      artifactPaths.some((path) => !authority.artifactPaths.some((scope) => pathContains(scope, path))) ||
+      artifactPaths.some((path) => authority.deniedPaths.some((scope) => pathContains(scope, path)))
+    ) {
+      throw new ProjectFabricCoreError(
+        "CAPABILITY_FORBIDDEN",
+        "launch artifacts must remain inside the reviewed run directory and chair artifact scope",
+      );
+    }
+    const stageSuffix = randomBytes(12).toString("hex");
+    const stagedLaunchPacketPath = `${request.launchPacketRef.path}.prepare-${stageSuffix}`;
+    const stagedResourcePlanPath = `${request.resourcePlanRef.path}.prepare-${stageSuffix}`;
+    this.#database.prepare(`
+      UPDATE project_session_launch_preparations
+         SET status='staged', launch_packet_path=?, launch_packet_digest=?,
+             resource_plan_path=?, resource_plan_digest=?, staged_launch_packet_path=?,
+             staged_resource_plan_path=?, updated_at=?
+       WHERE operator_id=? AND command_id=? AND status='claimed'
+    `).run(
+      launchPacketPath,
+      request.launchPacketRef.digest,
+      resourcePlanPath,
+      request.resourcePlanRef.digest,
+      stagedLaunchPacketPath,
+      stagedResourcePlanPath,
+      this.#clock(),
+      context.operatorId,
+      request.command.commandId,
+    );
+    try {
+      this.#fault("launch-preparation:before-stage-write");
+      const stagedResourcePlanIdentity = this.#writeClosedLaunchArtifact(root, stagedResourcePlanPath, resourcePlanText);
+      this.#fault("launch-preparation:after-resource-stage-write");
+      this.#database.prepare(`
+        UPDATE project_session_launch_preparations
+           SET staged_resource_plan_device=?, staged_resource_plan_inode=?, updated_at=?
+         WHERE operator_id=? AND command_id=? AND status='staged'
+           AND staged_resource_plan_path=?
+      `).run(
+        stagedResourcePlanIdentity.device,
+        stagedResourcePlanIdentity.inode,
+        this.#clock(),
+        context.operatorId,
+        request.command.commandId,
+        stagedResourcePlanPath,
+      );
+      const stagedLaunchPacketIdentity = this.#writeClosedLaunchArtifact(root, stagedLaunchPacketPath, launchPacketText);
+      this.#fault("launch-preparation:after-launch-stage-write");
+      this.#database.prepare(`
+        UPDATE project_session_launch_preparations
+           SET staged_launch_packet_device=?, staged_launch_packet_inode=?, updated_at=?
+         WHERE operator_id=? AND command_id=? AND status='staged'
+           AND staged_launch_packet_path=?
+      `).run(
+        stagedLaunchPacketIdentity.device,
+        stagedLaunchPacketIdentity.inode,
+        this.#clock(),
+        context.operatorId,
+        request.command.commandId,
+        stagedLaunchPacketPath,
+      );
+      linkSync(resolve(root, stagedResourcePlanPath), resolve(root, resourcePlanPath));
+      this.#fault("launch-preparation:after-resource-publish");
+      linkSync(resolve(root, stagedLaunchPacketPath), resolve(root, launchPacketPath));
+      this.#fault("launch-preparation:after-launch-publish");
+      this.#fault("launch-preparation:before-transition");
+      const result = this.#database.transaction((): ProjectSessionLaunchPacketPreparation => {
+        const projectSession = this.#projectSessions.transitionProjectSession(context, {
+          command: request.command,
+          projectSessionId: request.projectSessionId,
+          expectedGeneration: request.expectedSessionGeneration,
+          transition: {
+            to: "awaiting_launch",
+            reason: `accepted evidence ${request.acceptedScopeRef.digest}`,
+            launchPacketRef: request.launchPacketRef,
+          },
+        }, "launch");
+        const prepared = {
+          projectSession,
+          launchPacketRef: request.launchPacketRef,
+          resourcePlanRef: request.resourcePlanRef,
+          acceptedScopeRef: request.acceptedScopeRef,
+        };
+        this.#database.prepare(`
+          UPDATE project_session_launch_preparations
+             SET status='committed', result_json=?, updated_at=?
+           WHERE operator_id=? AND command_id=? AND status='staged'
+        `).run(canonicalJson(prepared), this.#clock(), context.operatorId, request.command.commandId);
+        return prepared;
+      })();
+      const committed = rowOrNotFound(this.#database.prepare(`
+        SELECT * FROM project_session_launch_preparations
+         WHERE operator_id=? AND command_id=?
+      `).get(context.operatorId, request.command.commandId), "committed launch preparation");
+      this.#fault("launch-preparation:before-committed-stage-cleanup");
+      this.#cleanCommittedLaunchPreparationStages(committed);
+      this.#fault("launch-preparation:after-commit");
+      return result;
+    } catch (error: unknown) {
+      const stored = rowOrNotFound(this.#database.prepare(`
+        SELECT * FROM project_session_launch_preparations
+         WHERE operator_id=? AND command_id=?
+      `).get(context.operatorId, request.command.commandId), "launch preparation custody");
+      if (stringField(stored, "status") === "staged") this.#compensateLaunchPreparation(stored);
+      throw error;
+    }
   }
 
   async dispatchPublicProtocol(
@@ -2703,6 +3232,12 @@ export class Fabric {
         const credential = operatorCredential();
         operatorCommand(credential, request.command);
         return this.#projectSessions.closeProjectSession(credential.context, request);
+      }
+      case FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare: {
+        const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare];
+        const credential = operatorCredential();
+        operatorCommand(credential, request.command);
+        return this.#prepareProjectSessionImplementation(credential, request);
       }
       case FABRIC_OPERATIONS.projectSessionLaunchPrepare: {
         const request = input as OperationInputMap[typeof FABRIC_OPERATIONS.projectSessionLaunchPrepare];
@@ -5268,7 +5803,6 @@ export class Fabric {
       }
       ephemeralMaxTurns = reservedTurns;
       if (
-        typeof input.payload.model !== "string" || input.payload.model.trim().length === 0 ||
         typeof input.payload.modelFamily !== "string" || input.payload.modelFamily.trim().length === 0 ||
         typeof input.payload.prompt !== "string" || input.payload.prompt.trim().length === 0 ||
         Buffer.byteLength(input.payload.prompt, "utf8") > MAXIMUM_EPHEMERAL_PROVIDER_PROMPT_BYTES

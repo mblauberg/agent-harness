@@ -21,7 +21,7 @@ export async function loadAdapterModelConstraints(input: {
   schemaPath: string;
   adapterId: string;
   requireEnabled?: boolean;
-}): Promise<{ enabled: boolean; allowed: string[]; patterns: string[]; requiresExplicitModel: boolean; wrapperEntrypoint?: string; providerExecutable?: string }> {
+}): Promise<{ enabled: boolean; allowed: string[]; patterns: string[]; requiresExplicitModel: boolean; wrapperEntrypoint?: string; providerExecutable?: string; cursorInstallRoot?: string; providerInstallRoot?: string; providerIdentity?: string }> {
   await verifyAdapterCompatibility({
     compatibilityPath: input.compatibilityPath,
     schemaPath: input.schemaPath,
@@ -46,15 +46,29 @@ export async function loadAdapterModelConstraints(input: {
   const providerExecutable = typeof implementation.executable === "string"
     ? resolveCompatibilityArtifact(input.compatibilityPath, implementation.executable)
     : undefined;
+  const cursorInstallRoot = typeof implementation.cursor_install_root === "string"
+    ? resolveCompatibilityArtifact(input.compatibilityPath, implementation.cursor_install_root)
+    : undefined;
+  const providerInstallRoot = typeof implementation.provider_install_root === "string"
+    ? resolveCompatibilityArtifact(input.compatibilityPath, implementation.provider_install_root)
+    : undefined;
+  const providerIdentity = typeof implementation.provider_identity === "string"
+    ? implementation.provider_identity
+    : undefined;
   return {
     enabled: adapter.enabled === true,
     allowed: stringArray(adapter.model_family_constraints.allowed),
     patterns: adapter.model_family_constraints.allowed_model_patterns === undefined
       ? []
       : stringArray(adapter.model_family_constraints.allowed_model_patterns),
-    requiresExplicitModel: adapter.model_family_constraints.requires_explicit_model === true,
+    // Fail closed on omission: only an explicit `requires_explicit_model:
+    // false` pin opts an adapter into account-default dispatch (#190).
+    requiresExplicitModel: adapter.model_family_constraints.requires_explicit_model !== false,
     ...(wrapperEntrypoint === undefined ? {} : { wrapperEntrypoint }),
     ...(providerExecutable === undefined ? {} : { providerExecutable }),
+    ...(cursorInstallRoot === undefined ? {} : { cursorInstallRoot }),
+    ...(providerInstallRoot === undefined ? {} : { providerInstallRoot }),
+    ...(providerIdentity === undefined ? {} : { providerIdentity }),
   };
 }
 
@@ -73,16 +87,29 @@ export function assessAdapterModelPolicy(input: {
   allowedModelPatterns?: readonly string[];
   requiresExplicitModel: boolean;
 }): { allowed: true; reason: "allowed" } | { allowed: false; reason: "model-required" | "family-forbidden" | "model-forbidden" } {
-  if (input.requiresExplicitModel && (input.modelId === undefined || input.modelId === null || input.modelId.length === 0)) {
+  const modelAbsent = input.modelId === undefined || input.modelId === null || input.modelId.length === 0;
+  if (input.requiresExplicitModel && modelAbsent) {
     return { allowed: false, reason: "model-required" };
   }
+  // requiresExplicitModel false means account-default-only dispatch (#190):
+  // the provider account's default model is used and the runtime rejects
+  // explicit ids, so a present id fails closed here instead of reaching the
+  // provider's known rejection path.
+  if (!input.requiresExplicitModel && !modelAbsent) {
+    return { allowed: false, reason: "model-forbidden" };
+  }
+  // On the account-default path there is no identifier for the pattern gate
+  // to assess. The family gate still applies, and the open-weight family
+  // bridge always needs an explicit matching model.
+  const accountDefault = modelAbsent && !input.requiresExplicitModel;
   const patterns = input.allowedModelPatterns ?? [];
-  const patternMatch = patterns.length === 0 || patterns.some((pattern) => patternMatches(input.modelId ?? "", pattern));
+  const patternMatch = patterns.length === 0 ||
+    (!modelAbsent && patterns.some((pattern) => patternMatches(input.modelId ?? "", pattern)));
   const familyAllowed = input.allowedFamilies.includes(input.modelFamily) || (
     patterns.length > 0 && input.allowedFamilies.includes("open-weight") && patternMatch
   );
   if (!familyAllowed) return { allowed: false, reason: "family-forbidden" };
-  if (!patternMatch) {
+  if (!patternMatch && !accountDefault) {
     return { allowed: false, reason: "model-forbidden" };
   }
   return { allowed: true, reason: "allowed" };

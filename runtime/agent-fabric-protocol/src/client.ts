@@ -75,6 +75,8 @@ import type {
   ProjectSessionCloseRequest,
   ProjectSessionCreateRequest,
   ProjectSessionGetRequest,
+  ProjectSessionLaunchPacketPreparation,
+  ProjectSessionLaunchPacketPrepareRequest,
   ProjectSessionLaunchPrepareRequest,
   ProjectSessionTransitionRequest,
 } from "./project-session.js";
@@ -125,6 +127,7 @@ export interface ProjectSessionClient {
   get?(input: ProjectSessionGetRequest): Promise<ProjectSession>;
   transition?(input: ProjectSessionTransitionRequest): Promise<ProjectSession>;
   close?(input: ProjectSessionCloseRequest): Promise<ProjectSession>;
+  prepareImplementation?(input: ProjectSessionLaunchPacketPrepareRequest): Promise<ProjectSessionLaunchPacketPreparation>;
   prepareLaunch?(input: ProjectSessionLaunchPrepareRequest): Promise<OperatorActionPreview>;
   bindMembership?(input: Extract<MembershipBindRequest, { origin: "operator" }>): Promise<MembershipBindResult>;
 }
@@ -331,6 +334,11 @@ function projectSessions(transport: ProtocolRpcTransport): ProjectSessionClient 
           transport.call(FABRIC_OPERATIONS.projectSessionClose, input) }
       : {}),
     ...(hasFeature(transport, "launch-custody.v1") &&
+      hasOperation(transport, FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare)
+      ? { prepareImplementation: (input: ProjectSessionLaunchPacketPrepareRequest) =>
+          transport.call(FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare, input) }
+      : {}),
+    ...(hasFeature(transport, "launch-custody.v1") &&
       hasOperation(transport, FABRIC_OPERATIONS.projectSessionLaunchPrepare)
       ? { prepareLaunch: (input: ProjectSessionLaunchPrepareRequest) =>
           transport.call(FABRIC_OPERATIONS.projectSessionLaunchPrepare, input) }
@@ -415,7 +423,8 @@ export function createOperatorClient(transport: ProtocolRpcTransport): Negotiate
         hasOperation(transport, FABRIC_OPERATIONS.membershipBind)
       )) ||
       (hasFeature(transport, "launch-custody.v1") &&
-        hasOperation(transport, FABRIC_OPERATIONS.projectSessionLaunchPrepare))
+        (hasOperation(transport, FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare) ||
+          hasOperation(transport, FABRIC_OPERATIONS.projectSessionLaunchPrepare)))
     ) ? { projectSessions: projectSessions(transport) } : {}),
     ...(hasFeature(transport, "operator-control.v1") && hasOperations(transport, [
       FABRIC_OPERATIONS.operatorAttach,

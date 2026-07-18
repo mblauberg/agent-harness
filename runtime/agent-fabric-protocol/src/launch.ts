@@ -175,7 +175,12 @@ export type LaunchProviderActionJournalRefV1 =
     })
   | (LaunchProviderActionJournalRefV1Common & {
       journalState: "terminal";
-      outcomeKind: "terminal-success" | "terminal-no-effect";
+      outcomeKind: "terminal-success";
+      outcomeDigest: Sha256Digest;
+    })
+  | (LaunchProviderActionJournalRefV1Common & {
+      journalState: "terminal";
+      outcomeKind: "terminal-no-effect";
       outcomeDigest: Sha256Digest;
     })
   | (LaunchProviderActionJournalRefV1Common & {
@@ -229,6 +234,19 @@ const launchResourcePlanBaseCodec = objectCodec({
   }),
   launchReservation: objectCodec({ amounts: nonEmptyResourceAmountsCodec }),
 });
+const launchResourcePlanExample = {
+  schemaVersion: 1,
+  projectId: "project_01",
+  projectSessionId: "ps_01",
+  runId: "run_01",
+  budgetRef: "budget_01",
+  scopes: {
+    project: { scopeId: "scope_project_01", limits: { provider_calls: 1 } },
+    projectSession: { scopeId: "scope_session_01", limits: { provider_calls: 1 } },
+    coordinationRun: { scopeId: "scope_run_01", limits: { provider_calls: 1 } },
+  },
+  launchReservation: { amounts: { provider_calls: 1 } },
+} as const;
 const launchProviderActionIdentityCodec = objectCodec({
   providerAdapterId: defineIdentifierCodec("claude-agent-sdk"),
   providerActionId: defineIdentifierCodec("provider_action_01"),
@@ -382,7 +400,7 @@ export const LAUNCH_PACKET_V1_CODEC: Codec<LaunchPacketV1> = parserBacked(
 export const LAUNCH_RESOURCE_PLAN_V1_CODEC: Codec<LaunchResourcePlanV1> = parserBacked(
   launchResourcePlanBaseCodec,
   (value, path) => parseLaunchResourcePlanV1(value, path),
-  parseLaunchResourcePlanV1(launchResourcePlanBaseCodec.example),
+  parseLaunchResourcePlanV1(launchResourcePlanExample),
 );
 
 export const PROJECT_SESSION_LAUNCH_CURRENT_STATE_CODEC: Codec<ProjectSessionLaunchCurrentState> = parserBacked(
@@ -478,6 +496,18 @@ export function parseLaunchResourcePlanV1(
   }
   const scopes = strictRecord(record.scopes, `${path}.scopes`, ["project", "projectSession", "coordinationRun"]);
   const launchReservation = strictRecord(record.launchReservation, `${path}.launchReservation`, ["amounts"]);
+  const project = parseLaunchResourceScopePlan(scopes.project, `${path}.scopes.project`);
+  const projectSession = parseLaunchResourceScopePlan(scopes.projectSession, `${path}.scopes.projectSession`);
+  const coordinationRun = parseLaunchResourceScopePlan(scopes.coordinationRun, `${path}.scopes.coordinationRun`);
+  const amounts = parseLaunchResourceAmounts(launchReservation.amounts, `${path}.launchReservation.amounts`);
+  if (amounts.provider_calls !== 1) {
+    throw new TypeError(`${path}.launchReservation.amounts.provider_calls must equal 1`);
+  }
+  for (const [scopeName, scope] of Object.entries({ project, projectSession, coordinationRun })) {
+    if ((scope.limits.provider_calls ?? 0) < 1) {
+      throw new TypeError(`${path}.scopes.${scopeName}.limits.provider_calls must be at least 1`);
+    }
+  }
   return {
     schemaVersion: 1,
     projectId: parseIdentifier<"ProjectId">(record.projectId, `${path}.projectId`),
@@ -485,13 +515,11 @@ export function parseLaunchResourcePlanV1(
     runId: parseIdentifier<"CoordinationRunId">(record.runId, `${path}.runId`),
     budgetRef: parseIdentifier<"BudgetRef">(record.budgetRef, `${path}.budgetRef`),
     scopes: {
-      project: parseLaunchResourceScopePlan(scopes.project, `${path}.scopes.project`),
-      projectSession: parseLaunchResourceScopePlan(scopes.projectSession, `${path}.scopes.projectSession`),
-      coordinationRun: parseLaunchResourceScopePlan(scopes.coordinationRun, `${path}.scopes.coordinationRun`),
+      project,
+      projectSession,
+      coordinationRun,
     },
-    launchReservation: {
-      amounts: parseLaunchResourceAmounts(launchReservation.amounts, `${path}.launchReservation.amounts`),
-    },
+    launchReservation: { amounts },
   };
 }
 

@@ -87,7 +87,9 @@ def _validate_profile(
     name: str, profile: Any, invalid_type: type[ValueError],
 ) -> None:
     _fail(
-        not isinstance(profile, dict) or set(profile) != PROFILE_FIELDS,
+        not isinstance(profile, dict)
+        or set(profile) - {"conditional_evidence"} != PROFILE_FIELDS
+        or not set(profile) <= PROFILE_FIELDS | {"conditional_evidence"},
         f"profile {name} contract is incomplete",
         invalid_type,
     )
@@ -123,6 +125,25 @@ def _validate_profile(
         f"profile {name} boundary checks are not deterministic gates",
         invalid_type,
     )
+    conditional = profile.get("conditional_evidence", {})
+    _fail(
+        not isinstance(conditional, dict) or not set(conditional) <= set(artifact_types),
+        f"profile {name} conditional evidence uses an unknown artifact type",
+        invalid_type,
+    )
+    for artifact_type, requirements in conditional.items():
+        _fail(
+            not isinstance(requirements, dict)
+            or set(requirements) != {"deterministic", "judgement"}
+            or any(
+                not isinstance(gates, list)
+                or any(not isinstance(gate, str) or not gate for gate in gates)
+                or len(gates) != len(set(gates))
+                for gates in requirements.values()
+            ),
+            f"profile {name} conditional evidence for {artifact_type} is invalid",
+            invalid_type,
+        )
 
 
 def load_profiles(root: Path, *, invalid_type: type[ValueError]) -> dict[str, Any]:
@@ -138,6 +159,21 @@ def load_profiles(root: Path, *, invalid_type: type[ValueError]) -> dict[str, An
     for name, profile in data["profiles"].items():
         _validate_profile(name, profile, invalid_type)
     return data
+
+
+def profile_evidence_requirements(
+    profile: dict[str, Any], artifacts: dict[str, dict[str, Any]],
+) -> dict[str, set[str]]:
+    required = {
+        kind: set(gates) for kind, gates in profile["required_evidence"].items()
+    }
+    conditional = profile.get("conditional_evidence", {})
+    for artifact in artifacts.values():
+        if artifact.get("class") != "canonical":
+            continue
+        for kind, gates in conditional.get(artifact.get("artifact_type"), {}).items():
+            required[kind].update(gates)
+    return required
 
 
 def apply_project_policy(

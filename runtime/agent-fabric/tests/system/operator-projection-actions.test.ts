@@ -23,6 +23,7 @@ import {
 } from "@local/agent-fabric-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { NotificationOutbox } from "../../src/attention/outbox.ts";
 import { applyMigrations } from "../../src/core/migrations.ts";
 import {
   OperatorActionStore,
@@ -216,6 +217,51 @@ afterEach(() => {
 });
 
 describe("operator projection store", () => {
+  it("keeps revision-bound snapshot, page, and detail bytes stable across an identical availability refresh", () => {
+    const fixture = setupProjection();
+    let checkedAt = now - 200;
+    const outbox = new NotificationOutbox({ database: fixture.database, clock: () => checkedAt });
+    const worker = { workerInstanceId: "native-worker", integrationId: "native-desktop" };
+    const availability = {
+      state: "available" as const,
+      discoveredContract: { generation: 1, detail: "Native desktop available" },
+    };
+    outbox.setIntegrationAvailability(worker, availability);
+
+    const request = {
+      credential: fixture.credential,
+      projectId: identifier<"ProjectId">("project_01"),
+      projectSessionId: identifier<"ProjectSessionId">("session_01"),
+    };
+    const beforeSnapshot = fixture.projections.snapshot(request, "include");
+    const pageRequest: OperatorViewPageRequest<"system"> = {
+      ...request,
+      view: "system",
+      snapshotRevision: beforeSnapshot.snapshotRevision,
+      cursor: 0,
+      limit: 10,
+    };
+    const beforePage = fixture.projections.viewPage(pageRequest, "include");
+    if (beforePage.status !== "page") throw new Error("expected current system page");
+    const nativeRow = beforePage.rows.find((candidate) => candidate.itemId === "native-desktop");
+    if (nativeRow?.fact.freshness !== "live") throw new Error("expected live native integration row");
+    const detailRequest: OperatorDetailReadRequest = {
+      ...request,
+      snapshotRevision: beforeSnapshot.snapshotRevision,
+      detailRef: nativeRow.fact.value.detailRef,
+    };
+    const beforeDetail = fixture.projections.detail(detailRequest);
+
+    checkedAt = now - 100;
+    outbox.setIntegrationAvailability(worker, availability);
+
+    const afterSnapshot = fixture.projections.snapshot(request, "include");
+    expect(afterSnapshot.snapshotRevision).toBe(beforeSnapshot.snapshotRevision);
+    expect(afterSnapshot.stateDigest).toBe(beforeSnapshot.stateDigest);
+    expect(fixture.projections.viewPage(pageRequest, "include")).toEqual(beforePage);
+    expect(fixture.projections.detail(detailRequest)).toEqual(beforeDetail);
+  });
+
   it("discovers the selected project and returns one authoritative revisioned snapshot", () => {
     const fixture = setupProjection();
     const projectId = identifier<"ProjectId">("project_01");
@@ -2016,6 +2062,10 @@ describe("operator action store", () => {
       },
     };
     let launchTerminal = false;
+    let launchOutcomeKind: "terminal-success" | "terminal-no-effect" = "terminal-success";
+    let seatSessionRevision = 2;
+    let seatRunRevision = 1;
+    let seatDescriptorCalls = 0;
     const launchCustody: OperatorLaunchCustodyPort = {
       readCurrentState: async () => {
         if (current.kind !== "project-session-launch") throw new Error("launch state changed family");
@@ -2055,10 +2105,25 @@ describe("operator action store", () => {
         custodyAttemptGeneration: 1,
         journalRevision: launchTerminal ? 2 : 1,
         journalState: launchTerminal ? "terminal" : "prepared",
-        outcomeKind: launchTerminal ? "terminal-success" : null,
+        outcomeKind: launchTerminal ? launchOutcomeKind : null,
         outcomeDigest: launchTerminal ? authorityRef : null,
       }),
+      seatProvisioningDescriptorForCommand: () => {
+        seatDescriptorCalls += 1;
+        return {
+        schemaVersion: 1,
+        projectSessionId,
+        sessionRevision: seatSessionRevision,
+        sessionGeneration: 1,
+        coordinationRunId: identifier<"CoordinationRunId">("run_launch_01"),
+        runRevision: seatRunRevision,
+        chairAgentId: identifier<"AgentId">("chair"),
+        chairGeneration: 1,
+          chairLeaseId: identifier<"LeaseId">("chair:run_launch_01:1"),
+        };
+      },
     };
+    let actionNow = now;
     const actions = new OperatorActionStore({
       database: fixture.database,
       operatorStore: fixture.operatorStore,
@@ -2068,7 +2133,8 @@ describe("operator action store", () => {
         observe: async () => { throw new Error("not expected"); },
       },
       launchCustody,
-      clock: () => now,
+      clock: () => actionNow,
+      previewTtlMs: 100,
     });
     const request: OperatorActionPreviewRequest = {
       command: {
@@ -2096,16 +2162,62 @@ describe("operator action store", () => {
       },
     }, { allowLaunchIntent: true })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
 
+    const expiredPreview = await actions.preview(fixture.context, {
+      ...request,
+      command: {
+        ...request.command,
+        commandId: identifier<"CommandId">("preview_launch_expired_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_launch_01"),
+          inputEventId: "input_preview_launch_expired_01",
+        },
+      },
+    }, { allowLaunchIntent: true });
+    actionNow += 101;
+    const expiredCommitRequest = {
+      command: {
+        ...request.command,
+        commandId: identifier<"CommandId">("commit_launch_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_launch_01"),
+          inputEventId: "input_commit_launch_01",
+        },
+      },
+      projectId,
+      previewId: expiredPreview.previewId,
+      expectedPreviewRevision: expiredPreview.previewRevision,
+      previewDigest: expiredPreview.previewDigest,
+      expectedIntentDigest: expiredPreview.intentDigest,
+      confirmation: { kind: "explicit", confirmationId: "confirm_launch_expired_01" },
+    } as const;
+    await expect(actions.commit(fixture.context, expiredCommitRequest)).rejects.toMatchObject({
+      code: "CAPABILITY_EXPIRED",
+    });
+    expect(launchTerminal).toBe(false);
+    expect(actions.status({
+      credential: launchCredential,
+      projectId,
+      commandId: expiredCommitRequest.command.commandId,
+    })).toEqual({ status: "not-found", commandId: expiredCommitRequest.command.commandId });
+    expect(fixture.database.prepare(`
+      SELECT COUNT(*) AS count FROM operator_commands WHERE operator_id=? AND command_id=?
+    `).get("operator_01", expiredCommitRequest.command.commandId)).toMatchObject({ count: 0 });
+    expect(fixture.database.prepare(`
+      SELECT COUNT(*) AS count FROM operator_effect_custody WHERE operator_id=? AND command_id=?
+    `).get("operator_01", expiredCommitRequest.command.commandId)).toMatchObject({ count: 0 });
+
     const preview = await actions.preview(fixture.context, request, { allowLaunchIntent: true });
     expect(preview).toMatchObject({
       intent,
       consequenceClass: "consequential",
       evidenceRefs: [launchPacketRef, resourcePlanRef],
     });
-    const receipt = await actions.commit(fixture.context, {
+    const commitRequest = {
       command: {
         ...request.command,
-        commandId: identifier<"CommandId">("commit_launch_01"),
+        commandId: expiredCommitRequest.command.commandId,
         provenance: {
           kind: "console-direct-input",
           clientId: identifier<"OperatorClientId">("console_launch_01"),
@@ -2118,12 +2230,62 @@ describe("operator action store", () => {
       previewDigest: preview.previewDigest,
       expectedIntentDigest: preview.intentDigest,
       confirmation: { kind: "explicit", confirmationId: "confirm_launch_01" },
+    } as const;
+    const receipt = await actions.commit(fixture.context, commitRequest);
+    await expect(actions.commit(fixture.context, expiredCommitRequest)).rejects.toMatchObject({
+      code: "DEDUPE_CONFLICT",
     });
+    expect(receipt).not.toHaveProperty("seatProvisioning");
     expect(actions.status({
       credential: launchCredential,
       projectId,
       commandId: receipt.commandId,
-    })).toEqual({ status: "committed", commandId: receipt.commandId, receipt });
+    })).toMatchObject({
+      status: "committed",
+      commandId: receipt.commandId,
+      receipt,
+      seatProvisioning: {
+        sessionRevision: 2,
+        runRevision: 1,
+      },
+    });
+
+    seatSessionRevision = 3;
+    seatRunRevision = 2;
+    expect(actions.status({
+      credential: launchCredential,
+      projectId,
+      commandId: receipt.commandId,
+    })).toMatchObject({
+      status: "committed",
+      receipt,
+      seatProvisioning: {
+        sessionRevision: 3,
+        runRevision: 2,
+      },
+    });
+    await expect(actions.commit(fixture.context, commitRequest)).resolves.toStrictEqual(receipt);
+    expect(receipt).not.toHaveProperty("seatProvisioning");
+    expect(actions.status({
+      credential: launchCredential,
+      projectId,
+      commandId: receipt.commandId,
+    })).toMatchObject({
+      seatProvisioning: { projectSessionId, sessionRevision: 3, runRevision: 2 },
+    });
+    const descriptorCallsBeforeNoEffect = seatDescriptorCalls;
+    launchOutcomeKind = "terminal-no-effect";
+    const noEffectStatus = actions.status({
+      credential: launchCredential,
+      projectId,
+      commandId: receipt.commandId,
+    });
+    expect(noEffectStatus).toMatchObject({
+      status: "committed",
+      launchProviderActionJournalRef: { outcomeKind: "terminal-no-effect" },
+    });
+    expect(noEffectStatus).not.toHaveProperty("seatProvisioning");
+    expect(seatDescriptorCalls).toBe(descriptorCallsBeforeNoEffect);
 
     const launchOnlyCredential: OperatorCapabilityCredential = {
       capabilityId: identifier<"CapabilityId">("cap_session_launch_only_01"),
@@ -2147,7 +2309,7 @@ describe("operator action store", () => {
       credential: launchOnlyCredential,
       projectId,
       commandId: receipt.commandId,
-    })).toEqual({ status: "committed", commandId: receipt.commandId, receipt });
+    })).toMatchObject({ status: "committed", commandId: receipt.commandId, receipt });
 
     await expect(actions.reconcile(fixture.context, {
       command: {

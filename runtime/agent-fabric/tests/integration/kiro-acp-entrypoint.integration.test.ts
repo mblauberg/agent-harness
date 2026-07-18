@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +17,7 @@ describe("Kiro ACP provider entrypoint", () => {
   it("runs a managed spawn, turn, and release over the real ACP stdio boundary", async () => {
     const directory = await mkdtemp(join(tmpdir(), "kiro-acp-entrypoint-"));
     temporaryDirectories.push(directory);
-    const wrapper = fileURLToPath(new URL("../../src/adapters/providers/optional/kiro-acp.ts", import.meta.url));
+    const wrapper = fileURLToPath(new URL("../support/provider-wrapper-entrypoint.ts", import.meta.url));
     const fake = fileURLToPath(new URL("../support/kiro-acp-fake.ts", import.meta.url));
     const loader = fileURLToPath(import.meta.resolve("tsx"));
     const transcript = join(directory, "provider-transcript.jsonl");
@@ -44,7 +44,7 @@ describe("Kiro ACP provider entrypoint", () => {
         "--request-timeout-ms",
         "1000",
       ],
-      environment: {},
+      environment: { AGENT_FABRIC_TEST_ADAPTER: "kiro-acp" },
       responseTimeoutMs: 3_000,
     });
     try {
@@ -54,7 +54,7 @@ describe("Kiro ACP provider entrypoint", () => {
       });
       await expect(transport.request("spawn", {
         actionId: "kiro:spawn:1",
-        payload: { cwd: directory, model: "qwen3-coder", modelFamily: "open-weight" },
+        payload: { cwd: directory, model: "qwen3-coder", modelFamily: "open-weight", effort: "high" },
       })).resolves.toEqual({ resumeReference: "kiro-session-1", sessionId: "kiro-session-1" });
       await expect(transport.request("dispatch", {
         actionId: "kiro:turn:1",
@@ -64,6 +64,7 @@ describe("Kiro ACP provider entrypoint", () => {
           resumeReference: "kiro-session-1",
           model: "qwen3-coder",
           modelFamily: "open-weight",
+          effort: "high",
           prompt: "bounded task",
         },
       })).resolves.toMatchObject({ status: "terminal", result: { text: "bounded response" } });
@@ -72,6 +73,11 @@ describe("Kiro ACP provider entrypoint", () => {
         operation: "release",
         payload: { cwd: directory, resumeReference: "kiro-session-1" },
       })).resolves.toMatchObject({ status: "terminal", result: { released: true, deleted: false } });
+      const records = (await readFile(transcript, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+      expect(records).toContainEqual({
+        direction: "argv",
+        value: ["acp", "--model", "qwen3-coder", "--effort", "high", "--agent-engine", "v2"],
+      });
     } finally {
       await transport.close();
     }

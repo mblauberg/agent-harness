@@ -8,7 +8,8 @@ Applies to: `runtime/agent-fabric` and `scripts/agent-fabric*`
 The following remain separate approvals. One does not imply another:
 
 1. build or install the local runtime outside an active implementation envelope;
-2. trust a project root or provision/rotate its operator and agent seats;
+2. trust any parent, wildcard, home, sibling collection or other root beyond
+   the exact current project, or provision/rotate operator and agent seats;
 3. enable a provider adapter after compatibility verification;
 4. install an auto-start/login service for the daemon;
 5. log into or consume quota from a provider;
@@ -16,9 +17,15 @@ The following remain separate approvals. One does not imply another:
 7. run a smoke that invokes a real provider adapter;
 8. accept the implementation, release it or publish Git state.
 
+Standing global harness authority covers only automatic trust registration for
+the exact current project's canonical Git root, or its canonical current
+directory when no repository exists. This trust grants no task, write,
+credential, provider, provisioning, acceptance or release authority. Seat
+provisioning remains separately gated.
+
 Read the active authority before acting. Prior activation evidence does not
-authorise a new root, login, registry mutation, provider call, acceptance,
-release or publication.
+authorise a different or broader root, login, registry mutation, provider call,
+acceptance, release or publication.
 
 ## Preflight
 
@@ -35,7 +42,20 @@ python3 skills/deliver/scripts/validate_delivery.py \
   '<canonical-run>/RUN.json' --workspace-root "$PWD" --verify-hashes
 ```
 
-Then verify the selected compatibility entries against the current executable/schema hashes. Unresolved pins, missing artifacts or disabled entries fail closed.
+Then verify the selected compatibility entries. Fabric library and protocol
+schema artifacts are checked against their pinned hashes. Provider CLI versions
+and digests are observed evidence, not admission locks.
+Repository-owned wrapper code carries Git provenance instead of a hash pin
+(`runtime/agent-fabric/src/adapters/compatibility.ts`): the wrapper
+entrypoint must resolve inside a Git repository, be tracked at HEAD and
+byte-identical to its committed content, and its first-party source spans
+(the owning workspace package's src tree, local workspace dependency src
+trees and every consulted package manifest) must be diff-clean against HEAD.
+An empty or truncated span discovery is a hard verification failure, never a
+skip. Provenance, adapter-specific vendor identity and the bounded non-answer
+provider interface are required at activation and revalidated at point of use.
+Unresolved contract gaps, missing artifacts, disabled entries or any
+provenance/identity/interface mismatch fail closed.
 
 ## Keep the CLI dist warm
 
@@ -63,8 +83,32 @@ scripts/agent-fabric status --json --project "$PWD"
 scripts/agent-fabric doctor --json
 ```
 
-Each client registry contains only the proxy command, socket path, fabric state
-directory, seat and client label:
+`doctor` reports one typed overall state and exits successfully for both normal
+operating modes:
+
+| `state` | `code` | `healthy` | Meaning |
+| --- | --- | --- | --- |
+| `idle` | `DAEMON_ON_DEMAND_IDLE` | `true` | Configuration, compatibility, private paths, database and election state pass; no daemon is expected to be running. `daemon.pid` and `daemon.socketPath` are `null`. |
+| `live` | `DAEMON_LIVE` | `true` | Generation-bound discovery, bootstrap election, process, owned Unix socket and authenticated handshake agree. |
+| `failed` | causal failure code | `false` | A preflight, election, discovery, process, socket or handshake failed. The command exits non-zero. |
+
+In the idle case the `daemon-socket` check has status `idle`, not `pass` or
+`fail`. This does not weaken preflight: for example, an intact idle daemon
+state alongside an incompatible database still produces overall `state:
+"failed"` and a non-zero exit. A failed or in-progress bootstrap, ambiguous or
+stale discovery, crashed process, orphan socket and failed handshake are never
+relabelled idle. `doctor` diagnoses only; it does not start the on-demand
+daemon. Concurrent doctors share one non-blocking inspection fence and may
+report the same idle snapshot; bootstrap and shutdown ownership are exclusive
+and report an in-progress code before socket artifacts are classified. The
+daemon acquires its shutdown-transition fence before releasing the election
+lock and retains it until terminal discovery is durable. Only absent discovery
+or an exact, generation-matched `stopped` owner with exit `0` and no signal can
+be idle. Forced, non-zero, unknown, crashed and otherwise non-clean owners fail
+closed.
+
+Each client registry contains only the proxy command, fabric state directory,
+seat and client label:
 
 | Client | Global registry |
 | --- | --- |
@@ -79,6 +123,48 @@ searched for the nearest project-keyed seat. An unprovisioned project fails
 closed instead of authenticating into another project's run. Clients that do
 not preserve the workspace working directory need project-scoped registration.
 Subdirectories intentionally inherit the nearest ancestor project's seat.
+
+The harness installer configures the project-dynamic global entry for its
+selected primary client. Configure or verify both Claude Code and Codex from
+the harness checkout with:
+
+```sh
+scripts/configure-agent-fabric-mcp.py --platform all
+scripts/configure-agent-fabric-mcp.py --platform all --check
+```
+
+The command atomically replaces only the `agent-fabric` entry in each client
+configuration and reports only that entry's status. It never prints
+capabilities or unrelated configuration. Its global entries omit
+`AGENT_FABRIC_PROJECT_PATH`; Claude Code and Codex preserve cwd and must use
+nearest-ancestor discovery. A fixed `AGENT_FABRIC_PROJECT_PATH` remains a
+manual, project-scoped compatibility path only for a client that cannot preserve
+its workspace cwd. Never add it to a global Claude Code or Codex entry.
+Existing files are updated with an atomic exchange: the displaced identity and
+bytes must match the composed snapshot, and the requested direct path or
+symlink must still resolve to the installed inode. On any mismatch the command
+exits with a typed conflict and retains the displaced file at the reported
+recovery path inside a fresh owner-only `0700` directory. The displaced object
+is inspected without following symlinks and is not chmodded, so hard-linked
+content retains its caller-owned mode. Conflict handling never rolls that object
+back over a pathname that a concurrent writer may have changed. Reconcile both
+the current client configuration and recovery object before rerunning.
+
+Primary provider execution uses the locked Claude Agent SDK and the installed,
+vendor-signed Claude Code and Codex CLIs through repository-owned wrappers. On
+the supported host, restore the package closure and verify both boundaries
+with:
+
+```sh
+npm ci --no-audit --no-fund
+npm run compatibility:check:primary
+```
+
+The verifier checks the stable provider launchers, native signing identity,
+non-answer interface, protocol schemas and Fabric wrapper provenance. Each
+provider wrapper revalidates its launcher, safe path and vendor identity
+immediately before a new provider process. Normal signed CLI updates need no
+registry edit; wrapper or protocol changes remain fail closed.
 
 The resolved `.cap` file must remain a private regular file with mode `0600`.
 The adjacent `.json` file is secret-free metadata and is checked against the
@@ -129,6 +215,62 @@ narrowed authority and their own capability. Swapping Claude and Codex
 leadership requires typed handoff/takeover custody; it does not change the
 protocol or create a fallback chain.
 
+### First use in an exact trusted project
+
+An unprovisioned Claude or Codex global MCP exposes exactly one tool:
+`fabric_bootstrap`. Call it without arguments. The proxy derives its validated
+seat from `AGENT_FABRIC_SEAT` and the exact project root from its working
+directory. The daemon atomically creates one deterministic, narrow scoping run;
+the same MCP connection then emits `tools/list_changed` and exposes the normal
+Fabric tools. A concurrent second primary joins that run as its peer and rotates
+the normal two-seat generation.
+
+Bootstrap never launches a provider and accepts no model, policy, root, run or
+agent identifiers. Its fixed authority reads only the exact project root,
+writes only its bootstrap run directory and Fabric coordination/evidence, and
+denies secrets, deployment, irreversible actions and tool egress. An untrusted
+root fails closed. The local fallback is `provenant fabric bootstrap --seat
+claude|codex`; it invokes the same composition. Public `mcp provision` retains
+its full-roster requirement.
+
+Bootstrap seats are short-lived bearers over a bounded bootstrap authority
+that deliberately outlives them. When a bootstrap seat is expired or within
+one hour of expiry, the Claude/Codex MCP proxy automatically revalidates trust
+for the exact current root and asks the daemon to rotate the complete roster.
+The daemon compare-and-swaps only the current generation and revokes every
+predecessor token; the project session, run and chair do not change. If exact
+trust or the generation changed, renewal fails closed. Stop and restart a
+stale proxy after another host completes the cutover. Operator-created runs
+continue to use the explicit `mcp provision` flow below.
+The bounded bootstrap authority currently lasts 365 days; rollover without
+orphaning delegated descendants is tracked in
+[#281](https://github.com/mblauberg/provenant/issues/281).
+
+In production Console, Launch is available only when the dedicated
+`projectSessions.prepareLaunch` operation and explicit operator-action commit
+surface are negotiated. The selected live Project row supplies the session
+revision, generation and reviewed launch-packet reference; Launch accepts no
+caller-authored CAS fields. Preview preparation uses a per-input-attempt command
+so an expired, effect-free preview can be replaced. Console derives the commit
+command ID from the operator, project, session, session generation and exact
+launch packet path/digest; input events and Console client instances are
+deliberately excluded. An exact reopen therefore polls the existing commit,
+while a new generation or packet gets a new identity. Provider dispatch still requires a
+separate explicit confirmation gesture. Sessions projected as `launching` or
+`launch_ambiguous` rehydrate through status-only observation; Console never
+redispatches or invokes generic action reconciliation for launch custody.
+
+If a selected session is `recovery_required`, Console asks the daemon to derive one loss-bound takeover capability and
+server-authored recovery intent. Do not copy loss IDs or construct recovery payloads by hand. Abandon remains a
+destructive action: inspect the preview, then use the separate explicit Confirm gesture. On confirmed
+abandon, the daemon may repair historical launch accounting only from the exact terminal-success provider action
+(`provider_calls=1`, retained `concurrent_turns=0`); other unknown capacity remains unknown.
+
+Cancel may terminalise a `draft` or `awaiting_launch` session without provider I/O only when it has no run, membership,
+launch custody, reservation, gate or prior operator effect. A live Console attachment is transport, not lifecycle work,
+and does not block this path. Once any such lifecycle evidence exists, use its owning recovery or cancellation flow;
+zero cancelled tasks must be reported as rejected, never as a successful task cancellation.
+
 For visible pairing, Herdr attaches panes or observer renderers while messages still travel through the durable fabric mailbox. For headless orchestration, no pane is required. Both profiles can coexist in one run.
 
 Herdr provides pane visibility and process supervision. Fabric events are
@@ -146,6 +288,76 @@ Set controls directly on each admitted provider spawn or turn:
 | `compact` | Checkpoint first, then continue the same retained task with bounded context. |
 | `rotate` / clear | Checkpoint first, then start fresh for a new task, independent review, stale/confused/unreconciled context, or role/model change. Fabric rotate is the clear equivalent; never clear silently. |
 
+The active optional reviewer routes are exact and subscription-authenticated:
+
+| Review route | Exact selection | Family / effort |
+| --- | --- | --- |
+| Agy | `Gemini 3.1 Pro (High)` | Google / high |
+| Cursor | `cursor-grok-4.5-high` | xAI / high |
+| OpenCode | `opencode/<catalogue-model>` | generic-open / advertised ACP effort |
+
+Kiro is an active optional open-weight ACP worker. Select an explicit model
+reported by the current subscription; Fabric admits the maintained family
+prefixes rather than locking exact model names.
+
+OpenCode is limited to its `opencode/*` account catalogue. Its wrapper applies
+only effort values advertised by that model's ACP session configuration.
+
+Do not set or persist provider API keys for these routes or Kiro. The wrappers forward
+only the minimal process environment (`HOME`, `PATH` and `TMPDIR`) and use the
+provider CLIs' existing subscription sessions. `scripts/model-route resolve`
+must report the exact family, model and high effort through `--adapter-gate
+fabric` before dispatch. A disabled entry, inactive adapter, unresolved pin,
+artifact mismatch, unavailable model or wrong family is terminal routing
+evidence; use another already-admitted review family or record the bonus leg as
+unavailable. Never bypass the gate with a direct CLI and claim Fabric evidence.
+
+Real provider smokes are local-only, consume subscription quota and require
+current provider-use authority. They traverse the verified Fabric adapter
+request protocol, require exact spawn/turn/release sentinels and prove the
+isolated workspace stayed unchanged:
+
+```sh
+cd runtime/agent-fabric
+node smoke/provider-adapter-readonly.mjs \
+  --adapter agy --model 'Gemini 3.1 Pro (High)' \
+  --model-family google --effort high \
+  --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter agy)"
+node smoke/provider-adapter-readonly.mjs \
+  --adapter cursor-agent --model cursor-grok-4.5-high \
+  --model-family xai --effort high \
+  --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter cursor-agent)"
+kiro-cli chat --list-models --format json-pretty
+node smoke/provider-adapter-readonly.mjs \
+  --adapter kiro-acp --model qwen3-coder-next \
+  --model-family open-weight --effort low \
+  --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter kiro-acp)"
+node smoke/provider-adapter-readonly.mjs \
+  --adapter opencode-acp --model opencode/deepseek-v4-flash-free \
+  --model-family generic-open --effort high \
+  --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter opencode-acp)"
+```
+
+For Kiro, first replace the example model when the account's current list has
+changed; the name is smoke input, not an admission lock. The activation proof
+for issue #265 returned `status: pass`, `output: exact-sentinel`, `workspace:
+unchanged` and `session: spawn-turn-release` through Kiro 2.13.0 with Amazon
+Team ID `94KV3E626L`. Version and digest in that receipt are observations only.
+
+The issue #253 OpenCode acceptance returned `status: pass`, `output:
+exact-sentinel`, `workspace: unchanged`, `providerConfig: unchanged`,
+`credentialInput: subscription-session`, `fabricCapability: not-provided`,
+`effort: high` and
+`session: spawn-turn-release` for the advertised
+`opencode/deepseek-v4-flash-free` model. It observed OpenCode 1.17.18 at the
+canonical owner-controlled Homebrew Cellar path; version and digest remain
+observations, not admission bounds.
+
+`adapter executable` prints only the validated executable path from the active
+adapter's compatibility entry. It fails closed before the provider smoke if the
+adapter is inactive, the stable executable is missing or its compatibility
+contract no longer conforms.
+
 Claude reviewers and one-task workers start fresh and release when done. For a
 retained Claude pair, checkpoint and compact at each stage or work-unit
 boundary, by four answer-bearing provider turns, or before a pause expected to
@@ -158,8 +370,8 @@ Build and verify the standalone Console before attaching it to live state:
 
 ```sh
 npm run check --workspace=@local/agent-fabric-console
-node runtime/agent-fabric-console/dist/cli.js --help
-node runtime/agent-fabric-console/dist/cli.js --project "$PWD"
+node runtime/agent-fabric-console/dist/bin.js --help
+node runtime/agent-fabric-console/dist/bin.js --project "$PWD"
 ```
 
 Use `--session '<stable project-session ID>'` when more than one attachable
@@ -170,6 +382,51 @@ default when dimensions are unavailable, not a fixed size. Resize events
 reflow full, compact and inert layouts while preserving stable selection,
 focus, scroll, drafts and pending commands. `q` detaches the UI; it does not
 stop a project session or daemon.
+
+### Onboard accepted work
+
+Use this path when a reviewed project artifact is accepted and a new draft
+project session is ready to launch:
+
+1. Resolve the owning Git root (`git rev-parse --show-toplevel`), or the
+   canonical current project directory when no repository exists. Inspect that
+   exact root and, when absent, establish trust with
+   `$HOME/.agents/scripts/agent-fabric workspace trust "$project_root"` before
+   opening the Console. This first-use step is automatic under the global
+   harness; never substitute a parent, wildcard, home directory or sibling
+   collection.
+2. Create or select the draft project session. If several sessions are
+   attachable, pass its stable ID with `--session`.
+3. Open the complete, verified accepted-evidence row and choose
+   `Implement...`. Supply exactly `intake`, `launch-packet-path`, `packet` and
+   `resource-plan`. The packet contains the authority expiry, budget, provider
+   route, run directory and write/worktree scopes. It references artifact
+   paths and digests instead of embedding accepted source bytes.
+4. Review the accepted-evidence, launch-packet and resource-plan refs;
+   authority; budget; provider route; and worktree/write scopes. Editing either
+   JSON document creates a new digest and review. Confirming Implement closes
+   the two artifacts and moves the same project session to `awaiting_launch`;
+   it does not contact the provider. Provider input is shown through the shared
+   inert redactor and any trusted control, credential-like key or credential
+   value is rejected before a preparation row or artifact is written. Cancel or
+   fix any missing, stale, expired or inconsistent binding.
+5. Select the live Project row and choose `Launch...`. Review the daemon-owned
+   launch preview, then use a separate confirmation gesture. Only this step may
+   dispatch the provider. After reconnect or handoff, reopen the session by its
+   stable ID; Console uses its persisted exact packet ref.
+6. Wait for committed launch status with a terminal-success journal and a
+   current `seatProvisioning` descriptor. Provision the complete roster with
+   the command under [Renew seats](#renew-seats), reconnect all clients, then
+   run both registered MCP smoke checks.
+
+Stop before Launch if Implement reports a changed evidence digest, session
+revision, authority expiry, budget, provider route or artifact ref. Do not
+repair those bindings by editing a generated digest or bypassing the Console.
+Implement uses one stable command identity derived from the exact session,
+accepted-scope, packet and plan bindings. A lost response is replayed with that
+identity; after Console restart, reopen the same accepted evidence and submit
+the exact packet and plan to recover the committed result. A changed binding is
+a new command and never adopts the earlier result.
 
 ## Verify registrations
 
@@ -205,8 +462,10 @@ Both values come from the current project-keyed seat pointer. Do not derive a
 project key from status prose, a copied path or an older generation.
 
 The daemon and every MCP proxy derive the same stable private socket at
-`$AGENT_FABRIC_STATE_DIRECTORY/runtime/fabric-v1.sock`. Registry entries bind
-`AGENT_FABRIC_PROJECT_PATH` plus a seat; they do not hard-code credentials.
+`$AGENT_FABRIC_STATE_DIRECTORY/runtime/fabric-v1.sock`. Dynamic Claude Code and
+Codex registry entries bind a seat but no project path or credential. A client
+that cannot preserve cwd may use a separately scoped `AGENT_FABRIC_PROJECT_PATH`
+entry for one project; it must never be reused as a global registration.
 
 Start a least-privilege observer after provisioning or renewal:
 
@@ -245,8 +504,11 @@ Claude to Codex mailbox messages through separate MCP proxies.
 
 Bind a new immutable seat generation to the exact current operator-launched
 project session and coordination run before the current credentials expire.
-Use the revisions, generations, chair identity and active chair lease reported
-by the current operator projection. The command derives the current active
+After launch reaches committed status, use the current `seatProvisioning`
+descriptor returned by `operatorActionStatus` for the session/run revisions,
+generations, chair identity and active chair lease. This descriptor is a
+current CAS projection and is not part of the immutable commit receipt; refresh
+status immediately before provisioning. The command derives the current active
 roster generation from the locked project pointer and passes it as the expected
 predecessor; there is no caller-selected rollback value. The requested expiry
 must be a future ISO timestamp no more than 31 days away and cannot outlive any

@@ -32,7 +32,7 @@ Important boundaries:
 - `src/core/read-policy.ts`: chair/owner/participant scoped projections
 - `src/daemon/`: single-instance process, trusted composition and socket transport
 - `src/mcp/`: one input/output schema surface for both primary clients
-- `src/adapters/providers/`: isolated, pinned provider adapters
+- `src/adapters/providers/`: isolated provider adapters with contract-based CLI admission
 - `src/exports/`: receipt projection, schema enforcement and link verification
 - `migrations/0001-current-baseline.sql`: complete current schema, triggers and indexes
 - `schemas/database-baseline.v1.json`: pinned SQL and canonical catalogue digests
@@ -105,11 +105,29 @@ atomically revokes the prior roster, stages the complete immutable filesystem
 generation and compare-and-swaps a private `current.json` pointer. There is no
 flat-seat fallback or second accepted generation.
 
+Installers and operators configure the project-dynamic Claude Code and Codex
+entries through `scripts/configure-agent-fabric-mcp.py`; `--platform all`
+configures both and `--check` verifies only their `agent-fabric` entries. Those
+global entries contain the proxy command, state directory, seat and client
+label, and omit `AGENT_FABRIC_PROJECT_PATH`. A fixed project path remains
+available only as a separately scoped compatibility entry for a client that
+cannot preserve workspace cwd. It is not valid in global Claude Code and Codex
+registration. Existing-file updates use an atomic exchange with displaced-byte
+and installed-path verification. Concurrent configuration drift produces a
+typed conflict and retains the displaced object without symlink following or
+chmod inside a fresh owner-only `0700` recovery directory; conflict handling
+never rolls back over the live client pathname.
+
 Clients use lock-safe on-demand bootstrap: they attach to a compatible
 incumbent before database preflight, or elect one daemon and inspect/publish
 current state on the no-incumbent path. Fabric is not a login service. Herdr
 may host or observe processes, but it does not own daemon truth. A newly
 started client session loads its MCP registry entry; an older provider session
 may need to reconnect or restart after a registry or seat-generation change.
+
+Doctor inspection uses a shared flock across election and discovery
+classification. Concurrent doctors coexist, while an exclusive bootstrap or
+shutdown-transition fence reports in progress rather than idle or
+stale-socket. Healthy stopped-idle requires exit `0` with no signal.
 
 See [the operations runbook](../../docs/runbooks/agent-fabric-operations.md) before any live start or registration.

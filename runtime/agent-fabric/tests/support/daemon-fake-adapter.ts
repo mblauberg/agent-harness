@@ -8,6 +8,7 @@ if (journalPath === undefined) {
 }
 const requiredJournalPath: string = journalPath;
 const ephemeralSpawnEnabled = process.env.FAKE_ADAPTER_EPHEMERAL_SPAWN === "1";
+const accountDefaultModel = process.env.FAKE_ADAPTER_ACCOUNT_DEFAULT_MODEL === "1";
 const reportLoginIdentity = process.env.FAKE_ADAPTER_REPORT_LOGIN_IDENTITY === "1";
 const ephemeralSpawnDelayMs = Number(process.env.FAKE_ADAPTER_EPHEMERAL_SPAWN_DELAY_MS ?? "0");
 
@@ -131,7 +132,9 @@ input.on("line", (line) => {
     }
     if (
       typeof request.params.actionId !== "string" ||
-      typeof request.params.model !== "string" ||
+      (accountDefaultModel
+        ? request.params.model !== undefined
+        : typeof request.params.model !== "string") ||
       typeof request.params.modelFamily !== "string" ||
       typeof request.params.prompt !== "string" ||
       typeof request.params.taskId !== "string" ||
@@ -144,7 +147,7 @@ input.on("line", (line) => {
       ? `:${process.env.USER ?? "missing"}:${process.env.LOGNAME ?? "missing"}`
       : "";
     const complete = (): void => respond(request.id, {
-      result: `review:${request.params.modelFamily}:${request.params.model}${loginIdentity}`,
+      result: `review:${request.params.modelFamily}:${accountDefaultModel ? "account-default" : request.params.model}${loginIdentity}`,
       taskId: request.params.taskId,
     });
     if (Number.isSafeInteger(ephemeralSpawnDelayMs) && ephemeralSpawnDelayMs > 0) {

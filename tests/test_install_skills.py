@@ -1,6 +1,7 @@
 from pathlib import Path
 import importlib.util
 import json
+import shutil
 import subprocess
 
 import pytest
@@ -48,6 +49,35 @@ def test_installer_preserves_existing_entries(tmp_path):
     assert result.returncode == 0, result.stderr
     assert marker.read_text() == "owned elsewhere\n"
     assert not existing.is_symlink()
+
+
+def test_directory_symlink_to_canonical_skills_is_preserved_without_manifest(tmp_path):
+    fixture_root = tmp_path / "agents"
+    scripts = fixture_root / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copy2(SCRIPT, scripts / "install-skills")
+    shutil.copy2(MANAGER, scripts / "manage_installation.py")
+    shutil.copytree(ROOT / "skills", fixture_root / "skills")
+    platform_home = tmp_path / "claude"
+    platform_home.mkdir()
+    target = platform_home / "skills"
+    target.symlink_to(fixture_root / "skills", target_is_directory=True)
+
+    result = subprocess.run(
+        [str(scripts / "install-skills"), "--target", str(target)],
+        cwd=fixture_root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert target.is_symlink()
+    assert target.resolve() == fixture_root / "skills"
+    assert "skills existing=" in result.stdout
+    assert not (fixture_root / ".agent-harness-installation.json").exists()
+    assert not (platform_home / ".agent-harness-installation.json").exists()
 
 
 def test_installer_requires_a_target():

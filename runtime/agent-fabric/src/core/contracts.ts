@@ -41,6 +41,19 @@ export type CurrentMcpSeatBindingResult = {
   credentials: Array<CurrentMcpSeatBinding & { capability: string }>;
 };
 
+export type BootstrapMcpSeatInput = {
+  canonicalRoot: string;
+  trustRecordDigest: string;
+  seat: "claude" | "codex";
+  expiresAt: string;
+};
+
+export type BootstrapMcpSeatResult = CurrentMcpSeatBindingResult & {
+  projectId: string;
+  canonicalRoot: string;
+  bootstrapRunDirectory: string;
+};
+
 export type LeaseResult = {
   leaseId: string;
   holderAgentId: string;

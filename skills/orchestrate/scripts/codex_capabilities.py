@@ -12,19 +12,46 @@ import sys
 from typing import Any
 
 
+def load_json(raw: str) -> Any:
+    def reject_duplicate_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON member: {key}")
+            result[key] = value
+        return result
+
+    return json.loads(raw, object_pairs_hook=reject_duplicate_members)
+
+
 def normalize(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict) or not isinstance(raw.get("models"), list):
         raise ValueError("catalogue root must contain a models list")
     models: dict[str, Any] = {}
     for item in raw["models"]:
-        if not isinstance(item, dict) or not isinstance(item.get("slug"), str):
-            continue
+        if not isinstance(item, dict):
+            raise ValueError("catalogue model entry must be an object")
+        slug = item.get("slug")
+        if not isinstance(slug, str) or not slug.strip():
+            raise ValueError("catalogue model slug must be a non-empty string")
+        levels = item.get("supported_reasoning_levels")
+        if not isinstance(levels, list):
+            raise ValueError("catalogue reasoning levels must be a list")
+        if not levels:
+            raise ValueError("catalogue reasoning levels must not be empty")
         efforts = []
-        for level in item.get("supported_reasoning_levels", []):
-            if isinstance(level, dict) and isinstance(level.get("effort"), str):
-                efforts.append(level["effort"].lower())
-        models[item["slug"].lower()] = {
-            "resolved_model": item["slug"],
+        for level in levels:
+            if not isinstance(level, dict):
+                raise ValueError("catalogue reasoning-level entry must be an object")
+            effort = level.get("effort")
+            if not isinstance(effort, str) or not effort.strip():
+                raise ValueError("catalogue reasoning effort must be a non-empty string")
+            efforts.append(effort.lower())
+        normalized_slug = slug.casefold()
+        if normalized_slug in models:
+            raise ValueError("catalogue model slugs must be unique when case-folded")
+        models[normalized_slug] = {
+            "resolved_model": slug,
             "supported_efforts": efforts,
         }
     if not models:
@@ -53,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if result.returncode != 0:
             raise ValueError(f"codex debug models exited {result.returncode}: {result.stderr.strip()}")
-        snapshot = normalize(json.loads(result.stdout))
+        snapshot = normalize(load_json(result.stdout))
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError) as exc:
         print(f"capability discovery failed: {exc}", file=sys.stderr)
         return 1

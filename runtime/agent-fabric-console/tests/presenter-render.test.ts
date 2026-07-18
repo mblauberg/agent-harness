@@ -1054,7 +1054,8 @@ describe("structured presenter and responsive Fabric renderer", () => {
       workflowCapabilities: {
         intake: { state: "available" },
         gate: { state: "available" },
-        launch: { state: "unavailable", reason: "typed-planner-unregistered" },
+        implement: { state: "unavailable", reason: "implementation-protocol-unavailable" },
+        launch: { state: "available" },
         git: { state: "unavailable", reason: "typed-planner-unregistered" },
         promotion: { state: "unavailable", reason: "typed-planner-unregistered" },
       },
@@ -1144,7 +1145,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
         id: "workflow:implement",
         label: "Implement...",
         enabled: false,
-        reason: "typed-planner-unregistered",
+        reason: "implementation-protocol-unavailable",
       }),
     ]));
   });
@@ -1206,6 +1207,87 @@ describe("structured presenter and responsive Fabric renderer", () => {
       expect.objectContaining({ id: "action:resume" }),
       expect.objectContaining({ id: "action:steer" }),
     ]));
+  });
+
+  it("enables Project-row cancel only for an exact live effect-free prelaunch session", () => {
+    const dataset = richDataset();
+    const project = dataset.pages.project.rows[0];
+    const snapshot = dataset.snapshot;
+    if (
+      project === undefined ||
+      snapshot?.session.freshness !== "live" || snapshot.session.value === null
+    ) {
+      throw new Error("live Project session fixture unavailable");
+    }
+    const guarded: FabricConsoleDataset = {
+      ...dataset,
+      productionActionPlanning: true,
+      snapshot: {
+        ...snapshot,
+        session: {
+          ...snapshot.session,
+          value: { ...snapshot.session.value, state: "draft" },
+        },
+      },
+      pages: {
+        ...dataset.pages,
+        project: {
+          ...dataset.pages.project,
+          rows: [{
+            ...project,
+            detailRef: { kind: "project", projectId, expectedRevision: 7 },
+            actionAvailability: {
+              state: "available",
+              actions: ["cancel"],
+              requiresPreview: true,
+            },
+          }],
+        },
+      },
+    };
+    const base = controllerState();
+    const controller: ConsoleControllerState = {
+      ...base,
+      activeView: "project",
+      selectionByView: {
+        ...base.selectionByView,
+        project: { stableId: project.stableId, revision: project.revision },
+      },
+    };
+
+    expect(presentFabricConsole(
+      guarded,
+      controller,
+      createFabricUiState({ draft: "cancel unused draft" }),
+      { columns: 80, rows: 24 },
+    ).actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "action:cancel", enabled: true }),
+    ]));
+    expect(presentFabricConsole(
+      guarded,
+      controller,
+      createFabricUiState({ draft: "" }),
+      { columns: 80, rows: 24 },
+    ).actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "action:cancel", enabled: false, reason: "enter-a-reason" }),
+    ]));
+
+    const wrongState = {
+      ...guarded,
+      snapshot: {
+        ...snapshot,
+        session: {
+          ...snapshot.session,
+          value: { ...snapshot.session.value, state: "active" as const },
+        },
+      },
+    } satisfies FabricConsoleDataset;
+    expect(presentFabricConsole(
+      wrongState,
+      controller,
+      createFabricUiState({ draft: "cancel active session" }),
+      { columns: 80, rows: 24 },
+    ).actions).toStrictEqual([]);
   });
 
   it("keeps typed launch, Git and promotion entry points discoverable with capability reasons", () => {
@@ -2299,6 +2381,36 @@ describe("structured presenter and responsive Fabric renderer", () => {
     expect(complete.rows.join("\n")).toContain("Intent Expected revision:11");
     expect(complete.hitRegions.find(({ id }) => id === "review:continue"))
       .toMatchObject({ enabled: true });
+  });
+
+  it("keeps unresolved Launch custody observable and not closable", () => {
+    const workflow: ConsoleWorkflowReview = {
+      workflowId: "workflow-launch-unresolved",
+      kind: "operator-action",
+      source: "daemon-preview",
+      stage: "ambiguous",
+      previewDigest: "sha256:preview",
+      expectedRevision: revisionFromProtocol(11),
+      consequenceClass: "consequential",
+      confirmationMode: "explicit",
+      summary: "project-session-launch recovery",
+      details: [{ label: "commandId", value: "console_launch_command" }],
+      evidence: [],
+      openedByEventId: "event-launch-recovery",
+      armedByEventId: null,
+      result: "operator-action | console_launch_command | ambiguous",
+      failure: "LAUNCH_AMBIGUOUS",
+    };
+    const frame = renderFabricConsoleFrame(
+      richDataset(),
+      controllerState(),
+      createFabricUiState({ workflowReview: workflow }),
+      { columns: 200, rows: 18 },
+    );
+
+    expect(frame.hitRegions.find(({ id }) => id === "review:observe"))
+      .toMatchObject({ enabled: true });
+    expect(frame.hitRegions.some(({ id }) => id === "review:close")).toBe(false);
   });
 
   it.each(["editor", "guided", "palette"] as const)(

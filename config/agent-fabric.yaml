@@ -7,13 +7,18 @@ allowedAdapters:
   - agy
   - cursor-agent
   - kiro-acp
+  - opencode-acp
 
 # Provider adapters join the daemon only after their compatibility entry is
-# enabled, fully pinned and listed here. Removing all entries restores the
+# enabled, contract-conformant and listed here. Removing all entries restores the
 # coordination-only profile while preserving the provider allow-list above.
 activeAdapters:
   - claude-agent-sdk
   - codex-app-server
+  - agy
+  - cursor-agent
+  - opencode-acp
+  - kiro-acp
 
 allowedProfiles:
   - headless
@@ -77,6 +82,15 @@ adapters:
       - "${AGENTS_HOME}/runtime/agent-fabric/src/adapters/providers/optional/kiro-acp.ts"
       - --journal
       - "${FABRIC_STATE_DIRECTORY}/adapters/kiro-acp.sqlite3"
+  opencode-acp:
+    command:
+      - node
+      - "--import"
+      - "${AGENTS_HOME}/node_modules/tsx/dist/loader.mjs"
+      - "--conditions=source"
+      - "${AGENTS_HOME}/runtime/agent-fabric/src/adapters/providers/optional/opencode-acp.ts"
+      - --journal
+      - "${FABRIC_STATE_DIRECTORY}/adapters/opencode-acp.sqlite3"
 
 workspaceRoots:
   - "${AGENTS_HOME}"

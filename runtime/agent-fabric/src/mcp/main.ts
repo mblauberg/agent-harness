@@ -5,26 +5,43 @@ import {
   createUnprovisionedMcpServer,
   type FabricMcpServerHandle,
 } from "./server.js";
-import { McpSeatNotProvisionedError, resolveMcpCapability } from "./credentials.js";
+import { McpSeatNotProvisionedError, resolveMcpCapability, resolveRenewableMcpCapability } from "./credentials.js";
 import { resolveFabricPaths } from "../cli/paths.js";
+import { bootstrapMcpSeat } from "../cli/mcp-bootstrap.js";
 
 // Stdio MCP proxy entry point (spec section 14): one proxy process per client,
 // each connecting to the shared daemon socket with its own capability. The
 // proxy holds no fabric state and enforces no policy; the daemon derives the
 // principal from the capability, never from MCP arguments.
 
-const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH ?? resolveFabricPaths().socketPath;
+const paths = resolveFabricPaths();
+const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH ?? paths.socketPath;
+const effectivePaths = { ...paths, socketPath };
+const renewCurrentSeat = async (): Promise<void> => {
+  await bootstrapMcpSeat({
+    environment: process.env,
+    cwd: process.cwd(),
+    paths: effectivePaths,
+  });
+};
+const resolveCurrentCapability = async (): Promise<string> => process.env.AGENT_FABRIC_SEAT === undefined
+  ? await resolveMcpCapability(process.env, process.cwd())
+  : await resolveRenewableMcpCapability(
+    process.env,
+    process.cwd(),
+    renewCurrentSeat,
+    (message) => process.stderr.write(`warning: ${message}\n`),
+  );
 
 let handle: FabricMcpServerHandle;
 try {
-  const capability = await resolveMcpCapability(
-    process.env,
-    process.cwd(),
-    (message) => process.stderr.write(`warning: ${message}\n`),
-  );
+  const capability = await resolveCurrentCapability();
   handle = await createFabricMcpServer({
     socketPath,
     capability,
+    ...(process.env.AGENT_FABRIC_SEAT === undefined
+      ? {}
+      : { refreshCapability: resolveCurrentCapability }),
     ...(process.env.AGENT_FABRIC_CLIENT_LABEL === undefined
       ? {}
       : { clientLabel: process.env.AGENT_FABRIC_CLIENT_LABEL }),
@@ -34,8 +51,24 @@ try {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(2);
   }
-  process.stderr.write(`warning: ${error.message}; Fabric tools are unavailable until seats are provisioned\n`);
-  handle = createUnprovisionedMcpServer();
+  process.stderr.write(`warning: ${error.message}; exact-root bootstrap is available\n`);
+  handle = createUnprovisionedMcpServer({
+    bootstrap: async () => {
+      const bootstrapped = await bootstrapMcpSeat({
+        environment: process.env,
+        cwd: process.cwd(),
+        paths: effectivePaths,
+      });
+      return {
+        socketPath,
+        capability: bootstrapped.credential,
+        refreshCapability: resolveCurrentCapability,
+        ...(process.env.AGENT_FABRIC_CLIENT_LABEL === undefined
+          ? {}
+          : { clientLabel: process.env.AGENT_FABRIC_CLIENT_LABEL }),
+      };
+    },
+  });
 }
 delete process.env.AGENT_FABRIC_CAPABILITY;
 

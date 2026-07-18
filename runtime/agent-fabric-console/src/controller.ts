@@ -182,6 +182,9 @@ function intentAvailableAction(
   ) {
     return intent.kind;
   }
+  if (intent.kind === "chair-bridge-recovery") {
+    return "chair-bridge-recovery";
+  }
   if (intent.kind === "git") {
     return "git";
   }
@@ -311,15 +314,19 @@ export class ConsoleController {
       (review.stage === "review" || review.stage === "confirm")
     ) {
       const changes: ReviewChange[] = [];
-      if (dataset.snapshotRevision !== review.binding.projectionRevision) {
+      const current = this.#row(review.binding.view, review.binding.itemId);
+      const itemRevisionChanged = current?.revision !== review.binding.itemRevision;
+      if (
+        dataset.snapshotRevision !== review.binding.projectionRevision &&
+        (itemRevisionChanged || dataset.connection.state !== "live")
+      ) {
         changes.push({
           field: "projectionRevision",
           before: review.binding.projectionRevision,
           after: dataset.snapshotRevision ?? "unavailable",
         });
       }
-      const current = this.#row(review.binding.view, review.binding.itemId);
-      if (current?.revision !== review.binding.itemRevision) {
+      if (itemRevisionChanged) {
         changes.push({
           field: "itemRevision",
           before: review.binding.itemRevision,
@@ -544,11 +551,17 @@ export class ConsoleController {
         confirmation,
       });
       this.#assertReceipt(committed, command.commandId, review.preview);
-      const status: OperatorActionStatus = {
-        status: "committed",
-        commandId: command.commandId,
-        receipt: committed,
-      };
+      const status: OperatorActionStatus = committed.launchProviderActionJournalRef === undefined
+        ? {
+            status: "committed",
+            commandId: command.commandId,
+            receipt: committed,
+          }
+        : await this.#actions.status({
+            credential: this.#credential,
+            projectId: this.#projectId,
+            commandId: command.commandId,
+          });
       this.#applyStatus(status);
       return status;
     } catch (error) {
@@ -650,9 +663,6 @@ export class ConsoleController {
   }
 
   #assertReviewCurrent(review: ActionReview): void {
-    if (review.binding.projectionRevision !== this.#dataset.snapshotRevision) {
-      throw new Error("Review projection revision changed");
-    }
     const row = this.#row(review.binding.view, review.binding.itemId);
     if (
       row === null ||

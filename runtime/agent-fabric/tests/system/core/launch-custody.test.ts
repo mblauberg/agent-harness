@@ -120,6 +120,7 @@ function createFixture(options: Readonly<{
   promoteSuccessor?: (input: Record<string, unknown>) => Promise<boolean>;
   lookupSuccessor?: (input: Record<string, unknown>) => Promise<"child" | "chair" | "missing">;
   retireChair?: (entry: { agentId: string; providerSessionRef: string }) => void;
+  launchResources?: Readonly<Record<string, number>>;
 }> = {}): {
   database: Database.Database;
   databasePath: string;
@@ -135,6 +136,10 @@ function createFixture(options: Readonly<{
   databases.push(database);
   applyMigrations(database);
 
+  const launchResources = options.launchResources ?? { provider_calls: 1 };
+  const resourceLimits = Object.fromEntries(
+    Object.entries(launchResources).map(([unit, amount]) => [unit, Math.max(10, amount)]),
+  );
   const resourcePlan = {
     schemaVersion: 1,
     projectId: "project_01",
@@ -142,11 +147,11 @@ function createFixture(options: Readonly<{
     runId: "run_launch_01",
     budgetRef: "budget_launch_01",
     scopes: {
-      project: { scopeId: "scope_project_01", limits: { provider_calls: 10 } },
-      projectSession: { scopeId: "scope_session_launch_01", limits: { provider_calls: 10 } },
-      coordinationRun: { scopeId: "scope_run_launch_01", limits: { provider_calls: 10 } },
+      project: { scopeId: "scope_project_01", limits: resourceLimits },
+      projectSession: { scopeId: "scope_session_launch_01", limits: resourceLimits },
+      coordinationRun: { scopeId: "scope_run_launch_01", limits: resourceLimits },
     },
-    launchReservation: { amounts: { provider_calls: 1 } },
+    launchReservation: { amounts: launchResources },
   };
   const resourcePlanText = canonicalJson(resourcePlan);
   writeFileSync(join(root, "launch-resources.json"), resourcePlanText, { mode: 0o600 });
@@ -162,7 +167,7 @@ function createFixture(options: Readonly<{
     deniedActions: [],
     disclosure: { level: "forbidden" },
     expiresAt: "2027-01-02T00:00:00.000Z",
-    budget: { provider_calls: 10 },
+    budget: resourceLimits,
   };
   const normalisedAuthority = normaliseLaunchChairAuthority(chairAuthority, root);
   const authorityRef = digest(canonicalJson(normalisedAuthority));
@@ -722,6 +727,18 @@ describe("launch custody", () => {
       outcomeKind: null,
       outcomeDigest: null,
     });
+    expect(fixture.service.seatProvisioningDescriptorForCommand("operator_01", "commit_launch_01"))
+      .toStrictEqual({
+        schemaVersion: 1,
+        projectSessionId: "session_launch_01",
+        sessionRevision: 3,
+        sessionGeneration: 1,
+        coordinationRunId: "run_launch_01",
+        runRevision: 1,
+        chairAgentId: "chair_launch_01",
+        chairGeneration: 1,
+        chairLeaseId: "chair:run_launch_01:1",
+      });
     expect(databaseContains(fixture.database, "chair-secret-canary-01")).toBe(false);
     expect(databaseContains(fixture.database, attestationChallenge)).toBe(false);
   });
@@ -793,7 +810,7 @@ describe("launch custody", () => {
     } as unknown as OperatorActionCommitRequest);
 
     expect(genericEffects).toBe(0);
-    expect(receipt.launchProviderActionJournalRef).toMatchObject({ journalState: "ambiguous", outcomeKind: "ambiguous" });
+    expect(receipt.launchProviderActionJournalRef).toMatchObject({ journalState: "prepared", outcomeKind: null });
     expect(actions.status({
       credential: command.credential,
       projectId: "project_01",
@@ -874,6 +891,8 @@ describe("launch custody", () => {
         dispatchPrepared: fixture.service.dispatchPrepared.bind(fixture.service),
         launchProviderActionJournalRefForCommand:
           fixture.service.launchProviderActionJournalRefForCommand.bind(fixture.service),
+        seatProvisioningDescriptorForCommand:
+          fixture.service.seatProvisioningDescriptorForCommand.bind(fixture.service),
       },
       clock: () => now,
     });
@@ -1019,7 +1038,10 @@ describe("launch custody", () => {
         resourceUsage: { provider_calls: 1 },
       },
     };
-    const fixture = createFixture({ dispatch: async () => outcome, retainedChairBridge: true });
+    const fixture = createFixture({
+      dispatch: async () => outcome,
+      retainedChairBridge: true,
+    });
     const { handle } = await prepareFixture(fixture);
     await fixture.service.dispatchPrepared(handle);
     const loss = {
@@ -1163,10 +1185,28 @@ describe("launch custody", () => {
         providerSessionRef: "claude-chair-abandon-01",
         providerSessionGeneration: 3,
         effectDigest: digest("provider-abandon-effect"),
-        resourceUsage: { provider_calls: 1 },
+        resourceUsage: { provider_calls: "unknown", concurrent_turns: "unknown" },
       },
     };
-    const fixture = createFixture({ dispatch: async () => outcome, retainedChairBridge: true });
+    const fixture = createFixture({
+      dispatch: async () => outcome,
+      retainedChairBridge: true,
+      launchResources: { provider_calls: 1, concurrent_turns: 1 },
+    });
+    const localSubjectHash = digest("local operator subject");
+    fixture.database.prepare(`
+      UPDATE operator_principals SET authenticated_subject_hash=? WHERE operator_id='operator_01'
+    `).run(localSubjectHash);
+    fixture.database.prepare(`
+      INSERT INTO operator_capabilities(
+        capability_id, token_hash, operator_id, project_id, project_session_id,
+        project_authority_generation, session_generation, principal_generation,
+        kind, operations_json, issued_at, expires_at
+      ) VALUES (
+        'operator_cap_project_01', ?, 'operator_01', 'project_01', NULL,
+        1, NULL, 1, 'project-launch', '["read","launch"]', ?, ?
+      )
+    `).run(sha256("operator-project-secret"), now - 1, now + 60_000);
     const { handle } = await prepareFixture(fixture);
     await fixture.service.dispatchPrepared(handle);
     fixture.service.observeChairBridgeLoss({
@@ -1219,30 +1259,27 @@ describe("launch custody", () => {
       providerContractDigest: String(loss.provider_contract_digest) as Sha256Digest,
       reason: "operator accepted terminal provider loss",
     };
-    fixture.database.prepare(`
-      INSERT INTO operator_capabilities(
-        capability_id, token_hash, operator_id, project_id, project_session_id,
-        project_authority_generation, session_generation, principal_generation,
-        kind, operations_json, issued_at, expires_at, handoff_digest,
-        old_chair_generation, expected_run_id, expected_run_revision,
-        expected_session_revision, cas_target_revision
-      ) VALUES (
-        'operator_cap_recovery_01', ?, 'operator_01', 'project_01', 'session_launch_01',
-        1, ?, 1, 'takeover', '["takeover","read"]', ?, ?, ?, ?,
-        'run_launch_01', ?, ?, ?
-      )
-    `).run(
-      sha256("operator-recovery-secret"),
-      intent.expectedSessionGeneration,
-      now - 1,
-      now + 60_000,
-      intent.recoveryManifestDigest,
-      intent.expectedChairGeneration,
-      intent.expectedRunRevision,
-      intent.expectedSessionRevision,
-      intent.expectedBridgeRevision,
-    );
     const operatorStore = new OperatorStore({ database: fixture.database, clock: () => now });
+    const issued = operatorStore.openLocalOperatorConsoleTakeoverCapability({
+      projectId: "project_01",
+      canonicalRoot: fixture.root,
+      trustRecordDigest: trustDigest,
+      authenticatedSubjectHash: localSubjectHash,
+      projectCapability: {
+        capabilityId: "operator_cap_project_01",
+        token: "operator-project-secret",
+      },
+      projectSessionId: "session_launch_01",
+      expiresAt: new Date(now + 30_000).toISOString(),
+    });
+    expect(issued).toMatchObject({
+      kind: "takeover",
+      actions: ["read", "takeover"],
+      recoveryIntent: {
+        ...intent,
+        reason: "operator confirmed terminal retained-chair loss",
+      },
+    });
     let genericEffects = 0;
     const actions = new OperatorActionStore({
       database: fixture.database,
@@ -1262,9 +1299,9 @@ describe("launch custody", () => {
       principalGeneration: 1,
     } as never;
     const previewCommand = {
-      credential: { capabilityId: "operator_cap_recovery_01", token: "operator-recovery-secret" },
+      credential: issued.credential,
       commandId: "preview_recovery_abandon_01",
-      expectedRevision: intent.expectedBridgeRevision,
+      expectedRevision: issued.recoveryIntent.expectedBridgeRevision,
       actor: "operator_01",
       provenance: {
         kind: "console-direct-input",
@@ -1276,7 +1313,7 @@ describe("launch custody", () => {
     const preview = await actions.preview(context, {
       command: previewCommand,
       projectId: "project_01",
-      intent,
+      intent: issued.recoveryIntent,
     } as unknown as OperatorActionPreviewRequest);
     const receipt = await actions.commit(context, {
       command: {
@@ -1317,6 +1354,14 @@ describe("launch custody", () => {
     expect(fixture.database.prepare(`SELECT state FROM launched_chair_bridge_state`).get()).toEqual({ state: "abandoned" });
     expect(fixture.database.prepare(`SELECT state FROM project_sessions`).get()).toEqual({ state: "cancelled" });
     expect(fixture.database.prepare(`SELECT lifecycle_state FROM runs`).get()).toEqual({ lifecycle_state: "cancelled" });
+    expect(fixture.database.prepare(`
+      SELECT used, reserved, usage_unknown FROM resource_dimensions
+       WHERE scope_id='scope_project_01' AND unit_key='provider_calls'
+    `).get()).toEqual({ used: 1, reserved: 0, usage_unknown: 0 });
+    expect(fixture.database.prepare(`
+      SELECT used, reserved, usage_unknown FROM resource_dimensions
+       WHERE scope_id='scope_project_01' AND unit_key='concurrent_turns'
+    `).get()).toEqual({ used: 0, reserved: 0, usage_unknown: 0 });
     expect(fixture.database.prepare(`SELECT path FROM chair_bridge_loss_resolutions`).get()).toEqual({ path: "abandon" });
     expect(fixture.database.prepare(`SELECT state FROM deliveries WHERE delivery_id='informational_delivery'`).get())
       .toEqual({ state: "ready" });
@@ -2155,6 +2200,36 @@ describe("launch custody", () => {
       SELECT state FROM resource_reservations
        WHERE reservation_id=(SELECT reservation_id FROM project_session_launch_custody)
     `).get()).toEqual({ state: "reconciled" });
+
+    const reservation = fixture.database.prepare(`
+      SELECT reservation.reservation_id, reservation.revision
+        FROM resource_reservations reservation
+        JOIN project_session_launch_custody custody
+          ON custody.reservation_id=reservation.reservation_id
+    `).get() as { reservation_id: string; revision: number };
+    expect(fixture.service.reconcileUnknownLaunchUsage({
+      projectId: "project_01",
+      projectSessionId: "session_launch_01",
+      coordinationRunId: "run_launch_01",
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_01",
+      reservationId: reservation.reservation_id,
+      expectedReservationRevision: reservation.revision,
+      observedUsage: { provider_calls: 1 },
+      evidenceDigest: digest("exact authenticated launch usage"),
+    })).toEqual({
+      reservationId: reservation.reservation_id,
+      revision: reservation.revision + 1,
+      reconciledUsage: { provider_calls: 1 },
+    });
+    expect(fixture.database.prepare(`
+      SELECT COUNT(*) AS count FROM resource_dimensions
+       WHERE unit_key='provider_calls' AND usage_unknown=1
+    `).get()).toEqual({ count: 0 });
+    expect(fixture.database.prepare(`
+      SELECT used, reserved, usage_unknown FROM resource_dimensions
+       WHERE scope_id='scope_project_01' AND unit_key='provider_calls'
+    `).get()).toEqual({ used: 1, reserved: 0, usage_unknown: 0 });
   });
 
   it("enters recovery-required on exact launch overrun without truncating the reservation", async () => {

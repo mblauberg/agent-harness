@@ -116,6 +116,63 @@ describe("bootstrap election receipts", () => {
     await acquired?.release();
   });
 
+  it("fences an initially absent lock path before inspecting election artifacts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-bootstrap-probe-"));
+    cleanup.push(root);
+    const runtimeDirectory = join(root, "runtime");
+    await mkdir(runtimeDirectory, { mode: 0o700 });
+    const lockPath = join(runtimeDirectory, "daemon-election.lock");
+
+    const probe = await FLOCK_ELECTION_LOCK_PORT.probe(lockPath);
+    expect(probe.status).toBe("acquired");
+    if (probe.status !== "acquired") throw new Error("probe did not fence the absent lock path");
+    await expect(FLOCK_ELECTION_LOCK_PORT.tryAcquire(lockPath)).resolves.toBeUndefined();
+    expect((await stat(lockPath)).mode & 0o777).toBe(0o600);
+    await probe.handle.release();
+
+    const acquired = await FLOCK_ELECTION_LOCK_PORT.tryAcquire(lockPath);
+    expect(acquired).toBeDefined();
+    await acquired?.release();
+  });
+
+  it("allows concurrent shared inspection while excluding bootstrap ownership", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-bootstrap-shared-probe-"));
+    cleanup.push(root);
+    const runtimeDirectory = join(root, "runtime");
+    await mkdir(runtimeDirectory, { mode: 0o700 });
+    const lockPath = join(runtimeDirectory, "daemon-election.lock");
+
+    const first = await FLOCK_ELECTION_LOCK_PORT.probe(lockPath);
+    const second = await FLOCK_ELECTION_LOCK_PORT.probe(lockPath);
+    expect(first.status).toBe("acquired");
+    expect(second.status).toBe("acquired");
+    await expect(FLOCK_ELECTION_LOCK_PORT.tryAcquire(lockPath)).resolves.toBeUndefined();
+    if (second.status === "acquired") await second.handle.release();
+    if (first.status === "acquired") await first.handle.release();
+  });
+
+  it("holds the shared inspection fence through the caller snapshot", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-bootstrap-snapshot-"));
+    cleanup.push(root);
+    const runtimeDirectory = join(root, "runtime");
+    await mkdir(runtimeDirectory, { mode: 0o700 });
+    const election = new BootstrapElection({ runtimeDirectory });
+    let entered: (() => void) | undefined;
+    let release: (() => void) | undefined;
+    const enteredPromise = new Promise<void>((resolve) => { entered = resolve; });
+    const releasePromise = new Promise<void>((resolve) => { release = resolve; });
+    const snapshot = election.inspectCurrentWith(async (inspection) => {
+      entered?.();
+      await releasePromise;
+      return inspection.status;
+    });
+
+    await enteredPromise;
+    await expect(FLOCK_ELECTION_LOCK_PORT.tryAcquire(election.paths.lockPath)).resolves.toBeUndefined();
+    release?.();
+    await expect(snapshot).resolves.toBe("absent");
+  });
+
   it("requires both lease expiry and kernel-lock release before reclaiming a generation", async () => {
     const root = await mkdtemp(join(tmpdir(), "fabric-bootstrap-reclaim-"));
     cleanup.push(root);

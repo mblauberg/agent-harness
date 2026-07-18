@@ -10,9 +10,30 @@ executor that owns its own safety and activation gates must opt in explicitly
 with `--adapter-gate direct-cli`; this never bypasses family or model-pattern
 constraints.
 
-Route by **role, evidence surface, safety requirement, and capability tier**. Never route by a memorised
-model name. Discover current model IDs and tool modes at runtime (`cli-headless.md`) and record what was
-actually used for high-stakes work.
+Route every dispatch by **task class, role, evidence surface, safety requirement,
+and capability tier**. Never route by a memorised model name. Discover current
+model IDs and effort modes at runtime (`cli-headless.md`) and retain the route
+receipt.
+
+| Task class | Bound role | Default tier | Default effort | Typical work |
+|---|---|---|---|---|
+| `mechanical` | worker | scout | low | search, extraction, formatting, deterministic checks |
+| `legwork` | worker | workhorse | medium | ordinary implementation, analysis, drafting, source mapping |
+| `critical-review` | critical-review | flagship | high | hard review, adversarial verification, design judgement |
+| `orchestration` | orchestrator | flagship | high | decomposition, adjudication, synthesis |
+
+`scripts/model-route resolve --task-class ...` is authoritative for these
+defaults. An explicit role override may raise effort; an unavailable effort may
+substitute only when the receipt records requested and effective values. Alias
+routing remains a compatibility surface. Chair inheritance is exceptional: it
+must be explicit and recorded, never inferred from an omitted binding.
+Task-class dispatch rejects a mismatched role and requires a fresh, adapter-bound
+runtime capability snapshot that verifies the effective model and effort. Codex
+account-default transport still omits the literal model; its snapshot verifies
+effort while the receipt retains policy identity. Claude task-class dispatch
+uses a no-tools, no-session subscription canary and rejects caller-authored
+source labels without its scrubbed provenance. The canary has a small provider
+cost; reuse its snapshot only within the router's five-minute freshness window.
 
 ## Tiers (relative, family-agnostic)
 
@@ -69,9 +90,9 @@ two different-family passes where practical. Prefer the safest adapter that can 
 artifact. If no safe external adapter is available under the host data policy, use objective local
 checks and record `CROSS-FAMILY-NOT-RUN` instead of pretending it happened.
 
-In dynamic workflows, every stage inherits the session model unless the script routes it. Route bulk
-scan/extract stages to the cheap tier and reserve flagship for synthesis/adjudication stages
-explicitly (`dynamic-workflows.md`).
+In dynamic workflows, bind every stage from its task class. Route bulk
+scan/extract stages to scout and reserve flagship for synthesis/adjudication
+(`dynamic-workflows.md`).
 
 Express chains by **role → tier/family**, resolving names at runtime:
 
@@ -91,6 +112,15 @@ flexible advisory workers/reviewers: useful for blind spots, never load-bearing
 when quota/API output is absent. Pi stays dormant until a pinned distinct
 open-model route, current Herdr integration and smoke evaluation exist; it may
 not broker Claude/OpenAI and claim distinct-family certification.
+
+Provider-subscription preferences are deliberately small and explicit. Agy is
+Gemini-first and optional/advisory until its Fabric route has repeatable
+subscription-backed evidence. Cursor prefers xAI/Grok first, then Composer.
+If neither is available, route an explicit recorded fallback through the
+family's native Claude, Codex or Agy adapter; do not rebroadcast that family
+through Cursor unless its current compatibility contract admits it. The
+ordered machine policy is in `config/model-routing.json`; it never authorises
+automatic retries or silent substitution.
 
 ## Diversity caveat
 

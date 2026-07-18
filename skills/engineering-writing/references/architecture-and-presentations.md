@@ -8,6 +8,7 @@ Use this reference for architecture descriptions, decision records, design docum
 - [Architecture decision record (ADR)](#architecture-decision-record-adr)
 - [Design document](#design-document)
 - [Presentations and slide decks](#presentations-and-slide-decks)
+- [Progressive disclosure for mixed audiences](#progressive-disclosure-for-mixed-audiences)
 - [Meeting brief](#meeting-brief)
 
 ## Architecture description
@@ -84,6 +85,21 @@ Reader's job: for a non-technical audience (sponsors, clients, partners, a board
 - **Sweep titles and notes for slide-specific machine tells**, on top of the general sweep in `engineer-voice.md`: aphorism and chiasmus pairs (`the app wins the firms; the funding earns the revenue`), `X, not Y` slogan titles, coined abstractions no engineer says aloud (`structured distrust`), motivational-poster closers (`build it properly, on the right foundation`), and scripted sincerity in the speaker notes (`let me be straight with you`, `worth naming out loud`, `the sentence that matters`). Replace each with the plain assertion; conversational is fine, performed is not.
 
 Validation before presenting: a non-technical reviewer can state the decision being asked after the agenda slide; the ask appears once and consistently; stages, gates, and milestones use one scheme that matches the pack documents; every figure survives "what does the room decide with this?" and the hostile-reading test; scripted talk time plus demo fits the slot with room for discussion; no slide relies on unexplained jargon.
+
+## Progressive disclosure for mixed audiences
+
+Keep the primary layer concise: the adopted design, important trade-offs,
+material risks, open decisions and any operational cost range. Offer optional
+depth through stable, human-labelled links to the canonical requirements,
+architecture, design, security and specification material. Links must be
+accessible and useful to the intended reader, not raw internal mechanics they
+cannot open or interpret.
+
+Keep target design separate from current implementation status when both are
+relevant; omit status narration when it does not help the reader decide or act.
+For cost estimates, name the period, range, assumptions and contributing
+services or components, then link those drivers to the technical choices or
+evidence behind them.
 
 ## Meeting brief
 

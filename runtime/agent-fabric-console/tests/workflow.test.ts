@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
+const fakeProviderToken = `sk-${"A".repeat(24)}`;
+const fakePrivateKey = ["-----BEGIN PRIVATE", " KEY-----\nnot-real\n-----END PRIVATE", " KEY-----"].join("");
+
 import {
   FABRIC_OPERATIONS,
   OPERATION_CONTRACT_FIXTURES,
   type NegotiatedOperatorClient,
   type OperatorCapabilityCredential,
+  type OperatorActionCommitRequest,
   type OperatorProjectionSnapshot,
   type Intake,
   type ProjectId,
@@ -101,6 +105,56 @@ function dataset(withSession = true): FabricConsoleDataset {
     pages: createEmptyViewPages(),
     loadedAtMs: Date.parse(observedAt),
     canMutate: true,
+  };
+}
+
+function launchRecoveryDataset(state: "launching" | "launch_ambiguous"): FabricConsoleDataset {
+  const base = dataset();
+  const snapshot = base.snapshot;
+  const session = snapshot?.session;
+  if (snapshot == null || session?.freshness !== "live" || session.value === null) {
+    throw new Error("launch recovery session fixture unavailable");
+  }
+  return {
+    ...base,
+    snapshot: {
+      ...snapshot,
+      session: {
+        ...session,
+        value: { ...session.value, state },
+      },
+    },
+    pages: {
+      ...base.pages,
+      project: {
+        view: "project",
+        rows: [{
+          view: "project",
+          stableId: projectId,
+          revision: revisionFromProtocol(3),
+          urgency: "normal",
+          freshness: {
+            state: "live",
+            source: "fabric",
+            revision: revisionFromProtocol(3),
+            observedAt,
+            ageMs: 0,
+          },
+          summary: {
+            kind: "project",
+            goal: "Recover launch custody",
+            acceptedScopeRef: null,
+            repositoryRevision: "abc123",
+          },
+          detailRef: { kind: "project", projectId, expectedRevision: 3 },
+          actionAvailability: { state: "read-only", reason: "state-ineligible" },
+        }],
+        nextCursor: 1,
+        hasMore: false,
+        snapshotRevision: revisionFromProtocol(11),
+        readTransactionId: "launch-recovery-project-page",
+      },
+    },
   };
 }
 
@@ -394,6 +448,379 @@ describe("typed Console workflow planner", () => {
     }));
   });
 
+  it("reviews an editable closed launch packet from exact accepted evidence before preparing the session", async () => {
+    const acceptedScopeRef = { path: "docs/accepted-scope.md" as never, digest };
+    const intake: Intake = {
+      intakeId: "intake_implement" as never,
+      projectId,
+      projectSessionId,
+      coordinationRunId: "run_implement" as never,
+      revision: 5,
+      state: "accepted",
+      dedupeKey: "implement",
+      summary: "Implement accepted scope",
+      artifactRefs: [acceptedScopeRef],
+      gateIds: [],
+      acceptedScopeRef,
+    };
+    let loseFirstResponse = true;
+    const prepareImplementation = vi.fn(async (request) => {
+      if (loseFirstResponse) {
+        loseFirstResponse = false;
+        throw new Error("response lost after durable preparation");
+      }
+      return {
+        projectSession: {
+          ...request,
+          mode: "coordinated",
+          state: "awaiting_launch",
+          revision: 9,
+          generation: 2,
+          authorityRef: digest,
+          budgetRef: "budget_workflow",
+          launchPacketRef: request.launchPacketRef,
+          membershipRevision: 1,
+          origin: { kind: "operator-launch", operatorId: "operator_workflow" },
+        },
+        launchPacketRef: request.launchPacketRef,
+        resourcePlanRef: request.resourcePlanRef,
+        acceptedScopeRef,
+      };
+    });
+    const planner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        intakes: { createDraft: vi.fn(), read: vi.fn(async () => intake), submit: vi.fn(), revise: vi.fn() },
+        projectSessions: { prepareImplementation } as never,
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow" as never,
+      projectId,
+      now: () => Date.parse("2026-07-17T01:00:00.000Z"),
+    });
+    const selected = dataset();
+    const session = selected.snapshot?.session;
+    if (session?.freshness !== "live" || session.value === null) throw new Error("session fixture unavailable");
+    const binding = {
+      view: "evidence" as const,
+      itemId: "evidence_implement",
+      itemRevision: revisionFromProtocol(7),
+      projectionRevision: revisionFromProtocol(11),
+    };
+    const guidedDataset: FabricConsoleDataset = {
+      ...selected,
+      snapshot: {
+        ...selected.snapshot!,
+        session: { ...session, value: { ...session.value, state: "draft" } },
+      },
+      inspection: {
+        kind: "artifact",
+        state: "current",
+        binding,
+        readTransactionId: "implement-artifact-read",
+        result: {
+          artifactRef: acceptedScopeRef,
+          evidenceRevision: 7,
+          evidenceKind: "artifact",
+          sourceKind: "project-file",
+          publisherKind: "agent",
+          publisherRef: "chair-implement",
+          projectSessionId,
+          coordinationRunId: intake.coordinationRunId,
+          taskId: null,
+          createdAt: observedAt,
+          mediaType: "text/markdown",
+          content: "accepted scope",
+          totalBytes: 14,
+          totalLines: 1,
+          renderedTotalBytes: 14,
+          renderedTotalLines: 1,
+          renderedArtifactDigest: digest,
+          transformation: "none",
+          terminalNeutralised: true,
+          capabilityValuesRedacted: true,
+          credentialValuesRedacted: true,
+          pages: [{ pageIndex: 0, lineFragment: "whole", pageContentDigest: digest, bytes: 14 }],
+          coverage: { complete: true, verified: true, pageCount: 1 },
+          reviewDisposition: "eligible",
+        },
+      },
+    };
+    const resourcePlan = {
+      schemaVersion: 1,
+      projectId,
+      projectSessionId,
+      runId: "run_implement",
+      budgetRef: "budget_workflow",
+      scopes: {
+        project: { scopeId: "scope_project", limits: { provider_calls: 2, concurrent_turns: 2 } },
+        projectSession: { scopeId: "scope_session", limits: { provider_calls: 2, concurrent_turns: 2 } },
+        coordinationRun: { scopeId: "scope_run", limits: { provider_calls: 1, concurrent_turns: 1 } },
+      },
+      launchReservation: { amounts: { provider_calls: 1, concurrent_turns: 1 } },
+    };
+    const packet = {
+      schemaVersion: 1,
+      projectId,
+      projectSessionId,
+      runId: "run_implement",
+      chairAgentId: "chair_implement",
+      projectRunDirectory: ".agent-run/run_implement",
+      topologyMode: "coordinated",
+      budgetRef: "budget_workflow",
+      resourcePlanRef: { path: ".agent-run/run_implement/launch-resources.json", digest },
+      chairAuthority: {
+        schemaVersion: 2,
+        approval: { approvedBy: "human-maintainer", evidenceId: "accepted-scope", evidenceDigest: digest },
+        workspaceRoots: ["."],
+        sourcePaths: ["runtime/agent-fabric-console"],
+        artifactPaths: [".agent-run/run_implement"],
+        actions: [FABRIC_OPERATIONS.getTask],
+        deniedPaths: [],
+        deniedActions: [],
+        prohibitedActions: ["deployment"],
+        disclosure: { level: "scoped", scopes: ["local", "approved-provider"] },
+        secrets: { access: "none" },
+        deployment: { allowed: false },
+        irreversibleActions: { allowed: false },
+        network: { toolEgress: "none" },
+        expiresAt: "2026-07-18T01:00:00.000Z",
+        budget: { provider_calls: 1, concurrent_turns: 1 },
+      },
+      provider: {
+        adapterId: "claude-agent-sdk",
+        actionId: "provider_implement",
+        contractDigest: digest,
+        inputSchemaId: "provider-launch.v1",
+        input: {
+          model: "claude-opus",
+          prompt: "Reopen docs/accepted-scope.md and implement it.",
+        },
+      },
+    };
+    const raw = [
+      "intake=intake_implement",
+      "launch-packet-path=.agent-run/run_implement/launch-packet.json",
+      `packet=${JSON.stringify(packet)}`,
+      `resource-plan=${JSON.stringify(resourcePlan)}`,
+    ].join("\n");
+
+    const review = await planner.prepareGuided({
+      action: "implement",
+      binding,
+      raw,
+      dataset: guidedDataset,
+      eventId: "implement-open",
+    });
+
+    expect(prepareImplementation).not.toHaveBeenCalled();
+    expect(review).toMatchObject({
+      kind: "project-session-launch-packet-prepare",
+      stage: "review",
+      confirmationMode: "explicit",
+      details: expect.arrayContaining([
+        { label: "Provider route", value: expect.stringContaining("claude-agent-sdk") },
+        { label: "Provider input", value: expect.stringContaining("Reopen docs/accepted-scope.md") },
+        { label: "Worktree/write scopes", value: expect.stringContaining("runtime/agent-fabric-console") },
+        { label: "Budget", value: expect.stringContaining("concurrent_turns") },
+      ]),
+    });
+    const unsafePacket = {
+      ...packet,
+      provider: {
+        ...packet.provider,
+        input: {
+          apiKey: "not-real-api-key",
+          password: "not-real-password",
+          prompt: `Use ${fakeProviderToken} then https://operator:not-real@example.invalid/task`,
+          keyBlock: fakePrivateKey,
+        },
+      },
+    };
+    const unsafeReview = await planner.prepareGuided({
+      action: "implement",
+      binding,
+      raw: [
+        "intake=intake_implement",
+        "launch-packet-path=.agent-run/run_implement/launch-packet.json",
+        `packet=${JSON.stringify(unsafePacket)}`,
+        `resource-plan=${JSON.stringify(resourcePlan)}`,
+      ].join("\n"),
+      dataset: guidedDataset,
+      eventId: "implement-redacted-preview",
+    });
+    const unsafeRendered = JSON.stringify(unsafeReview.details);
+    for (const secret of [
+      "not-real-api-key",
+      "not-real-password",
+      fakeProviderToken,
+      "operator:not-real",
+      fakePrivateKey.split("\n", 1)[0],
+    ]) expect(unsafeRendered).not.toContain(secret);
+    expect(unsafeRendered).toContain("[REDACTED credential]");
+    await expect(planner.prepareGuided({
+      action: "implement",
+      binding,
+      raw: raw.replace("2026-07-18T01:00:00.000Z", "2026-07-17T00:59:59.000Z"),
+      dataset: guidedDataset,
+      eventId: "implement-expired",
+    })).rejects.toThrow("authority has expired");
+    expect(prepareImplementation).not.toHaveBeenCalled();
+
+    const editedRaw = raw
+      .replace("and implement it.", "and implement it, then write the handoff.")
+      .replace("claude-opus", "claude-sonnet");
+    const editedReview = await planner.prepareGuided({
+      action: "implement",
+      binding,
+      raw: editedRaw,
+      dataset: guidedDataset,
+      eventId: "implement-edit",
+    });
+    expect(editedReview.previewDigest).not.toBe(review.previewDigest);
+    expect(editedReview.details).toContainEqual({
+      label: "Launch packet",
+      value: expect.stringContaining("sha256:"),
+    });
+    expect(editedReview.details).toContainEqual({
+      label: "Provider input",
+      value: expect.stringMatching(/claude-sonnet.*write the handoff/),
+    });
+
+    const committed = await planner.commit({
+      review: planner.arm(editedReview, "implement-arm"),
+      eventId: "implement-confirm",
+    });
+    expect(committed.review.stage).toBe("committed");
+    expect(prepareImplementation).toHaveBeenCalledTimes(2);
+    expect(prepareImplementation).toHaveBeenCalledWith(expect.objectContaining({
+      acceptedScopeRef,
+      launchPacket: expect.objectContaining({
+        provider: expect.objectContaining({
+          input: expect.objectContaining({
+            model: "claude-sonnet",
+            prompt: expect.stringContaining("write the handoff"),
+          }),
+        }),
+      }),
+    }));
+    const committedCommandId = prepareImplementation.mock.calls[1]?.[0].command.commandId;
+
+    const restartedPrepare = vi.fn(async (request) => ({
+      projectSession: {
+        ...request,
+        mode: "coordinated" as const,
+        state: "awaiting_launch" as const,
+        revision: 9,
+        generation: 2,
+        authorityRef: digest,
+        budgetRef: "budget_workflow",
+        launchPacketRef: request.launchPacketRef,
+        membershipRevision: 1,
+        origin: { kind: "operator-launch" as const, operatorId: "operator_workflow" },
+      },
+      launchPacketRef: request.launchPacketRef,
+      resourcePlanRef: request.resourcePlanRef,
+      acceptedScopeRef,
+    }));
+    const restarted = createProductionConsoleWorkflowPlanner({
+      client: client({
+        intakes: { createDraft: vi.fn(), read: vi.fn(async () => intake), submit: vi.fn(), revise: vi.fn() },
+        projectSessions: { prepareImplementation: restartedPrepare } as never,
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow_restarted" as never,
+      projectId,
+      now: () => Date.parse("2026-07-17T01:00:00.000Z"),
+    });
+    const committedRequest = prepareImplementation.mock.calls[1]?.[0];
+    if (committedRequest === undefined) throw new Error("implementation request unavailable");
+    const restartedDataset: FabricConsoleDataset = {
+      ...guidedDataset,
+      snapshot: {
+        ...guidedDataset.snapshot!,
+        session: {
+          ...session,
+          value: {
+            ...session.value,
+            state: "awaiting_launch",
+            revision: 9,
+            launchPacketRef: committedRequest.launchPacketRef,
+          },
+        },
+      },
+    };
+    const recoveryReview = await restarted.prepareGuided({
+      action: "implement",
+      binding,
+      raw: editedRaw,
+      dataset: restartedDataset,
+      eventId: "implement-reconnect-open",
+    });
+    const recovered = await restarted.commit({
+      review: restarted.arm(recoveryReview, "implement-reconnect-arm"),
+      eventId: "implement-reconnect-confirm",
+    });
+    expect(recovered.review.stage).toBe("committed");
+    expect(restartedPrepare.mock.calls[0]?.[0].command.commandId).toBe(committedCommandId);
+    expect(restartedPrepare.mock.calls[0]?.[0].command.expectedRevision).toBe(8);
+
+    let ambiguousAttempts = 0;
+    const ambiguousPrepare = vi.fn(async (request) => {
+      ambiguousAttempts += 1;
+      if (ambiguousAttempts <= 2) throw new Error("transport unavailable");
+      return {
+        projectSession: {
+          ...request,
+          mode: "coordinated" as const,
+          state: "awaiting_launch" as const,
+          revision: 9,
+          generation: 2,
+          authorityRef: digest,
+          budgetRef: "budget_workflow",
+          launchPacketRef: request.launchPacketRef,
+          membershipRevision: 1,
+          origin: { kind: "operator-launch" as const, operatorId: "operator_workflow" },
+        },
+        launchPacketRef: request.launchPacketRef,
+        resourcePlanRef: request.resourcePlanRef,
+        acceptedScopeRef,
+      };
+    });
+    const ambiguousPlanner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        intakes: { createDraft: vi.fn(), read: vi.fn(async () => intake), submit: vi.fn(), revise: vi.fn() },
+        projectSessions: { prepareImplementation: ambiguousPrepare } as never,
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow_ambiguous" as never,
+      projectId,
+      now: () => Date.parse("2026-07-17T01:00:00.000Z"),
+    });
+    const ambiguousReview = await ambiguousPlanner.prepareGuided({
+      action: "implement",
+      binding,
+      raw: editedRaw,
+      dataset: guidedDataset,
+      eventId: "implement-ambiguous-open",
+    });
+    const ambiguous = await ambiguousPlanner.commit({
+      review: ambiguousPlanner.arm(ambiguousReview, "implement-ambiguous-arm"),
+      eventId: "implement-ambiguous-confirm",
+    });
+    expect(ambiguous.review.stage).toBe("ambiguous");
+    const observed = await ambiguousPlanner.observe({
+      review: ambiguous.review,
+      eventId: "implement-ambiguous-observe",
+    });
+    expect(observed.stage).toBe("committed");
+    expect(new Set(ambiguousPrepare.mock.calls.map(([request]) => request.command.commandId))).toEqual(
+      new Set([committedCommandId]),
+    );
+  });
+
   it("fails a guided decision before mutation when the supplied intake is cross-session", async () => {
     const wrongSessionIntake: Intake = {
       intakeId: "intake_wrong_session" as never,
@@ -523,6 +950,411 @@ describe("typed Console workflow planner", () => {
       eventId: "guided-git-unavailable",
     })).rejects.toThrow("git-contract-not-negotiated");
     expect(buildIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it("commits a dedicated Launch preview without calling the forbidden generic preview API", async () => {
+    const intent = {
+      kind: "project-session-launch" as const,
+      projectId,
+      projectSessionId,
+      expectedProjectRevision: 3,
+      expectedSessionRevision: 8,
+      expectedSessionGeneration: 2,
+      trustRecordDigest: digest,
+      launchPacketRef: { path: "launch/packet.json" as never, digest },
+      authorityRef: digest,
+      budgetRef: "budget_workflow",
+      resourcePlanRef: { path: "launch/resource-plan.json" as never, digest },
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_workflow" as never,
+      providerContractDigest: digest,
+      resourceStateDigest: digest,
+    };
+    const daemonPreview = {
+      previewId: "preview_guided_launch",
+      previewRevision: 1,
+      previewDigest: digest,
+      intent,
+      intentDigest: digest,
+      beforeStateDigest: digest,
+      consequenceClass: "consequential" as const,
+      evidenceRefs: [],
+      gateIds: [],
+      confirmationMode: "explicit" as const,
+      expiresAt: "2099-01-01T00:00:00.000Z" as Timestamp,
+    };
+    const genericPreview = vi.fn(async () => {
+      throw new Error("project-session-launch previews are server-authored only");
+    });
+    const preparedJournal = {
+      schemaVersion: 1 as const,
+      projectSessionId,
+      coordinationRunId: "run_launch_workflow" as never,
+      actionRef: { adapterId: "claude-agent-sdk", actionId: intent.providerActionId },
+      providerContractDigest: digest,
+      custodyAttemptGeneration: 1,
+      journalRevision: 1,
+      journalState: "prepared" as const,
+      outcomeKind: null,
+      outcomeDigest: null,
+    };
+    const receipt = {
+      commandId: "command_launch_commit",
+      previewId: daemonPreview.previewId,
+      previewRevision: 1,
+      intentDigest: digest,
+      beforeStateDigest: digest,
+      afterStateDigest: digest,
+      launchProviderActionJournalRef: preparedJournal,
+      evidenceRefs: [],
+      committedAt: observedAt,
+    };
+    const commit = vi.fn(async (request: OperatorActionCommitRequest) => ({
+      ...receipt,
+      commandId: request.command.commandId,
+    }));
+    const status = vi.fn(async (request: { commandId: string }) => ({
+      status: "committed" as const,
+      commandId: request.commandId,
+      receipt: { ...receipt, commandId: request.commandId },
+      launchProviderActionJournalRef: {
+        ...preparedJournal,
+        journalRevision: 2,
+        journalState: "terminal" as const,
+        outcomeKind: "terminal-success" as const,
+        outcomeDigest: digest,
+      },
+      seatProvisioning: {
+        schemaVersion: 1 as const,
+        projectSessionId,
+        sessionRevision: 9,
+        sessionGeneration: 2,
+        coordinationRunId: preparedJournal.coordinationRunId,
+        runRevision: 2,
+        chairAgentId: "chair_launch_workflow" as never,
+        chairGeneration: 1,
+        chairLeaseId: "chair:run_launch_workflow:1" as never,
+      },
+    }));
+    const planner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        console: {
+          readOnly: false,
+          launchAvailable: true,
+          actions: { preview: genericPreview, commit, status, reconcile: vi.fn() },
+          gates: { read: vi.fn() },
+          projection: { viewPage: vi.fn(), readDetail: vi.fn() },
+        },
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow" as never,
+      projectId,
+      typedEntryPlanner: {
+        capabilities: {
+          launch: { state: "available" },
+          git: { state: "unavailable", reason: "git-unavailable" },
+          promotion: { state: "unavailable", reason: "promotion-unavailable" },
+        },
+        buildIntent: vi.fn(async () => ({ intent, expectedRevision: 8, daemonPreview })),
+      },
+    });
+    const binding = {
+      view: "project" as const,
+      itemId: projectId,
+      itemRevision: revisionFromProtocol(3),
+      projectionRevision: revisionFromProtocol(11),
+    };
+
+    const review = await planner.prepareGuided({
+      action: "launch",
+      binding,
+      raw: "",
+      dataset: dataset(),
+      eventId: "guided-launch",
+    });
+    expect(genericPreview).not.toHaveBeenCalled();
+
+    const result = await planner.commit({
+      review: planner.arm(review, "guided-launch-arm"),
+      eventId: "guided-launch-confirm",
+    });
+    expect(commit).toHaveBeenCalledWith(expect.objectContaining({
+      previewId: daemonPreview.previewId,
+      expectedPreviewRevision: daemonPreview.previewRevision,
+      confirmation: expect.objectContaining({ kind: "explicit" }),
+    }));
+    expect(status).toHaveBeenCalledWith(expect.objectContaining({
+      commandId: expect.stringMatching(/^console_/u),
+    }));
+    expect(result.review.stage).toBe("committed");
+  });
+
+  it("keeps pending Launch custody observable and treats terminal no-effect as failure", async () => {
+    const intent = {
+      kind: "project-session-launch" as const,
+      projectId,
+      projectSessionId,
+      expectedProjectRevision: 3,
+      expectedSessionRevision: 8,
+      expectedSessionGeneration: 2,
+      trustRecordDigest: digest,
+      launchPacketRef: { path: "launch/packet.json" as never, digest },
+      authorityRef: digest,
+      budgetRef: "budget_workflow",
+      resourcePlanRef: { path: "launch/resource-plan.json" as never, digest },
+      providerAdapterId: "claude-agent-sdk",
+      providerActionId: "provider_launch_settlement" as never,
+      providerContractDigest: digest,
+      resourceStateDigest: digest,
+    };
+    const preparedJournal = {
+      schemaVersion: 1 as const,
+      projectSessionId,
+      coordinationRunId: "run_launch_settlement" as never,
+      actionRef: { adapterId: "claude-agent-sdk", actionId: intent.providerActionId },
+      providerContractDigest: digest,
+      custodyAttemptGeneration: 1,
+      journalRevision: 1,
+      journalState: "prepared" as const,
+      outcomeKind: null,
+      outcomeDigest: null,
+    };
+    const daemonPreview = {
+      previewId: "preview_launch_settlement",
+      previewRevision: 1,
+      previewDigest: digest,
+      intent,
+      intentDigest: digest,
+      beforeStateDigest: digest,
+      consequenceClass: "consequential" as const,
+      evidenceRefs: [],
+      gateIds: [],
+      confirmationMode: "explicit" as const,
+      expiresAt: "2099-01-01T00:00:00.000Z" as Timestamp,
+    };
+    const receipt = {
+      commandId: "command_launch_settlement",
+      previewId: daemonPreview.previewId,
+      previewRevision: 1,
+      intentDigest: digest,
+      beforeStateDigest: digest,
+      afterStateDigest: digest,
+      launchProviderActionJournalRef: preparedJournal,
+      evidenceRefs: [],
+      committedAt: observedAt,
+    };
+    const pendingStatus = {
+      status: "pending" as const,
+      commandId: receipt.commandId,
+      intentDigest: digest,
+      phase: "observing" as const,
+      attemptGeneration: 1,
+      launchProviderActionJournalRef: { ...preparedJournal, journalState: "accepted" as const },
+    };
+    const noEffectStatus = {
+      status: "committed" as const,
+      commandId: receipt.commandId,
+      receipt,
+      launchProviderActionJournalRef: {
+        ...preparedJournal,
+        journalRevision: 2,
+        journalState: "terminal" as const,
+        outcomeKind: "terminal-no-effect" as const,
+        outcomeDigest: digest,
+      },
+    };
+    const status = vi.fn()
+      .mockImplementationOnce(async (request: { commandId: string }) => ({
+        ...pendingStatus,
+        commandId: request.commandId,
+      }))
+      .mockImplementationOnce(async (request: { commandId: string }) => ({
+        ...noEffectStatus,
+        commandId: request.commandId,
+        receipt: { ...receipt, commandId: request.commandId },
+      }));
+    const reconcile = vi.fn();
+    const commit = vi.fn(async (_request: OperatorActionCommitRequest) => receipt);
+    const planner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        console: {
+          readOnly: false,
+          launchAvailable: true,
+          actions: {
+            preview: vi.fn(),
+            commit,
+            status,
+            reconcile,
+          },
+          gates: { read: vi.fn() },
+          projection: { viewPage: vi.fn(), readDetail: vi.fn() },
+        },
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_workflow" as never,
+      projectId,
+      typedEntryPlanner: {
+        capabilities: {
+          launch: { state: "available" },
+          git: { state: "unavailable", reason: "git-unavailable" },
+          promotion: { state: "unavailable", reason: "promotion-unavailable" },
+        },
+        buildIntent: vi.fn(async () => ({ intent, expectedRevision: 8, daemonPreview })),
+      },
+    });
+    const review = await planner.prepareGuided({
+      action: "launch",
+      binding: {
+        view: "project",
+        itemId: projectId,
+        itemRevision: revisionFromProtocol(3),
+        projectionRevision: revisionFromProtocol(11),
+      },
+      raw: "",
+      dataset: dataset(),
+      eventId: "launch-settlement-review",
+    });
+    const pending = await planner.commit({
+      review: planner.arm(review, "launch-settlement-arm"),
+      eventId: "launch-settlement-commit",
+    });
+    expect(pending.review).toMatchObject({ stage: "pending", failure: null });
+    const committedCommandId = commit.mock.calls[0]?.[0].command.commandId;
+    expect(committedCommandId).toMatch(/^console_launch_/u);
+    expect(status.mock.calls[0]?.[0].commandId).toBe(committedCommandId);
+
+    const reopenedStatus = vi.fn(async (request: { commandId: string }) => ({
+      ...pendingStatus,
+      commandId: request.commandId,
+    }));
+    const reopenedBuildIntent = vi.fn(async () => {
+      throw new Error("restart recovery must not prepare a second launch");
+    });
+    const reopenedPlanner = createProductionConsoleWorkflowPlanner({
+      client: client({
+        console: {
+          readOnly: false,
+          launchAvailable: true,
+          actions: {
+            preview: vi.fn(),
+            commit: vi.fn(),
+            status: reopenedStatus,
+            reconcile: vi.fn(),
+          },
+          gates: { read: vi.fn() },
+          projection: { viewPage: vi.fn(), readDetail: vi.fn() },
+        },
+      }),
+      credential,
+      operatorId: "operator_workflow" as never,
+      clientId: "console_after_restart" as never,
+      projectId,
+      typedEntryPlanner: {
+        capabilities: {
+          launch: { state: "available" },
+          git: { state: "unavailable", reason: "git-unavailable" },
+          promotion: { state: "unavailable", reason: "promotion-unavailable" },
+        },
+        buildIntent: reopenedBuildIntent,
+      },
+    });
+    const reopened = await reopenedPlanner.prepareGuided({
+      action: "launch",
+      binding: {
+        view: "project",
+        itemId: projectId,
+        itemRevision: revisionFromProtocol(3),
+        projectionRevision: revisionFromProtocol(11),
+      },
+      raw: "",
+      dataset: launchRecoveryDataset("launching"),
+      eventId: "launch-after-process-restart",
+    });
+    expect(reopened).toMatchObject({ stage: "pending", failure: null });
+    expect(reopenedStatus).toHaveBeenCalledWith(expect.objectContaining({
+      commandId: committedCommandId,
+    }));
+    expect(reopenedBuildIntent).not.toHaveBeenCalled();
+
+    const settled = await planner.observe({
+      review: pending.review,
+      eventId: "launch-settlement-observe",
+    });
+    expect(status).toHaveBeenLastCalledWith(expect.objectContaining({
+      commandId: expect.stringMatching(/^console_/u),
+    }));
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(settled).toMatchObject({
+      stage: "conflict",
+      failure: "LAUNCH_TERMINAL_NO_EFFECT",
+    });
+
+    commit.mockRejectedValueOnce(new Error("commit response lost"));
+    status.mockImplementationOnce(async (request: { commandId: string }) => ({
+      ...noEffectStatus,
+      commandId: request.commandId,
+      receipt: { ...receipt, commandId: request.commandId },
+    }));
+    const lostResponseReview = await planner.prepareGuided({
+      action: "launch",
+      binding: {
+        view: "project",
+        itemId: projectId,
+        itemRevision: revisionFromProtocol(3),
+        projectionRevision: revisionFromProtocol(11),
+      },
+      raw: "",
+      dataset: dataset(),
+      eventId: "launch-lost-response-review",
+    });
+    const recoveredLostResponse = await planner.commit({
+      review: planner.arm(lostResponseReview, "launch-lost-response-arm"),
+      eventId: "launch-lost-response-commit",
+    });
+    expect(recoveredLostResponse.review).toMatchObject({
+      stage: "conflict",
+      failure: "LAUNCH_TERMINAL_NO_EFFECT",
+    });
+
+    status
+      .mockRejectedValueOnce(new Error("first status unavailable"))
+      .mockRejectedValueOnce(new Error("recovery status unavailable"))
+      .mockImplementationOnce(async (request: { commandId: string }) => ({
+        ...noEffectStatus,
+        commandId: request.commandId,
+        receipt: { ...receipt, commandId: request.commandId },
+      }));
+    const unavailableReview = await planner.prepareGuided({
+      action: "launch",
+      binding: {
+        view: "project",
+        itemId: projectId,
+        itemRevision: revisionFromProtocol(3),
+        projectionRevision: revisionFromProtocol(11),
+      },
+      raw: "",
+      dataset: dataset(),
+      eventId: "launch-status-unavailable-review",
+    });
+    const unavailable = await planner.commit({
+      review: planner.arm(unavailableReview, "launch-status-unavailable-arm"),
+      eventId: "launch-status-unavailable-commit",
+    });
+    expect(unavailable.review).toMatchObject({
+      stage: "pending",
+      failure: "LAUNCH_STATUS_UNAVAILABLE",
+    });
+    const recoveredUnavailable = await planner.observe({
+      review: unavailable.review,
+      eventId: "launch-status-recovered-observe",
+    });
+    expect(recoveredUnavailable).toMatchObject({
+      stage: "conflict",
+      failure: "LAUNCH_TERMINAL_NO_EFFECT",
+    });
+    expect(reconcile).not.toHaveBeenCalled();
   });
 
   it("previews and commits a revision-bound Attention request-changes decision", async () => {

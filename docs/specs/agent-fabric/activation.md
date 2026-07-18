@@ -1,8 +1,8 @@
 # Agent Fabric activation and operations
 
-[Issue #23](https://github.com/mblauberg/provenant/issues/23) and its Project
-Status field own delivery state, owner, dependencies and user gates for these
-requirements.
+[Issue #23](https://github.com/mblauberg/provenant/issues/23) records the
+completed delivery that established these requirements. A change to them
+requires a current linked GitHub issue and Project Status.
 
 The current contract closes effective-configuration identity, subject lineage and permission semantics across activation, smoke and provider actions. It permits authorised write-capable generic work while retaining enforced read-only as a hard certifying-review requirement. Every active adapter publishes the shared capability snapshot and effective launch configuration, with requested, actual or honestly unknown route identity in its activation evidence.
 
@@ -12,16 +12,22 @@ Promote the coordination-only agent fabric into a safely activated local model-e
 
 ## Required behaviour
 
-1. Every activated adapter is bound to Git wrapper provenance: the wrapper entrypoint is tracked source, verified tracked at the owning repository's HEAD and byte-identical to its committed content, and recorded as repository commit plus wrapper path in the composed adapter evidence. The verified first-party span covers the owning workspace package's src tree and every local workspace dependency's src tree (`@local/*` packages import their sources in the wrapper execution path via the `source` export condition), and provenance is re-derived immediately before every adapter process spawn. Untracked, ignored or locally modified wrapper code fails activation closed. Upstream executable or package identity, protocol/schema and model-family constraints stay hash-verified; hash pins exist only for identities Git does not supply. The tsx loader that executes tracked TypeScript source is a lockfile-pinned third-party dependency — the same trust class as the provider SDK dependencies that neither the removed manifest model nor Git provenance pins.
+1. Every activated adapter is bound to Git wrapper provenance: the wrapper entrypoint is tracked source, verified tracked at the owning repository's HEAD and byte-identical to its committed content, and recorded as repository commit plus wrapper path in the composed adapter evidence. The verified first-party span covers the owning workspace package's src tree and every local workspace dependency's src tree (`@local/*` packages import their sources in the wrapper execution path via the `source` export condition), and provenance is re-derived immediately before every adapter process spawn. Untracked, ignored or locally modified wrapper code fails activation closed. Provider CLIs are admitted through their stable launcher, adapter-specific vendor identity and bounded non-answer interface; observed version and digest never gate a normal update. Protocol schemas and Fabric SDK libraries remain hash/lockfile verified. The tsx loader that executes tracked TypeScript source is a lockfile-pinned third-party dependency.
 2. Provider work uses the admitted absolute working directory and exact matched
    permission profile. Generic work may use write tools/edit modes only when its
    task authority and matched profile explicitly grant them; approval bypasses,
    extra roots and uncontrolled provider/model substitutions remain forbidden.
    Certifying review always requires an enforced `read-only` profile.
 3. Malformed, drifted or ambiguous provider responses fail closed before state is accepted.
-4. Kiro uses a real, version-pinned ACP client with bounded framing, capability negotiation, session lifecycle and read-only tool policy.
+4. Kiro uses a real ACP v1 client with bounded framing, capability negotiation,
+   session lifecycle and read-only tool policy; its signed stable launcher and
+   initialize handshake are revalidated without a CLI version lock.
 5. Activation is staged and reversible. One adapter failure cannot disable coordination or corrupt another adapter's journal.
-6. Provider-backed smoke tests use bounded read-only prompts, record the pinned adapter/executable and explicitly requested model route, reject wrapper-visible substitutions, and may consume quota under this approval. Upstreams that do not report an effective model must not be described as independently proving it.
+6. Provider-backed smoke tests use bounded read-only prompts, record the
+   admitted adapter, canonical executable and observed identity plus the
+   explicitly requested model route, reject wrapper-visible substitutions, and
+   may consume quota under this approval. Upstreams that do not report an
+   effective model must not be described as independently proving it.
 7. Herdr observation reads a durable monotonic event cursor and renders one-line summaries in a separate local observer pane. Message events include a terminal-safe 160-character body preview. It never types into an agent composer, receives mail or acknowledges delivery.
 8. Seat expiry warnings are automatic. Authority extension remains an explicit operator action: close the old run only after daemon-produced barrier evidence, provision a fresh immutable generation, atomically cut over the roster, reconnect every seat, and run health plus round-trip smokes. The global 31-day maximum remains non-configurable by projects.
 
@@ -75,6 +81,15 @@ migration or new authority model.
 7. Coordinated seat renewal.
 
 Each step must pass compatibility, boundary, conformance and negative tests before joining `activeAdapters`. Provider-backed smoke follows activation and stops on any write attempt, schema drift, unexpected permission request, missing session reference or unbounded output.
+
+The current activated optional-reviewer identities are Agy
+`Gemini 3.1 Pro (High)` (`google`, high) and Cursor
+`cursor-grok-4.5-high` (`xai`, high). They use the existing provider
+subscription sessions. Adapter subprocesses receive no ambient provider API
+key, and no provider credential is stored in Fabric. Activation remains exact:
+the installed CLI version, executable (and Cursor bundle), schema, wrapper
+provenance, explicit model, family and model-encoded effort must all match the
+checked contract or new work fails closed.
 
 ## Non-goals
 

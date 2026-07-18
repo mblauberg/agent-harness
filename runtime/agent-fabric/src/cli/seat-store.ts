@@ -13,6 +13,7 @@ export type SeatMetadata = {
   projectPath: string;
   generation: string;
   previousGeneration: string | null;
+  originKind?: "bootstrap" | "provisioned";
   projectSessionId: string;
   sessionRevision: number;
   sessionGeneration: number;
@@ -44,6 +45,12 @@ export type SeatGenerationPointer = {
   schemaVersion: 1;
   projectKey: string;
   previousGeneration: string | null;
+  generation: string;
+};
+
+type LegacyBootstrapGenerationMarker = {
+  schemaVersion: 1;
+  projectKey: string;
   generation: string;
 };
 
@@ -190,6 +197,20 @@ function parseGenerationPointer(pointer: unknown, pointerPath: string, key: stri
   return pointer as SeatGenerationPointer;
 }
 
+function parseLegacyBootstrapMarker(marker: unknown, markerPath: string, key: string): LegacyBootstrapGenerationMarker {
+  if (
+    typeof marker !== "object" || marker === null || Array.isArray(marker) ||
+    Object.keys(marker).sort().join(",") !== "generation,projectKey,schemaVersion" ||
+    !("schemaVersion" in marker) || marker.schemaVersion !== 1 ||
+    !("projectKey" in marker) || marker.projectKey !== key ||
+    !("generation" in marker) || typeof marker.generation !== "string" ||
+    !GENERATION_PATTERN.test(marker.generation)
+  ) {
+    throw new Error(`legacy bootstrap generation marker is invalid: ${markerPath}`);
+  }
+  return marker as LegacyBootstrapGenerationMarker;
+}
+
 async function activeGeneration(directory: string, key: string): Promise<string> {
   const pointerPath = join(directory, "current.json");
   return parseGenerationPointer(JSON.parse(await readPrivateFile(pointerPath)), pointerPath, key).generation;
@@ -207,6 +228,49 @@ export async function readActiveSeatGeneration(input: {
     if (errorCode(error) === "ENOENT") return null;
     throw error;
   }
+}
+
+export async function readLegacyBootstrapSeatGeneration(input: {
+  stateDirectory: string;
+  projectPath: string;
+}): Promise<string | null> {
+  const root = await resolveSeatProject({ stateDirectory: input.stateDirectory, project: input.projectPath });
+  const markerPath = join(root.directory, "legacy-bootstrap.json");
+  try {
+    return parseLegacyBootstrapMarker(
+      JSON.parse(await readPrivateFile(markerPath)),
+      markerPath,
+      root.projectKey,
+    ).generation;
+  } catch (error: unknown) {
+    if (errorCode(error) === "ENOENT") return null;
+    throw error;
+  }
+}
+
+export async function markLegacyBootstrapSeatGeneration(input: {
+  stateDirectory: string;
+  projectPath: string;
+  generation: string;
+}): Promise<void> {
+  if (!GENERATION_PATTERN.test(input.generation)) throw new Error("legacy bootstrap generation is invalid");
+  const root = await resolveSeatProject({ stateDirectory: input.stateDirectory, project: input.projectPath });
+  await withPointerLock(root.directory, async () => {
+    const active = await readActiveSeatGeneration(input);
+    if (active?.generation !== input.generation) {
+      throw new Error("active MCP seat generation changed before legacy bootstrap marking");
+    }
+    const marker: LegacyBootstrapGenerationMarker = {
+      schemaVersion: 1,
+      projectKey: root.projectKey,
+      generation: input.generation,
+    };
+    await atomicPrivateWrite(
+      join(root.directory, "legacy-bootstrap.json"),
+      `${JSON.stringify(marker, null, 2)}\n`,
+    );
+    await syncDirectory(root.directory);
+  });
 }
 
 export function parseMcpSeat(value: string): McpSeat {
@@ -264,6 +328,7 @@ export async function installSeatGeneration(input: {
   generation: string;
   expectedPreviousGeneration: string | null;
   seats: Array<{ metadata: Omit<SeatMetadata, "credentialPath">; credential: string }>;
+  allowMissingPreviousGeneration?: boolean;
   beforeActivate?: () => void | Promise<void>;
 }): Promise<Array<{ seat: McpSeat; credentialPath: string; metadataPath: string }>> {
   if (!GENERATION_PATTERN.test(input.generation)) throw new Error("MCP seat generation is invalid");
@@ -339,7 +404,10 @@ export async function installSeatGeneration(input: {
         }
         return;
       }
-      if ((active?.generation ?? null) !== input.expectedPreviousGeneration) {
+      const crashConvergence = active === null &&
+        input.expectedPreviousGeneration !== null &&
+        input.allowMissingPreviousGeneration === true;
+      if (!crashConvergence && (active?.generation ?? null) !== input.expectedPreviousGeneration) {
         throw new Error("active MCP seat generation changed before filesystem cutover");
       }
       const pointer: SeatGenerationPointer = {

@@ -44,6 +44,48 @@ def test_constitution_names_equal_primaries_and_router_has_current_codex_family(
     assert "GPT-5.6" in routing
 
 
+def test_first_use_fabric_trust_is_exact_and_does_not_provision():
+    agents = " ".join((ROOT / "AGENTS.md").read_text().split())
+    runbook = " ".join(
+        (ROOT / "docs" / "runbooks" / "agent-fabric-operations.md").read_text().split()
+    )
+    assert "exact canonical repository root" in agents
+    assert "never trust a parent, wildcard, home or sibling collection" in agents
+    assert "Standing global harness authority covers only automatic trust registration" in runbook
+    assert "Seat provisioning remains separately gated" in runbook
+    assert "trust a project root or provision" not in runbook
+
+
+def test_first_use_fabric_trust_uses_the_global_home_launcher():
+    agents = " ".join((ROOT / "AGENTS.md").read_text().split())
+    runbook = " ".join(
+        (ROOT / "docs" / "runbooks" / "agent-fabric-operations.md").read_text().split()
+    )
+    command = '$HOME/.agents/scripts/agent-fabric workspace trust'
+    assert command in agents
+    assert f'{command} "$project_root"' in runbook
+    assert '`scripts/agent-fabric workspace trust "$project_root"`' not in runbook
+
+
+def test_subagent_dispatch_contract_requires_task_class_bound_route_and_receipt():
+    harness = (ROOT / "HARNESS.md").read_text()
+    skill = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text()
+    contract = (
+        ROOT / "skills" / "orchestrate" / "references" / "orchestration-contract.md"
+    ).read_text()
+    codex = (
+        ROOT / "skills" / "orchestrate" / "references" / "codex-subagents.md"
+    ).read_text()
+    for field in ("task class", "tier", "model", "effort", "route receipt"):
+        assert field in contract.lower()
+    assert "task class" in skill.lower()
+    assert "Codex subscription-native workers bind effort only" in harness
+    assert (
+        "For subscription-native Codex workers, omit the literal transport `model` "
+        "and bind the resolved `effort`."
+    ) in codex
+
+
 def test_constitution_is_a_compact_core_with_progressive_disclosure():
     text = (ROOT / "HARNESS.md").read_text()
     assert len(text.split()) <= 700
@@ -474,3 +516,31 @@ def test_retrospect_closes_the_quality_flywheel_without_log_bloat():
     assert "one dated log per run" in skill
     assert "proposal-first and read-only by default" in skill
     assert "user-approved scope" in skill
+
+
+def test_current_docs_use_live_issue_and_durable_decision_owners():
+    specs_index = (ROOT / "docs" / "specs" / "README.md").read_text()
+    handoffs = (ROOT / "docs" / "handoffs" / "README.md").read_text()
+    historical_specs = (
+        ROOT / "docs" / "specs" / "harness" / "lifecycle.md",
+        ROOT / "docs" / "specs" / "agent-fabric" / "activation.md",
+        ROOT / "docs" / "specs" / "agent-fabric" / "provider-write-containment.md",
+    )
+
+    assert "issues/141" in specs_index
+    assert "No active handoffs." in handoffs
+    assert not (ROOT / "docs" / "handoffs" / "consolidated-harness-cli.md").exists()
+    assert (ROOT / "docs" / "adr" / "0013-thin-provenant-cli.md").is_file()
+    for path in historical_specs:
+        text = path.read_text()
+        assert "owns current delivery" not in text
+        assert "own delivery state" not in text
+
+
+def test_current_architecture_and_install_bootstrap_use_user_terminology():
+    architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text()
+    installer = (ROOT / "scripts" / "install-harness").read_text()
+
+    assert re.search(r"\bhuman(?:s)?\b|human-", architecture, re.IGNORECASE) is None
+    assert "explicit user authority" in installer
+    assert "explicit human authority" not in installer

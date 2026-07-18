@@ -13,6 +13,7 @@ import {
   type OperatorHeartbeatRequest,
   type IntegrationInputAttestationRequest,
   type OperatorInputAttestation,
+  type ChairBridgeRecoveryIntent,
 } from "@local/agent-fabric-protocol";
 import { randomBytes } from "node:crypto";
 import type Database from "better-sqlite3";
@@ -39,6 +40,9 @@ import {
   timestampToMillis,
   type Row,
 } from "../project-session/store-support.js";
+import {
+  openLocalOperatorConsoleTakeoverCapability as openLocalOperatorConsoleTakeoverCapabilityOwner,
+} from "./local-takeover-capability.js";
 
 export type OperatorCommandTarget = {
   projectId: string;
@@ -142,6 +146,32 @@ export type LocalOperatorConsoleSessionCapabilityResult =
     issued: true;
     credential: { capabilityId: string; token: string };
   };
+
+export type LocalOperatorTakeoverCapabilityInput = {
+  projectId: string;
+  canonicalRoot: string;
+  trustRecordDigest: string;
+  authenticatedSubjectHash: string;
+  projectCapability: { capabilityId: string; token: string };
+  projectSessionId: string;
+  expiresAt: string;
+};
+
+export type LocalOperatorTakeoverCapabilityResult = {
+  projectId: string;
+  operatorId: string;
+  capabilityId: string;
+  projectSessionId: string;
+  projectAuthorityGeneration: number;
+  sessionGeneration: number;
+  principalGeneration: number;
+  kind: "takeover";
+  actions: ["read", "takeover"];
+  issuedAt: string;
+  expiresAt: string;
+  credential: { capabilityId: string; token: string };
+  recoveryIntent: Extract<ChairBridgeRecoveryIntent, { path: "abandon" }>;
+};
 
 export type LocalOperatorPrincipalRotationInput = {
   projectId: string;
@@ -725,6 +755,17 @@ export class OperatorStore {
       );
     }
     return result;
+  }
+
+  openLocalOperatorConsoleTakeoverCapability(
+    input: LocalOperatorTakeoverCapabilityInput,
+  ): LocalOperatorTakeoverCapabilityResult {
+    return openLocalOperatorConsoleTakeoverCapabilityOwner({
+      database: this.database,
+      clock: this.#clock,
+      authenticateCredential: (token) => this.authenticateCredential(token),
+      issueCapability: (grant, token) => this.issueCapability(grant, token),
+    }, input);
   }
 
   rotatePrincipal(input: LocalOperatorPrincipalRotationInput): LocalOperatorPrincipalRotationResult {
@@ -1385,6 +1426,14 @@ export class OperatorStore {
       return result;
     });
     return execute();
+  }
+
+  authenticateCommand(
+    context: AuthenticatedOperatorContext,
+    command: OperatorMutationContext,
+    target: OperatorCommandTarget,
+  ): void {
+    this.#authenticate(context, command, target, false);
   }
 
   #authenticate(

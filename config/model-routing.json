@@ -1,6 +1,12 @@
 {
   "schema_version": 1,
-  "catalog_date": "2026-07-10",
+  "catalog_date": "2026-07-18",
+  "task_class_routes": {
+    "mechanical": {"alias": "scout", "effort": "low", "role": "worker"},
+    "legwork": {"alias": "workhorse", "effort": "medium", "role": "worker"},
+    "critical-review": {"alias": "flagship", "effort": "high", "role": "critical-review"},
+    "orchestration": {"alias": "flagship", "effort": "high", "role": "orchestrator"}
+  },
   "families": {
     "anthropic": {
       "aliases": {
@@ -41,14 +47,36 @@
   },
   "adapters": {
     "claude": {"endpoint_provider": "anthropic", "fixed_model_family": "anthropic", "effort_transport": "flag"},
-    "codex": {"endpoint_provider": "openai", "fixed_model_family": "openai", "effort_transport": "flag"},
-    "cursor": {"endpoint_provider": "cursor", "fixed_model_family": null, "effort_transport": "model-id"},
-    "agy": {"endpoint_provider": "agy", "fixed_model_family": null, "effort_transport": "model-id"},
+    "codex": {"endpoint_provider": "openai", "fixed_model_family": "openai", "effort_transport": "flag", "model_selection": "account-default"},
+    "cursor": {
+      "endpoint_provider": "cursor",
+      "fixed_model_family": null,
+      "effort_transport": "model-id",
+      "model_family_preferences": {
+        "preferred": ["xai", "cursor-composer"],
+        "fallback": {
+          "anthropic": "claude",
+          "openai": "codex",
+          "google": "agy"
+        }
+      }
+    },
+    "agy": {
+      "endpoint_provider": "agy",
+      "fixed_model_family": null,
+      "effort_transport": "model-id",
+      "model_family_preferences": {
+        "preferred": ["google", "anthropic"],
+        "fallback": {}
+      }
+    },
     "copilot": {"endpoint_provider": "github", "fixed_model_family": null, "effort_transport": "flag"},
     "kiro": {"endpoint_provider": "aws", "fixed_model_family": null, "effort_transport": "flag"},
+    "opencode": {"endpoint_provider": "opencode", "fixed_model_family": "generic-open", "effort_transport": "flag"},
     "pi": {"endpoint_provider": "configured", "fixed_model_family": null, "effort_transport": "none"}
   },
   "model_patterns": [
+    {"pattern": "^opencode/", "family": "generic-open"},
     {"pattern": "claude|fable|opus|sonnet|haiku", "family": "anthropic"},
     {"pattern": "gpt|codex|^o1|^o3|^o4", "family": "openai"},
     {"pattern": "gemini", "family": "google"},

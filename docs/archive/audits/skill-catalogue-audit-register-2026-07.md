@@ -1,6 +1,6 @@
-# Skill Catalogue Audit Register — Epic #124, Workstream B
+# Archived Skill Catalogue Audit Register — Epic #124, Workstream B
 
-> **Status:** audit recommendations + **owner decisions recorded** (grill-me R1–R5, see next section). All 12 DEFERs resolved into a direction; execution **complete** on branch `issue-124-skill-audit-register` (see **Implementation status** below).
+> **Status:** historical and consumed. Audit recommendations and **owner decisions are recorded** below; execution completed in July 2026.
 > **Date:** 2026-07-15 · **Epic:** #124 · **Scope:** 33 skills (+ `_shared`) · **Outcome:** 21 APPROVE-ready · 12 DEFER (now decided) · 0 CUT.
 > **Provenance:** 6 family-batched auditors + 1 licensing/provenance auditor (workhorse tier), flagship synthesis, other-primary cross-family verify (all findings folded). Source-read-only throughout.
 
@@ -37,7 +37,7 @@ All staged implement work landed on branch `issue-124-skill-audit-register`. Cat
 
 **Remaining (not on this branch):**
 - **#135**: direct milestone-codename retirement and commit-plus-path routing provenance, implemented on its child branch.
-- **Codex P2 (release-gate trackedness), deferred:** `public_release_check.scan_paths` validates `REQUIRED` legal files by filesystem existence, not tracked-set membership, so a future consolidation could omit a tracked required file while the gate passes. The current tree is unaffected (`NOTICE` + all eight `LICENSES/*` are tracked). The clean fix (a canonical manifest plus an untracked-decoy regression test) is a gate refactor deferred to its own change rather than rushed under a CI green-up.
+- **Codex P2 (release-gate trackedness), deferred to [#224](https://github.com/mblauberg/provenant/issues/224):** `public_release_check.scan_paths` validates `REQUIRED` legal files by filesystem existence, not tracked-set membership, so a future consolidation could omit a tracked required file while the gate passes. The current tree is unaffected (`NOTICE` + all eight `LICENSES/*` are tracked). The live issue owns the canonical-manifest and untracked-decoy regression fix.
 
 ## Owner decisions (grill-me R1–R5)
 

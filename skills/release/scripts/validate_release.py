@@ -175,6 +175,9 @@ def accepted_artifact_errors(
     except DELIVERY_VALIDATOR.Invalid:
         errors.append("artifact.acceptance_receipt must be a valid neutral delivery receipt")
 
+    if delivery.get("profile") == "software" and not delivery.get("software_delivery"):
+        errors.append("software promotion requires the canonical post-merge delivery binding")
+
     if gate == "ready" and delivery.get("status") != "awaiting_release":
         errors.append("artifact.acceptance_receipt must be awaiting_release at the ready gate")
     if gate == "complete" and (

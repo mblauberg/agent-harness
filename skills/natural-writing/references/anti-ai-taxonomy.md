@@ -41,6 +41,12 @@ These have no legitimate register value in any of this family's domains.
   `This section explains`. Write about the subject, not the act of writing:
   `This guide explains how to configure the worker` becomes `Configure the
   worker.`
+- **Interface meta-copy.** A heading, badge, label or helper sentence must
+  name information or an action. Remove copy whose only job is to advertise
+  the format, ease of reading or an obvious card or control. Keep instructions
+  when the action, consequence or accessibility affordance is not self-evident.
+  Do not repeat an actor in both a label and its sentence unless attribution
+  changes authority, provenance, liability or negotiation meaning.
 - **Tool and markup residue.** Literal tool strings (`turn0search0`,
   `oaicite`, `oai_citation`, `contentReference`, `attributableIndex`),
   `utm_source=chatgpt.com` in link URLs, stray `**bold**` markers or `#`

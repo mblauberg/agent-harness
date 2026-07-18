@@ -41,3 +41,34 @@ it does not replace or weaken validation of the private canonical receipt.
 
 `awaiting_acceptance` is machine-ready, not complete. User acceptance and any
 production promotion remain separate gates.
+
+## Post-merge continuity
+
+For a pull-request delivery, retain the complete ignored run directory until
+the merge commit and its `ci-status` check exist. Copy that directory into the
+synced primary checkout before removing the implementation worktree, then run
+`scripts/bind_merged_delivery.py` there with the pre-existing typed exact-head
+review artifacts. The binder reads PR and `ci-status` truth through the
+authenticated GitHub API, holds an exclusive receipt lock, keeps the receipt
+at `awaiting_acceptance` and adds:
+
+- a canonical `git_revision` artifact whose digest is the exact merged commit's
+  Git archive;
+- readable, hash-bound `github-pull-request-evidence` and
+  `github-ci-evidence` JSON; and
+- one readable `code-review-evidence` JSON artifact for every passing review
+  retained by the receipt.
+
+The merged tree must equal the reviewed PR-head tree, and `ci-status` binds the
+merge commit. Validate the updated receipt with `--verify-hashes` before asking
+for acceptance. Only explicit acceptance advances that same receipt through
+`accepted` to `awaiting_release`; release validation will not accept a legacy
+software receipt or reconstruct this evidence later.
+
+Because binding reads GitHub with the CLI's stored authentication, the approved
+Authority V2 scope must already set `network.tool_egress: allowlist`, include
+`api.github.com` in `network.allowed_hosts`, set
+`secrets_access: use-without-disclosure`, and name the `github-cli-auth` secret
+reference. The binder validates the complete receipt and these explicit grants
+before creating its lock file or invoking `gh`; denied runs leave no receipt or
+artifact mutation.

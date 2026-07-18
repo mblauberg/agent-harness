@@ -226,7 +226,15 @@ These versions are the proposed Stage 1 core baseline, verified on 10 July
 | `ajv` | 8.20.0 |
 | `uuid` | 14.0.1 |
 | Vitest | 4.1.10 |
-The lockfile pins exact transitive dependencies. A provider stage cannot enter implementation until `config/adapter-compatibility.yaml` records each adapter's contract version, exact package version or source commit, protocol/schema version and hash, supported runtime range, capability fixture version, official source URL and verification date. Stage 3 pins Claude Agent SDK, Codex app-server and Herdr contracts. Stage 4 pins Pi, Agy, Cursor and Kiro or ACP. An adapter without a verified entry remains disabled.
+The lockfile pins exact transitive Fabric dependencies. A provider stage cannot
+enter implementation until `config/adapter-compatibility.yaml` records its
+adapter contract, stable launcher, required vendor-identity policy,
+protocol/schema evidence, supported runtime, capability fixture, official
+source and verification date. Provider CLI versions and digests are observed,
+never admission locks; activation instead proves the bounded non-answer
+interface. Fabric SDK libraries, wrappers and protocol schemas retain their
+lockfile, Git-provenance and hash gates. An adapter without a verified entry
+remains disabled.
 
 ## Requirements
 

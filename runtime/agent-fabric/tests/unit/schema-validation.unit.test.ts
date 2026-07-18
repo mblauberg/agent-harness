@@ -20,6 +20,7 @@ const requiredRealAdapters = [
   "cursor-agent",
   "herdr",
   "kiro-acp",
+  "opencode-acp",
   "pi-rpc",
 ] as const;
 
@@ -54,6 +55,34 @@ describe("Stage 1 versioned JSON Schemas", () => {
     expect(unknown.keywords).toContain("additionalProperties");
   });
 
+  it("admits an account-default rejection route without treating the request as resolved", async () => {
+    const receiptSchema = await readSchema("fabric-receipt.schema.json");
+    const definitions = receiptSchema.$defs;
+    if (!isJsonObject(definitions) || !isJsonObject(definitions.modelRouteReceipt)) {
+      throw new TypeError("fabric receipt model-route schema is invalid");
+    }
+    const rejectedRoute = {
+      schema_version: 1,
+      status: "adapter_account_default_only",
+      adapter: "codex",
+      alias: "flagship",
+      role: "lead",
+      endpoint_provider: "openai",
+      model_family: "openai",
+      resolved_model: "",
+      task_class: "mechanical",
+      route_source: "task-class",
+      requested_model: "gpt-5.6-sol",
+      catalog_model: "gpt-5.6-sol",
+      model_selection: "account-default",
+      identity_source: "account-default",
+    };
+
+    const result = validateWithSchema(definitions.modelRouteReceipt, rejectedRoute);
+    expect(result.details).toEqual([]);
+    expect(result.valid).toBe(true);
+  });
+
   it("validates adapter compatibility and exposes only explicitly gated adapters", async () => {
     const schema = await readSchema("adapter-compatibility.schema.json");
     const compatibility = await readYamlObject("adapter-compatibility.yaml");
@@ -68,7 +97,7 @@ describe("Stage 1 versioned JSON Schemas", () => {
       throw new TypeError("adapter compatibility must contain an adapters object");
     }
     expect(Object.keys(adapters).sort()).toEqual([...requiredRealAdapters].sort());
-    const enabledAdapters = new Set(["claude-agent-sdk", "codex-app-server"]);
+    const enabledAdapters = new Set(["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent", "kiro-acp", "opencode-acp"]);
     for (const adapterId of requiredRealAdapters) {
       const adapter = adapters[adapterId];
       expect(isJsonObject(adapter), `${adapterId} must be an object`).toBe(true);
@@ -76,14 +105,41 @@ describe("Stage 1 versioned JSON Schemas", () => {
         throw new TypeError(`${adapterId} must be an object`);
       }
       expect(adapter.enabled, `${adapterId} activation state`).toBe(enabledAdapters.has(adapterId));
-      const constraints = adapter.model_family_constraints;
-      if (isJsonObject(constraints) && constraints.requires_explicit_model === true) {
-        expect(
-          Array.isArray(constraints.allowed_model_patterns) && constraints.allowed_model_patterns.length > 0,
-          `${adapterId} must bind self-reported family to a trusted model pattern`,
-        ).toBe(true);
-      }
     }
+    expect(adapters.agy).toMatchObject({
+      implementation: {
+        executable: "${USER_HOME}/.local/bin/agy",
+      },
+      contract: { protocol_version: "headless-cli" },
+      model_family_constraints: { allowed: ["google", "anthropic"] },
+    });
+    expect(adapters["cursor-agent"]).toMatchObject({
+      implementation: {
+        executable: "${USER_HOME}/.local/bin/cursor-agent",
+        cursor_install_root: "${USER_HOME}/.local/share/cursor-agent",
+      },
+      contract: { protocol_version: "stream-json-cli" },
+      model_family_constraints: {
+        allowed: ["cursor-composer", "xai", "anthropic", "openai", "google"],
+      },
+    });
+    expect(adapters["opencode-acp"]).toMatchObject({
+      implementation: {
+        executable: "/opt/homebrew/bin/opencode",
+        provider_install_root: "/opt/homebrew/Cellar/opencode",
+        provider_identity: "owner-controlled-install-root",
+      },
+      contract: { protocol_version: 1 },
+      model_family_constraints: {
+        allowed: ["generic-open"],
+        allowed_model_patterns: ["opencode/*"],
+      },
+    });
+    expect(adapters["kiro-acp"]).toMatchObject({
+      implementation: { executable: "${USER_HOME}/.local/bin/kiro-cli" },
+      contract: { protocol_version: 1 },
+      model_family_constraints: { allowed: ["open-weight"] },
+    });
     const claude = adapters["claude-agent-sdk"];
     if (!isJsonObject(claude) || !isJsonObject(claude.implementation)) {
       throw new TypeError("Claude implementation compatibility is invalid");

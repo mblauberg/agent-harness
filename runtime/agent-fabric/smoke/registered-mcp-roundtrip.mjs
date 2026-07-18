@@ -71,9 +71,16 @@ const claude = await connect("claude");
 try {
   const nonce = randomUUID();
   const conversationId = `registered-roundtrip:${nonce}`;
+  const groupId = conversationId;
+  const chair = codexMetadata.role === "chair" ? codex : claude;
+  await call(chair, "fabric_discussion_group_create", {
+    groupId,
+    memberAgentIds: [codexMetadata.agentId, claudeMetadata.agentId],
+    commandId: `${conversationId}:group:create`,
+  });
   const request = await call(codex, "fabric_message_send", {
     audience: { kind: "agents", agentIds: [claudeMetadata.agentId] },
-    context: { kind: "direct" },
+    context: { kind: "discussion-group", groupId },
     kind: "request",
     body: "Codex registration check: please acknowledge this shared MCP message.",
     requiresAck: true,
@@ -85,7 +92,7 @@ try {
   await call(claude, "fabric_delivery_acknowledge", { deliveryId: receivedByClaude.deliveryId });
   const response = await call(claude, "fabric_message_send", {
     audience: { kind: "agents", agentIds: [codexMetadata.agentId] },
-    context: { kind: "direct" },
+    context: { kind: "discussion-group", groupId },
     kind: "response",
     body: "Claude registration check: message received and acknowledged over the shared MCP fabric.",
     requiresAck: true,

@@ -24,6 +24,8 @@ describe("registered MCP smoke contract", () => {
     expect(referenced.filter((name) => !currentTools.has(name))).toStrictEqual([]);
     expect(roundtrip).toContain("agentIds: [claudeMetadata.agentId]");
     expect(roundtrip).toContain("agentIds: [codexMetadata.agentId]");
+    expect(roundtrip).toContain('"fabric_discussion_group_create"');
+    expect(roundtrip).toContain('context: { kind: "discussion-group", groupId }');
     expect(roundtrip).not.toMatch(/agentIds:\s*\["(?:claude|codex)"\]/u);
   });
 });

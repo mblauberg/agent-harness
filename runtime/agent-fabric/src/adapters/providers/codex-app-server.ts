@@ -12,7 +12,7 @@ import {
   type ChairLaunchFabricBridge,
   type ChairLaunchFabricBridgeInput,
 } from "./chair-launch-continuity.js";
-import { CodexJsonRpcConnection } from "./codex-json-rpc.js";
+import { CodexJsonRpcConnection, openVerifiedCodexJsonRpcConnection } from "./codex-json-rpc.js";
 import { SqliteAdapterActionJournal } from "./journal.js";
 import { journalPathFromArguments, serveAdapter } from "./server.js";
 import {
@@ -85,7 +85,10 @@ const CAPABILITIES: ProviderAdapterCapabilities = {
     publicPayloadSchema: {
       type: "object",
       additionalProperties: false,
-      required: ["cwd", "modelFamily", "model", "prompt"],
+      // model is optional: a ChatGPT-subscription Codex account rejects
+      // explicit model ids (HTTP 400) and dispatches on the account's
+      // default model when the id is omitted (#190).
+      required: ["cwd", "modelFamily", "prompt"],
       properties: {
         cwd: { type: "string", minLength: 1, pattern: "^/" },
         modelFamily: { type: "string", const: "openai" },
@@ -134,9 +137,11 @@ function validateCodexChairLaunchPayload(payload: Record<string, unknown>): Reco
   const validated: Record<string, unknown> = {
     cwd,
     modelFamily,
-    model: requiredString(payload.model, "model"),
     prompt: requiredString(payload.prompt, "prompt"),
   };
+  // Optional: omitted for ChatGPT-subscription accounts, which reject
+  // explicit model ids and use the account default (#190).
+  copyString(payload, "model", validated);
   for (const field of stringFields) copyString(payload, field, validated);
   if (payload.ephemeral === false) validated.ephemeral = false;
   else if (payload.ephemeral !== undefined) {
@@ -236,7 +241,7 @@ type CodexConnection = Pick<
   "initialize" | "request" | "waitForNotification" | "setServerRequestHandler" | "close" | "closed"
 >;
 
-type ConnectionFactory = (environment?: Record<string, string>) => CodexConnection;
+type ConnectionFactory = (environment?: Record<string, string>) => CodexConnection | Promise<CodexConnection>;
 type BridgeFactory = (input: ChairLaunchFabricBridgeInput) => Promise<ChairLaunchFabricBridge>;
 type AgentBridgeFactory = (input: AgentSessionFabricBridgeInput) => Promise<AgentSessionFabricBridge>;
 
@@ -306,7 +311,7 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   }
 
   async #withConnection<T>(operation: (connection: CodexConnection) => Promise<T>): Promise<T> {
-    const connection = this.#connectionFactory();
+    const connection = await this.#connectionFactory();
     try {
       await connection.initialize();
       return await operation(connection);
@@ -316,7 +321,7 @@ export class InstalledCodexAppServerBoundary implements CodexAppServerBoundary {
   }
 
   async #openConnection(environment?: Record<string, string>): Promise<CodexConnection> {
-    const connection = this.#connectionFactory(environment);
+    const connection = await this.#connectionFactory(environment);
     await connection.initialize();
     return connection;
   }
@@ -800,7 +805,10 @@ export async function runCodexAppServerAdapter(arguments_: string[] = process.ar
   const providerExecutable = providerIndex === -1 ? undefined : arguments_[providerIndex + 1];
   if (providerExecutable === undefined) throw new Error("codex-app-server adapter requires --provider-executable");
   const boundary = new InstalledCodexAppServerBoundary(
-    (environment) => new CodexJsonRpcConnection(codexAppServerCommand(providerExecutable), environment),
+    async (environment) => await openVerifiedCodexJsonRpcConnection(
+      codexAppServerCommand(providerExecutable),
+      environment,
+    ),
   );
   try {
     await serveAdapter(

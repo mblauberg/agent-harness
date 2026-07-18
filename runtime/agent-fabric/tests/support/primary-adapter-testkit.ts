@@ -56,6 +56,7 @@ function compatibilityAdapter(options: {
       installed_version: "1.0.0-fixture",
       executable: options.implementationPath,
       executable_sha256: options.implementationHash,
+      provider_identity: "apple-designated",
     },
     contract: {
       adapter_version: 1,
@@ -66,7 +67,7 @@ function compatibilityAdapter(options: {
       capability_fixture_version: 1,
     },
     runtime_range: { platforms: [process.platform] },
-    model_family_constraints: { allowed: [] },
+    model_family_constraints: { allowed: [], requires_explicit_model: true },
     official_source_url: "https://example.invalid/fixture",
     unresolved_pins: [],
   };

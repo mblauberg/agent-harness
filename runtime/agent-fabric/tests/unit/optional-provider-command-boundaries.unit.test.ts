@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { stat, writeFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -13,8 +13,29 @@ import {
   buildKiroAcpInvocation,
   buildPiRpcLaunch,
 } from "../../src/adapters/providers/optional/invocations.ts";
+import { FabricError } from "../../src/errors.ts";
+import { ProviderAdapterError } from "../../src/adapters/providers/types.ts";
 
 describe("optional provider command boundaries", () => {
+  it("revalidates interface conformance immediately before every provider process", async () => {
+    const runner = vi.fn(async () => ({
+      stdout: '{"type":"result","subtype":"success","is_error":false,"session_id":"s","result":"done"}\n',
+      stderr: "",
+      exitCode: 0,
+    }));
+    const verifyExecutable = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new FabricError("ADAPTER_INTERFACE_MISMATCH", "headless interface changed"));
+    const cursor = createCursorCliBoundary({ executable: "/cursor", cwd: "/workspace", runner, verifyExecutable });
+
+    await expect(cursor.spawn({ model: "grok", prompt: "one" })).resolves.toMatchObject({ result: "done" });
+    await expect(cursor.spawn({ model: "grok", prompt: "two" })).rejects.toMatchObject({
+      code: "ADAPTER_INTERFACE_MISMATCH",
+    });
+    expect(verifyExecutable).toHaveBeenCalledTimes(2);
+    expect(runner).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts only one explicitly bounded turn for task-bound one-shot Agy and Cursor spawns", async () => {
     const runner = vi.fn(async () => {
       throw new Error("provider runner must not start for an invalid turn contract");
@@ -57,6 +78,31 @@ describe("optional provider command boundaries", () => {
         resumeReference: "3cbfa155-fc5f-4c6e-aa99-3a44d48262b4",
         result: '{"conversationId":"forged-by-model","result":"model answer"}',
         providerRecordCount: 0,
+      });
+  });
+
+  it("rejects a successful Agy process that returns no answer output", async () => {
+    const runner = vi.fn(async (invocation: { args: string[] }) => {
+      const logIndex = invocation.args.indexOf("--log-file");
+      const logPath = invocation.args[logIndex + 1];
+      if (logPath === undefined) throw new Error("missing log path");
+      await writeFile(logPath, "Created conversation 3cbfa155-fc5f-4c6e-aa99-3a44d48262b4\n");
+      return {
+        stdout: "",
+        stderr: "Agy completed without printable output",
+        exitCode: 0,
+      };
+    });
+    const boundary = createAgyCliBoundary({ executable: "/agy", cwd: "/workspace", runner });
+
+    await expect(boundary.spawn({ model: "Gemini 3.1 Pro (High)", prompt: "read only" }))
+      .rejects.toMatchObject({
+        code: "PROVIDER_RESPONSE_INVALID",
+        message: "Agy CLI exited successfully without answer output; verify subscription model access and headless print compatibility",
+        details: {
+          exitCode: 0,
+          stderr: "Agy completed without printable output",
+        },
       });
   });
 
@@ -137,6 +183,32 @@ describe("optional provider command boundaries", () => {
     );
   });
 
+  it("defaults answer-bearing optional provider commands to the 30-minute provider-turn deadline", async () => {
+    const agyRunner: ProviderCommandRunner = vi.fn(async (invocation) => {
+      const logIndex = invocation.args.indexOf("--log-file");
+      const logPath = invocation.args[logIndex + 1];
+      if (logPath === undefined) throw new Error("missing log path");
+      await writeFile(logPath, "Created conversation 3cbfa155-fc5f-4c6e-aa99-3a44d48262b4\n");
+      return { stdout: "done", stderr: "", exitCode: 0 };
+    });
+    const cursorRunner: ProviderCommandRunner = vi.fn(async () => ({
+      stdout: `${JSON.stringify({ type: "result", subtype: "success", is_error: false, session_id: "cursor-session", result: "done" })}\n`,
+      stderr: "",
+      exitCode: 0,
+    }));
+
+    await createAgyCliBoundary({ executable: "/trusted/agy", cwd: "/workspace", runner: agyRunner })
+      .spawn({ model: "Gemini 3.5 Flash (High)", prompt: "review" });
+    await createCursorCliBoundary({ executable: "/trusted/cursor", cwd: "/workspace", runner: cursorRunner })
+      .spawn({ model: "cursor-grok-4.5-high", prompt: "review" });
+
+    expect(agyRunner).toHaveBeenCalledWith(expect.objectContaining({
+      timeoutMs: 30 * 60_000,
+      args: expect.arrayContaining(["--print-timeout", "1800s"]),
+    }));
+    expect(cursorRunner).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 30 * 60_000 }));
+  });
+
   it("uses the admitted cwd for each Cursor action and normalises provider output", async () => {
     const runner: ProviderCommandRunner = vi.fn(async () => ({
       stdout: [
@@ -173,6 +245,35 @@ describe("optional provider command boundaries", () => {
       cwd: "/admitted/cursor-project",
       args: expect.arrayContaining(["--mode", "ask"]),
     }));
+  });
+
+  it("reports only safe metadata for an unsupported Cursor stream record", async () => {
+    const boundary = createCursorCliBoundary({
+      executable: "/trusted/cursor",
+      cwd: "/workspace",
+      runner: async () => ({
+        stdout: `${JSON.stringify({
+          type: "private_provider_content",
+          message: "private provider content",
+          session_id: "private-session",
+          "private provider content": "must not become metadata",
+        })}\n`,
+        stderr: "",
+        exitCode: 0,
+      }),
+    });
+
+    await expect(boundary.spawn({ model: "cursor-grok-4.5-high", prompt: "review" }))
+      .rejects.toMatchObject({
+        code: "PROVIDER_RESPONSE_INVALID",
+        message: "Cursor stream contained an unsupported record type",
+        details: {
+          recordIndex: 0,
+          recordTypeSha256: "03ac7d3ac98ea049784810426c00f5a0221fe198644336030896a0310099ee47",
+          recordTypeLength: 24,
+          recordFields: ["message", "session_id", "type"],
+        },
+      });
   });
 
   it.each([
@@ -258,5 +359,38 @@ describe("optional provider command boundaries", () => {
         timeoutMs: 1000,
       }),
     ).rejects.toMatchObject({ code: "PROVIDER_EXIT_NONZERO", details: { exitCode: 7 } });
+  });
+
+  it("removes Agy's private invocation log after a timed-out command", async () => {
+    let logPath: string | undefined;
+    const boundary = createAgyCliBoundary({
+      executable: "/trusted/agy",
+      cwd: "/workspace",
+      timeoutMs: 20,
+      runner: async (invocation) => {
+        const logIndex = invocation.args.indexOf("--log-file");
+        logPath = invocation.args[logIndex + 1];
+        throw new ProviderAdapterError("PROVIDER_TIMEOUT", "provider CLI exceeded 20ms");
+      },
+    });
+
+    await expect(boundary.spawn({ model: "Gemini 3.5 Flash (High)", prompt: "review" }))
+      .rejects.toMatchObject({ code: "PROVIDER_TIMEOUT" });
+    if (logPath === undefined) throw new Error("provider runner did not receive the private log path");
+    await expect(stat(logPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not forward ambient provider API keys to subscription-authenticated CLIs", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "gemini-secret-canary");
+    vi.stubEnv("GOOGLE_API_KEY", "google-secret-canary");
+    vi.stubEnv("CURSOR_API_KEY", "cursor-secret-canary");
+    vi.stubEnv("XAI_API_KEY", "xai-secret-canary");
+    const result = await runBoundedProviderCommand({
+      executable: process.execPath,
+      args: ["-e", "process.stdout.write(JSON.stringify({gemini:process.env.GEMINI_API_KEY,google:process.env.GOOGLE_API_KEY,cursor:process.env.CURSOR_API_KEY,xai:process.env.XAI_API_KEY}))"],
+      timeoutMs: 1000,
+    });
+
+    expect(result.stdout).toBe("{}");
   });
 });

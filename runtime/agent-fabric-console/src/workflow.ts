@@ -4,6 +4,8 @@ import {
   FABRIC_OPERATIONS,
   OPERATION_CODECS,
   parseIdentifier,
+  parseLaunchPacketV1,
+  parseLaunchResourcePlanV1,
   parseTimestamp,
   type CommandId,
   type IntakeDraftCreateRequest,
@@ -15,6 +17,7 @@ import {
   type OperatorActionIntent,
   type OperatorActionPreview,
   type OperatorActionPreviewRequest,
+  type OperatorActionStatus,
   type OperatorCapabilityCredential,
   type OperatorClientId,
   type OperatorId,
@@ -24,12 +27,15 @@ import {
   type ProjectSessionCloseRequest,
   type ProjectSessionCreateRequest,
   type ProjectSessionId,
+  type ProjectSessionLaunchPacketPrepareRequest,
   type ProjectSessionTransitionRequest,
   type ScopedGateResolveRequest,
   type TaskRequest,
 } from "@local/agent-fabric-protocol";
+import { redactLaunchProviderInput } from "@local/agent-fabric";
 
 import { operatorIntentRevision } from "./action-revision.js";
+import { consoleImplementationCommandId, consoleLaunchCommandId } from "./launch-command.js";
 import {
   revisionFromProtocol,
   type ConsoleWorkflowCapabilities,
@@ -49,6 +55,7 @@ export const CONSOLE_WORKFLOW_KINDS = Object.freeze([
   "intake-revise",
   "scoped-gate-resolve",
   "project-session-close",
+  "project-session-launch-packet-prepare",
   "operator-action",
 ] as const);
 
@@ -57,6 +64,7 @@ export type ConsoleWorkflowStage =
   | "review"
   | "confirm"
   | "pending"
+  | "ambiguous"
   | "committed"
   | "conflict";
 
@@ -94,6 +102,10 @@ export type ConsoleWorkflowPlanner = Readonly<{
     review: ConsoleWorkflowReview;
     reconnectProjectSessionId: ProjectSessionId | null;
   }>>;
+  observe(input: Readonly<{
+    review: ConsoleWorkflowReview;
+    eventId: string;
+  }>): Promise<ConsoleWorkflowReview>;
   prepareGuided(input: Readonly<{
     action: GuidedWorkflowAction;
     binding: ConsoleInspectionBinding;
@@ -130,11 +142,13 @@ export type ConsoleTypedEntryPlanner = Readonly<{
   buildIntent(input: Readonly<{
     kind: ConsoleTypedEntryKind;
     fields: Readonly<Record<string, string>>;
+    eventId: string;
     binding: ConsoleInspectionBinding;
     dataset: FabricConsoleDataset;
   }>): Promise<Readonly<{
     intent: OperatorActionIntent;
     expectedRevision: number;
+    daemonPreview?: OperatorActionPreview;
   }>>;
 }>;
 
@@ -147,6 +161,7 @@ type PreparedWorkflow = Readonly<{
   review: ConsoleWorkflowReview;
   request: Record<string, unknown>;
   daemonPreview?: OperatorActionPreview;
+  commitCommandId?: CommandId;
 }>;
 
 const MAX_WORKFLOW_BYTES = 65_536;
@@ -277,6 +292,18 @@ function requiredGuidedField(
     );
   }
   return value;
+}
+
+function guidedJsonField(fields: Readonly<Record<string, string>>, key: string): unknown {
+  const value = requiredGuidedField(fields, key);
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    throw new ConsoleGuidedInputError(
+      "CONSOLE_GUIDED_JSON_INVALID",
+      `guided workflow field ${key} must contain valid JSON`,
+    );
+  }
 }
 
 function exactArtifactInspection(
@@ -491,13 +518,24 @@ function expectedRevision(
     if (revision === null) throw new TypeError("typed Git workflow revision is unavailable");
     return revision;
   }
-  return liveSession(dataset).revision;
+  const session = liveSession(dataset);
+  if (
+    envelope.kind === "project-session-launch-packet-prepare" &&
+    session.state === "awaiting_launch" &&
+    isRecord(envelope.request.launchPacketRef) &&
+    envelope.request.launchPacketRef.path === session.launchPacketRef.path &&
+    envelope.request.launchPacketRef.digest === session.launchPacketRef.digest
+  ) {
+    if (session.revision <= 1) throw new Error("prepared project session revision is invalid");
+    return session.revision - 1;
+  }
+  return session.revision;
 }
 
 function mutationContext(
   options: ProductionConsoleWorkflowPlannerOptions,
   eventId: string,
-  phase: "preview" | "commit",
+  phase: "preview" | "commit" | "reconcile",
   revision: number,
   workflowDigest: string,
 ): OperatorMutationContext {
@@ -549,6 +587,12 @@ function validateDirectRequest(
     case "project-session-close":
       parseOperation<ProjectSessionCloseRequest>(
         FABRIC_OPERATIONS.projectSessionClose,
+        { ...envelope.request, command },
+      );
+      return;
+    case "project-session-launch-packet-prepare":
+      parseOperation<ProjectSessionLaunchPacketPrepareRequest>(
+        FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
         { ...envelope.request, command },
       );
       return;
@@ -605,9 +649,44 @@ function requestDetails(request: Record<string, unknown>): readonly Readonly<{ l
   }));
 }
 
+function implementationDetails(request: Record<string, unknown>): readonly Readonly<{ label: string; value: string }>[] {
+  const packet = isRecord(request.launchPacket) ? request.launchPacket : {};
+  const authority = isRecord(packet.chairAuthority) ? packet.chairAuthority : {};
+  const provider = isRecord(packet.provider) ? packet.provider : {};
+  return [
+    { label: "Accepted evidence", value: canonical(request.acceptedScopeRef) },
+    { label: "Launch packet", value: canonical(request.launchPacketRef) },
+    { label: "Resource plan", value: canonical(request.resourcePlanRef) },
+    { label: "Authority", value: canonical(safeValue(authority)) },
+    { label: "Budget", value: canonical(authority.budget) },
+    {
+      label: "Provider route",
+      value: canonical(safeValue({
+        adapterId: provider.adapterId,
+        actionId: provider.actionId,
+        contractDigest: provider.contractDigest,
+        inputSchemaId: provider.inputSchemaId,
+      })),
+    },
+    { label: "Provider input", value: canonical(redactLaunchProviderInput(provider.input)) },
+    {
+      label: "Worktree/write scopes",
+      value: canonical({
+        projectRunDirectory: packet.projectRunDirectory,
+        workspaceRoots: authority.workspaceRoots,
+        sourcePaths: authority.sourcePaths,
+        artifactPaths: authority.artifactPaths,
+      }),
+    },
+  ];
+}
+
 function consequence(kind: ConsoleWorkflowKind): ConsoleWorkflowReview["consequenceClass"] {
   if (kind === "project-session-close") return "destructive";
-  if (kind === "project-session-create" || kind === "project-session-transition" || kind === "scoped-gate-resolve") {
+  if (
+    kind === "project-session-create" || kind === "project-session-transition" ||
+    kind === "project-session-launch-packet-prepare" || kind === "scoped-gate-resolve"
+  ) {
     return "consequential";
   }
   return "routine";
@@ -639,6 +718,36 @@ function resultSummary(kind: ConsoleWorkflowKind, result: unknown): string {
     .join(" | ");
 }
 
+function launchSettlementReview(
+  review: ConsoleWorkflowReview,
+  status: OperatorActionStatus,
+): ConsoleWorkflowReview {
+  const common = {
+    ...review,
+    result: `operator-action | ${status.commandId} | ${status.status}`,
+  };
+  if (status.status === "pending") return { ...common, stage: "pending", failure: null };
+  if (status.status === "ambiguous") {
+    return { ...common, stage: "ambiguous", failure: "LAUNCH_AMBIGUOUS" };
+  }
+  if (status.status === "committed") {
+    const journal = status.launchProviderActionJournalRef;
+    if (
+      journal?.journalState === "terminal" &&
+      journal.outcomeKind === "terminal-success" &&
+      status.seatProvisioning !== undefined
+    ) return { ...common, stage: "committed", failure: null };
+    if (journal?.journalState === "terminal" && journal.outcomeKind === "terminal-no-effect") {
+      return { ...common, stage: "conflict", failure: "LAUNCH_TERMINAL_NO_EFFECT" };
+    }
+    return { ...common, stage: "conflict", failure: "LAUNCH_SETTLEMENT_INVALID" };
+  }
+  if (status.status === "rejected") {
+    return { ...common, stage: "conflict", failure: status.code };
+  }
+  return { ...common, stage: "conflict", failure: `LAUNCH_${status.status.toUpperCase()}` };
+}
+
 function directPreview(
   envelope: WorkflowEnvelope,
   revision: number,
@@ -655,7 +764,9 @@ function directPreview(
     consequenceClass: consequence(envelope.kind),
     confirmationMode: "explicit",
     summary: envelope.kind,
-    details: requestDetails(envelope.request),
+    details: envelope.kind === "project-session-launch-packet-prepare"
+      ? implementationDetails(envelope.request)
+      : requestDetails(envelope.request),
     evidence: [],
     openedByEventId: eventId,
     armedByEventId: null,
@@ -669,6 +780,7 @@ export function createProductionConsoleWorkflowPlanner(
 ): ConsoleWorkflowPlanner {
   const prepared = new Map<string, PreparedWorkflow>();
   const typedRevisionOverrides = new Map<string, number>();
+  const typedPreviewOverrides = new Map<string, OperatorActionPreview>();
   const gateBindingOverrides = new Map<string, Readonly<{
     revision: number;
     coordinationRunId: string;
@@ -680,6 +792,9 @@ export function createProductionConsoleWorkflowPlanner(
       : { state: "available" },
     gate: options.client.gates === undefined || options.client.console?.gates === undefined
       ? { state: "unavailable", reason: "gate-protocol-unavailable" }
+      : { state: "available" },
+    implement: options.client.intakes === undefined || options.client.projectSessions?.prepareImplementation === undefined
+      ? { state: "unavailable", reason: "project-session-implementation-prepare-unavailable" }
       : { state: "available" },
     launch: options.typedEntryPlanner?.capabilities.launch ?? {
       state: "unavailable",
@@ -774,7 +889,8 @@ export function createProductionConsoleWorkflowPlanner(
           intent: envelope.request.intent,
         },
       );
-      daemonPreview = await actions.preview(request);
+      daemonPreview = typedPreviewOverrides.get(`${input.eventId}\0${sha256(request.intent)}`) ??
+        await actions.preview(request);
       if (canonical(daemonPreview.intent) !== canonical(request.intent)) {
         throw new Error("operator action Preview changed the requested intent");
       }
@@ -884,9 +1000,108 @@ export function createProductionConsoleWorkflowPlanner(
       input.action === "implement" || input.action === "launch" ||
       input.action === "git" || input.action === "promotion"
     ) {
-      const kind: ConsoleTypedEntryKind = input.action === "implement"
-        ? "launch"
-        : input.action;
+      if (input.action === "implement") {
+        const capability = capabilities.implement;
+        if (capability === undefined || capability.state === "unavailable") {
+          throw new Error(capability?.reason ?? "project-session-implementation-prepare-unavailable");
+        }
+        const fields = guidedFields(input.raw);
+        if (Object.keys(fields).sort().join(",") !== "intake,launch-packet-path,packet,resource-plan") {
+          throw new ConsoleGuidedInputError(
+            "CONSOLE_GUIDED_IMPLEMENT_FIELDS_INVALID",
+            "guided Implement requires exactly intake, launch-packet-path, packet and resource-plan",
+          );
+        }
+        const inspection = exactArtifactInspection(
+          input.dataset,
+          input.binding,
+          input.artifactConfirmation,
+        );
+        const intakes = options.client.intakes;
+        if (intakes === undefined) throw new Error("intake protocol is unavailable");
+        const intake = await intakes.read({
+          credential: options.credential,
+          intakeId: requiredGuidedField(fields, "intake") as never,
+        });
+        const session = liveSession(input.dataset);
+        if (
+          (session.state !== "draft" && session.state !== "awaiting_launch") || intake.state !== "accepted" ||
+          intake.projectId !== options.projectId ||
+          intake.acceptedScopeRef?.path !== inspection.result.artifactRef.path ||
+          intake.acceptedScopeRef.digest !== inspection.result.artifactRef.digest ||
+          (inspection.result.coordinationRunId !== null && inspection.result.coordinationRunId !== intake.coordinationRunId)
+        ) {
+          throw new Error("guided Implement requires the exact accepted evidence and preparable project session");
+        }
+        const resourcePlan = parseLaunchResourcePlanV1(
+          guidedJsonField(fields, "resource-plan"),
+          "guidedImplement.resourcePlan",
+        );
+        const rawPacket = guidedJsonField(fields, "packet");
+        if (!isRecord(rawPacket) || !isRecord(rawPacket.resourcePlanRef) || typeof rawPacket.resourcePlanRef.path !== "string") {
+          throw new ConsoleGuidedInputError(
+            "CONSOLE_GUIDED_IMPLEMENT_PACKET_INVALID",
+            "guided Implement packet requires a resourcePlanRef path",
+          );
+        }
+        const resourcePlanRef = {
+          path: rawPacket.resourcePlanRef.path,
+          digest: sha256(resourcePlan),
+        };
+        const launchPacket = parseLaunchPacketV1(
+          { ...rawPacket, resourcePlanRef },
+          "guidedImplement.launchPacket",
+        );
+        const launchPacketRef = {
+          path: requiredGuidedField(fields, "launch-packet-path"),
+          digest: sha256(launchPacket),
+        };
+        if (
+          session.state === "awaiting_launch" &&
+          (
+            session.launchPacketRef.path !== launchPacketRef.path ||
+            session.launchPacketRef.digest !== launchPacketRef.digest
+          )
+        ) {
+          throw new Error("guided Implement recovery requires the session's exact committed launch packet");
+        }
+        if (
+          launchPacket.projectId !== options.projectId ||
+          launchPacket.projectSessionId !== session.projectSessionId ||
+          launchPacket.topologyMode !== session.mode ||
+          launchPacket.budgetRef !== session.budgetRef ||
+          resourcePlan.projectId !== options.projectId ||
+          resourcePlan.projectSessionId !== session.projectSessionId ||
+          resourcePlan.runId !== launchPacket.runId ||
+          resourcePlan.budgetRef !== session.budgetRef ||
+          launchPacket.chairAuthority.approval.evidenceDigest !== inspection.result.artifactRef.digest ||
+          canonical(launchPacket.chairAuthority.budget) !== canonical(resourcePlan.scopes.coordinationRun.limits)
+        ) {
+          throw new Error("guided Implement packet authority, budget or session binding is inconsistent");
+        }
+        if (Date.parse(launchPacket.chairAuthority.expiresAt) <= now()) {
+          throw new Error("guided Implement packet authority has expired");
+        }
+        return await prepare({
+          raw: JSON.stringify({
+            kind: "project-session-launch-packet-prepare",
+            request: {
+              projectId: options.projectId,
+              projectSessionId: session.projectSessionId,
+              expectedSessionGeneration: session.generation,
+              intakeId: intake.intakeId,
+              acceptedScopeRef: inspection.result.artifactRef,
+              launchPacketRef,
+              resourcePlanRef,
+              launchPacket,
+              resourcePlan,
+            },
+          }),
+          dataset: input.dataset,
+          eventId: input.eventId,
+        });
+      }
+      const kind: ConsoleTypedEntryKind = input.action;
       const capability = capabilities[kind];
       if (capability.state === "unavailable") throw new Error(capability.reason);
       const typedEntryPlanner = options.typedEntryPlanner;
@@ -894,21 +1109,77 @@ export function createProductionConsoleWorkflowPlanner(
         throw new Error("typed entry planner is unavailable");
       }
       if (
-        (kind === "launch" || kind === "git") &&
-        input.binding.view !== "project" && input.action !== "implement"
+        (kind === "launch" || kind === "git") && input.binding.view !== "project"
       ) {
         throw new Error(`${kind} must start from the selected Project row`);
       }
-      if (input.action === "implement") {
-        exactArtifactInspection(
-          input.dataset,
-          input.binding,
-          input.artifactConfirmation,
-        );
+      if (kind === "launch") {
+        const fields = guidedFields(input.raw);
+        if (Object.keys(fields).length !== 0) {
+          throw new ConsoleGuidedInputError(
+            "CONSOLE_GUIDED_LAUNCH_FIELDS_INVALID",
+            "guided Launch uses the reviewed session launch packet and accepts no fields",
+          );
+        }
+        const session = liveSession(input.dataset);
+        if (session.state === "launching" || session.state === "launch_ambiguous") {
+          exactGuidedRow(input.dataset, input.binding);
+          const actions = options.client.console?.actions;
+          if (actions === undefined) throw new Error("operator action status is unavailable");
+          const commandId = consoleLaunchCommandId({
+            phase: "commit",
+            operatorId: options.operatorId,
+            projectId: options.projectId,
+            projectSessionId: session.projectSessionId,
+            sessionGeneration: session.generation,
+            launchPacketRef: session.launchPacketRef,
+          });
+          const status = await actions.status({
+            credential: options.credential,
+            projectId: options.projectId,
+            commandId,
+          });
+          if (status.status === "not-found") {
+            throw new Error("launch recovery command was not found for the selected session binding");
+          }
+          const intentDigest = status.status === "committed"
+            ? status.receipt.intentDigest
+            : status.intentDigest;
+          const recoveryBase: ConsoleWorkflowReview = {
+            workflowId: stableId("launch_recovery", commandId),
+            kind: "operator-action",
+            source: "daemon-preview",
+            stage: "pending",
+            previewDigest: intentDigest,
+            expectedRevision: revisionFromProtocol(session.revision),
+            consequenceClass: "consequential",
+            confirmationMode: "explicit",
+            summary: "project-session-launch recovery",
+            details: [
+              { label: "projectSessionId", value: session.projectSessionId },
+              { label: "commandId", value: commandId },
+            ],
+            evidence: [],
+            openedByEventId: input.eventId,
+            armedByEventId: null,
+            result: null,
+            failure: null,
+          };
+          const recovered = launchSettlementReview(recoveryBase, status);
+          if (recovered.stage === "pending" || recovered.stage === "ambiguous") {
+            prepared.set(recovered.workflowId, {
+              review: recovered,
+              request: {},
+              commitCommandId: commandId,
+            });
+          }
+          return recovered;
+        }
       }
       const built = await typedEntryPlanner.buildIntent({
         kind,
         fields: guidedFields(input.raw),
+        eventId: input.eventId,
         binding: input.binding,
         dataset: input.dataset,
       });
@@ -922,6 +1193,9 @@ export function createProductionConsoleWorkflowPlanner(
       }
       const overrideKey = `${input.eventId}\0${sha256(intent)}`;
       typedRevisionOverrides.set(overrideKey, built.expectedRevision);
+      if (built.daemonPreview !== undefined) {
+        typedPreviewOverrides.set(overrideKey, built.daemonPreview);
+      }
       try {
         return await prepare({
           raw: JSON.stringify({ kind: "operator-action", request: { intent } }),
@@ -930,6 +1204,7 @@ export function createProductionConsoleWorkflowPlanner(
         });
       } finally {
         typedRevisionOverrides.delete(overrideKey);
+        typedPreviewOverrides.delete(overrideKey);
       }
     }
     if (
@@ -1049,6 +1324,9 @@ export function createProductionConsoleWorkflowPlanner(
     );
     const pending = { ...stored.review, stage: "pending" as const, failure: null };
     let result: unknown;
+    let launchStatus: OperatorActionStatus | undefined;
+    let launchCommandId: CommandId | undefined;
+    let implementationRequest: ProjectSessionLaunchPacketPrepareRequest | undefined;
     let reconnectProjectSessionId: ProjectSessionId | null = null;
     try {
       switch (stored.review.kind) {
@@ -1080,6 +1358,47 @@ export function createProductionConsoleWorkflowPlanner(
             FABRIC_OPERATIONS.projectSessionClose,
             { ...stored.request, command },
           ));
+          break;
+        }
+        case "project-session-launch-packet-prepare": {
+          const client = options.client.projectSessions;
+          if (client?.prepareImplementation === undefined) {
+            throw new Error("project-session implementation preparation is unavailable");
+          }
+          const provisional = parseOperation<ProjectSessionLaunchPacketPrepareRequest>(
+            FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+            { ...stored.request, command },
+          );
+          const implementationCommandId = consoleImplementationCommandId({
+            operatorId: options.operatorId,
+            projectId: provisional.projectId,
+            projectSessionId: provisional.projectSessionId,
+            sessionGeneration: provisional.expectedSessionGeneration,
+            acceptedScopeRef: provisional.acceptedScopeRef,
+            launchPacketRef: provisional.launchPacketRef,
+            resourcePlanRef: provisional.resourcePlanRef,
+          });
+          implementationRequest = parseOperation<ProjectSessionLaunchPacketPrepareRequest>(
+            FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+            {
+              ...stored.request,
+              command: {
+                ...command,
+                commandId: implementationCommandId,
+                provenance: {
+                  kind: "console-direct-input",
+                  clientId: "console_implementation_custody" as OperatorClientId,
+                  inputEventId: implementationCommandId,
+                },
+              },
+            },
+          );
+          prepared.set(input.review.workflowId, {
+            ...stored,
+            review: pending,
+            commitCommandId: implementationCommandId,
+          });
+          result = await client.prepareImplementation(implementationRequest);
           break;
         }
         case "intake-draft-create": {
@@ -1131,13 +1450,46 @@ export function createProductionConsoleWorkflowPlanner(
           if (actions === undefined || preview === undefined) {
             throw new Error("operator action Preview is unavailable");
           }
+          if (preview.intent.kind === "project-session-launch") {
+            launchCommandId = consoleLaunchCommandId({
+              phase: "commit",
+              operatorId: options.operatorId,
+              projectId: preview.intent.projectId,
+              projectSessionId: preview.intent.projectSessionId,
+              sessionGeneration: preview.intent.expectedSessionGeneration,
+              launchPacketRef: preview.intent.launchPacketRef,
+            });
+            prepared.set(input.review.workflowId, {
+              ...stored,
+              review: pending,
+              commitCommandId: launchCommandId,
+            });
+          }
+          const effectiveCommand = launchCommandId === undefined
+            ? command
+            : {
+                ...command,
+                commandId: launchCommandId,
+                provenance: {
+                  kind: "console-direct-input" as const,
+                  clientId: "console_launch_custody" as OperatorClientId,
+                  inputEventId: launchCommandId,
+                },
+              };
           const confirmation = preview.confirmationMode === "echo"
             ? { kind: "echo" as const, echoedPreviewDigest: preview.previewDigest }
-            : { kind: "explicit" as const, confirmationId: stableId("confirmation", input.eventId, preview.previewDigest) };
-          result = await actions.commit(parseOperation<OperatorActionCommitRequest>(
+            : {
+                kind: "explicit" as const,
+                confirmationId: stableId(
+                  "confirmation",
+                  launchCommandId ?? input.eventId,
+                  preview.previewDigest,
+                ),
+              };
+          const committed = await actions.commit(parseOperation<OperatorActionCommitRequest>(
             FABRIC_OPERATIONS.operatorActionCommit,
             {
-              command,
+              command: effectiveCommand,
               projectId: options.projectId,
               previewId: preview.previewId,
               expectedPreviewRevision: preview.previewRevision,
@@ -1146,20 +1498,100 @@ export function createProductionConsoleWorkflowPlanner(
               confirmation,
             },
           ));
+          result = committed;
+          if (preview.intent.kind === "project-session-launch") {
+            launchStatus = await actions.status({
+              credential: options.credential,
+              projectId: options.projectId,
+              commandId: launchCommandId ?? command.commandId,
+            });
+          }
           break;
         }
       }
     } catch (error: unknown) {
-      const failureCode = isRecord(error) && typeof error.code === "string" &&
-          /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u.test(error.code)
-        ? error.code
-        : "WORKFLOW_COMMIT_FAILED";
-      const failed: ConsoleWorkflowReview = {
-        ...pending,
-        stage: "conflict",
-        failure: failureCode,
-      };
-      return { review: failed, reconnectProjectSessionId: null };
+      if (implementationRequest !== undefined) {
+        const firstFailureCode = isRecord(error) && typeof error.code === "string" ? error.code : undefined;
+        const client = options.client.projectSessions;
+        if (firstFailureCode !== undefined) {
+          implementationRequest = undefined;
+        } else if (client?.prepareImplementation !== undefined) {
+          try {
+            result = await client.prepareImplementation(implementationRequest);
+          } catch (replayError: unknown) {
+            const replayFailureCode = isRecord(replayError) && typeof replayError.code === "string"
+              ? replayError.code
+              : undefined;
+            if (replayFailureCode !== undefined) {
+              return {
+                review: { ...pending, stage: "conflict", failure: replayFailureCode },
+                reconnectProjectSessionId: null,
+              };
+            }
+            const unresolved: ConsoleWorkflowReview = {
+              ...pending,
+              stage: "ambiguous",
+              result: `project-session-launch-packet-prepare | ${implementationRequest.command.commandId} | replay-unavailable`,
+              failure: "IMPLEMENT_REPLAY_UNAVAILABLE",
+            };
+            prepared.set(input.review.workflowId, {
+              ...stored,
+              review: unresolved,
+              commitCommandId: implementationRequest.command.commandId,
+            });
+            return { review: unresolved, reconnectProjectSessionId: null };
+          }
+        }
+      }
+      if (launchCommandId !== undefined) {
+        const actions = options.client.console?.actions;
+        if (actions !== undefined) {
+          try {
+            launchStatus = await actions.status({
+              credential: options.credential,
+              projectId: options.projectId,
+              commandId: launchCommandId,
+            });
+          } catch {
+            const unresolved: ConsoleWorkflowReview = {
+              ...pending,
+              result: `operator-action | ${launchCommandId} | status-unavailable`,
+              failure: "LAUNCH_STATUS_UNAVAILABLE",
+            };
+            prepared.set(input.review.workflowId, {
+              ...stored,
+              review: unresolved,
+              commitCommandId: launchCommandId,
+            });
+            return { review: unresolved, reconnectProjectSessionId: null };
+          }
+        }
+      }
+      if (launchStatus === undefined && implementationRequest === undefined) {
+        const failureCode = isRecord(error) && typeof error.code === "string" &&
+            /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u.test(error.code)
+          ? error.code
+          : "WORKFLOW_COMMIT_FAILED";
+        const failed: ConsoleWorkflowReview = {
+          ...pending,
+          stage: "conflict",
+          failure: failureCode,
+        };
+        return { review: failed, reconnectProjectSessionId: null };
+      }
+    }
+    if (launchStatus !== undefined) {
+      const settled = launchSettlementReview(pending, launchStatus);
+      if (settled.stage === "pending" || settled.stage === "ambiguous") {
+        prepared.set(input.review.workflowId, {
+          ...stored,
+          review: settled,
+          commitCommandId: launchStatus.commandId as CommandId,
+        });
+      } else {
+        prepared.delete(input.review.workflowId);
+      }
+      return { review: settled, reconnectProjectSessionId: null };
     }
     prepared.delete(input.review.workflowId);
     const completed: ConsoleWorkflowReview = {
@@ -1173,5 +1605,74 @@ export function createProductionConsoleWorkflowPlanner(
     };
   };
 
-  return { capabilities, prepare, prepareGuided, arm, commit };
+  const observe = async (input: Readonly<{
+    review: ConsoleWorkflowReview;
+    eventId: string;
+  }>): Promise<ConsoleWorkflowReview> => {
+    const stored = prepared.get(input.review.workflowId);
+    if (
+      stored === undefined ||
+      canonical(stored.review) !== canonical(input.review) ||
+      (input.review.stage !== "pending" && input.review.stage !== "ambiguous") ||
+      stored.commitCommandId === undefined
+    ) {
+      throw new Error("Console workflow settlement is stale or unavailable");
+    }
+    if (input.review.kind === "project-session-launch-packet-prepare") {
+      const client = options.client.projectSessions;
+      if (client?.prepareImplementation === undefined) {
+        throw new Error("project-session implementation preparation is unavailable");
+      }
+      const commandId = stored.commitCommandId;
+      const command = mutationContext(
+        options,
+        commandId,
+        "commit",
+        Number(stored.review.expectedRevision),
+        stored.review.previewDigest,
+      );
+      try {
+        const result = await client.prepareImplementation(parseOperation<ProjectSessionLaunchPacketPrepareRequest>(
+          FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+          {
+            ...stored.request,
+            command: {
+              ...command,
+              commandId,
+              provenance: {
+                kind: "console-direct-input",
+                clientId: "console_implementation_custody" as OperatorClientId,
+                inputEventId: commandId,
+              },
+            },
+          },
+        ));
+        prepared.delete(input.review.workflowId);
+        return {
+          ...input.review,
+          stage: "committed",
+          result: resultSummary(input.review.kind, result),
+          failure: null,
+        };
+      } catch {
+        return input.review;
+      }
+    }
+    const actions = options.client.console?.actions;
+    if (actions === undefined) throw new Error("operator action status is unavailable");
+    const status = await actions.status({
+      credential: options.credential,
+      projectId: options.projectId,
+      commandId: stored.commitCommandId,
+    });
+    const settled = launchSettlementReview(input.review, status);
+    if (settled.stage === "pending" || settled.stage === "ambiguous") {
+      prepared.set(input.review.workflowId, { ...stored, review: settled });
+    } else {
+      prepared.delete(input.review.workflowId);
+    }
+    return settled;
+  };
+
+  return { capabilities, prepare, prepareGuided, arm, commit, observe };
 }

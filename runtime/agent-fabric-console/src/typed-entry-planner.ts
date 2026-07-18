@@ -1,6 +1,11 @@
+import { createHash } from "node:crypto";
+
 import type {
+  CommandId,
   NegotiatedOperatorClient,
   OperatorCapabilityCredential,
+  OperatorClientId,
+  OperatorId,
   ProjectId,
   ProjectSession,
   PromotionIntent,
@@ -16,16 +21,32 @@ export type ProductionConsoleTypedEntryPlannerOptions = Readonly<{
   client: NegotiatedOperatorClient;
   credential: OperatorCapabilityCredential;
   projectId: ProjectId;
+  operatorId: OperatorId;
+  clientId: OperatorClientId;
 }>;
 
 export type ProductionConsoleTypedEntryPlannerFactory = (
   options: ProductionConsoleTypedEntryPlannerOptions,
 ) => ConsoleTypedEntryPlanner;
 
-const LAUNCH_PREPARATION_UNAVAILABLE =
-  "daemon-launch-intent-preparation-unavailable";
 const GIT_PREPARATION_UNAVAILABLE =
   "daemon-git-intent-preparation-unavailable";
+
+function launchPreparationCommandId(clientId: OperatorClientId, eventId: string): CommandId {
+  return `console_${createHash("sha256")
+    .update(`${clientId}\0launch-preview\0${eventId}`)
+    .digest("hex")
+    .slice(0, 48)}` as CommandId;
+}
+
+function assertNoLaunchFields(fields: Readonly<Record<string, string>>): void {
+  if (Object.keys(fields).length !== 0) {
+    throw new ConsoleGuidedInputError(
+      "CONSOLE_GUIDED_LAUNCH_FIELDS_INVALID",
+      "guided Launch uses the reviewed session launch packet and accepts no fields",
+    );
+  }
+}
 
 function exactProjectBinding(
   dataset: FabricConsoleDataset,
@@ -81,13 +102,20 @@ function exactGateField(fields: Readonly<Record<string, string>>): string {
 
 /**
  * Builds only intents whose security bindings can be obtained from an
- * authoritative daemon read. Launch and Git stay explicit until their closed
- * daemon preparation APIs exist; operators never hand-author CAS digests.
+ * authoritative daemon read. Operators never hand-author CAS digests.
  */
 export const createProductionConsoleTypedEntryPlanner:
 ProductionConsoleTypedEntryPlannerFactory = (options) => {
   const gateRead = options.client.console?.gates.read;
   const actionPreviewAvailable = options.client.console?.readOnly === false;
+  const launchPrepare = options.client.projectSessions?.prepareLaunch;
+  const launchCapability = launchPrepare === undefined
+    ? { state: "unavailable" as const, reason: "project-session-launch-prepare-unavailable" }
+    : options.client.console?.launchAvailable !== true
+      ? { state: "unavailable" as const, reason: "launch-custody-unavailable" }
+      : !actionPreviewAvailable || options.client.console?.actions === undefined
+        ? { state: "unavailable" as const, reason: "operator-action-commit-unavailable" }
+        : { state: "available" as const };
   const promotionCapability = gateRead === undefined || !actionPreviewAvailable
     ? {
         state: "unavailable" as const,
@@ -97,10 +125,7 @@ ProductionConsoleTypedEntryPlannerFactory = (options) => {
       }
     : { state: "available" as const };
   const capabilities: ConsoleTypedEntryPlanner["capabilities"] = {
-    launch: {
-      state: "unavailable",
-      reason: LAUNCH_PREPARATION_UNAVAILABLE,
-    },
+    launch: launchCapability,
     git: {
       state: "unavailable",
       reason: GIT_PREPARATION_UNAVAILABLE,
@@ -111,7 +136,45 @@ ProductionConsoleTypedEntryPlannerFactory = (options) => {
   return {
     capabilities,
     async buildIntent(input) {
-      if (input.kind === "launch") throw new Error(LAUNCH_PREPARATION_UNAVAILABLE);
+      if (input.kind === "launch") {
+        if (launchCapability.state === "unavailable" || launchPrepare === undefined) {
+          throw new Error(launchCapability.reason);
+        }
+        assertNoLaunchFields(input.fields);
+        const session = exactProjectBinding(input.dataset, input.binding, options.projectId);
+        const commandId = launchPreparationCommandId(options.clientId, input.eventId);
+        const daemonPreview = await launchPrepare({
+          command: {
+            credential: options.credential,
+            commandId,
+            expectedRevision: session.revision,
+            actor: options.operatorId,
+            provenance: {
+              kind: "console-direct-input",
+              clientId: options.clientId,
+              inputEventId: input.eventId,
+            },
+            evidenceRefs: [],
+          },
+          projectId: options.projectId,
+          projectSessionId: session.projectSessionId,
+          expectedSessionGeneration: session.generation,
+          launchPacketRef: session.launchPacketRef,
+        });
+        const intent = daemonPreview.intent;
+        if (
+          intent.kind !== "project-session-launch" ||
+          intent.projectId !== options.projectId ||
+          intent.projectSessionId !== session.projectSessionId ||
+          intent.expectedSessionRevision !== session.revision ||
+          intent.expectedSessionGeneration !== session.generation ||
+          intent.launchPacketRef.path !== session.launchPacketRef.path ||
+          intent.launchPacketRef.digest !== session.launchPacketRef.digest
+        ) {
+          throw new Error("Launch preparation changed the selected session binding");
+        }
+        return { intent, expectedRevision: session.revision, daemonPreview };
+      }
       if (input.kind === "git") throw new Error(GIT_PREPARATION_UNAVAILABLE);
       if (promotionCapability.state === "unavailable" || gateRead === undefined) {
         throw new Error(promotionCapability.reason);

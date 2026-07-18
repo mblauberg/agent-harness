@@ -1,8 +1,7 @@
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { fileURLToPath } from "node:url";
+import { describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 
 import { composeDaemonAdapters, composeDaemonConfiguration } from "../../src/daemon/composition.ts";
@@ -13,30 +12,24 @@ import {
   createPrimaryCompatibilityFixture,
 } from "../support/primary-adapter-testkit.ts";
 
-const repositoryRoot = fileURLToPath(new URL("../../../../", import.meta.url));
-
 describe("daemon trusted adapter composition", () => {
   it("composes only the explicitly activated and pinned adapters", async () => {
-    const fixture = process.env.AGENT_FABRIC_PORTABLE_TESTS === "1"
-      ? await createPortableActivatedPrimaryFixture()
-      : undefined;
+    const fixture = await createPortableActivatedPrimaryFixture();
+    const verifyProvider = vi.fn(async () => ({}) as never);
     try {
       const adapters = await composeDaemonAdapters({
-        globalConfigPath: fixture?.configPath ?? `${repositoryRoot}/config/agent-fabric.yaml`,
-        compatibilityPath: fixture?.compatibilityPath
-          ?? `${repositoryRoot}/config/adapter-compatibility.yaml`,
-        compatibilitySchemaPath: fixture?.schemaPath
-          ?? `${repositoryRoot}/runtime/agent-fabric/schemas/adapter-compatibility.schema.json`,
-        agentsHome: fixture?.directory ?? repositoryRoot,
-        ...(fixture === undefined
-          ? { stateDirectory: join(repositoryRoot, ".agent-run", "adapter-composition-test") }
-          : {}),
+        globalConfigPath: fixture.configPath,
+        compatibilityPath: fixture.compatibilityPath,
+        compatibilitySchemaPath: fixture.schemaPath,
+        agentsHome: fixture.directory,
+        verifyProvider,
       });
       expect(Object.keys(adapters).sort()).toEqual(
         ["claude-agent-sdk", "codex-app-server"],
       );
+      expect(verifyProvider).toHaveBeenCalledTimes(2);
     } finally {
-      if (fixture !== undefined) await rm(fixture.directory, { recursive: true, force: true });
+      await rm(fixture.directory, { recursive: true, force: true });
     }
   });
 
@@ -57,6 +50,7 @@ describe("daemon trusted adapter composition", () => {
         compatibilitySchemaPath: fixture.schemaPath,
         agentsHome,
         stateDirectory: join(directory, "state"),
+        verifyProvider: async () => ({}) as never,
       })).resolves.toMatchObject({ workspaceRoots: expectedRoots });
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -76,8 +70,7 @@ describe("daemon trusted adapter composition", () => {
     const codex = compatibility.adapters["codex-app-server"];
     if (codex === undefined) throw new TypeError("Codex compatibility fixture is missing");
     const executable = codex.implementation.executable;
-    const executableHash = codex.implementation.executable_sha256;
-    if (executable === undefined || executableHash === undefined) throw new TypeError("Codex fixture executable is unpinned");
+    if (executable === undefined) throw new TypeError("Codex fixture executable is missing");
     codex.enabled = true;
     codex.implementation.wrapper_entrypoint = executable;
     await writeWrapperPackageScaffold(fixture.directory);
@@ -101,9 +94,17 @@ describe("daemon trusted adapter composition", () => {
         compatibilityPath: fixture.compatibilityPath,
         compatibilitySchemaPath: fixture.schemaPath,
         agentsHome: fixture.directory,
+        verifyProvider: async () => ({}) as never,
       });
       expect(composed["codex-app-server"]).toMatchObject({
-        command: [process.execPath, fixture.artifactPaths[0], "--provider-executable", fixture.artifactPaths[0]],
+        command: [
+          process.execPath,
+          fixture.artifactPaths[0],
+          "--provider-executable",
+          fixture.artifactPaths[0],
+          "--provider-identity-policy",
+          "apple-designated",
+        ],
         modelPolicy: { allowedFamilies: ["openai"], requiresExplicitModel: true },
         wrapperProvenance: {
           repositoryCommit: fixtureCommit,
@@ -116,6 +117,7 @@ describe("daemon trusted adapter composition", () => {
   });
 
   it("admits a machine-only root before project profile and path narrowing", async () => {
+    const compatibilityFixture = await createPortableActivatedPrimaryFixture();
     const directory = await mkdtemp(join(tmpdir(), "fabric-machine-composition-"));
     const portableRoot = join(directory, "portable");
     const machineRoot = join(directory, "machine");
@@ -144,10 +146,15 @@ describe("daemon trusted adapter composition", () => {
       await runWorkspaceTrust(["trust", machineRoot, "--profiles", "paired-visible"], paths);
       await expect(composeDaemonConfiguration({
         globalConfigPath, projectConfigPath,
-        compatibilityPath: `${repositoryRoot}/config/adapter-compatibility.yaml`,
-        compatibilitySchemaPath: `${repositoryRoot}/runtime/agent-fabric/schemas/adapter-compatibility.schema.json`,
+        compatibilityPath: compatibilityFixture.compatibilityPath,
+        compatibilitySchemaPath: compatibilityFixture.schemaPath,
         agentsHome: directory, stateDirectory,
       })).resolves.toMatchObject({ executionProfile: "paired-visible", workspaceRoots: [await realpath(projectRoot)] });
-    } finally { await rm(directory, { recursive: true, force: true }); }
+    } finally {
+      await Promise.all([
+        rm(directory, { recursive: true, force: true }),
+        rm(compatibilityFixture.directory, { recursive: true, force: true }),
+      ]);
+    }
   });
 });

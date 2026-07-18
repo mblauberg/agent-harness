@@ -4,7 +4,8 @@ Decisions ratified by the user on 2026-07-13. Each ADR is the canonical owner
 of its decision; supporting scoping evidence, challenge history and rejected
 alternatives remain available in Git history without forming a live
 cross-reference dependency. ADRs 0009–0010 were ratified later, on 2026-07-15;
-ADR 0011 was ratified on 2026-07-16.
+ADRs 0011–0012 were ratified on 2026-07-16; ADR 0013 was ratified on
+2026-07-18.
 
 | ADR | Title | Status |
 |---|---|---|
@@ -19,3 +20,5 @@ ADR 0011 was ratified on 2026-07-16.
 | [0009](0009-standalone-semantic-specifications.md) | Standalone semantic specifications | Accepted |
 | [0010](0010-lifecycle-receipt-authority-distinct-trust-boundary.md) | Lifecycle receipt authority is a trust boundary distinct from provider authority compilation | Accepted |
 | [0011](0011-github-owns-work-state.md) | GitHub owns current work state | Accepted |
+| [0012](0012-defer-bun-node-pinned-runtime.md) | Defer Bun; Node stays the pinned runtime family | Accepted |
+| [0013](0013-thin-provenant-cli.md) | Thin `provenant` CLI for command discovery | Accepted |

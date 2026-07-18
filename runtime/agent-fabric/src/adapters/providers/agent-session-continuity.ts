@@ -6,6 +6,7 @@ import {
   FABRIC_OPERATIONS,
   NdjsonRpcTransport,
   OPERATION_REGISTRY,
+  PROTOCOL_LIMITS,
   operationsForPrincipal,
   parseOperationInput,
   type FabricOperation,
@@ -21,6 +22,7 @@ import {
 } from "./types.js";
 import {
   ProviderSessionFabricSurface,
+  RetainedProviderSessionKeepalive,
   type ProviderSessionProtocolTransport,
   type ProviderSessionToolResult,
 } from "./provider-session-fabric-surface.js";
@@ -77,6 +79,9 @@ async function connect(input: AgentSessionFabricBridgeInput): Promise<ProviderSe
     features: protocol.features,
     principal: protocol.principal,
     allowedOperations: protocol.allowedOperations,
+    idleTimeoutMs: typeof Reflect.get(protocol, "idleTimeoutMs") === "number"
+      ? Number(Reflect.get(protocol, "idleTimeoutMs"))
+      : PROTOCOL_LIMITS.idleTimeoutMs,
     async call(operation: FabricOperation, value: unknown): Promise<unknown> {
       return await protocol.call(operation, parseOperationInput(operation, value) as never);
     },
@@ -97,6 +102,7 @@ export class AgentSessionFabricBridge {
   readonly #binding: Omit<AgentSessionFabricBridgeInput, "capability" | "socketPath" | "expectedPrincipal">;
   readonly #transport: ProviderSessionProtocolTransport;
   readonly #surface: ProviderSessionFabricSurface;
+  readonly #keepalive: RetainedProviderSessionKeepalive;
   #session: { ref: string; generation: number } | undefined;
   #activation: { turnRef: string; invocationRef: string; operation: FabricOperation } | undefined;
   readonly #lifecycleAttestation: (AgentLifecycleAttestationBinding & { challenge: Buffer }) | undefined;
@@ -143,6 +149,7 @@ export class AgentSessionFabricBridge {
       operation: FABRIC_OPERATIONS.launchAttest,
       invoke: async (value, context) => await this.#attest(value, context),
     }]);
+    this.#keepalive = new RetainedProviderSessionKeepalive(transport);
     this.descriptors = this.#surface.descriptors;
     const descriptor = this.descriptors.find(({ operation }) => operation === (
       this.#lifecycleAttestation === undefined ? FABRIC_OPERATIONS.getMailboxState : FABRIC_OPERATIONS.launchAttest
@@ -271,6 +278,7 @@ export class AgentSessionFabricBridge {
       ...lifecycleAttestation,
       attestationDigest: agentLifecycleAttestationDigest(lifecycleAttestation),
     };
+    this.#keepalive.start();
     return {
       schemaVersion: 1,
       adapterId: this.#binding.providerAdapterId,
@@ -288,6 +296,7 @@ export class AgentSessionFabricBridge {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#keepalive.stop();
     await this.#transport.close();
   }
 }
