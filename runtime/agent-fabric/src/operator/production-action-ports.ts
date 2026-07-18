@@ -42,6 +42,7 @@ import {
   ProviderActionAdmissionTransactionError,
   type ProviderActionTicket,
 } from "../application/provider-action-admission.js";
+import { cancelEffectFreeProjectSession } from "./effect-free-session-cancellation.js";
 
 type Row = Record<string, unknown>;
 
@@ -1733,70 +1734,21 @@ class ProductionOperatorActions {
     scope: EffectScope,
   ): OperatorEffectOutcome {
     if (request.intent.kind !== "control" || request.intent.action !== "cancel") unsupported();
-    const reason = request.intent.reason;
-    const commandId = request.commandId;
-    const outcome: OperatorEffectOutcome = {
-      status: "committed",
-      afterState: { lifecycleState: "cancelled", cancelledTasks: 0 },
-    };
-    const terminalPath = canonicalJson({
-      kind: "cancelled",
-      reason,
+    return cancelEffectFreeProjectSession({
+      database: this.#database,
+      clock: this.#clock,
+      input: {
+        projectSessionId: target.projectSessionId,
+        expectedRevision: target.revision,
+        expectedGeneration: target.sessionGeneration,
+        reason: request.intent.reason,
+        commandId: request.commandId,
+      },
+      storeCustodyOutcome: (outcome) => this.#storeCustodyOutcome(scope, request.commandId, outcome),
+      ...(this.#retireVolatileProjectSession === undefined
+        ? {}
+        : { retireVolatileProjectSession: this.#retireVolatileProjectSession }),
     });
-    this.#database.transaction(() => {
-      const session = row(this.#database.prepare(`
-        SELECT state, revision, generation FROM project_sessions WHERE project_session_id=?
-      `).get(target.projectSessionId), "effect-free project session");
-      if (
-        !["draft", "awaiting_launch"].includes(text(session, "state")) ||
-        integer(session, "revision") !== target.revision ||
-        integer(session, "generation") !== target.sessionGeneration
-      ) {
-        throw new ProjectFabricCoreError(
-          "LIFECYCLE_PRECONDITION_FAILED",
-          "effect-free cancellation requires the exact draft or awaiting-launch session",
-        );
-      }
-      const blockers: ReadonlyArray<readonly [string, string, (readonly unknown[])?]> = [
-        ["coordination run", "SELECT 1 FROM runs WHERE project_session_id=? LIMIT 1"],
-        ["session membership", "SELECT 1 FROM project_session_memberships WHERE project_session_id=? LIMIT 1"],
-        ["launch custody", "SELECT 1 FROM project_session_launch_custody WHERE project_session_id=? LIMIT 1"],
-        ["resource reservation", "SELECT 1 FROM resource_reservations WHERE project_session_id=? LIMIT 1"],
-        ["gate", "SELECT 1 FROM scoped_gates WHERE project_session_id=? LIMIT 1"],
-        [
-          "operator effect",
-          `SELECT 1 FROM operator_effect_custody
-            WHERE project_session_id=? AND command_id<>? LIMIT 1`,
-          [commandId],
-        ],
-      ];
-      for (const [label, sql, tail = []] of blockers) {
-        if (this.#database.prepare(sql).get(target.projectSessionId, ...tail) !== undefined) {
-          throw new ProjectFabricCoreError(
-            "LIFECYCLE_PRECONDITION_FAILED",
-            `effect-free cancellation found an unresolved ${label}`,
-          );
-        }
-      }
-      const changed = this.#database.prepare(`
-        UPDATE project_sessions
-           SET state='cancelled', terminal_path_json=?, revision=revision+1, updated_at=?
-         WHERE project_session_id=? AND revision=? AND generation=?
-           AND state IN ('draft','awaiting_launch')
-      `).run(
-        terminalPath,
-        this.#clock(),
-        target.projectSessionId,
-        target.revision,
-        target.sessionGeneration,
-      );
-      if (changed.changes !== 1) {
-        throw new ProjectFabricCoreError("STALE_REVISION", "effect-free cancellation raced another transition");
-      }
-      this.#storeCustodyOutcome(scope, commandId, outcome);
-    })();
-    try { this.#retireVolatileProjectSession?.(target.projectSessionId); } catch { /* durable cancellation committed */ }
-    return outcome;
   }
 
   #settleCancelledTask(
