@@ -5,8 +5,8 @@ description: "Use for start, checkpoint, handoff, compaction, or end-of-session 
 
 # Session
 
-Store durable continuity in the project's canonical owner; without write
-authority, return a proposed delta in chat. Project instructions override.
+Store continuity in project's canonical owner; without write authority,
+propose a delta in chat. Project instructions may override continuity paths.
 Fallbacks:
 state `docs/STATE.md` (about 120 lines), handoffs `docs/handoffs/`, archive
 `docs/archive/`. Instructions may override `STATE_FILE`, `HANDOFF_DIR` and
