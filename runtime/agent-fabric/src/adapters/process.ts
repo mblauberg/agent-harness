@@ -49,6 +49,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const SAFE_CURSOR_RECORD_FIELDS = new Set(["is_error", "message", "result", "session_id", "subtype", "type"]);
+
+function safeCursorRecordDetails(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value) ||
+    Object.keys(value).sort().join("\0") !==
+      "recordFields\0recordIndex\0recordTypeLength\0recordTypeSha256" ||
+    !Number.isSafeInteger(value.recordIndex) ||
+    (value.recordIndex as number) < 0 ||
+    typeof value.recordTypeSha256 !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(value.recordTypeSha256) ||
+    !Number.isSafeInteger(value.recordTypeLength) ||
+    (value.recordTypeLength as number) < 0 ||
+    (value.recordTypeLength as number) > FABRIC_PROTOCOL_LIMITS.maximumFrameBytes ||
+    !Array.isArray(value.recordFields) ||
+    value.recordFields.length > SAFE_CURSOR_RECORD_FIELDS.size ||
+    !value.recordFields.every((field) => typeof field === "string" && SAFE_CURSOR_RECORD_FIELDS.has(field)) ||
+    [...value.recordFields].sort().join("\0") !== value.recordFields.join("\0") ||
+    new Set(value.recordFields).size !== value.recordFields.length
+  ) return undefined;
+  return {
+    recordIndex: value.recordIndex,
+    recordTypeSha256: value.recordTypeSha256,
+    recordTypeLength: value.recordTypeLength,
+    recordFields: [...value.recordFields],
+  };
+}
+
 function positiveMilliseconds(value: number, label: string): number {
   if (!Number.isFinite(value) || value <= 0) {
     throw new TypeError(`${label} must be a positive finite number`);
@@ -345,6 +372,8 @@ export class AdapterProcessTransport {
       }
       const error = new Error(value.error.message);
       error.name = value.error.code;
+      const safeDetails = safeCursorRecordDetails(value.error.details);
+      if (safeDetails !== undefined) Object.assign(error, { details: safeDetails });
       pending.reject(error);
       return;
     }
