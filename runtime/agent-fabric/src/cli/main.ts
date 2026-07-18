@@ -206,7 +206,11 @@ async function main(arguments_: string[]): Promise<void> {
       cwd: process.cwd(),
       paths: resolveFabricPaths(),
     });
-    const { credential: _credential, ...publicOutput } = output;
+    const { credential: _credential, credentials, ...safeOutput } = output;
+    const publicOutput = {
+      ...safeOutput,
+      credentials: credentials.map(({ capability: _capability, ...metadata }) => metadata),
+    };
     process.stdout.write(`${JSON.stringify(publicOutput, null, 2)}\n`);
     return;
   }
