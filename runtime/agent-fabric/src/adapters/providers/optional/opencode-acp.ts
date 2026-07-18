@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { verifyProviderConformance } from "../../provider-conformance.js";
 import { SqliteAdapterActionJournal } from "../journal.js";
 import { journalPathFromArguments, serveAdapter } from "../server.js";
-import { type AdapterRequestHandler } from "../types.js";
+import { actionPayload, ProviderAdapterError, requiredString, type AdapterRequestHandler } from "../types.js";
 import { KiroAcpStdioClient } from "./kiro-acp-client.js";
 import { createManagedAcpBoundary, type KiroAcpBoundary } from "./kiro-acp.js";
 import {
@@ -17,7 +17,7 @@ export function createOpenCodeAcpAdapter(options: {
   boundary: OpenCodeAcpBoundary;
   journal: SqliteAdapterActionJournal;
 }): AdapterRequestHandler {
-  return createOptionalProviderAdapter({
+  const delegate = createOptionalProviderAdapter({
     capabilities: optionalCapabilities({
       adapterId: "opencode-acp",
       operations: ["spawn", "send_turn", "release"],
@@ -30,6 +30,25 @@ export function createOpenCodeAcpAdapter(options: {
     journal: options.journal,
     modelPolicy: { allowedModelPatterns: ["opencode/*"] },
   });
+  return {
+    async request(method, params) {
+      if (method === "spawn" || (method === "dispatch" && (params.operation === "send_turn" || params.operation === "steer"))) {
+        const payload = actionPayload(params);
+        if (payload.effort !== undefined) {
+          const effort = requiredString(payload.effort, "effort");
+          const model = requiredString(payload.model, "model");
+          if (model.split("/").at(-1) !== effort) {
+            throw new ProviderAdapterError(
+              "ADAPTER_EFFORT_FORBIDDEN",
+              "OpenCode effort must be encoded in the advertised ACP model variant",
+              { effort, model },
+            );
+          }
+        }
+      }
+      return await delegate.request(method, params);
+    },
+  };
 }
 
 export async function runOpenCodeAcpAdapter(

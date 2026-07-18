@@ -298,7 +298,8 @@ The active optional reviewer routes are exact and subscription-authenticated:
 
 Do not set or persist provider API keys for these routes. OpenCode is limited to
 its `opencode/*` account catalogue; select an effort variant only when that
-catalogue advertises it. The wrappers forward
+catalogue advertises it. A separate effort value without the matching
+`/<effort>` model suffix fails closed. The wrappers forward
 only the minimal process environment (`HOME`, `PATH` and `TMPDIR`) and use the
 provider CLIs' existing subscription sessions. `scripts/model-route resolve`
 must report the exact family, model and high effort through `--adapter-gate
