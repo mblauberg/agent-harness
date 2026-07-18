@@ -21,6 +21,10 @@ def test_harness_python_selection_is_portable():
     assert "miniforge" not in checker
     assert '"$ROOT/.venv/bin/python"' in checker
     assert "command -v python3" in checker
+    assert "import pytest, yaml" in checker
+    assert "uv run --frozen --only-group test python" in checker
+    assert '"${PYTHON[@]}"' in checker
+    assert '"$PYTHON"' not in checker
 
 
 def test_install_and_continuity_docs_describe_the_actual_boundaries():
