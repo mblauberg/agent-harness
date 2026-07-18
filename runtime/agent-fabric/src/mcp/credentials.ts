@@ -138,7 +138,7 @@ async function resolveProjectSeatFile(
         );
       }
       if (remainingMs <= 0) throw new Error(`agent fabric MCP seat ${seat} expired at ${metadata.expiresAt}`);
-      if (!bootstrapSeat && remainingMs <= 7 * 24 * 60 * 60 * 1_000) {
+      if (!bootstrapSeat && !verifiedLegacyBootstrapSeat && remainingMs <= 7 * 24 * 60 * 60 * 1_000) {
         warn(`agent fabric MCP seat ${seat} expires at ${metadata.expiresAt}; coordinate a full-roster renewal`);
       }
       return credentialPath;

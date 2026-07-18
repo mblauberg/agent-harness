@@ -182,9 +182,10 @@ describe("MCP capability loading", () => {
   });
 
   it.each([
-    ["near expiry", 30 * 60 * 1_000],
-    ["expired", -1_000],
-  ])("migrates a verified %s legacy bootstrap seat", async (_label, remainingMs) => {
+    ["before the renewal window", 2 * 60 * 60 * 1_000, false],
+    ["near expiry", 30 * 60 * 1_000, true],
+    ["expired", -1_000, true],
+  ])("handles a verified legacy bootstrap seat %s", async (_label, remainingMs, shouldRenew) => {
     const directory = await mkdtemp(join(tmpdir(), "fabric-mcp-legacy-seat-expiry-"));
     cleanup.push(directory);
     const stateDirectory = join(directory, "state");
@@ -238,11 +239,13 @@ describe("MCP capability loading", () => {
       })}\n`, { mode: 0o600 });
     });
 
+    const warn = vi.fn();
     await expect(resolveRenewableMcpCapability({
       AGENT_FABRIC_SEAT: "codex",
       AGENT_FABRIC_STATE_DIRECTORY: stateDirectory,
-    }, projectPath, renew)).resolves.toBe(migratedCapability);
-    expect(renew).toHaveBeenCalledOnce();
+    }, projectPath, renew, warn)).resolves.toBe(shouldRenew ? migratedCapability : `afc_${"d".repeat(43)}`);
+    expect(renew).toHaveBeenCalledTimes(shouldRenew ? 1 : 0);
+    expect(warn).not.toHaveBeenCalled();
     await expect(readFile(legacyMetadataPath, "utf8")).resolves.toBe(legacyMetadata);
   });
 
