@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { readFile, rm, unlink, writeFile } from "node:fs/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
-import { parse } from "yaml";
+import { parse, stringify } from "yaml";
 
 import { runSourceCli } from "../support/cli-process.ts";
 import { createResolvedStage4Compatibility } from "../support/stage4-pi-agy-testkit.ts";
@@ -42,7 +42,7 @@ async function resolveFixtureExecutable(fixture: Fixture) {
 }
 
 describe("adapter executable resolver CLI", () => {
-  it("prints the activated compatibility-pinned executable after validation", async () => {
+  it("prints the activated stable compatibility executable after validation", async () => {
     const fixture = await createResolvedStage4Compatibility("agy");
     fixtures.push(fixture);
     const executable = await fixtureExecutable(fixture);
@@ -53,19 +53,21 @@ describe("adapter executable resolver CLI", () => {
     expect(result.stdout).toBe(`${executable}\n`);
   });
 
-  it("fails closed when the pinned executable hash drifts", async () => {
+  it("ignores a stale observational executable digest", async () => {
     const fixture = await createResolvedStage4Compatibility("agy");
     fixtures.push(fixture);
-    await writeFile(await fixtureExecutable(fixture), "tampered executable\n");
+    const document = parse(await readFile(fixture.compatibilityPath, "utf8"));
+    document.adapters.agy.implementation.executable_sha256 = "b".repeat(64);
+    await writeFile(fixture.compatibilityPath, stringify(document));
 
     const result = await resolveFixtureExecutable(fixture);
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("adapter artifact digest changed");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${await fixtureExecutable(fixture)}\n`);
+    expect(result.stderr).toBe("");
   });
 
-  it("fails closed when the pinned executable is missing", async () => {
+  it("fails closed when the stable executable is missing", async () => {
     const fixture = await createResolvedStage4Compatibility("agy");
     fixtures.push(fixture);
     await unlink(await fixtureExecutable(fixture));
@@ -74,7 +76,7 @@ describe("adapter executable resolver CLI", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("adapter artifact is unavailable");
+    expect(result.stderr).toContain("wrapper entrypoint is unavailable");
   });
 
   it("fails closed when the adapter is not active", async () => {

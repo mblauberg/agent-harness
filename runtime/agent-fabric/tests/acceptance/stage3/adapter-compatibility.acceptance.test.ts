@@ -49,7 +49,7 @@ describe("Section 21 Stage 3 adapter compatibility and activation gate", () => {
     }
   });
 
-  it("validates Claude, Codex and Herdr fixture hashes without executing them", async () => {
+  it("validates Claude, Codex and Herdr protocol schema hashes without executing providers", async () => {
     const verify = requirePublicFunction("verifyAdapterCompatibility");
     const fixture = await createPrimaryCompatibilityFixture();
 
@@ -63,14 +63,14 @@ describe("Section 21 Stage 3 adapter compatibility and activation gate", () => {
     ).resolves.toMatchObject({
       valid: true,
       adapterIds: ["claude-agent-sdk", "codex-app-server", "herdr"],
-      verifiedArtifactCount: 6,
+      verifiedArtifactCount: 3,
     });
   });
 
-  it("fails closed when a pinned artifact changes", async () => {
+  it("fails closed when a pinned protocol artifact changes", async () => {
     const verify = requirePublicFunction("verifyAdapterCompatibility");
     const fixture = await createPrimaryCompatibilityFixture();
-    await writeFile(fixture.artifactPaths[0] ?? "", "tampered fixture\n");
+    await writeFile(fixture.artifactPaths[1] ?? "", "tampered fixture\n");
 
     await expect(
       verify({

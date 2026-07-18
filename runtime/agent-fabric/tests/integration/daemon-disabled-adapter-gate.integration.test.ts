@@ -66,8 +66,7 @@ describe("daemon trusted adapter composition", () => {
     const codex = compatibility.adapters["codex-app-server"];
     if (codex === undefined) throw new TypeError("Codex compatibility fixture is missing");
     const executable = codex.implementation.executable;
-    const executableHash = codex.implementation.executable_sha256;
-    if (executable === undefined || executableHash === undefined) throw new TypeError("Codex fixture executable is unpinned");
+    if (executable === undefined) throw new TypeError("Codex fixture executable is missing");
     codex.enabled = true;
     codex.implementation.wrapper_entrypoint = executable;
     await writeWrapperPackageScaffold(fixture.directory);
@@ -98,8 +97,6 @@ describe("daemon trusted adapter composition", () => {
           fixture.artifactPaths[0],
           "--provider-executable",
           fixture.artifactPaths[0],
-          "--provider-executable-sha256",
-          executableHash,
         ],
         modelPolicy: { allowedFamilies: ["openai"], requiresExplicitModel: true },
         wrapperProvenance: {

@@ -69,7 +69,7 @@ export async function resolveAdapterExecutableCli(arguments_: string[]): Promise
   if (executable === undefined) {
     throw new FabricError(
       "ADAPTER_COMPATIBILITY_INVALID",
-      `activated adapter has no hash-pinned executable: ${adapterId}`,
+      `activated adapter has no provider executable: ${adapterId}`,
     );
   }
   return executable;

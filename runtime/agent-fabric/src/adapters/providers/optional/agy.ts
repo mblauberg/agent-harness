@@ -4,6 +4,7 @@ import type { AdapterRequestHandler } from "../types.js";
 import { SqliteAdapterActionJournal } from "../journal.js";
 import { journalPathFromArguments, serveAdapter } from "../server.js";
 import { createAgyCliBoundary } from "./command-boundaries.js";
+import { verifyProviderExecutableIdentity } from "../../provider-identity.js";
 import {
   createOptionalProviderAdapter,
   optionalCapabilities,
@@ -20,18 +21,13 @@ export function createAgyAdapter(options: {
     capabilities: optionalCapabilities({
       adapterId: "agy",
       operations: ["spawn", "attach", "send_turn", "release"],
-      modelFamilies: ["google"],
+      modelFamilies: ["google", "anthropic"],
       compactInPlace: false,
       answerBearingSpawn: true,
       answerBearingSpawnTurns: "one-shot",
     }),
     boundary: options.boundary,
     journal: options.journal,
-    modelPolicy: {
-      adapterId: "agy",
-      allowedFamilies: ["google"],
-      allowedModelPatterns: ["gemini*"],
-    },
   });
 }
 
@@ -48,11 +44,16 @@ function requiredArgument(arguments_: string[], name: string): string {
 
 export async function runAgyAdapter(arguments_: string[] = process.argv.slice(2)): Promise<void> {
   const journal = new SqliteAdapterActionJournal(journalPathFromArguments("agy", arguments_));
+  const executable = requiredArgument(arguments_, "--provider-executable");
+  const identityPolicy = argument(arguments_, "--provider-identity-policy");
   try {
     await serveAdapter(
       createAgyAdapter({
         boundary: createAgyCliBoundary({
-          executable: requiredArgument(arguments_, "--provider-executable"),
+          executable,
+          ...(identityPolicy === undefined ? {} : {
+            verifyExecutable: async () => await verifyProviderExecutableIdentity({ adapterId: "agy", executable }),
+          }),
           cwd: argument(arguments_, "--cwd") ?? process.cwd(),
         }),
         journal,

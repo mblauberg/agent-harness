@@ -21,7 +21,7 @@ export async function loadAdapterModelConstraints(input: {
   schemaPath: string;
   adapterId: string;
   requireEnabled?: boolean;
-}): Promise<{ enabled: boolean; allowed: string[]; patterns: string[]; requiresExplicitModel: boolean; wrapperEntrypoint?: string; providerExecutable?: string; providerExecutableSha256?: string }> {
+}): Promise<{ enabled: boolean; allowed: string[]; patterns: string[]; requiresExplicitModel: boolean; wrapperEntrypoint?: string; providerExecutable?: string; cursorInstallRoot?: string; providerIdentity?: string }> {
   await verifyAdapterCompatibility({
     compatibilityPath: input.compatibilityPath,
     schemaPath: input.schemaPath,
@@ -46,12 +46,12 @@ export async function loadAdapterModelConstraints(input: {
   const providerExecutable = typeof implementation.executable === "string"
     ? resolveCompatibilityArtifact(input.compatibilityPath, implementation.executable)
     : undefined;
-  const providerExecutableSha256 = typeof implementation.executable_sha256 === "string"
-    ? implementation.executable_sha256
+  const cursorInstallRoot = typeof implementation.cursor_install_root === "string"
+    ? resolveCompatibilityArtifact(input.compatibilityPath, implementation.cursor_install_root)
     : undefined;
-  if ((providerExecutable === undefined) !== (providerExecutableSha256 === undefined)) {
-    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", "adapter provider executable path and digest must be pinned together");
-  }
+  const providerIdentity = typeof implementation.provider_identity === "string"
+    ? implementation.provider_identity
+    : undefined;
   return {
     enabled: adapter.enabled === true,
     allowed: stringArray(adapter.model_family_constraints.allowed),
@@ -63,7 +63,8 @@ export async function loadAdapterModelConstraints(input: {
     requiresExplicitModel: adapter.model_family_constraints.requires_explicit_model !== false,
     ...(wrapperEntrypoint === undefined ? {} : { wrapperEntrypoint }),
     ...(providerExecutable === undefined ? {} : { providerExecutable }),
-    ...(providerExecutableSha256 === undefined ? {} : { providerExecutableSha256 }),
+    ...(cursorInstallRoot === undefined ? {} : { cursorInstallRoot }),
+    ...(providerIdentity === undefined ? {} : { providerIdentity }),
   };
 }
 

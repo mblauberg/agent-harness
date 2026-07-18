@@ -42,7 +42,7 @@ if (
   compatibilityEntry.enabled !== true || !Array.isArray(compatibilityEntry.unresolved_pins) ||
   compatibilityEntry.unresolved_pins.length !== 0
 ) {
-  throw new Error(`adapter ${adapterId} is not fully enabled and pinned`);
+  throw new Error(`adapter ${adapterId} is not enabled and contract-conformant`);
 }
 const implementation = compatibilityEntry.implementation;
 const expandPath = (value) => value
@@ -50,11 +50,10 @@ const expandPath = (value) => value
   .replaceAll("${AGENTS_HOME}", agentsRoot);
 const pinnedExecutable = expandPath(implementation.executable);
 if (await realpath(providerExecutable) !== await realpath(pinnedExecutable)) {
-  throw new Error("provider executable does not match the compatibility pin");
+  throw new Error("provider executable does not match the compatibility path");
 }
 const digest = async (path) => createHash("sha256").update(await readFile(path)).digest("hex");
 const executableSha256 = await digest(pinnedExecutable);
-if (executableSha256 !== implementation.executable_sha256) throw new Error("provider executable digest does not match the compatibility pin");
 const wrapperPath = resolve(new URL("../src", import.meta.url).pathname, wrapper);
 if (await realpath(wrapperPath) !== await realpath(join(agentsRoot, implementation.wrapper_entrypoint))) {
   throw new Error("wrapper entrypoint does not match the compatibility path");
@@ -115,7 +114,8 @@ const args = [
   wrapperPath,
   "--journal", join(directory, "journal.sqlite3"),
   "--provider-executable", pinnedExecutable,
-  "--provider-executable-sha256", executableSha256,
+  ...(implementation.provider_identity === undefined ? [] : ["--provider-identity-policy", implementation.provider_identity]),
+  ...(implementation.cursor_install_root === undefined ? [] : ["--provider-install-root", expandPath(implementation.cursor_install_root)]),
   ...(provider === undefined ? [] : ["--allowed-provider", provider]),
 ];
 const transport = new AdapterProcessTransport({ command: [process.execPath, ...args], environment: {}, responseTimeoutMs: 120_000 });

@@ -146,9 +146,9 @@ describe("adapter wrapper Git provenance", () => {
     });
   });
 
-  it("still fails closed when a pinned external artifact changes", async () => {
+  it("still fails closed when a pinned protocol artifact changes", async () => {
     const fixture = await createProvenanceFixture();
-    await writeFile(fixture.executablePath, "tampered provider executable\n");
+    await writeFile(join(fixture.directory, "protocol.json"), '{"schema_version":2}\n');
 
     await expect(verify(fixture)).rejects.toMatchObject({ code: "ADAPTER_HASH_MISMATCH" });
   });

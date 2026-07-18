@@ -5,6 +5,7 @@ import { ProviderAdapterError, requiredString, type AdapterRequestHandler } from
 import { SqliteAdapterActionJournal } from "../journal.js";
 import { journalPathFromArguments, serveAdapter } from "../server.js";
 import { KiroAcpStdioClient } from "./kiro-acp-client.js";
+import { verifyProviderExecutableIdentity } from "../../provider-identity.js";
 import {
   createOptionalProviderAdapter,
   optionalCapabilities,
@@ -32,11 +33,13 @@ function absoluteCwd(value: unknown): string {
 
 export function createKiroAcpBoundary(options: {
   clientFactory(input: { model: string; cwd: string }): KiroAcpClient;
+  verifyExecutable?: () => Promise<unknown>;
 }): KiroAcpBoundary & { shutdown(): Promise<void> } {
   type ManagedSession = { client: KiroAcpClient; cwd: string; model: string };
   const sessions = new Map<string, ManagedSession>();
 
   async function start(input: { model: string; cwd: string }): Promise<KiroAcpClient> {
+    await options.verifyExecutable?.();
     const created = options.clientFactory(input);
     try {
       await created.start();
@@ -158,6 +161,7 @@ export function createUnverifiedKiroAcpEntrypoint(): AdapterRequestHandler {
 export async function runKiroAcpAdapter(arguments_: string[] = process.argv.slice(2)): Promise<void> {
   const journal = new SqliteAdapterActionJournal(journalPathFromArguments("kiro-acp", arguments_));
   const providerExecutable = requiredArgument(arguments_, "--provider-executable");
+  const identityPolicy = argument(arguments_, "--provider-identity-policy");
   const providerArguments = argumentValues(arguments_, "--provider-argument");
   if (providerArguments.some((value) => value === "--trust-all-tools" || value === "--trust-tools" || value === "-a")) {
     throw new Error("kiro-acp adapter forbids provider trust overrides");
@@ -171,6 +175,9 @@ export async function runKiroAcpAdapter(arguments_: string[] = process.argv.slic
   const maximumLineBytes = positiveIntegerArgument(arguments_, "--maximum-line-bytes");
   const maximumOutputBytes = positiveIntegerArgument(arguments_, "--maximum-output-bytes");
   const boundary = createKiroAcpBoundary({
+    ...(identityPolicy === undefined ? {} : {
+      verifyExecutable: async () => await verifyProviderExecutableIdentity({ adapterId: "kiro-acp", executable: providerExecutable }),
+    }),
     clientFactory({ model, cwd }) {
       return new KiroAcpStdioClient({
         executable: providerExecutable,

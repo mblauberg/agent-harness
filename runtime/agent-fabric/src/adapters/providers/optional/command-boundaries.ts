@@ -161,6 +161,7 @@ type OneShotBoundaryOptions = {
   cwd: string;
   timeoutMs?: number;
   runner?: ProviderCommandRunner;
+  verifyExecutable?: () => Promise<unknown>;
 };
 
 function assertTaskBoundOneShot(payload: Record<string, unknown>): void {
@@ -178,6 +179,7 @@ export function createAgyCliBoundary(options: OneShotBoundaryOptions): ProviderB
     const logDirectory = await mkdtemp(join(tmpdir(), "agent-fabric-agy-"));
     const logFile = join(logDirectory, "provider.log");
     try {
+      await options.verifyExecutable?.();
       const result = await runner(
         buildAgyInvocation({
           executable: options.executable,
@@ -232,6 +234,7 @@ export function createAgyCliBoundary(options: OneShotBoundaryOptions): ProviderB
 export function createCursorCliBoundary(options: OneShotBoundaryOptions): ProviderBoundary {
   const runner = options.runner ?? runBoundedProviderCommand;
   const execute = async (payload: Record<string, unknown>, resume?: string): Promise<Record<string, unknown>> => {
+    await options.verifyExecutable?.();
     const result = await runner(
       buildCursorInvocation({
         executable: options.executable,

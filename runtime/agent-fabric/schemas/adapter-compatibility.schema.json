@@ -31,7 +31,7 @@
     "implementation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "installed_version"],
+      "required": ["kind"],
       "properties": {
         "kind": {"type": "string"},
         "package": {"type": "string"},
@@ -49,6 +49,8 @@
         "rpc_entrypoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "bundle_entrypoint": {"type": "string"},
         "bundle_entrypoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "cursor_install_root": {"type": "string"},
+        "provider_identity": {"enum": ["apple-designated", "cursor-partial-signed-helpers"]},
         "package_manifest": {"type": "string"},
         "package_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }

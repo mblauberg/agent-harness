@@ -66,7 +66,7 @@
       "fixed_model_family": null,
       "effort_transport": "model-id",
       "model_family_preferences": {
-        "preferred": ["google"],
+        "preferred": ["google", "anthropic"],
         "fallback": {}
       }
     },

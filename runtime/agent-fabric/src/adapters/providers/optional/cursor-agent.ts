@@ -4,6 +4,7 @@ import type { AdapterRequestHandler } from "../types.js";
 import { SqliteAdapterActionJournal } from "../journal.js";
 import { journalPathFromArguments, serveAdapter } from "../server.js";
 import { createCursorCliBoundary } from "./command-boundaries.js";
+import { verifyProviderExecutableIdentity } from "../../provider-identity.js";
 import {
   createOptionalProviderAdapter,
   optionalCapabilities,
@@ -20,18 +21,13 @@ export function createCursorAgentAdapter(options: {
     capabilities: optionalCapabilities({
       adapterId: "cursor-agent",
       operations: ["spawn", "attach", "send_turn", "release"],
-      modelFamilies: ["cursor-composer", "xai"],
+      modelFamilies: ["cursor-composer", "xai", "anthropic", "openai", "google"],
       compactInPlace: false,
       answerBearingSpawn: true,
       answerBearingSpawnTurns: "one-shot",
     }),
     boundary: options.boundary,
     journal: options.journal,
-    modelPolicy: {
-      adapterId: "cursor-agent",
-      allowedFamilies: ["cursor-composer", "xai"],
-      allowedModelPatterns: ["composer-*", "cursor-grok-*"],
-    },
   });
 }
 
@@ -48,11 +44,24 @@ function requiredArgument(arguments_: string[], name: string): string {
 
 export async function runCursorAgentAdapter(arguments_: string[] = process.argv.slice(2)): Promise<void> {
   const journal = new SqliteAdapterActionJournal(journalPathFromArguments("cursor-agent", arguments_));
+  const executable = requiredArgument(arguments_, "--provider-executable");
+  const identityPolicy = argument(arguments_, "--provider-identity-policy");
+  const cursorInstallRoot = argument(arguments_, "--provider-install-root");
+  if (identityPolicy !== undefined && cursorInstallRoot === undefined) {
+    throw new Error("cursor-agent adapter requires --provider-install-root with identity policy");
+  }
   try {
     await serveAdapter(
       createCursorAgentAdapter({
         boundary: createCursorCliBoundary({
-          executable: requiredArgument(arguments_, "--provider-executable"),
+          executable,
+          ...(identityPolicy === undefined || cursorInstallRoot === undefined ? {} : {
+            verifyExecutable: async () => await verifyProviderExecutableIdentity({
+              adapterId: "cursor-agent",
+              executable,
+              cursorInstallRoot,
+            }),
+          }),
           cwd: argument(arguments_, "--cwd") ?? process.cwd(),
         }),
         journal,

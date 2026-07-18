@@ -65,7 +65,7 @@ export function createOptionalProviderAdapter(options: {
   capabilities: OptionalProviderCapabilities;
   boundary: OptionalProviderBoundary;
   journal: SqliteAdapterActionJournal;
-  modelPolicy: ModelPolicy;
+  modelPolicy?: ModelPolicy;
 }): AdapterRequestHandler {
   const delegate = createProviderAdapter({
     capabilities: options.capabilities,
@@ -74,7 +74,7 @@ export function createOptionalProviderAdapter(options: {
   });
   return {
     async request(method, params) {
-      if (requiresModel(method, params)) validateModel(actionPayload(params), options.modelPolicy);
+      if (requiresModel(method, params) && options.modelPolicy !== undefined) validateModel(actionPayload(params), options.modelPolicy);
       return await delegate.request(method, params);
     },
   };

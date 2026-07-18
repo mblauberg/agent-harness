@@ -43,14 +43,6 @@ async function verifyHash(path: string, expected: string): Promise<void> {
   }
 }
 
-/** Re-hashes a compatibility-selected provider executable immediately before spawn. */
-export async function verifyProviderExecutableDigest(path: string, expected: string): Promise<void> {
-  if (!/^[0-9a-f]{64}$/u.test(expected)) {
-    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `adapter executable digest is invalid: ${path}`);
-  }
-  await verifyHash(path, expected);
-}
-
 const execFileAsync = promisify(execFile);
 
 export type WrapperProvenance = {
@@ -905,18 +897,15 @@ export async function verifyAdapterCompatibility(input: {
           `enabled adapter has incomplete protocol/schema pins: ${adapterId}`,
         );
       }
-      const upstreamArtifactPins = Object.keys(adapter.implementation).filter(
-        (field) => field.endsWith("_sha256"),
-      );
-      if (upstreamArtifactPins.length === 0) {
+      if (typeof adapter.implementation.executable !== "string") {
         throw new FabricError(
           "ADAPTER_COMPATIBILITY_INVALID",
-          `enabled adapter has no pinned upstream artifact: ${adapterId}`,
+          `enabled adapter has no provider executable: ${adapterId}`,
         );
       }
     }
     for (const [field, expected] of Object.entries(adapter.implementation)) {
-      if (!field.endsWith("_sha256") || typeof expected !== "string") continue;
+      if (!field.endsWith("_sha256") || field === "executable_sha256" || field === "bundle_entrypoint_sha256" || typeof expected !== "string") continue;
       const pathValue = adapter.implementation[field.slice(0, -"_sha256".length)];
       if (typeof pathValue !== "string") {
         throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `${adapterId}.${field} has no artifact path`);
@@ -924,10 +913,7 @@ export async function verifyAdapterCompatibility(input: {
       await verifyHash(resolveCompatibilityArtifact(input.compatibilityPath, pathValue), expected);
       verifiedArtifactCount += 1;
     }
-    if (
-      typeof adapter.implementation.executable === "string" &&
-      typeof adapter.implementation.executable_sha256 === "string"
-    ) {
+    if (typeof adapter.implementation.executable === "string") {
       resolvedExecutables[adapterId] = resolveCompatibilityArtifact(
         input.compatibilityPath,
         adapter.implementation.executable,
