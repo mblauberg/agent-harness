@@ -74,10 +74,11 @@ accepted. Other files are preserved; the installer exits 3 and
 prints the bootstrap line to add. `provenant doctor` checks Fabric configuration
 and enabled adapters; `provenant check` is the full repository gate.
 
-The checked-in profile enables Claude, Codex, Agy and Cursor, so install all four
+The checked-in profile enables Claude, Codex, Agy, Cursor and Kiro, so install all five
 CLIs for `provenant doctor`; authenticate through their subscription flows
 before use. Doctor checks identity and non-answer interfaces, not login or
-quota. Provenant does not set or persist provider API keys for Agy or Cursor.
+quota. Provenant does not set or persist provider API keys for Agy, Cursor or
+Kiro.
 
 | Client or provider | Current integration |
 |---|---|
@@ -85,7 +86,7 @@ quota. Provenant does not set or persist provider API keys for Agy or Cursor.
 | Codex | Primary client and enabled OpenAI provider |
 | Agy | Enabled optional Gemini/Claude provider |
 | Cursor | Enabled optional Grok/Composer provider |
-| Kiro | Global MCP client registered; provider disabled ([#265](https://github.com/mblauberg/provenant/issues/265)) |
+| Kiro | Global MCP client and enabled optional open-weight ACP provider |
 | OpenCode | Global instructions only; no Fabric seat/provider ([#253](https://github.com/mblauberg/provenant/issues/253)) |
 
 Provider CLI versions and digests are diagnostic observations, not admission

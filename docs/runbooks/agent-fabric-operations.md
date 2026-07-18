@@ -295,7 +295,11 @@ The active optional reviewer routes are exact and subscription-authenticated:
 | Agy | `Gemini 3.1 Pro (High)` | Google / high |
 | Cursor | `cursor-grok-4.5-high` | xAI / high |
 
-Do not set or persist provider API keys for these routes. The wrappers forward
+Kiro is an active optional open-weight ACP worker. Select an explicit model
+reported by the current subscription; Fabric admits the maintained family
+prefixes rather than locking exact model names.
+
+Do not set or persist provider API keys for these routes or Kiro. The wrappers forward
 only the minimal process environment (`HOME`, `PATH` and `TMPDIR`) and use the
 provider CLIs' existing subscription sessions. `scripts/model-route resolve`
 must report the exact family, model and high effort through `--adapter-gate
