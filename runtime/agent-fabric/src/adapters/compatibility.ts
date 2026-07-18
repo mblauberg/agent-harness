@@ -849,7 +849,13 @@ export async function verifyAdapterCompatibility(input: {
   schemaPath: string;
   adapterIds: string[];
   requireEnabled: boolean;
-}): Promise<{ valid: true; adapterIds: string[]; verifiedArtifactCount: number; wrapperProvenance: WrapperProvenance[] }> {
+}): Promise<{
+  valid: true;
+  adapterIds: string[];
+  verifiedArtifactCount: number;
+  wrapperProvenance: WrapperProvenance[];
+  resolvedExecutables: Record<string, string>;
+}> {
   const document: unknown = parse(await readFile(input.compatibilityPath, "utf8"));
   const schema: unknown = JSON.parse(await readFile(input.schemaPath, "utf8"));
   if (!isRecord(schema)) {
@@ -865,6 +871,7 @@ export async function verifyAdapterCompatibility(input: {
 
   let verifiedArtifactCount = 0;
   const wrapperProvenance: WrapperProvenance[] = [];
+  const resolvedExecutables: Record<string, string> = {};
   for (const adapterId of input.adapterIds) {
     const adapter = document.adapters[adapterId];
     if (!isRecord(adapter)) {
@@ -917,6 +924,15 @@ export async function verifyAdapterCompatibility(input: {
       await verifyHash(resolveCompatibilityArtifact(input.compatibilityPath, pathValue), expected);
       verifiedArtifactCount += 1;
     }
+    if (
+      typeof adapter.implementation.executable === "string" &&
+      typeof adapter.implementation.executable_sha256 === "string"
+    ) {
+      resolvedExecutables[adapterId] = resolveCompatibilityArtifact(
+        input.compatibilityPath,
+        adapter.implementation.executable,
+      );
+    }
     const wrapperEntrypoint = adapter.implementation.wrapper_entrypoint;
     if (typeof wrapperEntrypoint === "string") {
       wrapperProvenance.push(await deriveWrapperProvenance({
@@ -933,5 +949,11 @@ export async function verifyAdapterCompatibility(input: {
       verifiedArtifactCount += 1;
     }
   }
-  return { valid: true, adapterIds: [...input.adapterIds], verifiedArtifactCount, wrapperProvenance };
+  return {
+    valid: true,
+    adapterIds: [...input.adapterIds],
+    verifiedArtifactCount,
+    wrapperProvenance,
+    resolvedExecutables,
+  };
 }

@@ -102,6 +102,21 @@ describe("machine-local workspace trust", () => {
     expect(JSON.parse(await readFile(registryPath, "utf8"))).toMatchObject({ schemaVersion: 1 });
   });
 
+  it("trusts a first-use project exactly without trusting its parent", async () => {
+    const value = await fixture();
+
+    await expect(runWorkspaceTrust(["inspect", value.workspace], value.paths))
+      .resolves.toMatchObject({ canonicalPath: await realpath(value.workspace), trusted: false });
+    await expect(runWorkspaceTrust(["trust", value.workspace], value.paths))
+      .resolves.toMatchObject({ trusted: true });
+
+    await expect(runWorkspaceTrust(["list"], value.paths)).resolves.toMatchObject({
+      entries: [expect.objectContaining({ canonicalPath: await realpath(value.workspace) })],
+    });
+    await expect(runWorkspaceTrust(["inspect", value.root], value.paths))
+      .resolves.toMatchObject({ canonicalPath: await realpath(value.root), trusted: false });
+  });
+
   it("rejects symbolic-link roots and supports inspect/revoke without widening", async () => {
     const value = await fixture();
     const linked = join(value.root, "linked");
