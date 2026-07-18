@@ -74,11 +74,10 @@ accepted. Other files are preserved; the installer exits 3 and
 prints the bootstrap line to add. `provenant doctor` checks Fabric configuration
 and enabled adapters; `provenant check` is the full repository gate.
 
-The checked-in profile enables Claude, Codex, Agy, Cursor and Kiro, so install all five
-CLIs for `provenant doctor`; authenticate through their subscription flows
-before use. Doctor checks identity and non-answer interfaces, not login or
-quota. Provenant does not set or persist provider API keys for Agy, Cursor or
-Kiro.
+The checked-in profile enables Claude, Codex, Agy, Cursor and Kiro. Install and
+authenticate all five before `provenant doctor`. Doctor checks identity and
+non-answer interfaces, not login or quota, and Provenant does not set or
+persist provider API keys.
 
 | Client or provider | Current integration |
 |---|---|
