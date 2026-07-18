@@ -3,8 +3,8 @@
 # Synced by .github/workflows/labels.yml (crazy-max/ghaction-github-labeler)
 # with pruning enabled: a label that is not in this file is deleted from the
 # live repository on the next sync. Project Status carries progress; labels
-# carry type, governance signals and automation switches until native issue
-# types are configured for this repository. Do not add status labels here.
+# carry type and governance signals until native issue types are configured
+# for this repository. Do not add status labels here.
 
 - name: bug
   color: "d73a4a"
@@ -29,7 +29,3 @@
 - name: user-gate
   color: "d93f0b"
   description: Merge leaves a decision or action only the user can take
-
-- name: agent-go
-  color: "0e8a16"
-  description: The user authorises autonomous implementation dispatch; readiness lives in Project Status
