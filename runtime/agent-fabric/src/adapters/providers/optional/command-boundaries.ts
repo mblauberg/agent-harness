@@ -92,6 +92,14 @@ export const runBoundedProviderCommand: ProviderCommandRunner = async (invocatio
 };
 
 function agyCommandResult(result: ProviderCommandResult, fallbackReference?: string): Record<string, unknown> {
+  const output = result.stdout.trim();
+  if (output.length === 0) {
+    throw new ProviderAdapterError(
+      "PROVIDER_RESPONSE_INVALID",
+      "Agy CLI exited successfully without answer output; verify subscription model access and headless print compatibility",
+      { exitCode: result.exitCode, stderr: result.stderr.slice(-4096) },
+    );
+  }
   if (fallbackReference === undefined) {
     throw new ProviderAdapterError(
       "PROVIDER_RESPONSE_INVALID",
@@ -100,7 +108,7 @@ function agyCommandResult(result: ProviderCommandResult, fallbackReference?: str
   }
   return {
     resumeReference: fallbackReference,
-    result: result.stdout.trim(),
+    result: output,
     providerRecordCount: 0,
   };
 }

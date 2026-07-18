@@ -60,6 +60,31 @@ describe("optional provider command boundaries", () => {
       });
   });
 
+  it("rejects a successful Agy process that returns no answer output", async () => {
+    const runner = vi.fn(async (invocation: { args: string[] }) => {
+      const logIndex = invocation.args.indexOf("--log-file");
+      const logPath = invocation.args[logIndex + 1];
+      if (logPath === undefined) throw new Error("missing log path");
+      await writeFile(logPath, "Created conversation 3cbfa155-fc5f-4c6e-aa99-3a44d48262b4\n");
+      return {
+        stdout: "",
+        stderr: "Agy completed without printable output",
+        exitCode: 0,
+      };
+    });
+    const boundary = createAgyCliBoundary({ executable: "/agy", cwd: "/workspace", runner });
+
+    await expect(boundary.spawn({ model: "Gemini 3.1 Pro (High)", prompt: "read only" }))
+      .rejects.toMatchObject({
+        code: "PROVIDER_RESPONSE_INVALID",
+        message: "Agy CLI exited successfully without answer output; verify subscription model access and headless print compatibility",
+        details: {
+          exitCode: 0,
+          stderr: "Agy completed without printable output",
+        },
+      });
+  });
+
   it("builds only the locally documented disabled-provider command forms", () => {
     expect(buildPiRpcLaunch({ executable: "/trusted/pi", cwd: "." })).toEqual({
       executable: "/trusted/pi",
