@@ -283,7 +283,9 @@ export async function runWorkspaceTrust(
       if (broadened !== undefined) throw new Error(`workspace trust refuses ancestor broadening over ${broadened.canonicalPath}`);
     }
     const allowedProfiles = requestedProfiles ?? currentEntry?.allowedProfiles ?? DEFAULT_PROFILES;
-    const effectiveExpiry = expiresAt ?? currentEntry?.expiresAt;
+    const currentExpiryIsLive = currentEntry?.expiresAt !== undefined &&
+      timestamp(currentEntry.expiresAt, "workspace expiry") > now.getTime();
+    const effectiveExpiry = expiresAt ?? (currentExpiryIsLive ? currentEntry.expiresAt : undefined);
     if (effectiveExpiry !== undefined && timestamp(effectiveExpiry, "workspace expiry") <= now.getTime()) {
       throw new Error("workspace trust expiry must be in the future");
     }

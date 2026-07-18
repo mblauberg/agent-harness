@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,6 +13,7 @@ import { bootstrapMcpSeat } from "../../src/cli/mcp-bootstrap.ts";
 import { installSeatGeneration, projectKey, resolveSeatPaths } from "../../src/cli/seat-store.ts";
 
 const roots: string[] = [];
+const execFileAsync = promisify(execFile);
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
@@ -54,8 +57,41 @@ describe("zero-state MCP bootstrap", () => {
       },
     })).rejects.toMatchObject({
       code: "WORKSPACE_NOT_TRUSTED",
-      message: `Fabric bootstrap requires the exact current project root to be trusted; run $HOME/.agents/scripts/agent-fabric workspace trust '${root}' and retry fabric_bootstrap`,
+      message: `Fabric bootstrap requires the exact current project root to be trusted; run "$HOME/.agents/scripts/agent-fabric" workspace trust '${root}'; then retry fabric_bootstrap`,
     });
+  });
+
+  it("emits an executable recovery command for a spaced home and exact root", async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "fabric-spaced-bootstrap-"));
+    roots.push(temporaryRoot);
+    const home = join(temporaryRoot, "operator home");
+    const project = join(temporaryRoot, "project root");
+    const launcher = join(home, ".agents", "scripts", "agent-fabric");
+    await mkdir(join(home, ".agents", "scripts"), { recursive: true });
+    await mkdir(project);
+    await writeFile(launcher, "#!/bin/sh\nprintf '%s' \"$3\"\n", { mode: 0o700 });
+    let message = "";
+    try {
+      await bootstrapMcpSeat({
+        environment: { AGENT_FABRIC_SEAT: "codex" },
+        cwd: project,
+        paths: {
+          stateDirectory: join(temporaryRoot, "state"),
+          runtimeDirectory: join(temporaryRoot, "runtime"),
+          databasePath: join(temporaryRoot, "state", "fabric-v1.sqlite3"),
+          socketPath: join(temporaryRoot, "runtime", "fabric-v1.sock"),
+        },
+      });
+    } catch (error: unknown) {
+      if (error instanceof Error) message = error.message;
+    }
+    const recovery = /; run (?<command>.+); then retry fabric_bootstrap$/u.exec(message)?.groups?.command;
+    expect(recovery).toBeDefined();
+
+    const result = await execFileAsync("/bin/sh", ["-c", recovery!], {
+      env: { ...process.env, HOME: home },
+    });
+    expect(result.stdout).toBe(await realpath(project));
   });
 
   it("creates one deterministic scoping run and converges a second primary into its peer seat", async () => {
