@@ -27,6 +27,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$TARGET" ]] || { usage; exit 2; }
+
+# Claude installations may intentionally expose the canonical skill tree as
+# one directory-level symlink. Preserve that layout instead of resolving the
+# target into the source tree and treating source directories as unmanaged.
+if [[ -L "$TARGET" ]] \
+  && [[ "$(cd "$TARGET" && pwd -P)" == "$(cd "$ROOT/skills" && pwd -P)" ]]; then
+  echo "skills existing=directory-link target=$TARGET"
+  exit 0
+fi
+
 exec "$ROOT/scripts/manage_installation.py" install \
   --source "$ROOT/skills" \
   --target "$TARGET" \
