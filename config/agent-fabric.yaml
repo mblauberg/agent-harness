@@ -16,6 +16,7 @@ activeAdapters:
   - codex-app-server
   - agy
   - cursor-agent
+  - kiro-acp
 
 allowedProfiles:
   - headless

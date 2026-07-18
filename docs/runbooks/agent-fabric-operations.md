@@ -295,7 +295,11 @@ The active optional reviewer routes are exact and subscription-authenticated:
 | Agy | `Gemini 3.1 Pro (High)` | Google / high |
 | Cursor | `cursor-grok-4.5-high` | xAI / high |
 
-Do not set or persist provider API keys for these routes. The wrappers forward
+Kiro is an active optional open-weight ACP worker. Select an explicit model
+reported by the current subscription; Fabric admits the maintained family
+prefixes rather than locking exact model names.
+
+Do not set or persist provider API keys for these routes or Kiro. The wrappers forward
 only the minimal process environment (`HOME`, `PATH` and `TMPDIR`) and use the
 provider CLIs' existing subscription sessions. `scripts/model-route resolve`
 must report the exact family, model and high effort through `--adapter-gate
@@ -319,7 +323,18 @@ node smoke/provider-adapter-readonly.mjs \
   --adapter cursor-agent --model cursor-grok-4.5-high \
   --model-family xai --effort high \
   --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter cursor-agent)"
+kiro-cli chat --list-models --format json-pretty
+node smoke/provider-adapter-readonly.mjs \
+  --adapter kiro-acp --model qwen3-coder-next \
+  --model-family open-weight --effort low \
+  --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter kiro-acp)"
 ```
+
+For Kiro, first replace the example model when the account's current list has
+changed; the name is smoke input, not an admission lock. The activation proof
+for issue #265 returned `status: pass`, `output: exact-sentinel`, `workspace:
+unchanged` and `session: spawn-turn-release` through Kiro 2.13.0 with Amazon
+Team ID `94KV3E626L`. Version and digest in that receipt are observations only.
 
 `adapter executable` prints only the validated executable path from the active
 adapter's compatibility entry. It fails closed before the provider smoke if the

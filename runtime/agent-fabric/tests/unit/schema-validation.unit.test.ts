@@ -96,7 +96,7 @@ describe("Stage 1 versioned JSON Schemas", () => {
       throw new TypeError("adapter compatibility must contain an adapters object");
     }
     expect(Object.keys(adapters).sort()).toEqual([...requiredRealAdapters].sort());
-    const enabledAdapters = new Set(["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent"]);
+    const enabledAdapters = new Set(["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent", "kiro-acp"]);
     for (const adapterId of requiredRealAdapters) {
       const adapter = adapters[adapterId];
       expect(isJsonObject(adapter), `${adapterId} must be an object`).toBe(true);
@@ -121,6 +121,11 @@ describe("Stage 1 versioned JSON Schemas", () => {
       model_family_constraints: {
         allowed: ["cursor-composer", "xai", "anthropic", "openai", "google"],
       },
+    });
+    expect(adapters["kiro-acp"]).toMatchObject({
+      implementation: { executable: "${USER_HOME}/.local/bin/kiro-cli" },
+      contract: { protocol_version: 1 },
+      model_family_constraints: { allowed: ["open-weight"] },
     });
     const claude = adapters["claude-agent-sdk"];
     if (!isJsonObject(claude) || !isJsonObject(claude.implementation)) {

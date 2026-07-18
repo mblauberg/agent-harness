@@ -27,7 +27,7 @@ Thin front door; each command delegates to its existing owner:
   doctor         scripts/agent-fabric doctor
 
 Fabric clients and providers are separate roles.
-Kiro provider activation: issue #265.
+Kiro: optional subscription-native provider (ACP v1).
 OpenCode provider registration: issue #253.
 EOF
 }

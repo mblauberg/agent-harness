@@ -26,6 +26,7 @@ export type ProviderPathObservation = {
 export type ProviderIdentityPort = {
   inspectPath(path: string): Promise<ProviderPathObservation>;
   inspectDirectory(path: string): Promise<{ canonicalPath: string; directory: boolean; ownerUid: number; mode: number }>;
+  verifySignature(path: string): Promise<void>;
   signingIdentity(path: string): Promise<{ teamId: string; identifier: string }>;
   currentUid(): number;
 };
@@ -67,6 +68,14 @@ async function signingIdentity(path: string): Promise<{ teamId: string; identifi
   }
 }
 
+async function verifySignature(path: string): Promise<void> {
+  try {
+    await execFileAsync("/usr/bin/codesign", ["--verify", "--strict", path]);
+  } catch (error: unknown) {
+    throw new FabricError("ADAPTER_IDENTITY_MISMATCH", `provider signature is invalid: ${path}`, { cause: error });
+  }
+}
+
 const SYSTEM_PORT: ProviderIdentityPort = {
   inspectPath,
   inspectDirectory: async (path) => {
@@ -74,6 +83,7 @@ const SYSTEM_PORT: ProviderIdentityPort = {
     const metadata = await lstat(canonicalPath);
     return { canonicalPath, directory: metadata.isDirectory(), ownerUid: metadata.uid, mode: metadata.mode & 0o777 };
   },
+  verifySignature,
   signingIdentity,
   currentUid: () => process.getuid?.() ?? -1,
 };
@@ -89,6 +99,16 @@ function assertSigning(actual: { teamId: string; identifier: string }, expected:
   if (actual.teamId !== expected.teamId || (expected.identifier !== undefined && actual.identifier !== expected.identifier)) {
     throw new FabricError("ADAPTER_IDENTITY_MISMATCH", "provider signing identity does not match the expected vendor");
   }
+}
+
+async function verifiedSigningIdentity(port: ProviderIdentityPort, path: string): Promise<{ teamId: string; identifier: string }> {
+  try {
+    await port.verifySignature(path);
+  } catch (error: unknown) {
+    if (error instanceof FabricError) throw error;
+    throw new FabricError("ADAPTER_IDENTITY_MISMATCH", `provider signature is invalid: ${path}`, { cause: error });
+  }
+  return await port.signingIdentity(path);
 }
 
 /**
@@ -108,7 +128,7 @@ export async function verifyProviderExecutableIdentity(input: {
   const expectedVendor = VENDORS[input.adapterId as keyof typeof VENDORS];
   if (expectedVendor !== undefined) {
     assertSafeFile(executable);
-    const signing = await port.signingIdentity(executable.canonicalPath);
+    const signing = await verifiedSigningIdentity(port, executable.canonicalPath);
     assertSigning(signing, expectedVendor);
     return {
       ...executable,
@@ -140,8 +160,8 @@ export async function verifyProviderExecutableIdentity(input: {
   const directory = dirname(executable.canonicalPath);
   const helperPath = join(directory, "spawn-helper");
   const nodePath = join(directory, "node");
-  const helper = await port.signingIdentity(helperPath);
-  const node = await port.signingIdentity(nodePath);
+  const helper = await verifiedSigningIdentity(port, helperPath);
+  const node = await verifiedSigningIdentity(port, nodePath);
   assertSigning(helper, { teamId: "DCNK4UB866" });
   assertSigning(node, { teamId: "HX7739G8FX" });
   return {

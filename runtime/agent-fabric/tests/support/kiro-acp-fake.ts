@@ -8,11 +8,13 @@ const transcriptPath = process.argv[3];
 let permissionRequestId = 90;
 let pendingPromptId: unknown;
 
-function record(direction: "in" | "out", value: unknown): void {
+function record(direction: "argv" | "in" | "out", value: unknown): void {
   if (transcriptPath !== undefined) {
     appendFileSync(transcriptPath, `${JSON.stringify({ direction, value })}\n`);
   }
 }
+
+record("argv", process.argv.slice(4));
 
 function send(value: unknown): void {
   record("out", value);

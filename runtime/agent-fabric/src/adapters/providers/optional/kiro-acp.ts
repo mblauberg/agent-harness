@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { isAbsolute } from "node:path";
 
-import { ProviderAdapterError, requiredString, type AdapterRequestHandler } from "../types.js";
+import { actionPayload, ProviderAdapterError, requiredString, type AdapterRequestHandler } from "../types.js";
 import { SqliteAdapterActionJournal } from "../journal.js";
 import { journalPathFromArguments, serveAdapter } from "../server.js";
 import { KiroAcpStdioClient } from "./kiro-acp-client.js";
@@ -23,6 +23,16 @@ export type KiroAcpClient = {
 
 export type KiroAcpBoundary = OptionalProviderBoundary;
 
+const KIRO_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+
+function kiroEffort(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !KIRO_EFFORTS.has(value)) {
+    throw new ProviderAdapterError("INVALID_PARAMS", "Kiro ACP effort must be one of low, medium, high, xhigh, max");
+  }
+  return value;
+}
+
 function absoluteCwd(value: unknown): string {
   const cwd = requiredString(value, "cwd");
   if (!isAbsolute(cwd)) {
@@ -32,13 +42,13 @@ function absoluteCwd(value: unknown): string {
 }
 
 export function createKiroAcpBoundary(options: {
-  clientFactory(input: { model: string; cwd: string }): KiroAcpClient;
+  clientFactory(input: { model: string; effort?: string; cwd: string }): KiroAcpClient;
   verifyExecutable?: () => Promise<unknown>;
 }): KiroAcpBoundary & { shutdown(): Promise<void> } {
-  type ManagedSession = { client: KiroAcpClient; cwd: string; model: string };
+  type ManagedSession = { client: KiroAcpClient; cwd: string; model: string; effort?: string };
   const sessions = new Map<string, ManagedSession>();
 
-  async function start(input: { model: string; cwd: string }): Promise<KiroAcpClient> {
+  async function start(input: { model: string; effort?: string; cwd: string }): Promise<KiroAcpClient> {
     await options.verifyExecutable?.();
     const created = options.clientFactory(input);
     try {
@@ -65,6 +75,9 @@ export function createKiroAcpBoundary(options: {
         throw new ProviderAdapterError("PROVIDER_MODEL_MISMATCH", "Kiro ACP model changed within a managed session");
       }
     }
+    if (payload.effort !== undefined && kiroEffort(payload.effort) !== session.effort) {
+      throw new ProviderAdapterError("PROVIDER_EFFORT_MISMATCH", "Kiro ACP effort changed within a managed session");
+    }
     return { ...session, sessionId };
   }
 
@@ -83,13 +96,14 @@ export function createKiroAcpBoundary(options: {
     async spawn(payload) {
       const cwd = absoluteCwd(payload.cwd);
       const model = requiredString(payload.model, "model");
-      const created = await start({ model, cwd });
+      const effort = kiroEffort(payload.effort);
+      const created = await start({ model, ...(effort === undefined ? {} : { effort }), cwd });
       try {
         const session = await created.newSession(cwd);
         if (sessions.has(session.sessionId)) {
           throw new ProviderAdapterError("PROVIDER_SESSION_CONFLICT", "Kiro ACP returned an already managed session ID");
         }
-        sessions.set(session.sessionId, { client: created, cwd, model });
+        sessions.set(session.sessionId, { client: created, cwd, model, ...(effort === undefined ? {} : { effort }) });
         return { resumeReference: session.sessionId, sessionId: session.sessionId };
       } catch (error: unknown) {
         await created.stop();
@@ -128,7 +142,7 @@ export function createKiroAcpAdapter(options: {
   boundary: KiroAcpBoundary;
   journal: SqliteAdapterActionJournal;
 }): AdapterRequestHandler {
-  return createOptionalProviderAdapter({
+  const delegate = createOptionalProviderAdapter({
     capabilities: optionalCapabilities({
       adapterId: "kiro-acp",
       operations: ["spawn", "send_turn", "release"],
@@ -143,15 +157,12 @@ export function createKiroAcpAdapter(options: {
       allowedModelPatterns: ["deepseek-*", "glm-*", "minimax-*", "qwen*"],
     },
   });
-}
-
-export function createUnverifiedKiroAcpEntrypoint(): AdapterRequestHandler {
   return {
-    async request(): Promise<never> {
-      throw new ProviderAdapterError(
-        "KIRO_ACP_PROTOCOL_UNVERIFIED",
-        "Kiro ACP activation is disabled because the installed CLI exposes no pinned ACP wire version or schema",
-      );
+    async request(method, params) {
+      if (method === "spawn" || (method === "dispatch" && params.operation === "send_turn")) {
+        kiroEffort(actionPayload(params).effort);
+      }
+      return await delegate.request(method, params);
     },
   };
 }
@@ -176,13 +187,14 @@ export async function runKiroAcpAdapter(
   const maximumOutputBytes = positiveIntegerArgument(arguments_, "--maximum-output-bytes");
   const boundary = createKiroAcpBoundary({
     verifyExecutable: async () => await (dependencies.verifyProvider ?? verifyProviderConformance)({ adapterId: "kiro-acp", executable: providerExecutable }),
-    clientFactory({ model, cwd }) {
+    clientFactory({ model, effort, cwd }) {
       return new KiroAcpStdioClient({
         executable: providerExecutable,
         args: [
           ...providerArguments,
           "acp",
           ...(model === undefined ? [] : ["--model", model]),
+          ...(effort === undefined ? [] : ["--effort", effort]),
           "--agent-engine",
           engine,
         ],
