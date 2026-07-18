@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+from functools import lru_cache
 import hashlib
 import importlib.util
 import json
@@ -27,8 +28,18 @@ def command(*argv: str, text: bool = True) -> str | bytes:
     return subprocess.run(argv, check=True, capture_output=True, text=text).stdout
 
 
+@lru_cache(maxsize=1)
+def git_evidence():
+    path = ROOT / "scripts/git_evidence.py"
+    spec = importlib.util.spec_from_file_location("binder_git_evidence", path)
+    fail(not spec or not spec.loader, "canonical Git evidence runner is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def git(root: Path, *args: str, text: bool = True) -> str | bytes:
-    return command("git", "-C", str(root), *args, text=text)
+    return git_evidence().git_output(root, *args, text=text)
 
 
 def github(path: str) -> dict[str, Any]:

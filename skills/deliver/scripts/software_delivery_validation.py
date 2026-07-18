@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from functools import lru_cache
+import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -12,6 +15,22 @@ from typing import Any
 
 
 OID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+ROOT = Path(__file__).resolve().parents[3]
+GIT_ARTIFACT_FIELDS = {
+    "id", "git_revision", "media_type", "artifact_type", "class", "owner", "retention",
+}
+
+
+@lru_cache(maxsize=1)
+def _git_evidence():
+    path = ROOT / "scripts/git_evidence.py"
+    spec = importlib.util.spec_from_file_location("delivery_git_evidence", path)
+    if not spec or not spec.loader:
+        raise RuntimeError("canonical Git evidence runner is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _fail(condition: bool, message: str, invalid_type: type[ValueError]) -> None:
@@ -33,7 +52,8 @@ def _load_artifact(
     artifact: dict[str, Any], *, artifact_root: Path | None,
     invalid_type: type[ValueError], field: str,
 ) -> dict[str, Any]:
-    _fail(not artifact.get("path") or artifact.get("uri") or artifact.get("git_revision"),
+    locations = {key for key in ("path", "uri", "git_revision") if key in artifact}
+    _fail(locations != {"path"} or not isinstance(artifact.get("path"), str) or not artifact["path"],
           f"{field} must be a local artifact", invalid_type)
     _fail(artifact.get("media_type") != "application/json" or artifact.get("class") != "evidence",
           f"{field} must be a local JSON evidence artifact", invalid_type)
@@ -57,8 +77,49 @@ def _closed(value: dict[str, Any], fields: set[str], field: str, invalid_type: t
     _fail(set(value) != fields, f"{field} fields are invalid", invalid_type)
 
 
+def _native_object_format(repository_root: Path, invalid_type: type[ValueError]) -> tuple[str, int]:
+    try:
+        object_format = str(_git_evidence().git_output(
+            repository_root, "rev-parse", "--show-object-format",
+        )).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise invalid_type("Git repository object format is unavailable") from exc
+    sizes = {"sha1": 40, "sha256": 64}
+    _fail(object_format not in sizes, "Git repository object format is unsupported", invalid_type)
+    return object_format, sizes[object_format]
+
+
+def _resolve_exact_commit_tree(
+    repository_root: Path, commit: Any, *, invalid_type: type[ValueError], field: str,
+) -> tuple[str, int]:
+    _, oid_size = _native_object_format(repository_root, invalid_type)
+    _fail(not isinstance(commit, str) or not re.fullmatch(f"[0-9a-f]{{{oid_size}}}", commit),
+          f"{field} does not match the repository native object format", invalid_type)
+    try:
+        object_type = str(_git_evidence().git_output(repository_root, "cat-file", "-t", commit)).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise invalid_type(f"{field} cannot resolve the committed artifact") from exc
+    _fail(object_type != "commit", f"{field} must identify an exact commit object", invalid_type)
+    try:
+        resolved_commit = str(_git_evidence().git_output(
+            repository_root, "rev-parse", "--verify", f"{commit}^{{commit}}",
+        )).strip()
+        tree = str(_git_evidence().git_output(
+            repository_root, "rev-parse", "--verify", f"{commit}^{{tree}}",
+        )).strip()
+        tree_type = str(_git_evidence().git_output(repository_root, "cat-file", "-t", tree)).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise invalid_type(f"{field} cannot resolve the committed artifact") from exc
+    _fail(resolved_commit != commit,
+          f"{field} must identify an exact commit object", invalid_type)
+    _fail(not re.fullmatch(f"[0-9a-f]{{{oid_size}}}", tree) or tree_type != "tree",
+          f"{field} resolved tree is unavailable or invalid", invalid_type)
+    return tree, oid_size
+
+
 def validate_git_revision(
-    revision: Any, *, artifact_id: str, digest: Any, unavailable: Any,
+    revision: Any, *, artifact_id: str, media_type: Any, digest: Any,
+    digest_present: bool, unavailable_present: bool,
     workspace_root: Path | None, allowed_source_paths: list[str], verify_hashes: bool,
     safe_path: Any, inside: Any, invalid_type: type[ValueError],
 ) -> None:
@@ -73,8 +134,17 @@ def validate_git_revision(
           f"artifact {artifact_id}.git_revision.commit is invalid", invalid_type)
     _fail(not isinstance(tree, str) or not OID.fullmatch(tree),
           f"artifact {artifact_id}.git_revision.tree is invalid", invalid_type)
-    _fail(bool(digest) or bool(unavailable),
-          f"artifact {artifact_id}.git_revision must use commit and tree without digest fields", invalid_type)
+    _fail(len(commit) != len(tree),
+          f"artifact {artifact_id}.git_revision commit and tree object widths differ", invalid_type)
+    legacy = media_type == "application/x-git-archive"
+    _fail(media_type not in {"application/x-git-revision", "application/x-git-archive"},
+          f"artifact {artifact_id}.git_revision media_type is invalid", invalid_type)
+    if legacy:
+        _fail(not digest_present or unavailable_present or not isinstance(digest, str) or not SHA256.fullmatch(digest),
+              f"artifact {artifact_id}.git_revision legacy archive requires one SHA-256 digest", invalid_type)
+    else:
+        _fail(digest_present or unavailable_present,
+              f"artifact {artifact_id}.git_revision must use commit and tree without digest fields", invalid_type)
     if not verify_hashes:
         return
     _fail(workspace_root is None, "verify_hashes requires workspace_root", invalid_type)
@@ -85,14 +155,22 @@ def validate_git_revision(
         raise invalid_type(f"artifact {artifact_id}.git_revision repository resolves outside workspace_root") from exc
     _fail(not (repository_root / ".git").exists(),
           f"artifact {artifact_id}.git_revision repository is not a Git worktree", invalid_type)
-    try:
-        live_tree = subprocess.run(
-            ["git", "-C", str(repository_root), "rev-parse", f"{commit}^{{tree}}"],
-            check=True, capture_output=True, text=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise invalid_type(f"artifact {artifact_id}.git_revision cannot resolve the committed artifact") from exc
+    live_tree, oid_size = _resolve_exact_commit_tree(
+        repository_root, commit, invalid_type=invalid_type,
+        field=f"artifact {artifact_id}.git_revision",
+    )
+    _fail(not re.fullmatch(f"[0-9a-f]{{{oid_size}}}", tree),
+          f"artifact {artifact_id}.git_revision.tree does not match the repository native object format", invalid_type)
     _fail(live_tree != tree, f"artifact {artifact_id}.git_revision tree does not match commit", invalid_type)
+    if legacy:
+        try:
+            archive = _git_evidence().git_output(
+                repository_root, "archive", "--format=tar", commit, text=False,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise invalid_type(f"artifact {artifact_id}.git_revision cannot read the legacy archive") from exc
+        actual = "sha256:" + hashlib.sha256(archive).hexdigest()
+        _fail(actual != digest, f"artifact {artifact_id} digest does not match the committed Git archive", invalid_type)
 
 
 def validate_git_artifact(
@@ -100,16 +178,43 @@ def validate_git_artifact(
     workspace_root: Path | None, allowed_source_paths: list[str], verify_hashes: bool,
     safe_path: Any, inside: Any, invalid_type: type[ValueError],
 ) -> None:
-    revision = item.get("git_revision")
-    _fail(sum(bool(value) for value in (path, uri, revision)) != 1,
+    locations = {field for field in ("path", "uri", "git_revision") if field in item}
+    _fail(len(locations) != 1,
           f"artifact {artifact_id} requires exactly one path, uri or git_revision", invalid_type)
-    if revision:
+    if "uri" in locations:
+        _fail(not isinstance(uri, str) or not uri.strip(),
+              f"artifact {artifact_id}.uri must be a non-empty string", invalid_type)
+    if "git_revision" in locations:
+        revision = item["git_revision"]
+        media_type = item.get("media_type")
+        fields = GIT_ARTIFACT_FIELDS | ({"digest"} if media_type == "application/x-git-archive" else set())
         validate_git_revision(
-            revision, artifact_id=artifact_id, digest=item.get("digest"),
-            unavailable=item.get("digest_unavailable_reason"), workspace_root=workspace_root,
+            revision, artifact_id=artifact_id, media_type=media_type, digest=item.get("digest"),
+            digest_present="digest" in item,
+            unavailable_present="digest_unavailable_reason" in item, workspace_root=workspace_root,
             allowed_source_paths=allowed_source_paths, verify_hashes=verify_hashes,
             safe_path=safe_path, inside=inside, invalid_type=invalid_type,
         )
+        _closed(item, fields, f"artifact {artifact_id}", invalid_type)
+
+
+def validate_integrity_shape(
+    item: dict[str, Any], artifact_id: str, revision_present: bool, path_present: bool,
+    digest_validator: Any, fail: Any,
+) -> None:
+    digest_present = "digest" in item
+    unavailable_present = "digest_unavailable_reason" in item
+    fail(not revision_present and digest_present == unavailable_present,
+         f"artifact {artifact_id} requires digest xor digest_unavailable_reason")
+    if digest_present:
+        digest_validator(item["digest"], f"artifact {artifact_id}.digest")
+    if unavailable_present:
+        unavailable = item["digest_unavailable_reason"]
+        fail(not isinstance(unavailable, str) or not unavailable.strip(),
+             f"artifact {artifact_id}.digest_unavailable_reason must be non-empty text")
+    if path_present:
+        fail(not revision_present and (not digest_present or unavailable_present),
+             f"local artifact {artifact_id} requires digest")
 
 
 def validate_if_software(
@@ -211,16 +316,13 @@ def validate(
 
     if artifact_root is not None:
         repository = (artifact_root / revision["repository"]).resolve()
-        try:
-            merge_tree = subprocess.run(
-                ["git", "-C", str(repository), "rev-parse", f"{merge_commit}^{{tree}}"],
-                check=True, capture_output=True, text=True,
-            ).stdout.strip()
-            head_tree = subprocess.run(
-                ["git", "-C", str(repository), "rev-parse", f"{pr['head_commit']}^{{tree}}"],
-                check=True, capture_output=True, text=True,
-            ).stdout.strip()
-        except (OSError, subprocess.CalledProcessError) as exc:
-            raise invalid_type("software_delivery cannot resolve reviewed and merged Git revisions") from exc
+        merge_tree, _ = _resolve_exact_commit_tree(
+            repository, merge_commit, invalid_type=invalid_type,
+            field="software_delivery merged Git revision",
+        )
+        head_tree, _ = _resolve_exact_commit_tree(
+            repository, pr["head_commit"], invalid_type=invalid_type,
+            field="software_delivery reviewed Git revision",
+        )
         _fail(merge_tree != head_tree,
               "software_delivery merged tree differs from the reviewed PR head", invalid_type)

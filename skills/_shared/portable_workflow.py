@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 
@@ -19,6 +20,35 @@ def read_object(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain one JSON object")
     return value
+
+
+def validate_artifact_identity(value: Any) -> None:
+    if not isinstance(value, dict) or len(value) != 1:
+        raise ValueError("accepted artifact identity must be one closed union member")
+    if set(value) == {"digest"}:
+        digest_value = value["digest"]
+        if not isinstance(digest_value, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest_value):
+            raise ValueError("accepted artifact digest is invalid")
+        return
+    if set(value) != {"git_revision"} or not isinstance(value["git_revision"], dict):
+        raise ValueError("accepted artifact identity must contain digest or git_revision")
+    revision = value["git_revision"]
+    if set(revision) != {"repository", "commit", "tree"}:
+        raise ValueError("accepted Git revision fields are invalid")
+    repository = revision["repository"]
+    commit = revision["commit"]
+    tree = revision["tree"]
+    if not isinstance(repository, str) or not repository.strip():
+        raise ValueError("accepted Git repository is invalid")
+    repository_path = Path(repository)
+    if repository_path.is_absolute() or ".." in repository_path.parts:
+        raise ValueError("accepted Git repository must be safe and relative")
+    if not isinstance(commit, str) or not isinstance(tree, str):
+        raise ValueError("accepted Git object identities are invalid")
+    if len(commit) not in {40, 64} or len(tree) != len(commit):
+        raise ValueError("accepted Git object widths are invalid")
+    if not re.fullmatch(r"[0-9a-f]+", commit) or not re.fullmatch(r"[0-9a-f]+", tree):
+        raise ValueError("accepted Git object identities are invalid")
 
 
 def main() -> int:
@@ -49,6 +79,7 @@ def main() -> int:
     context = read_object(args.context)
     if any(field not in context for field in required_fields):
         raise ValueError("portable workflow context is incomplete")
+    validate_artifact_identity(context["accepted_artifact_identity"])
     if not (skill_root / "SKILL.md").is_file():
         raise ValueError("portable workflow has no owning skill")
 

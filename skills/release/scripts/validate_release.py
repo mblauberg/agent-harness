@@ -18,6 +18,9 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[3]
 WINDOW_DURATION = re.compile(r"^(\d+)([smhd])$")
 GIT_OID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+RELEASE_DIGEST_ARTIFACT_FIELDS = {"id", "digest", "acceptance_receipt"}
+RELEASE_GIT_ARTIFACT_FIELDS = {"id", "git_revision", "acceptance_receipt"}
 
 
 def load_delivery_validator():
@@ -130,18 +133,24 @@ def accepted_artifact_errors(
     """Validate that an artifact is pinned to the canonical accepted delivery."""
     errors: list[str] = []
     for field in ("id", "acceptance_receipt"):
-        if not artifact.get(field):
+        if field not in artifact or not substantive_text(artifact.get(field)):
             errors.append(f"artifact.{field} is required")
-    digest = artifact.get("digest")
-    revision = artifact.get("git_revision")
-    if bool(digest) == bool(revision):
-        errors.append("artifact requires exactly one digest or git_revision identity")
-    if revision and (
+    fields = set(artifact)
+    digest_shape = fields == RELEASE_DIGEST_ARTIFACT_FIELDS
+    revision_shape = fields == RELEASE_GIT_ARTIFACT_FIELDS
+    if not digest_shape and not revision_shape:
+        errors.append("artifact fields must be exactly one digest or git_revision shape")
+    digest = artifact.get("digest") if digest_shape else None
+    revision = artifact.get("git_revision") if revision_shape else None
+    if digest_shape and (not isinstance(digest, str) or not SHA256.fullmatch(digest)):
+        errors.append("artifact.digest must be a lowercase SHA-256 digest")
+    if revision_shape and (
         not isinstance(revision, dict)
         or set(revision) != {"repository", "commit", "tree"}
         or not substantive_text(revision.get("repository"))
         or not GIT_OID.fullmatch(str(revision.get("commit", "")))
         or not GIT_OID.fullmatch(str(revision.get("tree", "")))
+        or len(str(revision.get("commit", ""))) != len(str(revision.get("tree", "")))
     ):
         errors.append("artifact.git_revision must contain an exact repository, commit and tree")
     if not artifact.get("acceptance_receipt"):
@@ -211,7 +220,14 @@ def accepted_artifact_errors(
     )
     delivered_artifact = mapping(delivered)
     delivered_revision = delivered_artifact.get("git_revision")
-    if delivered_revision:
+    legacy_archive = (
+        delivered_artifact.get("media_type") == "application/x-git-archive"
+        and "digest" in delivered_artifact
+    )
+    if legacy_archive:
+        if not digest_shape or delivered_artifact.get("digest") != artifact.get("digest"):
+            errors.append("artifact.digest must match the accepted delivery artifact digest")
+    elif delivered_revision:
         if artifact.get("git_revision") != delivered_revision or artifact.get("digest"):
             errors.append("artifact.git_revision must match the accepted delivery Git revision")
     elif not delivered or delivered_artifact.get("digest") != artifact.get("digest") or artifact.get("git_revision"):

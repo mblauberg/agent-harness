@@ -63,8 +63,9 @@ at `awaiting_acceptance` and adds:
 The merged tree must equal the reviewed PR-head tree, and `ci-status` binds the
 merge commit. Validate the updated receipt with `--verify-hashes` before asking
 for acceptance. Only explicit acceptance advances that same receipt through
-`accepted` to `awaiting_release`; release validation will not accept a legacy
-software receipt or reconstruct this evidence later.
+`accepted` to `awaiting_release`; release validation will not reconstruct
+missing evidence later. Frozen schema-v1 Git-archive receipts remain readable,
+but this binder only emits the digestless commit-and-tree form.
 
 Because binding reads GitHub with the CLI's stored authentication, the approved
 Authority V2 scope must already set `network.tool_egress: allowlist`, include
