@@ -135,6 +135,10 @@ AGENT_FABRIC_CAPABILITY = "never-print-capability"
     assert "AGENT_FABRIC_PROJECT_PATH" not in rendered
     assert "AGENT_FABRIC_CAPABILITY" not in rendered
     assert "never-print" not in rendered
+    receipts = [line for line in result.stdout.splitlines() if "configured platform=" in line]
+    assert [line.split("platform=", 1)[1].split(" ", 1)[0] for line in receipts] == [
+        "claude", "codex", "cursor", "agy", "kiro", "opencode",
+    ]
 
     original_claude = claude_config.read_bytes()
     original_codex = codex_config.read_bytes()
@@ -257,10 +261,72 @@ def test_platform_all_revalidates_codex_after_writing_claude(tmp_path: Path, mon
     ])
 
     captured = capsys.readouterr()
-    assert result == 3
+    assert result == 4
+    assert "partial-state: agent-fabric MCP registration" in captured.err
+    assert "committed=claude" in captured.err
+    assert "remaining=codex,cursor,agy,kiro,opencode" in captured.err
     assert "Codex config changed" in captured.err
     assert codex_config.read_text() == external
     assert json.loads(claude_config.read_text())["mcpServers"]["agent-fabric"]["env"]["AGENT_FABRIC_SEAT"] == "claude"
+
+
+def test_platform_all_reports_commits_and_typed_recovery_on_late_conflict(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    configurer = load_configurer()
+    paths = {
+        "claude": tmp_path / "claude.json",
+        "codex": tmp_path / "codex.toml",
+        "cursor": tmp_path / "cursor.json",
+        "agy": tmp_path / "agy.json",
+        "kiro": tmp_path / "kiro.json",
+        "opencode": tmp_path / "opencode.jsonc",
+    }
+    for client, path in paths.items():
+        path.write_text('[unrelated]\nvalue = "before"\n' if client == "codex" else '{"unrelated":"before"}\n')
+    write_proposal = configurer.write_proposal
+    external = '{"unrelated":"concurrent-opencode-write"}\n'
+
+    def interleaved_write(proposal):
+        write_proposal(proposal)
+        if proposal.client == "kiro":
+            paths["opencode"].write_text(external)
+
+    monkeypatch.setattr(configurer, "write_proposal", interleaved_write)
+    arguments = [
+        "--agents-home", str(ROOT),
+        "--state-directory", str(tmp_path / "state"),
+        "--claude-config", str(paths["claude"]),
+        "--codex-config", str(paths["codex"]),
+        "--cursor-config", str(paths["cursor"]),
+        "--agy-config", str(paths["agy"]),
+        "--kiro-config", str(paths["kiro"]),
+        "--opencode-config", str(paths["opencode"]),
+    ]
+    result = configurer.main(arguments)
+
+    captured = capsys.readouterr()
+    assert result == 4
+    receipts = captured.out.splitlines()
+    assert [line.split("platform=", 1)[1].split(" ", 1)[0] for line in receipts] == [
+        "claude", "codex", "cursor", "agy", "kiro",
+    ]
+    assert all("agent-fabric MCP configured" in line for line in receipts)
+    assert "partial-state: agent-fabric MCP registration" in captured.err
+    assert "committed=claude,codex,cursor,agy,kiro" in captured.err
+    assert "remaining=opencode" in captured.err
+    assert "OpenCode config changed" in captured.err
+    assert "reconcile the reported configuration and any recovery file, then rerun --platform all" in captured.err
+    assert paths["opencode"].read_text() == external
+    for client in ("claude", "codex", "cursor", "agy", "kiro"):
+        assert "agent-fabric" in paths[client].read_text()
+
+    recovered = configurer.main(arguments)
+    recovery_output = capsys.readouterr()
+    assert recovered == 0, recovery_output.err
+    assert '"unrelated": "concurrent-opencode-write"' in paths["opencode"].read_text()
+    assert "agent-fabric" in paths["opencode"].read_text()
+    assert "configured platform=opencode" in recovery_output.out
 
 
 @pytest.mark.parametrize("client", ["claude", "codex"])
@@ -657,4 +723,12 @@ def test_operations_docs_define_dynamic_primary_registration_and_bounded_fixed_p
         assert "AGENT_FABRIC_PROJECT_PATH" in document
         assert "Claude Code and Codex" in document
         assert "cannot preserve" in document
+        assert "exactly three environment variables" in document
+        assert "AGENT_FABRIC_STATE_DIRECTORY" in document
+        assert "AGENT_FABRIC_SEAT" in document
+        assert "AGENT_FABRIC_CLIENT_LABEL" in document
+        assert "six clients" in document
+    assert "opencode mcp list" in runbook
+    assert "exit code `4`" in runbook
+    assert "partial-state" in runbook
     assert "Registry entries bind `AGENT_FABRIC_PROJECT_PATH`" not in runbook

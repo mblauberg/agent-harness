@@ -107,8 +107,17 @@ or an exact, generation-matched `stopped` owner with exit `0` and no signal can
 be idle. Forced, non-zero, unknown, crashed and otherwise non-clean owners fail
 closed.
 
-Each client registry contains only the proxy command, fabric state directory,
-seat and client label:
+Each global project-dynamic client registry contains the proxy command and
+exactly three environment variables:
+
+- `AGENT_FABRIC_STATE_DIRECTORY`
+- `AGENT_FABRIC_SEAT`
+- `AGENT_FABRIC_CLIENT_LABEL`
+
+`AGENT_FABRIC_PROJECT_PATH` is not a fourth global variable. It is permitted
+only in an explicit, separately managed project-scoped compatibility entry for
+a client that cannot preserve workspace cwd; that entry must never be reused
+globally.
 
 | Client | Global registry |
 | --- | --- |
@@ -126,22 +135,27 @@ not preserve the workspace working directory need project-scoped registration.
 Subdirectories intentionally inherit the nearest ancestor project's seat.
 
 The harness installer configures only its selected primary client by default.
-Pass `--mcp-clients all` to register all six clients. Configure or verify all
-clients, including Claude Code and Codex, from the harness checkout with:
+Pass `--mcp-clients all` to register all six clients. Configure and verify all
+six clients, including Claude Code and Codex, from the harness checkout with:
 
 ```sh
 scripts/configure-agent-fabric-mcp.py --platform all
 scripts/configure-agent-fabric-mcp.py --platform all --check
+opencode mcp list
 ```
 
-The command atomically replaces only the `agent-fabric` entry in each client
-configuration and reports only that entry's status. It never prints
-capabilities or unrelated configuration. Its global entries omit
-`AGENT_FABRIC_PROJECT_PATH`; clients must preserve cwd for nearest-ancestor
-discovery. A client that cannot preserve its workspace cwd needs a separately
-managed project-scoped compatibility entry. Optional clients use the supported
-`codex` seat while retaining distinct client labels. OpenCode JSONC containing
-comments fails closed rather than being rewritten.
+The `--check` command proves the expected registry entry for all six clients;
+`opencode mcp list` additionally confirms that OpenCode can discover its
+configured server. The configurer atomically replaces only the
+`agent-fabric` entry in each client configuration and reports only that entry's
+status. It never prints capabilities or unrelated configuration. Optional
+clients use the supported `codex` seat while retaining distinct client labels.
+OpenCode JSONC containing comments fails closed rather than being rewritten.
+During apply, each successful changed-client write flushes its committed receipt
+before the next client begins. If a later client conflicts, exit code `4` emits
+a `partial-state` result naming the committed and remaining clients plus the
+reconcile-and-rerun recovery action. A conflict before any commit retains exit
+code `3`. Rerunning `--platform all` after reconciliation is idempotent.
 Existing files are updated with an atomic exchange: the displaced identity and
 bytes must match the composed snapshot, and the requested direct path or
 symlink must still resolve to the installed inode. On any mismatch the command
@@ -465,9 +479,11 @@ project key from status prose, a copied path or an older generation.
 
 The daemon and every MCP proxy derive the same stable private socket at
 `$AGENT_FABRIC_STATE_DIRECTORY/runtime/fabric-v1.sock`. Dynamic Claude Code and
-Codex registry entries bind a seat but no project path or credential. A client
-that cannot preserve cwd may use a separately scoped `AGENT_FABRIC_PROJECT_PATH`
-entry for one project; it must never be reused as a global registration.
+Codex registry entries use the same exactly three environment variables as the
+other global dynamic clients and bind no project path or credential. A client
+that cannot preserve cwd may add `AGENT_FABRIC_PROJECT_PATH` only as the fourth
+variable in an explicit project-scoped compatibility entry for one project; it
+must never be reused as a global registration.
 
 Start a least-privilege observer after provisioning or renewal:
 

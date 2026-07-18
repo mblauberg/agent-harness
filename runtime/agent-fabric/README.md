@@ -108,15 +108,22 @@ flat-seat fallback or second accepted generation.
 Installers and operators configure project-dynamic Claude Code and Codex plus
 Cursor, Agy, Kiro and OpenCode entries through
 `scripts/configure-agent-fabric-mcp.py`; `--platform all` configures all six
-and `--check` verifies only their `agent-fabric` entries. Those
-global entries contain the proxy command, state directory, seat and client
-label, and omit `AGENT_FABRIC_PROJECT_PATH`. A fixed project path remains
-available only as a separately managed compatibility entry for a client that
-cannot preserve workspace cwd. Existing-file updates use an atomic exchange with displaced-byte
-and installed-path verification. Concurrent configuration drift produces a
-typed conflict and retains the displaced object without symlink following or
-chmod inside a fresh owner-only `0700` recovery directory; conflict handling
-never rolls back over the live client pathname.
+clients, and `--check` verifies only the `agent-fabric` entries for all six
+clients. The command therefore covers all six clients. Every global dynamic
+entry contains the proxy command. It contains
+exactly three environment variables:
+`AGENT_FABRIC_STATE_DIRECTORY`, `AGENT_FABRIC_SEAT` and
+`AGENT_FABRIC_CLIENT_LABEL`. `AGENT_FABRIC_PROJECT_PATH` is permitted only as
+the fourth variable in an explicit, separately managed project-scoped
+compatibility entry for a client that cannot preserve workspace cwd; it is
+never part of a global entry. Existing-file updates use an atomic exchange with
+displaced-byte and installed-path verification. Concurrent configuration drift
+produces a typed conflict and retains the displaced object without symlink
+following or chmod inside a fresh owner-only `0700` recovery directory;
+conflict handling never rolls back over the live client pathname. Multi-client
+apply flushes each committed receipt immediately. If a later client conflicts,
+a typed `partial-state` result identifies the committed and remaining clients
+and the reconcile-and-rerun recovery action.
 
 Clients use lock-safe on-demand bootstrap: they attach to a compatible
 incumbent before database preflight, or elect one daemon and inspect/publish

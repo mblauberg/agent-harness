@@ -22,6 +22,7 @@ from typing import Any
 SERVER_NAME = "agent-fabric"
 CODEX_TABLES = {"mcp_servers.agent-fabric", "mcp_servers.agent-fabric.env"}
 TABLE_HEADER = re.compile(r"^\s*\[([^\[\]]+)]\s*(?:#.*)?$")
+CLIENT_LABELS = {"opencode": "OpenCode"}
 
 
 class RegistrationError(ValueError):
@@ -30,6 +31,10 @@ class RegistrationError(ValueError):
 
 class RegistrationConflictError(RegistrationError):
     pass
+
+
+def _client_label(client: str) -> str:
+    return CLIENT_LABELS.get(client, client.title())
 
 
 @dataclass(frozen=True)
@@ -269,9 +274,10 @@ def codex_update(path: Path, desired: dict[str, Any]) -> ConfigProposal:
 
 
 def _assert_unchanged(proposal: ConfigProposal) -> None:
-    current = _capture(proposal.snapshot.requested_path, proposal.client.title())
+    label = _client_label(proposal.client)
+    current = _capture(proposal.snapshot.requested_path, label)
     if current != proposal.snapshot:
-        raise RegistrationConflictError(f"{proposal.client.title()} config changed after registration was composed")
+        raise RegistrationConflictError(f"{label} config changed after registration was composed")
 
 
 def atomic_exchange(first: Path, second: Path) -> None:
@@ -300,7 +306,7 @@ def atomic_exchange(first: Path, second: Path) -> None:
 
 def _displaced_matches(proposal: ConfigProposal, displaced: Path) -> bool:
     try:
-        identity, content = _read_regular(displaced, proposal.client.title())
+        identity, content = _read_regular(displaced, _client_label(proposal.client))
     except (OSError, RegistrationError):
         return False
     return _identity(identity) == proposal.snapshot.target_identity \
@@ -324,7 +330,7 @@ def _requested_resolves_to_installed(proposal: ConfigProposal, installed: FileId
         resolved = proposal.snapshot.requested_path.resolve(strict=True)
         if proposal.snapshot.source_kind == "symlink" and resolved != proposal.snapshot.target_path:
             return False
-        target, _ = _read_regular(resolved, proposal.client.title())
+        target, _ = _read_regular(resolved, _client_label(proposal.client))
         return _identity(target) == installed
     except (OSError, RegistrationError, RuntimeError):
         return False
@@ -379,6 +385,7 @@ def _cleanup_recovery_directory(recovery_directory: Path, target_parent: Path) -
 
 def write_proposal(proposal: ConfigProposal) -> None:
     target = proposal.snapshot.target_path
+    label = _client_label(proposal.client)
     target.parent.mkdir(parents=True, exist_ok=True)
     recovery_directory = Path(tempfile.mkdtemp(
         dir=target.parent, prefix=f".{target.name}.recovery.",
@@ -409,7 +416,7 @@ def write_proposal(proposal: ConfigProposal) -> None:
                 os.link(temporary, target, follow_symlinks=False)
             except FileExistsError as exc:
                 raise RegistrationConflictError(
-                    f"{proposal.client.title()} config changed after registration was composed",
+                    f"{label} config changed after registration was composed",
                 ) from exc
             retain_temporary = True
             try:
@@ -417,12 +424,12 @@ def write_proposal(proposal: ConfigProposal) -> None:
                 _fsync_directory(target.parent.resolve(strict=True))
             except OSError as exc:
                 raise RegistrationConflictError(
-                    f"{proposal.client.title()} config install durability failed; "
+                    f"{label} config install durability failed; "
                     f"preserve private recovery file {temporary}",
                 ) from exc
             if not _requested_resolves_to_installed(proposal, installed_identity):
                 raise RegistrationConflictError(
-                    f"{proposal.client.title()} config changed during atomic install; "
+                    f"{label} config changed during atomic install; "
                     f"preserve private recovery file {temporary}",
                 )
             retain_temporary = False
@@ -437,7 +444,7 @@ def write_proposal(proposal: ConfigProposal) -> None:
                 _fsync_directory(target.parent.resolve(strict=True))
             except OSError as exc:
                 raise RegistrationConflictError(
-                    f"{proposal.client.title()} config exchange failed; "
+                    f"{label} config exchange failed; "
                     f"preserve private recovery file {temporary}",
                 ) from exc
             if (
@@ -445,7 +452,7 @@ def write_proposal(proposal: ConfigProposal) -> None:
                 not _requested_resolves_to_installed(proposal, installed_identity)
             ):
                 raise RegistrationConflictError(
-                    f"{proposal.client.title()} config changed during atomic exchange; "
+                    f"{label} config changed during atomic exchange; "
                     f"preserve displaced recovery file {temporary}",
                 )
             retain_temporary = False
@@ -457,12 +464,19 @@ def write_proposal(proposal: ConfigProposal) -> None:
             except OSError:
                 cleanup_ready = False
                 print(
-                    f"warning: {proposal.client.title()} config installed; cleanup failed; "
+                    f"warning: {label} config installed; cleanup failed; "
                     f"preserve private recovery file {temporary}",
                     file=sys.stderr,
                 )
         if not retain_temporary and cleanup_ready and recovery_directory.exists():
             _cleanup_recovery_directory(recovery_directory, target.parent)
+
+
+def _report(proposal: ConfigProposal, verb: str) -> None:
+    print(
+        f"agent-fabric MCP {verb} platform={proposal.client} config={proposal.snapshot.target_path}",
+        flush=True,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -527,18 +541,37 @@ def main(argv: list[str] | None = None) -> int:
             if missing:
                 print("missing: agent-fabric MCP registration for " + ", ".join(missing))
                 return 1
-        elif not args.preflight:
             for proposal in proposals:
-                if proposal.status != "existing":
+                _report(proposal, "verified")
+            return 0
+        elif args.preflight:
+            for proposal in proposals:
+                _report(proposal, f"preflight-{proposal.status}")
+            return 0
+        else:
+            committed: list[str] = []
+            for index, proposal in enumerate(proposals):
+                if proposal.status == "existing":
+                    _report(proposal, "existing")
+                    continue
+                try:
                     write_proposal(proposal)
-        for proposal in proposals:
-            verb = (
-                "verified" if args.check else
-                f"preflight-{proposal.status}" if args.preflight else
-                "existing" if proposal.status == "existing" else "configured"
-            )
-            print(f"agent-fabric MCP {verb} platform={proposal.client} config={proposal.snapshot.target_path}")
-        return 0
+                except (OSError, RegistrationError) as exc:
+                    if not committed:
+                        raise
+                    remaining = ",".join(candidate.client for candidate in proposals[index:])
+                    print(
+                        "partial-state: agent-fabric MCP registration "
+                        f"committed={','.join(committed)} remaining={remaining} "
+                        f"conflict={exc}; recovery=reconcile the reported configuration and any "
+                        "recovery file, then rerun --platform all",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    return 4
+                committed.append(proposal.client)
+                _report(proposal, "configured")
+            return 0
     except (OSError, RegistrationError) as exc:
         print(f"conflicting: {exc}", file=sys.stderr)
         return 3
