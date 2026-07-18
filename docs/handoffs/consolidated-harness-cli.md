@@ -1,7 +1,9 @@
 # Consolidated harness CLI
 
-**Status:** reviewed and reduced; proposal only  
-**Date:** 18 July 2026  
+**Status:** reviewed and reduced; proposal only
+
+**Date:** 18 July 2026
+
 **Canonical owner:** this document owns the proposal until it is accepted,
 rejected or moved to an issue or design record.
 
