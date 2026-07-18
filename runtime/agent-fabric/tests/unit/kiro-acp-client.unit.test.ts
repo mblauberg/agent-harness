@@ -148,6 +148,35 @@ describe("Kiro ACP stdio client", () => {
   );
 
   it.each([
+    "user_message_chunk",
+    "agent_thought_chunk",
+    "tool_call",
+    "tool_call_update",
+    "plan",
+    "available_commands_update",
+    "current_mode_update",
+    "config_option_update",
+    "session_info_update",
+    "usage_update",
+  ])("fails closed on malformed known %s", async (updateKind) => {
+    const { client, directory } = await fixture(`malformed-known:${updateKind}`);
+    await client.start();
+    await client.newSession(directory);
+    await expect(client.prompt("kiro-session-1", "bounded task"))
+      .rejects.toMatchObject({ code: "PROVIDER_PROTOCOL_INVALID" });
+    await client.stop();
+  });
+
+  it("does not treat valid non-answer ACP updates as a terminal answer", async () => {
+    const { client, directory } = await fixture("valid-non-answer-updates");
+    await client.start();
+    await client.newSession(directory);
+    await expect(client.prompt("kiro-session-1", "bounded task"))
+      .rejects.toMatchObject({ code: "PROVIDER_RESPONSE_INVALID" });
+    await client.stop();
+  });
+
+  it.each([
     ["read-permission", "permission:allow"],
     ["edit-permission", "permission:reject"],
     ["outside-read-permission", "permission:reject"],

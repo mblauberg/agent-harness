@@ -334,7 +334,7 @@ node smoke/provider-adapter-readonly.mjs \
   --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter kiro-acp)"
 node smoke/provider-adapter-readonly.mjs \
   --adapter opencode-acp --model opencode/deepseek-v4-flash-free \
-  --model-family generic-open \
+  --model-family generic-open --effort high \
   --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter opencode-acp)"
 ```
 
@@ -346,7 +346,8 @@ Team ID `94KV3E626L`. Version and digest in that receipt are observations only.
 
 The issue #253 OpenCode acceptance returned `status: pass`, `output:
 exact-sentinel`, `workspace: unchanged`, `providerConfig: unchanged`,
-`credentialInput: subscription-session`, `fabricCapability: not-provided` and
+`credentialInput: subscription-session`, `fabricCapability: not-provided`,
+`effort: high` and
 `session: spawn-turn-release` for the advertised
 `opencode/deepseek-v4-flash-free` model. It observed OpenCode 1.17.18 at the
 canonical owner-controlled Homebrew Cellar path; version and digest remain

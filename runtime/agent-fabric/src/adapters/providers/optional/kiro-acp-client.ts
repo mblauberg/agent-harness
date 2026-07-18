@@ -27,19 +27,6 @@ type ActiveTurn = {
   outputBytes: number;
 };
 
-const ACP_V1_NON_ANSWER_SESSION_UPDATES = new Set([
-  "user_message_chunk",
-  "agent_thought_chunk",
-  "tool_call",
-  "tool_call_update",
-  "plan",
-  "available_commands_update",
-  "current_mode_update",
-  "config_option_update",
-  "session_info_update",
-  "usage_update",
-]);
-
 const ACP_V1_STOP_REASONS = new Set([
   "end_turn",
   "max_tokens",
@@ -47,6 +34,50 @@ const ACP_V1_STOP_REASONS = new Set([
   "refusal",
   "cancelled",
 ]);
+
+function validContentBlock(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.type !== "string") return false;
+  switch (value.type) {
+    case "text": return typeof value.text === "string";
+    case "image":
+    case "audio": return typeof value.data === "string" && typeof value.mimeType === "string";
+    case "resource_link": return typeof value.name === "string" && typeof value.uri === "string";
+    case "resource": return isRecord(value.resource);
+    default: return false;
+  }
+}
+
+function validNullableString(value: unknown): boolean {
+  return value === null || typeof value === "string";
+}
+
+function validNonAnswerSessionUpdate(update: JsonObject): boolean {
+  switch (update.sessionUpdate) {
+    case "user_message_chunk":
+    case "agent_thought_chunk":
+      return validContentBlock(update.content);
+    case "tool_call":
+      return typeof update.toolCallId === "string" && typeof update.title === "string";
+    case "tool_call_update":
+      return typeof update.toolCallId === "string";
+    case "plan":
+      return Array.isArray(update.entries);
+    case "available_commands_update":
+      return Array.isArray(update.availableCommands);
+    case "current_mode_update":
+      return typeof update.currentModeId === "string";
+    case "config_option_update":
+      return Array.isArray(update.configOptions);
+    case "session_info_update":
+      return (Object.hasOwn(update, "title") && validNullableString(update.title)) ||
+        (Object.hasOwn(update, "updatedAt") && validNullableString(update.updatedAt));
+    case "usage_update":
+      return Number.isSafeInteger(update.used) && Number(update.used) >= 0 &&
+        Number.isSafeInteger(update.size) && Number(update.size) >= 0;
+    default:
+      return false;
+  }
+}
 
 export type KiroAcpClientOptions = {
   executable: string;
@@ -442,7 +473,7 @@ export class KiroAcpStdioClient {
     }
     const update = params.update;
     if (update.sessionUpdate !== "agent_message_chunk") {
-      if (typeof update.sessionUpdate !== "string" || !ACP_V1_NON_ANSWER_SESSION_UPDATES.has(update.sessionUpdate)) {
+      if (!validNonAnswerSessionUpdate(update)) {
         this.#fail(protocolError("PROVIDER_PROTOCOL_INVALID", "Kiro ACP session update kind is unsupported"));
       }
       return;

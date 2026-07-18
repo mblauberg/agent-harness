@@ -100,6 +100,36 @@ input.on("line", (line) => {
     return;
   }
   if (value.method === "session/prompt") {
+    if (scenario.startsWith("malformed-known:")) {
+      send({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "kiro-session-1",
+          update: { sessionUpdate: scenario.slice("malformed-known:".length) },
+        },
+      });
+      result(value.id, { stopReason: "end_turn" });
+      return;
+    }
+    if (scenario === "valid-non-answer-updates") {
+      for (const update of [
+        { sessionUpdate: "user_message_chunk", content: { type: "text", text: "user" } },
+        { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "thought" } },
+        { sessionUpdate: "tool_call", toolCallId: "tool-1", title: "Read" },
+        { sessionUpdate: "tool_call_update", toolCallId: "tool-1" },
+        { sessionUpdate: "plan", entries: [] },
+        { sessionUpdate: "available_commands_update", availableCommands: [] },
+        { sessionUpdate: "current_mode_update", currentModeId: "default" },
+        { sessionUpdate: "config_option_update", configOptions: [] },
+        { sessionUpdate: "session_info_update", title: "Fixture" },
+        { sessionUpdate: "usage_update", used: 1, size: 2 },
+      ]) {
+        send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "kiro-session-1", update } });
+      }
+      result(value.id, { stopReason: "end_turn" });
+      return;
+    }
     if (scenario === "empty-answer") {
       result(value.id, { stopReason: "end_turn" });
       return;
