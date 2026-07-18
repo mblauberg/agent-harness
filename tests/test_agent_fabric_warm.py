@@ -30,8 +30,8 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
     _write(root / "runtime/agent-fabric-protocol/dist/index.js")
     _write(fabric_output)
     _write(root / "runtime/agent-fabric/dist/mcp/main.js")
-    _write(root / "runtime/agent-fabric-herdr/dist/cli.js")
-    _write(root / "runtime/agent-fabric-console/dist/cli.js")
+    _write(root / "runtime/agent-fabric-herdr/dist/bin.js")
+    _write(root / "runtime/agent-fabric-console/dist/bin.js")
 
     bin_dir = tmp_path / "bin"
     marker = tmp_path / "npm-invocations"

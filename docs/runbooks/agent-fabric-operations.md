@@ -370,8 +370,8 @@ Build and verify the standalone Console before attaching it to live state:
 
 ```sh
 npm run check --workspace=@local/agent-fabric-console
-node runtime/agent-fabric-console/dist/cli.js --help
-node runtime/agent-fabric-console/dist/cli.js --project "$PWD"
+node runtime/agent-fabric-console/dist/bin.js --help
+node runtime/agent-fabric-console/dist/bin.js --project "$PWD"
 ```
 
 Use `--session '<stable project-session ID>'` when more than one attachable

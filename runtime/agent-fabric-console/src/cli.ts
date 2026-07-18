@@ -1,7 +1,5 @@
-#!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import {
   parseIdentifier,
@@ -357,17 +355,4 @@ export async function runConsoleCli(
       throw new AggregateError(cleanupFailures, "Console cleanup failed");
     }
   }
-}
-
-const invokedPath = process.argv[1];
-if (
-  invokedPath !== undefined &&
-  import.meta.url === pathToFileURL(resolve(invokedPath)).href
-) {
-  runConsoleCli(process.argv.slice(2)).catch((error: unknown) => {
-    process.stderr.write(
-      `${error instanceof Error ? error.message : String(error)}\n`,
-    );
-    process.exitCode = 1;
-  });
 }

@@ -23,9 +23,9 @@ dist_mcp="$package_root/dist/mcp/main.js"
 protocol_root="$agents_home/runtime/agent-fabric-protocol"
 protocol_dist="$protocol_root/dist/index.js"
 herdr_root="$agents_home/runtime/agent-fabric-herdr"
-herdr_dist="$herdr_root/dist/cli.js"
+herdr_dist="$herdr_root/dist/bin.js"
 console_root="$agents_home/runtime/agent-fabric-console"
-console_dist="$console_root/dist/cli.js"
+console_dist="$console_root/dist/bin.js"
 
 workspace_is_stale() {
   workspace=$1
