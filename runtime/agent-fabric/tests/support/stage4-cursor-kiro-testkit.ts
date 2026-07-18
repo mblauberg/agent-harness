@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { stringify } from "yaml";
@@ -49,6 +49,8 @@ function compatibilityEntry(input: {
       installed_version: "1.0.0-fixture",
       executable: fixtureAdapter,
       executable_sha256: input.executableHash,
+      provider_identity: input.adapterId === "cursor-agent" ? "cursor-partial-signed-helpers" : "apple-designated",
+      ...(input.adapterId === "cursor-agent" ? { cursor_install_root: dirname(fixtureAdapter) } : {}),
       wrapper_entrypoint: input.wrapperPath,
     },
     contract: {

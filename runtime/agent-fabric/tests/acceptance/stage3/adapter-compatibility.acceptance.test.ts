@@ -126,4 +126,22 @@ describe("Section 21 Stage 3 adapter compatibility and activation gate", () => {
       }),
     ).rejects.toMatchObject({ code: "ADAPTER_COMPATIBILITY_INVALID" });
   });
+
+  it("requires the adapter-specific provider identity policy for enabled primaries", async () => {
+    const verify = requirePublicFunction("verifyAdapterCompatibility");
+    const fixture = await createPortableActivatedPrimaryFixture();
+    const document: unknown = parse(await readFile(fixture.compatibilityPath, "utf8"));
+    const adapters = record(record(document, "compatibility document").adapters, "adapters");
+    const adapter = record(adapters["claude-agent-sdk"], "claude adapter");
+    const implementation = record(adapter.implementation, "implementation");
+    implementation.provider_identity = "cursor-partial-signed-helpers";
+    await writeFile(fixture.compatibilityPath, stringify(document));
+
+    await expect(verify({
+      compatibilityPath: fixture.compatibilityPath,
+      schemaPath: fixture.schemaPath,
+      adapterIds: ["claude-agent-sdk"],
+      requireEnabled: true,
+    })).rejects.toMatchObject({ code: "ADAPTER_COMPATIBILITY_INVALID" });
+  });
 });

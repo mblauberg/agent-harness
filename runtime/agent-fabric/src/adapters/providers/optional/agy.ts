@@ -4,7 +4,7 @@ import type { AdapterRequestHandler } from "../types.js";
 import { SqliteAdapterActionJournal } from "../journal.js";
 import { journalPathFromArguments, serveAdapter } from "../server.js";
 import { createAgyCliBoundary } from "./command-boundaries.js";
-import { verifyProviderExecutableIdentity } from "../../provider-identity.js";
+import { verifyProviderConformance } from "../../provider-conformance.js";
 import {
   createOptionalProviderAdapter,
   optionalCapabilities,
@@ -42,18 +42,18 @@ function requiredArgument(arguments_: string[], name: string): string {
   return value;
 }
 
-export async function runAgyAdapter(arguments_: string[] = process.argv.slice(2)): Promise<void> {
+export async function runAgyAdapter(
+  arguments_: string[] = process.argv.slice(2),
+  dependencies: { verifyProvider?: typeof verifyProviderConformance } = {},
+): Promise<void> {
   const journal = new SqliteAdapterActionJournal(journalPathFromArguments("agy", arguments_));
   const executable = requiredArgument(arguments_, "--provider-executable");
-  const identityPolicy = argument(arguments_, "--provider-identity-policy");
   try {
     await serveAdapter(
       createAgyAdapter({
         boundary: createAgyCliBoundary({
           executable,
-          ...(identityPolicy === undefined ? {} : {
-            verifyExecutable: async () => await verifyProviderExecutableIdentity({ adapterId: "agy", executable }),
-          }),
+          verifyExecutable: async () => await (dependencies.verifyProvider ?? verifyProviderConformance)({ adapterId: "agy", executable }),
           cwd: argument(arguments_, "--cwd") ?? process.cwd(),
         }),
         journal,

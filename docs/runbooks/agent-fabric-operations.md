@@ -52,10 +52,10 @@ byte-identical to its committed content, and its first-party source spans
 (the owning workspace package's src tree, local workspace dependency src
 trees and every consulted package manifest) must be diff-clean against HEAD.
 An empty or truncated span discovery is a hard verification failure, never a
-skip. Provenance is re-derived immediately before every adapter process
-spawn and must match the provenance verified at composition. Unresolved
-contract gaps, missing artifacts, disabled entries or any provenance mismatch fail
-closed.
+skip. Provenance, adapter-specific vendor identity and the bounded non-answer
+provider interface are required at activation and revalidated at point of use.
+Unresolved contract gaps, missing artifacts, disabled entries or any
+provenance/identity/interface mismatch fail closed.
 
 ## Keep the CLI dist warm
 

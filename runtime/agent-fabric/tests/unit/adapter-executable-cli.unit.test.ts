@@ -1,11 +1,13 @@
 import { join } from "node:path";
-import { readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 
 import { runSourceCli } from "../support/cli-process.ts";
 import { createResolvedStage4Compatibility } from "../support/stage4-pi-agy-testkit.ts";
+import { resolveAdapterExecutableCli } from "../../src/cli/adapter-executable.ts";
+import { FabricError } from "../../src/errors.ts";
 
 type Fixture = Awaited<ReturnType<typeof createResolvedStage4Compatibility>>;
 
@@ -33,12 +35,19 @@ async function fixtureExecutable(fixture: Fixture): Promise<string> {
 async function resolveFixtureExecutable(fixture: Fixture) {
   const configPath = join(fixture.directory, "agent-fabric.yaml");
   await writeFile(configPath, "schemaVersion: 1\nallowedAdapters: [agy]\nactiveAdapters: [agy]\n");
-  return runSourceCli([
-    "adapter", "executable", "--adapter", "agy",
+  return await resolveAdapterExecutableCli([
+    "--adapter", "agy",
     "--config", configPath,
     "--compatibility", fixture.compatibilityPath,
     "--compatibility-schema", fixture.schemaPath,
-  ]);
+  ], {
+    verifyProvider: async (input) => {
+      try { await stat(input.executable); } catch (error: unknown) {
+        throw new FabricError("ADAPTER_ARTIFACT_MISSING", "provider executable is unavailable", { cause: error });
+      }
+      return {} as never;
+    },
+  });
 }
 
 describe("adapter executable resolver CLI", () => {
@@ -49,8 +58,7 @@ describe("adapter executable resolver CLI", () => {
 
     const result = await resolveFixtureExecutable(fixture);
 
-    expect(result).toMatchObject({ exitCode: 0, stderr: "" });
-    expect(result.stdout).toBe(`${executable}\n`);
+    expect(result).toBe(executable);
   });
 
   it("ignores a stale observational executable digest", async () => {
@@ -62,9 +70,7 @@ describe("adapter executable resolver CLI", () => {
 
     const result = await resolveFixtureExecutable(fixture);
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(`${await fixtureExecutable(fixture)}\n`);
-    expect(result.stderr).toBe("");
+    expect(result).toBe(await fixtureExecutable(fixture));
   });
 
   it("fails closed when the stable executable is missing", async () => {
@@ -72,11 +78,7 @@ describe("adapter executable resolver CLI", () => {
     fixtures.push(fixture);
     await unlink(await fixtureExecutable(fixture));
 
-    const result = await resolveFixtureExecutable(fixture);
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("wrapper entrypoint is unavailable");
+    await expect(resolveFixtureExecutable(fixture)).rejects.toMatchObject({ code: "ADAPTER_ARTIFACT_MISSING" });
   });
 
   it("fails closed when the adapter is not active", async () => {

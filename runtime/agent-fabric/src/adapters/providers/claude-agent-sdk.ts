@@ -56,7 +56,7 @@ import {
   parseWorkspaceWriteOfflineProjection,
   WORKSPACE_WRITE_OFFLINE_TOOLS,
 } from "./workspace-write-offline.js";
-import { verifyProviderExecutableIdentity } from "../provider-identity.js";
+import { verifyProviderConformance } from "../provider-conformance.js";
 
 export type ClaudeAgentSdkBoundary = ProviderBoundary;
 
@@ -596,7 +596,7 @@ type ClaudeMcpBridgeFactory = (session: ClaudeChairSession) => ClaudeChairMcpBri
 
 export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
   readonly #executable: string | undefined;
-  readonly #verifyExecutable: typeof verifyProviderExecutableIdentity;
+  readonly #verifyExecutable: typeof verifyProviderConformance;
   readonly #query: typeof query;
   readonly #bridgeFactory: BridgeFactory;
   readonly #mcpBridgeFactory: ClaudeMcpBridgeFactory;
@@ -605,7 +605,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
 
   constructor(options?: string | {
     executable?: string;
-    verifyExecutable?: typeof verifyProviderExecutableIdentity;
+    verifyExecutable?: typeof verifyProviderConformance;
     query?: typeof query;
     bridgeFactory?: BridgeFactory;
     mcpBridgeFactory?: ClaudeMcpBridgeFactory;
@@ -613,14 +613,14 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
   }) {
     if (typeof options === "string" || options === undefined) {
       this.#executable = options;
-      this.#verifyExecutable = verifyProviderExecutableIdentity;
+      this.#verifyExecutable = verifyProviderConformance;
       this.#query = query;
       this.#bridgeFactory = createChairLaunchFabricBridge;
       this.#mcpBridgeFactory = createClaudeChairMcpBridge;
       this.#agentBridgeFactory = AgentSessionFabricBridge.create;
     } else {
       this.#executable = options.executable;
-      this.#verifyExecutable = options.verifyExecutable ?? verifyProviderExecutableIdentity;
+      this.#verifyExecutable = options.verifyExecutable ?? verifyProviderConformance;
       this.#query = options.query ?? query;
       this.#bridgeFactory = options.bridgeFactory ?? createChairLaunchFabricBridge;
       this.#mcpBridgeFactory = options.mcpBridgeFactory ?? createClaudeChairMcpBridge;

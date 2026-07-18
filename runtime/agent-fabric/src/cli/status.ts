@@ -3,8 +3,7 @@ import { lstat, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { verifyAdapterCompatibility } from "../adapters/compatibility.js";
-import { verifyProviderExecutableIdentity } from "../adapters/provider-identity.js";
-import { probeProviderInterface } from "../adapters/provider-interface.js";
+import { verifyProviderConformance } from "../adapters/provider-conformance.js";
 import { loadAdapterModelConstraints } from "../adapters/model-selection.js";
 import { loadFabricConfig } from "../config/index.js";
 import { assertDatabaseIntegrity } from "../persistence/invariants.js";
@@ -325,7 +324,11 @@ async function doctorDaemonState(paths: FabricPaths): Promise<DoctorDaemonState>
   }
 }
 
-export async function fabricDoctor(arguments_: string[], paths: FabricPaths): Promise<Record<string, unknown>> {
+export async function fabricDoctor(
+  arguments_: string[],
+  paths: FabricPaths,
+  dependencies: { verifyProvider?: typeof verifyProviderConformance } = {},
+): Promise<Record<string, unknown>> {
   const selected = pathsFor(arguments_);
   let adapterIds: string[] = [];
   let adapterCommands: string[][] = [];
@@ -368,13 +371,12 @@ export async function fabricDoctor(arguments_: string[], paths: FabricPaths): Pr
         adapterId,
       });
       if (policy.providerIdentity === undefined) continue;
-      const identity = await verifyProviderExecutableIdentity({
+      const observation = await (dependencies.verifyProvider ?? verifyProviderConformance)({
         adapterId,
         executable,
         ...(policy.cursorInstallRoot === undefined ? {} : { cursorInstallRoot: policy.cursorInstallRoot }),
       });
-      const contract = await probeProviderInterface({ adapterId, executable });
-      observations.push(`${adapterId}=${contract.version}:${identity.sha256}:${identity.assurance}`);
+      observations.push(`${adapterId}=${observation.interface.version}:${observation.identity.sha256}:${observation.identity.assurance}`);
     }
     return observations.join(" ");
   }));

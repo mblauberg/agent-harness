@@ -51,6 +51,14 @@ export type WrapperProvenance = {
   wrapperPath: string;
 };
 
+const PROVIDER_IDENTITY_POLICY: Readonly<Record<string, string>> = {
+  "claude-agent-sdk": "apple-designated",
+  "codex-app-server": "apple-designated",
+  agy: "apple-designated",
+  "cursor-agent": "cursor-partial-signed-helpers",
+  "kiro-acp": "apple-designated",
+};
+
 /**
  * Environment for provenance Git invocations. Every GIT_* variable is
  * stripped so injected values (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, ...)
@@ -883,6 +891,18 @@ export async function verifyAdapterCompatibility(input: {
         "ADAPTER_COMPATIBILITY_INVALID",
         `enabled adapter has no pinned fabric wrapper: ${adapterId}`,
       );
+    }
+    if (input.requireEnabled) {
+      const expectedIdentity = PROVIDER_IDENTITY_POLICY[adapterId];
+      if (expectedIdentity !== undefined && adapter.implementation.provider_identity !== expectedIdentity) {
+        throw new FabricError(
+          "ADAPTER_COMPATIBILITY_INVALID",
+          `enabled adapter has the wrong provider identity policy: ${adapterId}`,
+        );
+      }
+      if (adapterId === "cursor-agent" && typeof adapter.implementation.cursor_install_root !== "string") {
+        throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", "enabled Cursor adapter has no canonical install root");
+      }
     }
     if (input.requireEnabled) {
       const protocolVersion = adapter.contract.protocol_version;

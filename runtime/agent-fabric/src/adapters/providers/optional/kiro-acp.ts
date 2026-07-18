@@ -5,7 +5,7 @@ import { ProviderAdapterError, requiredString, type AdapterRequestHandler } from
 import { SqliteAdapterActionJournal } from "../journal.js";
 import { journalPathFromArguments, serveAdapter } from "../server.js";
 import { KiroAcpStdioClient } from "./kiro-acp-client.js";
-import { verifyProviderExecutableIdentity } from "../../provider-identity.js";
+import { verifyProviderConformance } from "../../provider-conformance.js";
 import {
   createOptionalProviderAdapter,
   optionalCapabilities,
@@ -158,10 +158,12 @@ export function createUnverifiedKiroAcpEntrypoint(): AdapterRequestHandler {
   };
 }
 
-export async function runKiroAcpAdapter(arguments_: string[] = process.argv.slice(2)): Promise<void> {
+export async function runKiroAcpAdapter(
+  arguments_: string[] = process.argv.slice(2),
+  dependencies: { verifyProvider?: typeof verifyProviderConformance } = {},
+): Promise<void> {
   const journal = new SqliteAdapterActionJournal(journalPathFromArguments("kiro-acp", arguments_));
   const providerExecutable = requiredArgument(arguments_, "--provider-executable");
-  const identityPolicy = argument(arguments_, "--provider-identity-policy");
   const providerArguments = argumentValues(arguments_, "--provider-argument");
   if (providerArguments.some((value) => value === "--trust-all-tools" || value === "--trust-tools" || value === "-a")) {
     throw new Error("kiro-acp adapter forbids provider trust overrides");
@@ -175,9 +177,7 @@ export async function runKiroAcpAdapter(arguments_: string[] = process.argv.slic
   const maximumLineBytes = positiveIntegerArgument(arguments_, "--maximum-line-bytes");
   const maximumOutputBytes = positiveIntegerArgument(arguments_, "--maximum-output-bytes");
   const boundary = createKiroAcpBoundary({
-    ...(identityPolicy === undefined ? {} : {
-      verifyExecutable: async () => await verifyProviderExecutableIdentity({ adapterId: "kiro-acp", executable: providerExecutable }),
-    }),
+    verifyExecutable: async () => await (dependencies.verifyProvider ?? verifyProviderConformance)({ adapterId: "kiro-acp", executable: providerExecutable }),
     clientFactory({ model, cwd }) {
       return new KiroAcpStdioClient({
         executable: providerExecutable,

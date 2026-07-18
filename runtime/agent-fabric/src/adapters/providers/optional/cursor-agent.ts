@@ -4,7 +4,7 @@ import type { AdapterRequestHandler } from "../types.js";
 import { SqliteAdapterActionJournal } from "../journal.js";
 import { journalPathFromArguments, serveAdapter } from "../server.js";
 import { createCursorCliBoundary } from "./command-boundaries.js";
-import { verifyProviderExecutableIdentity } from "../../provider-identity.js";
+import { verifyProviderConformance } from "../../provider-conformance.js";
 import {
   createOptionalProviderAdapter,
   optionalCapabilities,
@@ -42,25 +42,22 @@ function requiredArgument(arguments_: string[], name: string): string {
   return value;
 }
 
-export async function runCursorAgentAdapter(arguments_: string[] = process.argv.slice(2)): Promise<void> {
+export async function runCursorAgentAdapter(
+  arguments_: string[] = process.argv.slice(2),
+  dependencies: { verifyProvider?: typeof verifyProviderConformance } = {},
+): Promise<void> {
   const journal = new SqliteAdapterActionJournal(journalPathFromArguments("cursor-agent", arguments_));
   const executable = requiredArgument(arguments_, "--provider-executable");
-  const identityPolicy = argument(arguments_, "--provider-identity-policy");
-  const cursorInstallRoot = argument(arguments_, "--provider-install-root");
-  if (identityPolicy !== undefined && cursorInstallRoot === undefined) {
-    throw new Error("cursor-agent adapter requires --provider-install-root with identity policy");
-  }
+  const cursorInstallRoot = requiredArgument(arguments_, "--provider-install-root");
   try {
     await serveAdapter(
       createCursorAgentAdapter({
         boundary: createCursorCliBoundary({
           executable,
-          ...(identityPolicy === undefined || cursorInstallRoot === undefined ? {} : {
-            verifyExecutable: async () => await verifyProviderExecutableIdentity({
-              adapterId: "cursor-agent",
-              executable,
-              cursorInstallRoot,
-            }),
+          verifyExecutable: async () => await (dependencies.verifyProvider ?? verifyProviderConformance)({
+            adapterId: "cursor-agent",
+            executable,
+            cursorInstallRoot,
           }),
           cwd: argument(arguments_, "--cwd") ?? process.cwd(),
         }),

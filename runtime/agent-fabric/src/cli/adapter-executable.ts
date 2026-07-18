@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 import { verifyAdapterCompatibility } from "../adapters/compatibility.js";
 import { loadFabricConfig } from "../config/index.js";
 import { FabricError } from "../errors.js";
+import { verifyProviderConformance } from "../adapters/provider-conformance.js";
+import { loadAdapterModelConstraints } from "../adapters/model-selection.js";
 
 const VALUE_OPTIONS = [
   "--adapter",
@@ -36,7 +38,10 @@ function parseArguments(arguments_: string[]): Partial<Record<ValueOption, strin
   return parsed;
 }
 
-export async function resolveAdapterExecutableCli(arguments_: string[]): Promise<string> {
+export async function resolveAdapterExecutableCli(
+  arguments_: string[],
+  dependencies: { verifyProvider?: typeof verifyProviderConformance } = {},
+): Promise<string> {
   const parsed = parseArguments(arguments_);
   const adapterId = parsed["--adapter"];
   if (adapterId === undefined) {
@@ -72,5 +77,11 @@ export async function resolveAdapterExecutableCli(arguments_: string[]): Promise
       `activated adapter has no provider executable: ${adapterId}`,
     );
   }
+  const policy = await loadAdapterModelConstraints({ compatibilityPath, schemaPath, adapterId, requireEnabled: true });
+  await (dependencies.verifyProvider ?? verifyProviderConformance)({
+    adapterId,
+    executable,
+    ...(policy.cursorInstallRoot === undefined ? {} : { cursorInstallRoot: policy.cursorInstallRoot }),
+  });
   return executable;
 }

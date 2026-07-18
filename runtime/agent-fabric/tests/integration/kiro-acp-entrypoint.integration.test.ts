@@ -17,7 +17,7 @@ describe("Kiro ACP provider entrypoint", () => {
   it("runs a managed spawn, turn, and release over the real ACP stdio boundary", async () => {
     const directory = await mkdtemp(join(tmpdir(), "kiro-acp-entrypoint-"));
     temporaryDirectories.push(directory);
-    const wrapper = fileURLToPath(new URL("../../src/adapters/providers/optional/kiro-acp.ts", import.meta.url));
+    const wrapper = fileURLToPath(new URL("../support/provider-wrapper-entrypoint.ts", import.meta.url));
     const fake = fileURLToPath(new URL("../support/kiro-acp-fake.ts", import.meta.url));
     const loader = fileURLToPath(import.meta.resolve("tsx"));
     const transcript = join(directory, "provider-transcript.jsonl");
@@ -44,7 +44,7 @@ describe("Kiro ACP provider entrypoint", () => {
         "--request-timeout-ms",
         "1000",
       ],
-      environment: {},
+      environment: { AGENT_FABRIC_TEST_ADAPTER: "kiro-acp" },
       responseTimeoutMs: 3_000,
     });
     try {

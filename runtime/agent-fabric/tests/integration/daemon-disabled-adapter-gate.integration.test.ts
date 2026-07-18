@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 
 import { composeDaemonAdapters, composeDaemonConfiguration } from "../../src/daemon/composition.ts";
@@ -15,16 +15,19 @@ import {
 describe("daemon trusted adapter composition", () => {
   it("composes only the explicitly activated and pinned adapters", async () => {
     const fixture = await createPortableActivatedPrimaryFixture();
+    const verifyProvider = vi.fn(async () => ({}) as never);
     try {
       const adapters = await composeDaemonAdapters({
         globalConfigPath: fixture.configPath,
         compatibilityPath: fixture.compatibilityPath,
         compatibilitySchemaPath: fixture.schemaPath,
         agentsHome: fixture.directory,
+        verifyProvider,
       });
       expect(Object.keys(adapters).sort()).toEqual(
         ["claude-agent-sdk", "codex-app-server"],
       );
+      expect(verifyProvider).toHaveBeenCalledTimes(2);
     } finally {
       await rm(fixture.directory, { recursive: true, force: true });
     }
@@ -47,6 +50,7 @@ describe("daemon trusted adapter composition", () => {
         compatibilitySchemaPath: fixture.schemaPath,
         agentsHome,
         stateDirectory: join(directory, "state"),
+        verifyProvider: async () => ({}) as never,
       })).resolves.toMatchObject({ workspaceRoots: expectedRoots });
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -90,6 +94,7 @@ describe("daemon trusted adapter composition", () => {
         compatibilityPath: fixture.compatibilityPath,
         compatibilitySchemaPath: fixture.schemaPath,
         agentsHome: fixture.directory,
+        verifyProvider: async () => ({}) as never,
       });
       expect(composed["codex-app-server"]).toMatchObject({
         command: [
@@ -97,6 +102,8 @@ describe("daemon trusted adapter composition", () => {
           fixture.artifactPaths[0],
           "--provider-executable",
           fixture.artifactPaths[0],
+          "--provider-identity-policy",
+          "apple-designated",
         ],
         modelPolicy: { allowedFamilies: ["openai"], requiresExplicitModel: true },
         wrapperProvenance: {

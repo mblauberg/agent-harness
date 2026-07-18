@@ -166,14 +166,14 @@ describe("optional provider executable wrappers", () => {
   it.each([
     {
       adapterId: "agy",
-      source: "../../src/adapters/providers/optional/agy.ts",
+      source: "../support/provider-wrapper-entrypoint.ts",
       model: "gemini-fixture",
       modelFamily: "google",
       expectedReference: "3cbfa155-fc5f-4c6e-aa99-3a44d48262b4",
     },
     {
       adapterId: "cursor-agent",
-      source: "../../src/adapters/providers/optional/cursor-agent.ts",
+      source: "../support/provider-wrapper-entrypoint.ts",
       model: "composer-fixture",
       modelFamily: "cursor-composer",
       expectedReference: "provider-session-1",
@@ -193,10 +193,11 @@ describe("optional provider executable wrappers", () => {
         join(directory, "adapter.sqlite3"),
         "--provider-executable",
         providerExecutable,
+        ...(fixture.adapterId === "cursor-agent" ? ["--provider-install-root", directory] : []),
         "--cwd",
         directory,
       ],
-      environment: {},
+      environment: { AGENT_FABRIC_TEST_ADAPTER: fixture.adapterId },
       responseTimeoutMs: 2_000,
     });
     try {

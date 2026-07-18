@@ -63,6 +63,7 @@ async function writeCompatibility(
             installed_version: "1",
             executable: fixture.executablePath,
             executable_sha256: sha256("provider executable\n"),
+            provider_identity: "apple-designated",
             wrapper_entrypoint: wrapperEntrypoint,
           },
           contract: {
