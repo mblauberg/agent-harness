@@ -72,7 +72,7 @@
     },
     "copilot": {"endpoint_provider": "github", "fixed_model_family": null, "effort_transport": "flag"},
     "kiro": {"endpoint_provider": "aws", "fixed_model_family": null, "effort_transport": "flag"},
-    "opencode": {"endpoint_provider": "opencode", "fixed_model_family": "generic-open", "effort_transport": "model-id"},
+    "opencode": {"endpoint_provider": "opencode", "fixed_model_family": "generic-open", "effort_transport": "flag"},
     "pi": {"endpoint_provider": "configured", "fixed_model_family": null, "effort_transport": "none"}
   },
   "model_patterns": [

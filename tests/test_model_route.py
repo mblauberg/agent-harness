@@ -703,12 +703,14 @@ def test_opencode_accepts_only_explicit_account_catalogue_models():
     allowed, route = resolve(
         "--adapter", "opencode", "--model", "opencode/deepseek-v4-flash-free",
         "--alias", "scout", "--role", "worker", "--adapter-gate", "fabric",
+        "--effort", "high",
     )
     assert allowed.returncode == 0
     assert route["status"] == "ok"
     assert route["model_family"] == "generic-open"
     assert route["compatibility_adapter"] == "opencode-acp"
     assert route["adapter_active"] is True
+    assert route["effort"] == "high"
 
     forbidden, forbidden_route = resolve(
         "--adapter", "opencode", "--model", "anthropic/claude-opus",
