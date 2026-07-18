@@ -51,7 +51,8 @@ Connection is a staged, typed projection owned by the bootstrap, daemon and
 protocol clients. The Console presents these stages in order:
 
 1. configuration discovery;
-2. compatibility manifests and generated-artifact pins;
+2. compatibility registry, external artifact pins and Git wrapper
+   provenance/source-span verification;
 3. daemon election and process readiness;
 4. socket or transport connection;
 5. protocol handshake and authentication;
@@ -136,7 +137,7 @@ schema belongs to the protocol/delivery contract, not to any UI package.
 
 Issue `#141` does not by itself justify installing a framework-specific TUI
 skill or adding another global catalogue entry. During this scope, the Console
-specs own the product and terminal contract; `frontend-design` may supply a
+specs own the product and terminal contract; `ui-ux-design` may supply a
 companion design lens under the lifecycle owner. A future portable
 `terminal-interface-design` technique skill may be proposed after the method
 proves useful in at least two projects and passes catalogue-budget, overlap,

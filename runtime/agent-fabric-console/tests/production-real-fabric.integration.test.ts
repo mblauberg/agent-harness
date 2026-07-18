@@ -214,6 +214,11 @@ describe("real local-session to production-binding path", () => {
                 kind: "run",
                 projectSessionId: "session_real_01",
                 declaredProgress: { plan: "open", counts: declaredCounts },
+                identity: {
+                  runKind: "coordination",
+                  chairAgentId: "chair_real_01",
+                  workstreams: [],
+                },
               },
             },
           },
@@ -237,6 +242,11 @@ describe("real local-session to production-binding path", () => {
             kind: "run",
             coordinationRunId: "run_real_01",
             declaredProgress: { plan: "open", counts: declaredCounts },
+            identity: {
+              runKind: "coordination",
+              chairAgentId: "chair_real_01",
+              workstreams: [],
+            },
           },
         },
       });

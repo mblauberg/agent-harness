@@ -118,8 +118,20 @@ operator experience:
 
 1. **Run identity and plan.** Run summaries/detail carry run kind, stable parent
    session/coordination/delivery/workstream IDs, lead, accepted-scope ref,
-   current-plan ref/revision and last-event time. A coordination run and its
-   delivery workstreams remain distinct rows or an explicit parent/child group.
+   current-plan ref/revision and last-event time. The B1 identity sub-slice
+   ships only the coordination identity arm: each run row/detail declares its
+   run kind, its chair as coordination lead, its latest committed event time
+   or explicit absence, and an explicit
+   parent/child group of its delivery workstreams (workstream ID, delivery-run
+   ID, lead, closed stored state and stored update time), so a coordination run
+   and its delivery workstreams remain distinct identities, never flattened.
+   The group is bounded to 1,024 workstreams and fails closed before producing
+   an unencodable result.
+   Accepted-scope ref and current-plan ref/revision are deliberately deferred
+   to the plan-declaration package — no run-level scope or plan binding
+   authority exists in Fabric yet — and each lands as its own result-shape
+   cutover; until then a premature identity field on the wire is rejected,
+   never translated or synthesised.
 2. **Declared progress.** Run detail carries a tagged progress fact. The
    current cut ships the `open` and `unknown` arms only: the open arm carries
    known task-state counts without a denominator; the unknown arm carries only

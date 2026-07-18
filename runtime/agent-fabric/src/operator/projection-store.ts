@@ -53,6 +53,7 @@ import type { AuthenticatedOperatorCredential, OperatorStore } from "./store.js"
 import { renderSafeMessageBody } from "./message-safety.js";
 import { HERDR_CONTROL_ADAPTER_ID } from "../integrations/herdr-fabric-ports.js";
 import { readControlEligibility, type ResolvedControlTarget } from "./control-eligibility.js";
+import { projectRunIdentity } from "./run-identity-projection.js";
 
 export type OperatorProjectionStoreOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
@@ -61,6 +62,7 @@ export type OperatorProjectionStoreOptions = CoreServiceOptions & {
 export type NativeNotificationProjection = "include" | "omit";
 export type RunSessionProjection = "include" | "omit";
 export type DeclaredRunProgressProjection = "include" | "omit";
+export type RunIdentityProjection = "include" | "omit";
 
 type LoadedOperatorDetail = {
   revision: number;
@@ -211,6 +213,7 @@ export class OperatorProjectionStore {
     nativeNotificationProjection: NativeNotificationProjection,
     runSessionProjection: RunSessionProjection = "include",
     declaredRunProgressProjection: DeclaredRunProgressProjection = "include",
+    runIdentityProjection: RunIdentityProjection = "include",
   ): OperatorViewPageResult {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
@@ -235,6 +238,7 @@ export class OperatorProjectionStore {
           authenticated,
           runSessionProjection,
           declaredRunProgressProjection,
+          runIdentityProjection,
         )
       ), selectedSessionId);
       case "work": return this.#viewPage(request, "work", () => (
@@ -326,6 +330,7 @@ export class OperatorProjectionStore {
     request: OperatorDetailReadRequest,
     runSessionProjection: RunSessionProjection = "include",
     declaredRunProgressProjection: DeclaredRunProgressProjection = "include",
+    runIdentityProjection: RunIdentityProjection = "include",
   ): OperatorDetailReadResult {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
@@ -340,6 +345,7 @@ export class OperatorProjectionStore {
         selectedSessionId,
         runSessionProjection,
         declaredRunProgressProjection,
+        runIdentityProjection,
       );
       if (request.detailRef.expectedRevision !== loaded.revision) {
         return {
@@ -1219,6 +1225,7 @@ export class OperatorProjectionStore {
     authenticated: AuthenticatedOperatorCredential,
     runSessionProjection: RunSessionProjection,
     declaredRunProgressProjection: DeclaredRunProgressProjection,
+    runIdentityProjection: RunIdentityProjection,
   ): OperatorViewRow<"runs">[] {
     return this.#rowsForRuns(projectId, projectSessionId).map((run): OperatorViewRow<"runs"> => {
       const phase = text(run, "lifecycle_state");
@@ -1248,6 +1255,9 @@ export class OperatorProjectionStore {
             nextMilestone: nextMilestone(phase),
             ...(declaredRunProgressProjection === "include"
               ? { declaredProgress: this.#declaredRunProgress(runId) }
+              : {}),
+            ...(runIdentityProjection === "include"
+              ? { identity: projectRunIdentity(this.#database, run) }
               : {}),
           },
           detailRef: {
@@ -1528,6 +1538,7 @@ export class OperatorProjectionStore {
     projectSessionId: ProjectSessionId | undefined,
     runSessionProjection: RunSessionProjection,
     declaredRunProgressProjection: DeclaredRunProgressProjection,
+    runIdentityProjection: RunIdentityProjection,
   ): LoadedOperatorDetail {
     switch (detailRef.kind) {
       case "project": return this.#loadProjectDetail(detailRef, projectId);
@@ -1538,6 +1549,7 @@ export class OperatorProjectionStore {
         projectSessionId,
         runSessionProjection,
         declaredRunProgressProjection,
+        runIdentityProjection,
       );
       case "task": return this.#loadTaskDetail(detailRef, projectId, projectSessionId);
       case "agent": return this.#loadAgentDetail(detailRef, projectId, projectSessionId);
@@ -1602,6 +1614,7 @@ export class OperatorProjectionStore {
     projectSessionId: ProjectSessionId | undefined,
     runSessionProjection: RunSessionProjection,
     declaredRunProgressProjection: DeclaredRunProgressProjection,
+    runIdentityProjection: RunIdentityProjection,
   ): LoadedOperatorDetail {
     const stored = row(this.#database.prepare(`
       SELECT r.* FROM runs r
@@ -1639,6 +1652,9 @@ export class OperatorProjectionStore {
         health: runHealth(phase),
         ...(declaredRunProgressProjection === "include"
           ? { declaredProgress: this.#declaredRunProgress(detailRef.coordinationRunId) }
+          : {}),
+        ...(runIdentityProjection === "include"
+          ? { identity: projectRunIdentity(this.#database, stored) }
           : {}),
       },
     };
