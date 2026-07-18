@@ -114,6 +114,12 @@ function dataset(): FabricConsoleDataset {
             health: "healthy",
             nextMilestone: "verification",
             declaredProgress: { plan: "open", counts: { blocked: 0, ready: 0, active: 1, complete: 0, cancelled: 0, degraded: 0 } },
+            identity: {
+              runKind: "coordination",
+              chairAgentId: "agent_production_chair" as never,
+              workstreams: [],
+              lastEventAt: observedAt,
+            },
           },
           detailRef: {
             kind: "run",
@@ -720,6 +726,7 @@ describe("production Console package-root bootstrap", () => {
         "native-notification-projection.v1",
         "run-session-projection.v1",
         "declared-run-progress.v1",
+        "run-identity-projection.v1",
         "artifact-content-read.v1",
       ],
       projection: {
@@ -823,6 +830,7 @@ describe("production Console package-root bootstrap", () => {
               "native-notification-projection.v1",
               "run-session-projection.v1",
               "declared-run-progress.v1",
+              "run-identity-projection.v1",
               "artifact-content-read.v1",
             ],
             projection: {
@@ -858,6 +866,12 @@ describe("production Console package-root bootstrap", () => {
                           health: "healthy",
                           nextMilestone: "verification",
                           declaredProgress: { plan: "open", counts: { blocked: 0, ready: 0, active: 1, complete: 0, cancelled: 0, degraded: 0 } },
+                          identity: {
+                            runKind: "coordination",
+                            chairAgentId: "agent_production_chair",
+                            workstreams: [],
+                            lastEventAt: observedAt,
+                          },
                         },
                         detailRef: {
                           kind: "run",
@@ -950,6 +964,7 @@ describe("production Console package-root bootstrap", () => {
         "native-notification-projection.v1",
         "run-session-projection.v1",
         "declared-run-progress.v1",
+        "run-identity-projection.v1",
         "artifact-content-read.v1",
       ],
       projection: {

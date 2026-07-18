@@ -2484,12 +2484,43 @@ const declaredRunProgressCodec = unionOf([
   objectCodec({ plan: literal("open"), counts: declaredRunTaskStateCountsCodec }),
   objectCodec({ plan: literal("unknown"), reason: text }),
 ]);
+const runWorkstreamIdentityCodec = objectCodec({
+  workstreamId: identifier,
+  deliveryRunId: identifier,
+  leadAgentId: identifier,
+  state: enumeration(["active", "complete", "cancelled", "degraded", "abandoned"]),
+  updatedAt: timestamp,
+});
+// The coordination arm is the only current run-kind arm. Accepted-scope and
+// current-plan refs are deliberately deferred to the plan-declaration
+// package: no run-level scope or plan binding authority exists in Fabric
+// yet, and each lands as its own result-shape cutover.
+const runIdentityBaseCodec = objectCodec({
+  runKind: literal("coordination"),
+  chairAgentId: identifier,
+  workstreams: arrayOf(runWorkstreamIdentityCodec, { maximum: 1024 }),
+  lastEventAt: nullable(timestamp),
+});
+const runIdentityCodec = parserBacked(
+  runIdentityBaseCodec,
+  (value, path) => {
+    const identity = value as Record<string, unknown>;
+    const workstreams = identity.workstreams as ReadonlyArray<Record<string, unknown>>;
+    const workstreamIds = new Set(workstreams.map((workstream) => workstream.workstreamId));
+    const deliveryRunIds = new Set(workstreams.map((workstream) => workstream.deliveryRunId));
+    if (workstreamIds.size !== workstreams.length || deliveryRunIds.size !== workstreams.length) {
+      throw new TypeError(`${path}.workstreams must have unique workstreamId and deliveryRunId values`);
+    }
+    return value;
+  },
+  runIdentityBaseCodec.example,
+);
 const runSummaryCodec = objectCodec({
   kind: literal("run"),
   phase: text,
   health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
   nextMilestone: text,
-}, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec });
+}, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec, identity: runIdentityCodec });
 const workSummaryCodec = objectCodec({
   kind: literal("work"),
   state: text,
@@ -2630,7 +2661,7 @@ const operatorDetailCodec = unionOf([
     chairAgentId: identifier,
     chairGeneration: positiveInteger,
     health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
-  }, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec }),
+  }, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec, identity: runIdentityCodec }),
   objectCodec({ kind: literal("task"), taskId: identifier, objective: text, state: text, ownerAgentId: nullable(identifier) }),
   objectCodec({
     kind: literal("agent"),
@@ -2714,6 +2745,13 @@ const operatorDetailReadResultCodec = parserBacked(
         : [fact.value as Record<string, unknown>];
     if (values.some((detail) => detail.kind !== detailRef.kind)) {
       throw new TypeError("operatorDetailRead detail kind does not match reference");
+    }
+    for (const detail of values) {
+      if (detail.kind !== "run" || detail.identity === undefined) continue;
+      const identity = detail.identity as Record<string, unknown>;
+      if (identity.chairAgentId !== detail.chairAgentId) {
+        throw new TypeError("operatorDetailRead identity chair must match the enclosing run chair");
+      }
     }
     return value;
   },

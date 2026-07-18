@@ -355,6 +355,12 @@ describe("public protocol adapter", () => {
                     health: "healthy",
                     nextMilestone: "review",
                     declaredProgress: { plan: "open", counts: { blocked: 0, ready: 0, active: 1, complete: 0, cancelled: 0, degraded: 0 } },
+                    identity: {
+                      runKind: "coordination",
+                      chairAgentId: "agent-chair",
+                      workstreams: [],
+                      lastEventAt: observedAt,
+                    },
                   },
                   detailRef: {
                     kind: "run",
@@ -728,6 +734,7 @@ describe("public protocol adapter", () => {
         "scoped-gate-read.v1",
         "run-session-projection.v1",
         "declared-run-progress.v1",
+        "run-identity-projection.v1",
         "artifact-content-read.v1",
       ],
     });
@@ -746,6 +753,7 @@ describe("public protocol adapter", () => {
           "scoped-gate-read.v1",
           "run-session-projection.v1",
           "declared-run-progress.v1",
+          "run-identity-projection.v1",
           "artifact-content-read.v1",
         ],
       },
@@ -774,7 +782,7 @@ describe("public protocol adapter", () => {
 
     expect(result).toStrictEqual({
       ok: false,
-      missingFeatures: ["run-session-projection.v1", "declared-run-progress.v1"],
+      missingFeatures: ["run-session-projection.v1", "declared-run-progress.v1", "run-identity-projection.v1"],
     });
   });
 
@@ -795,6 +803,7 @@ describe("public protocol adapter", () => {
         "scoped-gate-read.v1",
         "run-session-projection.v1",
         "declared-run-progress.v1",
+        "run-identity-projection.v1",
         "artifact-content-read.v1",
         "message-body-read.v1",
         "operator-repository-read.v1",
@@ -838,6 +847,7 @@ describe("public protocol adapter", () => {
         "scoped-gate-read.v1",
         "run-session-projection.v1",
         "declared-run-progress.v1",
+        "run-identity-projection.v1",
         "artifact-content-read.v1",
       ],
       projection: {},

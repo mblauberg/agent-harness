@@ -189,6 +189,12 @@ function richDataset(
         health: "blocked",
         nextMilestone: "Console GREEN",
         declaredProgress: { plan: "open", counts: { blocked: 0, ready: 0, active: 1, complete: 0, cancelled: 0, degraded: 0 } },
+        identity: {
+          runKind: "coordination",
+          chairAgentId: "agent-chair" as never,
+          workstreams: [],
+          lastEventAt: timestamp,
+        },
       }),
     ],
     work: [
@@ -2703,5 +2709,104 @@ describe("declared run progress presentation", () => {
       value: "unknown | unrecognised task state: parked",
     });
     expect(JSON.stringify(presented)).not.toMatch(/\d+ ?%|percentage|\bETA\b/iu);
+  });
+});
+
+describe("run identity presentation", () => {
+  function identityDataset(
+    identity: import("@local/agent-fabric-protocol").RunIdentity,
+  ): { dataset: FabricConsoleDataset; controller: ConsoleControllerState } {
+    const dataset = richDataset();
+    const runRow = dataset.pages.runs.rows[0];
+    if (runRow === undefined || runRow.summary?.kind !== "run") {
+      throw new Error("run fixture unavailable");
+    }
+    const identified: FabricConsoleDataset = {
+      ...dataset,
+      pages: {
+        ...dataset.pages,
+        runs: {
+          ...dataset.pages.runs,
+          rows: [{
+            ...runRow,
+            summary: { ...runRow.summary, identity },
+          }],
+        },
+      },
+    };
+    const baseController = controllerState();
+    return {
+      dataset: identified,
+      controller: {
+        ...baseController,
+        activeView: "runs",
+        selectionByView: {
+          ...baseController.selectionByView,
+          runs: { stableId: runRow.stableId, revision: runRow.revision },
+        },
+      },
+    };
+  }
+
+  it("declares the coordination run kind, lead and last event from Fabric facts only", () => {
+    const { dataset, controller } = identityDataset({
+      runKind: "coordination",
+      chairAgentId: "agent-chair" as never,
+      workstreams: [],
+      lastEventAt: null,
+    });
+    const presented = presentFabricConsole(
+      dataset,
+      controller,
+      createFabricUiState(),
+      { columns: 120, rows: 32 },
+    );
+    expect(presented.masterRows[0]?.secondary).toContain("coordination");
+    expect(presented.detail?.lines).toContainEqual({ label: "Run kind", value: "coordination" });
+    expect(presented.detail?.lines).toContainEqual({ label: "Lead", value: "agent-chair" });
+    expect(presented.detail?.lines).toContainEqual({ label: "Last event", value: "none recorded" });
+    expect(presented.detail?.lines).toContainEqual({ label: "Workstreams", value: "none recorded" });
+  });
+
+  it("groups delivery workstreams under their parent coordination run without flattening", () => {
+    const { dataset, controller } = identityDataset({
+      runKind: "coordination",
+      chairAgentId: "agent-chair" as never,
+      workstreams: [
+        {
+          workstreamId: "ws-console" as never,
+          deliveryRunId: "delivery-console" as never,
+          leadAgentId: "agent-console-lead" as never,
+          state: "active",
+          updatedAt: timestamp,
+        },
+        {
+          workstreamId: "ws-docs" as never,
+          deliveryRunId: "delivery-docs" as never,
+          leadAgentId: "agent-docs-lead" as never,
+          state: "complete",
+          updatedAt: timestamp,
+        },
+      ],
+      lastEventAt: timestamp,
+    });
+    const presented = presentFabricConsole(
+      dataset,
+      controller,
+      createFabricUiState(),
+      { columns: 120, rows: 32 },
+    );
+    // The parent coordination run stays one row; its delivery workstreams
+    // remain an explicit child group with their own stable identities.
+    expect(presented.masterRows).toHaveLength(1);
+    expect(presented.masterRows[0]?.secondary).toContain("coordination | 2 workstreams");
+    expect(presented.detail?.lines).toContainEqual({
+      label: "Workstream ws-console",
+      value: `delivery delivery-console | lead agent-console-lead | active | updated ${timestamp}`,
+    });
+    expect(presented.detail?.lines).toContainEqual({
+      label: "Workstream ws-docs",
+      value: `delivery delivery-docs | lead agent-docs-lead | complete | updated ${timestamp}`,
+    });
   });
 });

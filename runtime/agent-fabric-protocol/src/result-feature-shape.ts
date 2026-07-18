@@ -18,6 +18,7 @@ export const NATIVE_NOTIFICATION_PROJECTION_FEATURE =
   "native-notification-projection.v1" as const;
 export const RUN_SESSION_PROJECTION_FEATURE = "run-session-projection.v1" as const;
 export const DECLARED_RUN_PROGRESS_FEATURE = "declared-run-progress.v1" as const;
+export const RUN_IDENTITY_PROJECTION_FEATURE = "run-identity-projection.v1" as const;
 
 export type ProtocolResultShapeFailureReason =
   | "missing-negotiated-field"
@@ -166,6 +167,27 @@ function declaredProgressPresence(
   return [];
 }
 
+function runIdentityPresence(
+  operation: ProtocolOperation,
+  result: OperationResultMap[ProtocolOperation],
+): readonly boolean[] {
+  if (operation === FABRIC_OPERATIONS.projectionViewPage) {
+    const page = result as OperatorViewPageResult;
+    if (page.status !== "page" || page.view !== "runs") return [];
+    const runs = page as Extract<OperatorViewPageResult<"runs">, { status: "page" }>;
+    return runs.rows.flatMap((row) => factValues(row.fact)
+      .map((value) => value.summary.identity !== undefined));
+  }
+  if (operation === FABRIC_OPERATIONS.projectionDetailRead) {
+    const read = result as OperatorDetailReadResult;
+    if (read.status !== "current") return [];
+    return factValues(read.detail).flatMap((detail) => (
+      detail.kind === "run" ? [detail.identity !== undefined] : []
+    ));
+  }
+  return [];
+}
+
 function assertUniformFeaturePresence(
   operation: ProtocolOperation,
   featureNegotiated: boolean,
@@ -229,6 +251,11 @@ export function assertOperationResultFeatureShape<Operation extends ProtocolOper
     operation,
     features.includes(DECLARED_RUN_PROGRESS_FEATURE),
     declaredProgressPresence(operation, result as OperationResultMap[ProtocolOperation]),
+  );
+  assertUniformFeaturePresence(
+    operation,
+    features.includes(RUN_IDENTITY_PROJECTION_FEATURE),
+    runIdentityPresence(operation, result as OperationResultMap[ProtocolOperation]),
   );
   return result;
 }

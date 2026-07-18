@@ -9,6 +9,7 @@ import {
   LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC,
   LIFECYCLE_CURRENT_STATE_V1_CODEC,
   DECLARED_RUN_PROGRESS_FEATURE,
+  RUN_IDENTITY_PROJECTION_FEATURE,
   NATIVE_NOTIFICATION_PROJECTION_FEATURE,
   RUN_SESSION_PROJECTION_FEATURE,
   authorityEnvelopeV2Contained,
@@ -3429,6 +3430,7 @@ export class Fabric {
           context.features.includes(NATIVE_NOTIFICATION_PROJECTION_FEATURE) ? "include" : "omit",
           context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
           context.features.includes(DECLARED_RUN_PROGRESS_FEATURE) ? "include" : "omit",
+          context.features.includes(RUN_IDENTITY_PROJECTION_FEATURE) ? "include" : "omit",
         );
       }
       case FABRIC_OPERATIONS.projectionDetailRead: {
@@ -3439,6 +3441,7 @@ export class Fabric {
           request,
           context.features.includes(RUN_SESSION_PROJECTION_FEATURE) ? "include" : "omit",
           context.features.includes(DECLARED_RUN_PROGRESS_FEATURE) ? "include" : "omit",
+          context.features.includes(RUN_IDENTITY_PROJECTION_FEATURE) ? "include" : "omit",
         );
       }
       case FABRIC_OPERATIONS.messageBodyRead: {

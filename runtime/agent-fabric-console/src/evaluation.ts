@@ -732,6 +732,12 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
           degraded: 0,
         },
       },
+      identity: {
+        runKind: "coordination",
+        chairAgentId: run.chairAgentId,
+        workstreams: [],
+        lastEventAt: timestamp,
+      },
     },
     detailRef: {
       kind: "run",

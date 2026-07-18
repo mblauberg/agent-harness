@@ -1101,6 +1101,219 @@ describe("operator projection store", () => {
     }
     expect(detailUnnegotiated.detail.value).not.toHaveProperty("declaredProgress");
   });
+
+  it("declares coordination run identity with its workstream group only when negotiated", () => {
+    const fixture = setupProjection();
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    fixture.database.exec(`
+      INSERT INTO agents(run_id, agent_id, authority_id, provider_session_ref, lifecycle)
+      VALUES ('run_01', 'lead_01', 'authority_01', 'provider_session_02', 'ready');
+      INSERT INTO workstreams(
+        workstream_id, project_session_id, coordination_run_id, fabric_task_id,
+        lead_agent_id, delivery_run_id, revision, state, created_at, updated_at
+      ) VALUES (
+        'ws_01', 'session_01', 'run_01', 'task_01',
+        'lead_01', 'delivery_01', 1, 'active', ${String(now - 800)}, ${String(now - 700)}
+      );
+    `);
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    const pageRequest: OperatorViewPageRequest<"runs"> = {
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "runs",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 5,
+    };
+    const identity = {
+      runKind: "coordination",
+      chairAgentId: "chair_01",
+      workstreams: [{
+        workstreamId: "ws_01",
+        deliveryRunId: "delivery_01",
+        leadAgentId: "lead_01",
+        state: "active",
+        updatedAt: new Date(now - 700).toISOString(),
+      }],
+      lastEventAt: new Date(now - 300).toISOString(),
+    };
+
+    const negotiated = fixture.projections.viewPage(pageRequest, "include", "include", "include", "include");
+    expect(negotiated).toMatchObject({
+      status: "page",
+      view: "runs",
+      rows: [{
+        itemId: "run_01",
+        fact: {
+          freshness: "live",
+          value: { summary: { kind: "run", identity } },
+        },
+      }],
+    });
+
+    const unnegotiated = fixture.projections.viewPage(pageRequest, "include", "include", "include", "omit");
+    if (unnegotiated.status !== "page" || unnegotiated.view !== "runs") {
+      throw new Error("expected an unnegotiated runs page");
+    }
+    const unnegotiatedRow = unnegotiated.rows[0]?.fact;
+    if (unnegotiatedRow?.freshness !== "live") throw new Error("expected a live run row");
+    expect(unnegotiatedRow.value.summary).not.toHaveProperty("identity");
+
+    const detailRequest: OperatorDetailReadRequest = {
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      snapshotRevision: snapshot.snapshotRevision,
+      detailRef: {
+        kind: "run",
+        projectSessionId,
+        coordinationRunId: identifier<"CoordinationRunId">("run_01"),
+        expectedRevision: 4,
+      },
+    };
+    expect(fixture.projections.detail(detailRequest, "include", "include", "include")).toMatchObject({
+      status: "current",
+      detail: {
+        freshness: "live",
+        value: { kind: "run", coordinationRunId: "run_01", identity },
+      },
+    });
+    const detailUnnegotiated = fixture.projections.detail(detailRequest, "include", "include", "omit");
+    if (detailUnnegotiated.status !== "current" || detailUnnegotiated.detail.freshness !== "live") {
+      throw new Error("expected a live unnegotiated run detail");
+    }
+    expect(detailUnnegotiated.detail.value).not.toHaveProperty("identity");
+  });
+
+  it("reports no last event instead of relabelling run creation time", () => {
+    const fixture = setupProjection();
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    fixture.database.prepare(`
+      DELETE FROM observer_event_sequence
+       WHERE event_id IN (SELECT event_id FROM events WHERE run_id='run_01')
+    `).run();
+    fixture.database.prepare("DELETE FROM events WHERE run_id='run_01'").run();
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+
+    const result = fixture.projections.viewPage({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "runs",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 5,
+    }, "include", "include", "include", "include");
+
+    expect(result).toMatchObject({
+      status: "page",
+      rows: [{ fact: { value: { summary: { identity: { lastEventAt: null } } } } }],
+    });
+  });
+
+  it("fails closed before a run identity exceeds its 1024-workstream contract", () => {
+    const fixture = setupProjection();
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    fixture.database.exec(`
+      INSERT INTO agents(run_id, agent_id, authority_id, provider_session_ref, lifecycle)
+      VALUES ('run_01', 'lead_bound', 'authority_01', 'provider_session_bound', 'ready');
+      WITH RECURSIVE sequence(value) AS (
+        SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 1024
+      )
+      INSERT INTO workstreams(
+        workstream_id, project_session_id, coordination_run_id, fabric_task_id,
+        lead_agent_id, delivery_run_id, revision, state, created_at, updated_at
+      )
+      SELECT
+        printf('ws_bound_%04d', value), 'session_01', 'run_01', 'task_01',
+        'lead_bound', printf('delivery_bound_%04d', value), 1, 'active', ${String(now)}, ${String(now)}
+      FROM sequence;
+    `);
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    const request: OperatorViewPageRequest<"runs"> = {
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "runs",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 5,
+    };
+
+    expect(fixture.projections.viewPage(request, "include", "include", "include", "include"))
+      .toMatchObject({ status: "page", rows: [{ fact: { value: { summary: { identity: {
+        workstreams: expect.arrayContaining([expect.objectContaining({ workstreamId: "ws_bound_1024" })]),
+      } } } } }] });
+
+    fixture.database.prepare(`
+      INSERT INTO workstreams(
+        workstream_id, project_session_id, coordination_run_id, fabric_task_id,
+        lead_agent_id, delivery_run_id, revision, state, created_at, updated_at
+      ) VALUES ('ws_bound_1025', 'session_01', 'run_01', 'task_01', 'lead_bound',
+                'delivery_bound_1025', 1, 'active', ?, ?)
+    `).run(now, now);
+
+    const overflowSnapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    const overflowRequest = { ...request, snapshotRevision: overflowSnapshot.snapshotRevision };
+    expect(() => fixture.projections.viewPage(overflowRequest, "include", "include", "include", "include"))
+      .toThrowError(expect.objectContaining({ code: "RESOURCE_EXHAUSTED" }));
+  });
+
+  it("fails a run identity read closed when a stored workstream state leaves the contract", () => {
+    const fixture = setupProjection();
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    // The storage CHECK normally rejects such a row; bypassing it here proves
+    // the projection also refuses to translate an out-of-contract state.
+    fixture.database.exec(`
+      INSERT INTO agents(run_id, agent_id, authority_id, provider_session_ref, lifecycle)
+      VALUES ('run_01', 'lead_01', 'authority_01', 'provider_session_02', 'ready');
+      PRAGMA ignore_check_constraints = 1;
+      INSERT INTO workstreams(
+        workstream_id, project_session_id, coordination_run_id, fabric_task_id,
+        lead_agent_id, delivery_run_id, revision, state, created_at, updated_at
+      ) VALUES (
+        'ws_01', 'session_01', 'run_01', 'task_01',
+        'lead_01', 'delivery_01', 1, 'parked', ${String(now - 800)}, ${String(now - 700)}
+      );
+      PRAGMA ignore_check_constraints = 0;
+    `);
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    expect(() => fixture.projections.viewPage({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "runs",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 5,
+    }, "include", "include", "include", "include"))
+      .toThrowError(expect.objectContaining({ code: "RECOVERY_REQUIRED" }));
+  });
 });
 
 describe("operator action store", () => {
