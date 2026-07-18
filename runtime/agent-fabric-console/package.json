@@ -7,7 +7,7 @@
     "node": ">=24.15.0 <25"
   },
   "bin": {
-    "agent-fabric-console": "dist/cli.js"
+    "agent-fabric-console": "dist/bin.js"
   },
   "files": [
     "dist",

@@ -1,9 +1,6 @@
-#!/usr/bin/env node
-
 import { constants } from "node:fs";
 import { open, realpath } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import type {
   FabricActionJournalPort,
@@ -144,12 +141,4 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
   const actual = Object.keys(value).sort();
   const sorted = [...expected].sort();
   return actual.length === sorted.length && actual.every((key, index) => key === sorted[index]);
-}
-
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  process.exitCode = await runHerdrCli(process.argv.slice(2), {
-    stdin: process.stdin,
-    stdout: process.stdout,
-    stderr: process.stderr,
-  });
 }

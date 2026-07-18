@@ -7,7 +7,7 @@
     "node": ">=24.15.0 <25"
   },
   "bin": {
-    "agent-fabric-herdr": "dist/cli.js"
+    "agent-fabric-herdr": "dist/bin.js"
   },
   "files": [
     "dist"
