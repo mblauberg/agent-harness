@@ -22,7 +22,6 @@ export type BootstrapMcpCustody = {
 function isRow(value: unknown): value is Row {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-
 function rowOrNotFound(value: unknown, label: string): Row {
   if (!isRow(value)) throw new FabricError("NOT_FOUND", label + " was not found");
   return value;
@@ -325,4 +324,3 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
       return { ...bound, projectId, canonicalRoot, bootstrapRunDirectory };
     }).immediate();
 }
-
