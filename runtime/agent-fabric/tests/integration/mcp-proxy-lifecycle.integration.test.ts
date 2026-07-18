@@ -9,12 +9,143 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { describe, expect, it } from "vitest";
 
+import { startFabricDaemon } from "../../src/index.ts";
 import { createDaemonFixture } from "../support/daemon-testkit.ts";
+import { callTool, createMcpFixture, MCP_ROOT_AUTHORITY } from "../support/mcp-testkit.ts";
+import { trackTestProcess, untrackTestProcess } from "../support/test-process-registry.ts";
 
 const packageRoot = fileURLToPath(new URL("../..", import.meta.url));
 const mcpMain = fileURLToPath(new URL("../../src/mcp/main.ts", import.meta.url));
 
 describe("MCP proxy lifecycle", () => {
+  it("replays command-identified requests after restart and preserves their domain errors", async () => {
+    const fixture = await createMcpFixture("run-mcp-daemon-restart");
+    let replacement: Awaited<ReturnType<typeof startFabricDaemon>> | undefined;
+    try {
+      const before = await callTool(fixture.chairProxy.client, "fabric_message_receive", {
+        limit: 10,
+        visibilityTimeoutMs: 30_000,
+      });
+      expect(before.isError).toBe(false);
+
+      await fixture.daemon.stop();
+      untrackTestProcess(fixture.daemon.pid);
+      replacement = await startFabricDaemon({
+        databasePath: fixture.databasePath,
+        stateDirectory: join(fixture.directory, "state"),
+        runtimeDirectory: join(fixture.directory, "runtime"),
+        socketPath: fixture.socketPath,
+        workspaceRoots: [fixture.directory],
+      });
+      trackTestProcess(replacement.pid, `replacement Fabric daemon ${fixture.directory}`);
+
+      const [created, missing] = await Promise.all([
+        callTool(fixture.chairProxy.client, "fabric_task_create", {
+          taskId: "task-after-restart",
+          authorityId: fixture.run.chairAuthorityId,
+          eligibleAgentIds: ["chair"],
+          objective: "prove stable replay after restart",
+          baseRevision: "restart-base",
+          commandId: "restart:create-task",
+        }),
+        callTool(fixture.chairProxy.client, "fabric_task_claim", {
+          taskId: "missing-after-restart",
+          expectedRevision: 1,
+          commandId: "restart:claim-missing",
+        }),
+      ]);
+      expect(created).toMatchObject({ isError: false, structured: { taskId: "task-after-restart" } });
+      expect(missing).toMatchObject({ isError: true, structured: { code: "NOT_FOUND" } });
+    } finally {
+      if (replacement !== undefined) {
+        await replacement.stop().catch(() => undefined);
+        untrackTestProcess(replacement.pid);
+      }
+      await fixture.cleanup();
+    }
+  });
+
+  it("reconnects but does not replay commandless stateful requests", async () => {
+    const fixture = await createMcpFixture("run-mcp-no-unsafe-replay");
+    let replacement: Awaited<ReturnType<typeof startFabricDaemon>> | undefined;
+    const delegatedAuthority = {
+      ...MCP_ROOT_AUTHORITY,
+      sourcePaths: ["src/reconnected-peer"],
+      artifactPaths: [".agent-run/reconnected-peer"],
+      budget: { turns: 1, "cost:USD": 1 },
+    };
+    try {
+      await fixture.daemon.stop();
+      untrackTestProcess(fixture.daemon.pid);
+      replacement = await startFabricDaemon({
+        databasePath: fixture.databasePath,
+        stateDirectory: join(fixture.directory, "state"),
+        runtimeDirectory: join(fixture.directory, "runtime"),
+        socketPath: fixture.socketPath,
+        workspaceRoots: [fixture.directory],
+      });
+      trackTestProcess(replacement.pid, `replacement Fabric daemon ${fixture.directory}`);
+
+      const results = await Promise.all([
+        callTool(fixture.chairProxy.client, "fabric_message_receive", {
+          limit: 10,
+          visibilityTimeoutMs: 30_000,
+        }),
+        callTool(fixture.chairProxy.client, "fabric_authority_delegate", {
+          parentAuthorityId: fixture.run.chairAuthorityId,
+          authority: delegatedAuthority,
+        }),
+      ]);
+      expect(results.map((result) => result.structured.code)).toEqual([
+        "RECONNECT_REQUIRED",
+        "RECONNECT_REQUIRED",
+      ]);
+
+      await expect(callTool(fixture.chairProxy.client, "fabric_message_receive", {
+        limit: 10,
+        visibilityTimeoutMs: 30_000,
+      })).resolves.toMatchObject({ isError: false });
+      await expect(callTool(fixture.chairProxy.client, "fabric_authority_delegate", {
+        parentAuthorityId: fixture.run.chairAuthorityId,
+        authority: delegatedAuthority,
+      })).resolves.toMatchObject({ isError: false });
+    } finally {
+      if (replacement !== undefined) {
+        await replacement.stop().catch(() => undefined);
+        untrackTestProcess(replacement.pid);
+      }
+      await fixture.cleanup();
+    }
+  });
+
+  it("returns one reconnect action when the daemon remains unavailable", async () => {
+    const fixture = await createMcpFixture("run-mcp-daemon-unavailable");
+    try {
+      await fixture.daemon.stop();
+      untrackTestProcess(fixture.daemon.pid);
+
+      const result = await callTool(fixture.chairProxy.client, "fabric_message_receive", {
+        limit: 10,
+        visibilityTimeoutMs: 30_000,
+      });
+      expect(result).toEqual({
+        isError: true,
+        structured: {
+          code: "RECONNECT_REQUIRED",
+          message: "Agent Fabric could not reconnect to the daemon",
+          action: "Retry the Fabric request after the daemon is available.",
+        },
+        text: JSON.stringify({
+          code: "RECONNECT_REQUIRED",
+          message: "Agent Fabric could not reconnect to the daemon",
+          action: "Retry the Fabric request after the daemon is available.",
+        }),
+      });
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it("initializes with only exact-root bootstrap when the configured seat is not provisioned", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-mcp-unprovisioned-"));
     const project = join(directory, "project");
