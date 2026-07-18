@@ -130,6 +130,8 @@ describe("fresh Agent Fabric launch bootstrap", () => {
     const discovery = JSON.parse(await readFile(join(paths.runtimeDirectory, "fabric-v1.discovery.json"), "utf8")) as { pid: number };
     trackTestProcess(discovery.pid, "zero-state-bootstrap-cli-daemon");
     daemonPids.add(discovery.pid);
+    expect(stdout).not.toMatch(/"capability"\s*:/u);
+    expect(stdout).not.toContain("afc_");
     const output = JSON.parse(stdout) as { canonicalRoot: string; credentials: Array<{ seat: string }> };
     expect(output.canonicalRoot).toBe(projectRoot);
     expect(output.credentials.map(({ seat }) => seat)).toEqual(["codex"]);
