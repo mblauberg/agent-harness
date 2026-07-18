@@ -22,9 +22,14 @@ import {
 } from "../../../src/project-session/launch-custody.ts";
 import { canonicalJson } from "../../../src/project-session/store-support.ts";
 import { TEST_AUTHORITY_V2_FIELDS } from "../../support/authority-v2-testkit.ts";
+import {
+  terminateTrackedTestProcess,
+  trackTestProcess,
+} from "../../support/test-process-registry.ts";
 
 const roots: string[] = [];
 const consoles: LocalOperatorConsoleSession[] = [];
+const daemonPids: number[] = [];
 const freshAdapter = fileURLToPath(new URL("../../support/fresh-launch-adapter.ts", import.meta.url));
 const mcpMain = fileURLToPath(new URL("../../../src/mcp/main.ts", import.meta.url));
 // Spawn from the package root so the bare `tsx` --import specifier resolves;
@@ -68,6 +73,7 @@ const launchContract = {
 
 afterEach(async () => {
   await Promise.allSettled(consoles.splice(0).reverse().map(async (console) => console.close()));
+  await Promise.allSettled(daemonPids.splice(0).map(async (pid) => await terminateTrackedTestProcess(pid)));
   await Promise.allSettled(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -149,6 +155,8 @@ describe("fresh Agent Fabric launch bootstrap", () => {
       },
       clientId: "console_fresh_launch_01",
     });
+    trackTestProcess(console.daemonPid, "fresh-launch-bootstrap-daemon");
+    daemonPids.push(console.daemonPid);
     consoles.push(console);
 
     const projectSessions = console.projectClient.projectSessions;
