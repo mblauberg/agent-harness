@@ -69,15 +69,15 @@ It also links the thin `provenant` command into
 `${PROVENANT_BIN_DIR:-$HOME/.local/bin}` and warns when that directory is not
 on `PATH`; it never edits shell startup files. `provenant doctor` delegates to
 the Fabric doctor.
-A canonical instruction symlink to `~/.agents/AGENTS.md` is accepted. A regular
-or foreign instruction file is preserved; the installer exits 3 and prints the
-bootstrap line to add. `provenant doctor` checks Fabric configuration and its
-enabled adapters; `provenant check` is the slower full repository gate.
+An instruction symlink or file referencing both shared instructions is
+accepted. Other files are preserved; the installer exits 3 and
+prints the bootstrap line to add. `provenant doctor` checks Fabric configuration
+and enabled adapters; `provenant check` is the full repository gate.
 
-The checked-in Fabric profile enables Claude, Codex, Agy and Cursor adapters.
-For `provenant doctor` to pass that full profile, install and authenticate all
-four CLIs through their subscription flows. Provenant does not set or persist
-provider API keys for Agy or Cursor.
+The checked-in profile enables Claude, Codex, Agy and Cursor, so install all four
+CLIs for `provenant doctor`; authenticate through their subscription flows
+before use. Doctor checks identity and non-answer interfaces, not login or
+quota. Provenant does not set or persist provider API keys for Agy or Cursor.
 
 | Client or provider | Current integration |
 |---|---|
