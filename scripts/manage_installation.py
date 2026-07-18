@@ -183,7 +183,11 @@ def _mutate_link(
 def _rollback_mutations(journal: list[LinkMutation]) -> list[str]:
     preserved: list[str] = []
     for mutation in reversed(journal):
-        current = _capture_path(mutation.path)
+        try:
+            current = _capture_path(mutation.path)
+        except (OSError, InstallError):
+            preserved.append(mutation.path.name)
+            continue
         if current != mutation.installed:
             preserved.append(mutation.path.name)
             continue
@@ -198,7 +202,7 @@ def _rollback_mutations(journal: list[LinkMutation]) -> list[str]:
                 mutation.path.symlink_to(mutation.before.link_target)
             elif mutation.before.kind != "absent":
                 preserved.append(mutation.path.name)
-        except FileExistsError:
+        except OSError:
             preserved.append(mutation.path.name)
     return sorted(set(preserved))
 
