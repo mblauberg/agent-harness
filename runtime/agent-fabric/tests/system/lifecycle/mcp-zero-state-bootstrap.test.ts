@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { runWorkspaceTrust } from "../../../src/cli/workspace-trust.ts";
 import type { FabricPaths } from "../../../src/cli/paths.ts";
+import { projectKey, readLegacyBootstrapSeatGeneration } from "../../../src/cli/seat-store.ts";
 import { callTool } from "../../support/mcp-testkit.ts";
 import { terminateTrackedTestProcess, trackTestProcess } from "../../support/test-process-registry.ts";
 
@@ -144,10 +145,112 @@ describe("fresh Agent Fabric launch bootstrap", () => {
     daemonPids.add(discovery.pid);
     expect(stdout).not.toMatch(/"capability"\s*:/u);
     expect(stdout).not.toContain("afc_");
-    const output = JSON.parse(stdout) as { canonicalRoot: string; credentials: Array<{ seat: string }> };
+    const output = JSON.parse(stdout) as { canonicalRoot: string; generation: string; credentials: Array<{ seat: string }> };
     expect(output.canonicalRoot).toBe(projectRoot);
     expect(output.credentials.map(({ seat }) => seat)).toEqual(["codex"]);
+    await expect(readFile(join(
+      paths.stateDirectory,
+      "seats",
+      projectKey(projectRoot),
+      "generations",
+      output.generation,
+      "codex.json",
+    ), "utf8").then(JSON.parse)).resolves.toMatchObject({ originKind: "bootstrap" });
     await access(paths.databasePath);
+  });
+
+  it("replays a legacy bootstrap generation without rewriting its immutable metadata", async () => {
+    const { projectRoot, paths, agentsHome } = await fixture();
+    const environment = {
+      AGENT_FABRIC_STATE_DIRECTORY: paths.stateDirectory,
+      AGENT_FABRIC_RUNTIME_DIRECTORY: paths.runtimeDirectory,
+      AGENT_FABRIC_SEAT: "codex",
+      AGENTS_HOME: agentsHome,
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      TMPDIR: process.env.TMPDIR ?? "/tmp",
+      ...(process.env.HOME === undefined ? {} : { HOME: process.env.HOME }),
+    };
+    const first = await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cliMain, "bootstrap", "--seat", "codex"],
+      { cwd: projectRoot, env: environment, timeout: 15_000 },
+    );
+    const bootstrapped = JSON.parse(first.stdout) as { generation: string };
+    const metadataPath = join(
+      paths.stateDirectory,
+      "seats",
+      projectKey(projectRoot),
+      "generations",
+      bootstrapped.generation,
+      "codex.json",
+    );
+    const legacyMetadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+    delete legacyMetadata.originKind;
+    const legacyText = `${JSON.stringify(legacyMetadata, null, 2)}\n`;
+    await writeFile(metadataPath, legacyText, { mode: 0o600 });
+
+    const replay = await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cliMain, "bootstrap", "--seat", "codex"],
+      { cwd: projectRoot, env: environment, timeout: 15_000 },
+    );
+
+    expect(JSON.parse(replay.stdout)).toMatchObject({ generation: bootstrapped.generation });
+    await expect(readFile(metadataPath, "utf8")).resolves.toBe(legacyText);
+    await expect(readLegacyBootstrapSeatGeneration({
+      stateDirectory: paths.stateDirectory,
+      projectPath: projectRoot,
+    })).resolves.toBe(bootstrapped.generation);
+
+    const crossedLegacy = { ...legacyMetadata, agentId: "crossed-agent" };
+    await writeFile(metadataPath, `${JSON.stringify(crossedLegacy, null, 2)}\n`, { mode: 0o600 });
+    await expect(execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cliMain, "bootstrap", "--seat", "codex"],
+      { cwd: projectRoot, env: environment, timeout: 15_000 },
+    )).rejects.toThrow(/existing MCP seat generation differs/u);
+  });
+
+  it("restores a missing active pointer when replaying an exact legacy bootstrap generation", async () => {
+    const { projectRoot, paths, agentsHome } = await fixture();
+    const environment = {
+      AGENT_FABRIC_STATE_DIRECTORY: paths.stateDirectory,
+      AGENT_FABRIC_RUNTIME_DIRECTORY: paths.runtimeDirectory,
+      AGENT_FABRIC_SEAT: "codex",
+      AGENTS_HOME: agentsHome,
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      TMPDIR: process.env.TMPDIR ?? "/tmp",
+      ...(process.env.HOME === undefined ? {} : { HOME: process.env.HOME }),
+    };
+    const first = await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cliMain, "bootstrap", "--seat", "codex"],
+      { cwd: projectRoot, env: environment, timeout: 15_000 },
+    );
+    const bootstrapped = JSON.parse(first.stdout) as { generation: string };
+    const seatRoot = join(paths.stateDirectory, "seats", projectKey(projectRoot));
+    const metadataPath = join(seatRoot, "generations", bootstrapped.generation, "codex.json");
+    const legacyMetadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+    delete legacyMetadata.originKind;
+    const legacyText = `${JSON.stringify(legacyMetadata, null, 2)}\n`;
+    await writeFile(metadataPath, legacyText, { mode: 0o600 });
+    await rm(join(seatRoot, "current.json"));
+
+    const replay = await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cliMain, "bootstrap", "--seat", "codex"],
+      { cwd: projectRoot, env: environment, timeout: 15_000 },
+    );
+
+    expect(JSON.parse(replay.stdout)).toMatchObject({ generation: bootstrapped.generation });
+    await expect(readFile(metadataPath, "utf8")).resolves.toBe(legacyText);
+    await expect(readLegacyBootstrapSeatGeneration({
+      stateDirectory: paths.stateDirectory,
+      projectPath: projectRoot,
+    })).resolves.toBe(bootstrapped.generation);
+    await expect(readFile(join(seatRoot, "current.json"), "utf8").then(JSON.parse)).resolves.toMatchObject({
+      generation: bootstrapped.generation,
+    });
   });
 
   it("converges concurrent Claude and Codex zero-state calls and hot-switches both MCP clients", async () => {
