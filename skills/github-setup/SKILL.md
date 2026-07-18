@@ -5,21 +5,17 @@ description: "Use when the user says \"set up GitHub for this project\" or asks 
 
 # GitHub setup
 
-Scaffold a fresh (or under-scaffolded) repository with the pattern proven in
-provenant: declarative labels, a main-branch ruleset pinned to one aggregate
-required check, issue forms, a user-gate-first PR template, a work-item
-runbook, a Project board, and the branch/linking doctrine that ties them
-together. This skill authors the scaffolding; the target project's own
-runbook owns its mechanics once copied in.
+Scaffold a fresh or under-scaffolded repository with declarative labels, a
+main-branch ruleset pinned to one aggregate check, issue forms, a PR template,
+a work-item runbook and a Project board. The target project's runbook owns
+mechanics after setup.
 
 ## User gate first
 
-Nothing is pushed, created or enforced on GitHub before the user approves a
-concrete plan naming the target repo, the exact labels/ruleset/forms diff and
-the Project board name. Call out destructive steps by name in that plan:
-ruleset enforcement, label pruning via `skip-delete: false`. If the user has
-not named a target repository, ask; never infer one from the working
-directory.
+Before any GitHub write or enforcement, the user approves a plan naming the
+target, exact scaffold diff and Project board. Name destructive steps: ruleset
+enforcement and label pruning via `skip-delete: false`. Ask for an unnamed
+target; never infer it from the working directory.
 
 ## Steps
 
@@ -33,11 +29,16 @@ directory.
    to the project's CI, then create the branch ruleset pinning that one
    check. Commands and the `integration_id` rationale:
    [references/ruleset-and-ci.md](references/ruleset-and-ci.md).
-3. **Issue forms**: copy `templates/ISSUE_TEMPLATE/*.yml` to
+3. **Issue forms and security route**: before adding the issue-form contact
+   link, copy [`templates/SECURITY.md`](templates/SECURITY.md) to the repository
+   root, or verify that an existing `SECURITY.md` provides a valid private
+   route. Then copy `templates/ISSUE_TEMPLATE/*.yml` to
    `.github/ISSUE_TEMPLATE/`: `work-item.yml` as-is; adapt gate-command
-   wording in `bug.yml` and `feature.yml`; fill the SECURITY.md link in
-   `config.yml`. `skill-proposal.yml` is deliberately excluded as
-   provenant-specific.
+   wording in `bug.yml` and `feature.yml`; replace `<owner>/<repo>` in
+   `config.yml`. Confirm private vulnerability reporting is enabled, or replace
+   `<private-reporting-route>` with a working confidential contact method. Do
+   not publish until the placeholder is gone and both link and route work.
+   `skill-proposal.yml` is deliberately excluded as provenant-specific.
 4. **PR template**: copy
    [`templates/pull_request_template.md`](templates/pull_request_template.md)
    into `.github/`; replace the placeholder evidence rows with the project's
@@ -50,18 +51,15 @@ directory.
    make.
 6. **Project board**: create it with the six standard statuses:
    [references/project-board.md](references/project-board.md).
-7. **Optional agent-trigger wiring**: the `agent-go` label in
-   `templates/labels.yml` is a pure authorisation switch; readiness lives in
-   Project Status. No dispatch automation is part of this baseline; if the
-   target project wants one, scope it as a fresh, explicitly authorised
-   addition.
+7. **Optional agent trigger**: `agent-go` authorises; Project Status records
+   readiness. Dispatch automation is outside this baseline and needs separate
+   authority.
 8. **CODEOWNERS / Dependabot**: stack-specific; `templates/dependabot.yml`
    keeps one durable convention (Dependabot PRs carry only the
    `dependencies` label) with a comment showing where to add ecosystems.
 
 ## Stop conditions
 
-Stop and ask rather than guess: no target repo named, no push/write
-permission confirmed, an existing ruleset or labels file the user has not
-said may be replaced, or a CI stack where the `ci-status` aggregate is
-non-obvious to wire (ask which jobs it should `needs:`).
+Stop on an unnamed target, unconfirmed write permission, replacement of an
+existing ruleset or labels file, or ambiguous `ci-status` dependencies. Ask
+which jobs it should `needs:`.
