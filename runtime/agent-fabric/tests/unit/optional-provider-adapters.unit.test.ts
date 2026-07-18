@@ -274,4 +274,30 @@ describe("optional production provider wrappers", () => {
     expect(provider.compact).not.toHaveBeenCalled();
     actionJournal.close();
   });
+
+  it("admits Kiro's provider-advertised auto alias without inferring a concrete model", async () => {
+    const actionJournal = await journal();
+    const provider = boundary();
+    const adapter = createKiroAcpAdapter({ boundary: provider, journal: actionJournal });
+
+    await expect(
+      adapter.request("spawn", {
+        actionId: "kiro-auto",
+        payload: { model: "auto", modelFamily: "open-weight", effort: "low", prompt: "bounded task" },
+      }),
+    ).resolves.toEqual({ resumeReference: "session-1" });
+    expect(provider.spawn).toHaveBeenCalledWith(expect.objectContaining({
+      model: "auto",
+      modelFamily: "open-weight",
+      effort: "low",
+    }));
+
+    await expect(
+      adapter.request("spawn", {
+        actionId: "kiro-unadvertised-alias",
+        payload: { model: "default", modelFamily: "open-weight", effort: "low", prompt: "bounded task" },
+      }),
+    ).rejects.toMatchObject({ code: "ADAPTER_MODEL_FORBIDDEN" });
+    actionJournal.close();
+  });
 });
