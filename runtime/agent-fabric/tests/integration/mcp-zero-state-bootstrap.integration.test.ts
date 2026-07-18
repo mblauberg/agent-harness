@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { Fabric } from "../../src/core/fabric.ts";
 import { bootstrapMcpSeat } from "../../src/cli/mcp-bootstrap.ts";
+import { installSeatGeneration, projectKey, resolveSeatPaths } from "../../src/cli/seat-store.ts";
 
 const roots: string[] = [];
 
@@ -55,6 +56,42 @@ describe("zero-state MCP bootstrap", () => {
     expect(second.runId).toBe(first.runId);
     expect(second.chairAgentId).toBe(first.chairAgentId);
     expect(second.expectedPreviousGeneration).toBe(first.generation);
+
+    const stateDirectory = join(root, "seat-state");
+    await mkdir(stateDirectory, { mode: 0o700 });
+    const key = projectKey(root);
+    await installSeatGeneration({
+      stateDirectory,
+      projectPath: root,
+      generation: second.generation,
+      expectedPreviousGeneration: second.expectedPreviousGeneration,
+      allowMissingPreviousGeneration: true,
+      seats: second.credentials.map((binding) => ({
+        credential: binding.capability,
+        metadata: {
+          schemaVersion: 1,
+          projectKey: key,
+          projectPath: root,
+          generation: second.generation,
+          previousGeneration: second.expectedPreviousGeneration,
+          projectSessionId: second.projectSessionId,
+          sessionRevision: second.sessionRevision,
+          sessionGeneration: second.sessionGeneration,
+          runId: second.runId,
+          runRevision: second.runRevision,
+          chairAgentId: second.chairAgentId,
+          chairGeneration: second.chairGeneration,
+          chairLeaseId: second.chairLeaseId,
+          seat: binding.seat as "claude" | "codex",
+          agentId: binding.agentId,
+          principalGeneration: binding.expectedPrincipalGeneration,
+          role: binding.agentId === second.chairAgentId ? "chair" : "peer",
+          expiresAt: second.expiresAt,
+        },
+      })),
+    });
+    expect((await resolveSeatPaths({ stateDirectory, project: root, seat: "codex" })).generation).toBe(second.generation);
+    expect((await resolveSeatPaths({ stateDirectory, project: root, seat: "claude" })).generation).toBe(second.generation);
 
     const database = new Database(databasePath, { readonly: true });
     try {

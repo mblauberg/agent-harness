@@ -27,6 +27,9 @@ try {
   handle = await createFabricMcpServer({
     socketPath,
     capability,
+    ...(process.env.AGENT_FABRIC_SEAT === undefined
+      ? {}
+      : { refreshCapability: async () => await resolveMcpCapability(process.env, process.cwd()) }),
     ...(process.env.AGENT_FABRIC_CLIENT_LABEL === undefined
       ? {}
       : { clientLabel: process.env.AGENT_FABRIC_CLIENT_LABEL }),
@@ -47,6 +50,7 @@ try {
       return {
         socketPath,
         capability: bootstrapped.credential,
+        refreshCapability: async () => await resolveMcpCapability(process.env, process.cwd()),
         ...(process.env.AGENT_FABRIC_CLIENT_LABEL === undefined
           ? {}
           : { clientLabel: process.env.AGENT_FABRIC_CLIENT_LABEL }),

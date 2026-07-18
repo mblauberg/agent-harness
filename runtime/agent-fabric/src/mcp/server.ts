@@ -31,6 +31,7 @@ export type FabricMcpServerOptions = {
   socketPath: string;
   capability: string;
   clientLabel?: string;
+  refreshCapability?: () => Promise<string>;
 };
 
 export type FabricMcpServerHandle = {
@@ -142,8 +143,8 @@ function advertisedTool(descriptor: McpToolDescriptor): {
   };
 }
 
-async function configureFabricMcpServer(server: Server, options: FabricMcpServerOptions): Promise<() => Promise<void>> {
-  if (!/^afc_[A-Za-z0-9_-]{43}$/u.test(options.capability)) {
+async function connectAgentProtocol(options: FabricMcpServerOptions, capability: string) {
+  if (!/^afc_[A-Za-z0-9_-]{43}$/u.test(capability)) {
     throw new TypeError("MCP requires an Agent Fabric agent capability");
   }
   const protocol = await NdjsonRpcTransport.connect(createConnection(options.socketPath), {
@@ -151,7 +152,7 @@ async function configureFabricMcpServer(server: Server, options: FabricMcpServer
     client: { name: options.clientLabel ?? "agent-fabric-mcp", version: "1.0.0" },
     authentication: {
       scheme: "capability",
-      credential: options.capability,
+      credential: capability,
       clientNonce: `mcp_${randomUUID()}`,
     },
     expectedPrincipalKind: "agent",
@@ -162,6 +163,31 @@ async function configureFabricMcpServer(server: Server, options: FabricMcpServer
     await protocol.close();
     throw new TypeError("MCP protocol credential did not resolve to an agent principal");
   }
+  return protocol;
+}
+
+async function configureFabricMcpServer(server: Server, options: FabricMcpServerOptions): Promise<() => Promise<void>> {
+  let protocol = await connectAgentProtocol(options, options.capability);
+  let refreshInFlight: Promise<void> | undefined;
+  const call = async (operation: FabricOperation, input: unknown): Promise<unknown> => {
+    try {
+      return await protocol.call(operation as never, input as never);
+    } catch (error: unknown) {
+      if (!(error instanceof ProtocolRemoteError) || error.code !== "AUTHENTICATION_FAILED" || options.refreshCapability === undefined) {
+        throw error;
+      }
+      refreshInFlight ??= (async () => {
+        const capability = await options.refreshCapability?.();
+        if (capability === undefined) throw new Error("MCP seat credential refresh is unavailable");
+        const replacement = await connectAgentProtocol(options, capability);
+        const previous = protocol;
+        protocol = replacement;
+        await previous.close().catch(() => undefined);
+      })().finally(() => { refreshInFlight = undefined; });
+      await refreshInFlight;
+      return await protocol.call(operation as never, input as never);
+    }
+  };
   const descriptors = buildMcpDescriptorSet(protocol.allowedOperations);
   const toolsByName = new Map(descriptors.tools.map((descriptor) => [descriptor.name, descriptor]));
   server.setRequestHandler(ListToolsRequestSchema, () => ({
@@ -174,7 +200,7 @@ async function configureFabricMcpServer(server: Server, options: FabricMcpServer
     const args = request.params.arguments ?? {};
     try {
       const parsedInput = parseOperationInputForPrincipal(descriptor.operation, "agent", args);
-      const raw = await protocol.call(descriptor.operation as never, parsedInput as never);
+      const raw = await call(descriptor.operation, parsedInput);
       const result = parseOperationResult(descriptor.operation, raw);
       if (!isRecord(result)) throw new TypeError("projected Fabric result must be an object");
       return {
@@ -198,7 +224,7 @@ async function configureFabricMcpServer(server: Server, options: FabricMcpServer
     const { descriptor, runId } = resourceCall(request.params.uri, descriptors.resources);
     const operation = descriptor.operation as FabricOperation;
     const input = parseOperationInputForPrincipal(operation, "agent", { runId });
-    const raw = await protocol.call(operation as never, input as never);
+    const raw = await call(operation, input);
     const result = parseOperationResult(operation, raw);
     return {
       contents: [{

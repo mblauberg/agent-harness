@@ -95,6 +95,7 @@ export async function bootstrapMcpSeat(input: {
         generation: result.generation,
         expectedPreviousGeneration: result.expectedPreviousGeneration,
         seats: stagedSeats,
+        allowMissingPreviousGeneration: true,
       });
     } catch (cause: unknown) {
       if (!(cause instanceof Error) || !cause.message.includes("active MCP seat generation changed")) throw cause;
