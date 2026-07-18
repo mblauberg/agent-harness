@@ -376,8 +376,15 @@ target skills directory. The post-install integrity check verifies catalogue
 presence. Missing or noncanonical required names fail; extra symlinks resolving
 outside the canonical skill tree produce warnings. Unmanaged paths are never
 claimed, overwritten or automatically removed;
-changed managed targets fail for user resolution and link mutations roll back
-if the manifest commit fails.
+changed managed targets fail for user resolution. A bounded owner-only lock
+serialises each mutable manifest read, link plan and durable commit. Atomic
+exchange, no-clobber hard links and exact-identity moves retain a private
+recovery path when an uncooperative writer wins a race; absent installs enter
+the journal only when the live path still matches the exact staged link
+identity. The live and recovery directories reach a durability barrier before
+manifest replacement and after conditional rollback. A post-replacement
+directory-fsync failure reports uncertain committed durability without rolling
+links back into a known manifest/link inconsistency.
 Provider bootstraps remain small and share the same precedence sentence.
 
 ## Project Fabric Console

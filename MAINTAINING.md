@@ -75,6 +75,14 @@ reconciliation path; do not rely on users deleting or replacing global links by
 hand. Preview with `scripts/manage_installation.py plan`, then reconcile with the
 rename registry. Never claim or overwrite an unmanaged target.
 
+Each target parent has one owner-only, bounded `flock` transaction covering
+manifest read through durable replacement. Existing links use exact-identity
+atomic exchange or move; an absent installation is admitted to the journal only
+when the live path still matches the exact staged link identity. The live and
+private recovery directories are fsynced before manifest replacement and again
+after any conditional rollback. Never hand-edit the lock, manifest or retained
+recovery paths; a stale process cannot retain the kernel lock.
+
 ## Change the delivery kernel
 
 Keep profile policy in `config/delivery-profiles.json`, surface-selected checks

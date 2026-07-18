@@ -726,7 +726,7 @@ def test_stale_reconcile_restores_different_target_writer_raced_before_exchange(
     assert json.loads(manifest_for(target).read_text())["managed"]["alpha"]
 
 
-def test_same_target_substitution_after_exchange_is_preserved_by_exact_identity(
+def test_same_target_substitution_after_exchange_preserves_and_syncs_recovery(
     tmp_path, monkeypatch
 ):
     module = load_manager_module("managed_installer_same_target_race")
@@ -737,6 +737,8 @@ def test_same_target_substitution_after_exchange_is_preserved_by_exact_identity(
     stale.unlink()
     stale.symlink_to(tmp_path / "missing")
     original_exchange = module.atomic_exchange
+    original_fsync = module._fsync_directory
+    synced: list[Path] = []
     raced_identity = None
     raced = False
 
@@ -750,7 +752,12 @@ def test_same_target_substitution_after_exchange_is_preserved_by_exact_identity(
             info = stale.lstat()
             raced_identity = (info.st_dev, info.st_ino, stale.readlink())
 
+    def record_fsync(path):
+        synced.append(path)
+        original_fsync(path)
+
     monkeypatch.setattr(module, "atomic_exchange", race)
+    monkeypatch.setattr(module, "_fsync_directory", record_fsync)
     with pytest.raises(module.InstallError, match=r"preserve recovery path (.+)") as raised:
         module.execute("reconcile", source, target)
 
@@ -760,6 +767,8 @@ def test_same_target_substitution_after_exchange_is_preserved_by_exact_identity(
     assert stale.resolve() == (source / "alpha").resolve()
     assert recovery.is_symlink()
     assert recovery.resolve(strict=False) == (tmp_path / "missing").resolve(strict=False)
+    assert target in synced
+    assert recovery.parent in synced
     assert json.loads(manifest_for(target).read_text())["managed"]["alpha"]
 
 
@@ -924,6 +933,46 @@ def test_skill_directory_fsync_failure_rolls_back_and_fsyncs_rollback(
         module.execute("install", source, target)
 
     assert target_calls == 2
+    assert not (target / "alpha").exists()
+    assert not (target / "beta").exists()
+    assert not manifest_for(target).exists()
+
+
+def test_recovery_directory_fsync_failure_rolls_back_before_manifest_and_resyncs(
+    tmp_path, monkeypatch
+):
+    module = load_manager_module("managed_installer_recovery_fsync_failure")
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    original_fsync = module._fsync_directory
+    original_write = module._write_manifest
+    target_syncs = 0
+    recovery_syncs = 0
+    manifest_writes = 0
+
+    def fail_first_recovery_sync(path):
+        nonlocal target_syncs, recovery_syncs
+        if path == target:
+            target_syncs += 1
+        if path.name.startswith(".agent-harness-links."):
+            recovery_syncs += 1
+            if recovery_syncs == 1:
+                raise OSError("injected recovery directory fsync failure")
+        original_fsync(path)
+
+    def count_manifest_write(target_path, manifest):
+        nonlocal manifest_writes
+        manifest_writes += 1
+        original_write(target_path, manifest)
+
+    monkeypatch.setattr(module, "_fsync_directory", fail_first_recovery_sync)
+    monkeypatch.setattr(module, "_write_manifest", count_manifest_write)
+    with pytest.raises(OSError, match="injected recovery directory fsync failure"):
+        module.execute("install", source, target)
+
+    assert manifest_writes == 0
+    assert target_syncs == 2
+    assert recovery_syncs == 2
     assert not (target / "alpha").exists()
     assert not (target / "beta").exists()
     assert not manifest_for(target).exists()
