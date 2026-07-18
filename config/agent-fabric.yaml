@@ -9,7 +9,7 @@ allowedAdapters:
   - kiro-acp
 
 # Provider adapters join the daemon only after their compatibility entry is
-# enabled, fully pinned and listed here. Removing all entries restores the
+# enabled, contract-conformant and listed here. Removing all entries restores the
 # coordination-only profile while preserving the provider allow-list above.
 activeAdapters:
   - claude-agent-sdk

@@ -801,10 +801,9 @@ def test_clean_ci_builds_locked_protocol_before_daemon_typecheck() -> None:
     root_dev_dependencies = root_package.get("devDependencies")
     assert isinstance(root_dev_dependencies, dict)
     assert root_dev_dependencies.get("tsx") == "4.23.1"
-    assert root_package.get("dependencies") == {
-        "@anthropic-ai/claude-code": "2.1.212",
-        "@openai/codex": "0.144.5",
-    }
+    # Subscription provider CLIs are host tools admitted by identity and
+    # interface, not repository dependencies or version locks.
+    assert root_package.get("dependencies") is None
     assert root_scripts.get("compatibility:check:primary") == (
         "tsx runtime/agent-fabric/scripts/verify-primary-compatibility.ts"
     )

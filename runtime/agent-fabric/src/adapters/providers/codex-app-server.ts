@@ -803,14 +803,10 @@ export async function runCodexAppServerAdapter(arguments_: string[] = process.ar
   const agentBridgeHandoff = takeAgentBridgeHandoff(process.env);
   const providerIndex = arguments_.indexOf("--provider-executable");
   const providerExecutable = providerIndex === -1 ? undefined : arguments_[providerIndex + 1];
-  const providerDigestIndex = arguments_.indexOf("--provider-executable-sha256");
-  const providerExecutableSha256 = providerDigestIndex === -1 ? undefined : arguments_[providerDigestIndex + 1];
   if (providerExecutable === undefined) throw new Error("codex-app-server adapter requires --provider-executable");
-  if (providerExecutableSha256 === undefined) throw new Error("codex-app-server adapter requires --provider-executable-sha256");
   const boundary = new InstalledCodexAppServerBoundary(
     async (environment) => await openVerifiedCodexJsonRpcConnection(
       codexAppServerCommand(providerExecutable),
-      providerExecutableSha256,
       environment,
     ),
   );

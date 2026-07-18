@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
 
 import { isRecord, ProviderAdapterError } from "./types.js";
-import { verifyProviderExecutableDigest } from "../compatibility.js";
+import { verifyProviderConformance } from "../provider-conformance.js";
 
 type PendingRequest = {
   resolve(value: unknown): void;
@@ -293,11 +293,10 @@ export class CodexJsonRpcConnection {
 
 export async function openVerifiedCodexJsonRpcConnection(
   command: string[],
-  expectedExecutableSha256: string,
   environment: Record<string, string> = {},
 ): Promise<CodexJsonRpcConnection> {
   const executable = command[0];
   if (executable === undefined) throw new ProviderAdapterError("PROVIDER_COMMAND_INVALID", "Codex command is empty");
-  await verifyProviderExecutableDigest(executable, expectedExecutableSha256);
+  await verifyProviderConformance({ adapterId: "codex-app-server", executable });
   return new CodexJsonRpcConnection(command, environment);
 }

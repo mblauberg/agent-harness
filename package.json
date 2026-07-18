@@ -36,9 +36,5 @@
   "devDependencies": {
     "tsx": "4.23.1",
     "typescript": "7.0.2"
-  },
-  "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.212",
-    "@openai/codex": "0.144.5"
   }
 }

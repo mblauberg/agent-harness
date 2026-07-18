@@ -4,6 +4,7 @@ import type { AdapterRequestHandler } from "../types.js";
 import { SqliteAdapterActionJournal } from "../journal.js";
 import { journalPathFromArguments, serveAdapter } from "../server.js";
 import { createCursorCliBoundary } from "./command-boundaries.js";
+import { verifyProviderConformance } from "../../provider-conformance.js";
 import {
   createOptionalProviderAdapter,
   optionalCapabilities,
@@ -20,18 +21,13 @@ export function createCursorAgentAdapter(options: {
     capabilities: optionalCapabilities({
       adapterId: "cursor-agent",
       operations: ["spawn", "attach", "send_turn", "release"],
-      modelFamilies: ["cursor-composer", "xai"],
+      modelFamilies: ["cursor-composer", "xai", "anthropic", "openai", "google"],
       compactInPlace: false,
       answerBearingSpawn: true,
       answerBearingSpawnTurns: "one-shot",
     }),
     boundary: options.boundary,
     journal: options.journal,
-    modelPolicy: {
-      adapterId: "cursor-agent",
-      allowedFamilies: ["cursor-composer", "xai"],
-      allowedModelPatterns: ["composer-*", "cursor-grok-*"],
-    },
   });
 }
 
@@ -46,13 +42,23 @@ function requiredArgument(arguments_: string[], name: string): string {
   return value;
 }
 
-export async function runCursorAgentAdapter(arguments_: string[] = process.argv.slice(2)): Promise<void> {
+export async function runCursorAgentAdapter(
+  arguments_: string[] = process.argv.slice(2),
+  dependencies: { verifyProvider?: typeof verifyProviderConformance } = {},
+): Promise<void> {
   const journal = new SqliteAdapterActionJournal(journalPathFromArguments("cursor-agent", arguments_));
+  const executable = requiredArgument(arguments_, "--provider-executable");
+  const cursorInstallRoot = requiredArgument(arguments_, "--provider-install-root");
   try {
     await serveAdapter(
       createCursorAgentAdapter({
         boundary: createCursorCliBoundary({
-          executable: requiredArgument(arguments_, "--provider-executable"),
+          executable,
+          verifyExecutable: async () => await (dependencies.verifyProvider ?? verifyProviderConformance)({
+            adapterId: "cursor-agent",
+            executable,
+            cursorInstallRoot,
+          }),
           cwd: argument(arguments_, "--cwd") ?? process.cwd(),
         }),
         journal,
