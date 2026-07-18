@@ -160,7 +160,7 @@ export function createKiroAcpAdapter(options: {
     boundary: options.boundary,
     journal: options.journal,
     modelPolicy: {
-      allowedModelPatterns: ["deepseek-*", "glm-*", "minimax-*", "qwen*"],
+      allowedModelPatterns: ["auto", "deepseek-*", "glm-*", "minimax-*", "qwen*"],
     },
   });
   return {
