@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { verifyAdapterCompatibility } from "../../../src/index.ts";
+import { loadFabricConfig } from "../../../src/config/index.ts";
 import {
   createCursorKiroCompatibilityFixture,
   repositoryPath,
@@ -12,7 +13,16 @@ import {
 } from "../../support/stage4-cursor-kiro-testkit.ts";
 
 describe("Stage 4 Kiro ACP adapter public contract", () => {
-  it("keeps the checked-in adapter disabled while portable fixtures remain verifiable", async () => {
+  it("activates Kiro in the trusted global composition", async () => {
+    await expect(loadFabricConfig({
+      globalPath: repositoryPath("config/agent-fabric.yaml"),
+      agentsHome: repositoryPath("."),
+    })).resolves.toMatchObject({
+      adapterIds: expect.arrayContaining(["kiro-acp"]),
+    });
+  });
+
+  it("keeps the checked-in adapter enabled while portable fixtures remain verifiable", async () => {
     const fixture = process.env.AGENT_FABRIC_PORTABLE_TESTS === "1"
       ? await createCursorKiroCompatibilityFixture()
       : undefined;
@@ -25,8 +35,7 @@ describe("Stage 4 Kiro ACP adapter public contract", () => {
         adapterIds: ["kiro-acp"],
         requireEnabled: true,
       });
-      if (fixture === undefined) await expect(verification).rejects.toThrow(/not activated/u);
-      else await expect(verification).resolves.toMatchObject({ valid: true, adapterIds: ["kiro-acp"] });
+      await expect(verification).resolves.toMatchObject({ valid: true, adapterIds: ["kiro-acp"] });
     } finally {
       if (fixture !== undefined) await rm(fixture.directory, { recursive: true, force: true });
     }
@@ -57,7 +66,7 @@ describe("Stage 4 Kiro ACP adapter public contract", () => {
     }
   });
 
-  it("requires an explicit open-weight model and rejects closed-family rebroadcasts", async () => {
+  it("requires an explicit open-weight Kiro model without exact model locks", async () => {
     const validate = requireStage4PublicFunction("validateAdapterModelSelection");
     const fixture = await createCursorKiroCompatibilityFixture();
     const base = {
@@ -74,6 +83,11 @@ describe("Stage 4 Kiro ACP adapter public contract", () => {
       });
       await expect(validate({ ...base, modelId: null, modelFamily: "open-weight" })).rejects.toMatchObject({
         code: "MODEL_REQUIRED",
+      });
+      await expect(validate({ ...base, modelId: "qwen-future-coder", modelFamily: "open-weight" })).resolves.toMatchObject({
+        valid: true,
+        adapterId: "kiro-acp",
+        modelFamily: "open-weight",
       });
       for (const [modelId, modelFamily] of [
         ["claude-fable-5", "anthropic"],

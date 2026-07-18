@@ -113,7 +113,7 @@ describe("Kiro ACP stdio client", () => {
 });
 
 describe("Kiro adapter model policy", () => {
-  it("allows only the explicit Kiro open-model roster", async () => {
+  it("allows explicit Kiro open-weight models without exact-name locks", async () => {
     const directory = await mkdtemp(join(tmpdir(), "kiro-acp-policy-"));
     temporaryDirectories.push(directory);
     const journal = new SqliteAdapterActionJournal(join(directory, "actions.sqlite3"));
@@ -129,6 +129,10 @@ describe("Kiro adapter model policy", () => {
     await expect(adapter.request("spawn", {
       actionId: "allowed",
       payload: { model: "qwen3-coder", modelFamily: "open-weight" },
+    })).resolves.toMatchObject({ resumeReference: "session-1" });
+    await expect(adapter.request("spawn", {
+      actionId: "allowed-future",
+      payload: { model: "qwen-future-coder", modelFamily: "open-weight" },
     })).resolves.toMatchObject({ resumeReference: "session-1" });
     await expect(adapter.request("spawn", {
       actionId: "forbidden",

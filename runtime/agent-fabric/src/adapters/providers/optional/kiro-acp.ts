@@ -145,17 +145,6 @@ export function createKiroAcpAdapter(options: {
   });
 }
 
-export function createUnverifiedKiroAcpEntrypoint(): AdapterRequestHandler {
-  return {
-    async request(): Promise<never> {
-      throw new ProviderAdapterError(
-        "KIRO_ACP_PROTOCOL_UNVERIFIED",
-        "Kiro ACP activation is disabled because the installed CLI exposes no pinned ACP wire version or schema",
-      );
-    },
-  };
-}
-
 export async function runKiroAcpAdapter(
   arguments_: string[] = process.argv.slice(2),
   dependencies: { verifyProvider?: typeof verifyProviderConformance } = {},
