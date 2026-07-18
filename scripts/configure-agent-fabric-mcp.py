@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Configure project-dynamic Agent Fabric MCP entries for primary clients."""
+"""Configure project-dynamic or explicitly project-scoped Agent Fabric MCP entries."""
 
 from __future__ import annotations
 
@@ -137,12 +137,19 @@ def _text(snapshot: ConfigSnapshot, client: str) -> str:
         raise RegistrationError(f"{client} config is not UTF-8: {exc}") from exc
 
 
-def registration(agents_home: Path, state_directory: Path, seat: str) -> dict[str, Any]:
+def registration(
+    agents_home: Path,
+    state_directory: Path,
+    seat: str,
+    project_path: Path | None = None,
+) -> dict[str, Any]:
     environment = {
         "AGENT_FABRIC_STATE_DIRECTORY": str(state_directory),
         "AGENT_FABRIC_SEAT": seat,
         "AGENT_FABRIC_CLIENT_LABEL": seat,
     }
+    if project_path is not None:
+        environment["AGENT_FABRIC_PROJECT_PATH"] = str(project_path)
     result: dict[str, Any] = {
         "command": str(agents_home / "scripts" / "agent-fabric-mcp"),
         "env": environment,
@@ -153,21 +160,26 @@ def registration(agents_home: Path, state_directory: Path, seat: str) -> dict[st
 
 
 def claude_update(path: Path, desired: dict[str, Any]) -> ConfigProposal:
-    snapshot = _capture(path, "Claude")
-    text = _text(snapshot, "Claude")
+    return json_client_update(path, desired, "claude")
+
+
+def json_client_update(path: Path, desired: dict[str, Any], client: str) -> ConfigProposal:
+    label = client.title()
+    snapshot = _capture(path, label)
+    text = _text(snapshot, label)
     try:
         value: Any = json.loads(text) if snapshot.source_kind != "absent" else {}
     except json.JSONDecodeError as exc:
-        raise RegistrationError(f"Claude config is invalid JSON: {exc}") from exc
+        raise RegistrationError(f"{label} config is invalid JSON: {exc}") from exc
     if not isinstance(value, dict):
-        raise RegistrationError("Claude config root must be an object")
+        raise RegistrationError(f"{label} config root must be an object")
     servers = value.setdefault("mcpServers", {})
     if not isinstance(servers, dict):
-        raise RegistrationError("Claude config mcpServers must be an object")
+        raise RegistrationError(f"{label} config mcpServers must be an object")
     if servers.get(SERVER_NAME) == desired:
-        return ConfigProposal("claude", snapshot, text, "existing")
+        return ConfigProposal(client, snapshot, text, "existing")
     servers[SERVER_NAME] = desired
-    return ConfigProposal("claude", snapshot, json.dumps(value, indent=2, sort_keys=True) + "\n", "ready")
+    return ConfigProposal(client, snapshot, json.dumps(value, indent=2, sort_keys=True) + "\n", "ready")
 
 
 def _codex_value(text: str) -> dict[str, Any]:
@@ -431,7 +443,9 @@ def write_proposal(proposal: ConfigProposal) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", choices=("all", "claude", "codex"), default="all")
+    parser.add_argument(
+        "--platform", choices=("all", "claude", "codex", "cursor", "agy", "kiro"), default="all",
+    )
     parser.add_argument("--agents-home", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument(
         "--state-directory", type=Path,
@@ -442,6 +456,11 @@ def main(argv: list[str] | None = None) -> int:
         "--codex-config", type=Path,
         default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "config.toml",
     )
+    parser.add_argument("--cursor-config", type=Path, default=Path.home() / ".cursor/mcp.json")
+    parser.add_argument("--agy-config", type=Path, default=Path.home() / ".gemini/config/mcp_config.json")
+    parser.add_argument("--kiro-config", type=Path, default=Path.home() / ".kiro/settings/mcp.json")
+    parser.add_argument("--registration-scope", choices=("global", "project"), default="global")
+    parser.add_argument("--project-path", type=Path)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--preflight", action="store_true")
@@ -453,11 +472,34 @@ def main(argv: list[str] | None = None) -> int:
             raise RegistrationError("Agent Fabric state directory must be absolute")
         if not (agents_home / "scripts" / "agent-fabric-mcp").is_file():
             raise RegistrationError("Agent Fabric MCP wrapper is missing from AGENTS_HOME")
+        project_path: Path | None = None
+        if args.registration_scope == "project":
+            if args.platform not in {"cursor", "agy", "kiro"}:
+                raise RegistrationError("project-scoped registration requires a single optional client")
+            if args.project_path is None:
+                raise RegistrationError("project-scoped registration requires --project-path")
+            project_path = args.project_path.expanduser().resolve(strict=True)
+            if not project_path.is_dir():
+                raise RegistrationError("Agent Fabric project path must be a directory")
+        elif args.project_path is not None:
+            raise RegistrationError("--project-path requires --registration-scope project")
         proposals: list[ConfigProposal] = []
         if args.platform in {"all", "claude"}:
             proposals.append(claude_update(args.claude_config, registration(agents_home, state_directory, "claude")))
         if args.platform in {"all", "codex"}:
             proposals.append(codex_update(args.codex_config, registration(agents_home, state_directory, "codex")))
+        optional_configs = {
+            "cursor": args.cursor_config,
+            "agy": args.agy_config,
+            "kiro": args.kiro_config,
+        }
+        for client, path in optional_configs.items():
+            if args.platform in {"all", client}:
+                proposals.append(json_client_update(
+                    path,
+                    registration(agents_home, state_directory, client, project_path),
+                    client,
+                ))
         if args.check:
             missing = [proposal.client for proposal in proposals if proposal.status != "existing"]
             if missing:

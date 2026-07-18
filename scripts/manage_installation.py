@@ -267,7 +267,7 @@ def execute(action: str, source: Path, target: Path, renames: Path | None = None
     source = source.resolve()
     target = target.resolve()
     manifest = _load_manifest(target)
-    if action == "plan":
+    if action in {"plan", "check"}:
         return {"schema_version": 1, "action": action, "items": _plan(source, target, manifest), "changed": []}
     target.mkdir(parents=True, exist_ok=True)
     rename_operations: list[dict[str, Any]] = []
@@ -323,7 +323,7 @@ def execute(action: str, source: Path, target: Path, renames: Path | None = None
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("plan", "install", "reconcile", "uninstall-managed"))
+    parser.add_argument("action", choices=("plan", "check", "install", "reconcile", "uninstall-managed"))
     parser.add_argument("--target", required=True, type=Path)
     parser.add_argument("--source", type=Path, default=ROOT / "skills")
     parser.add_argument("--renames", type=Path)
@@ -340,6 +340,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"skills linked={linked} existing={existing} target={args.target}")
     else:
         print(json.dumps(result, indent=2))
+    if args.action == "check":
+        drift = [item for item in result["items"] if item["state"] not in {"managed", "unmanaged"}]
+        if drift:
+            rendered = " ".join(
+                f"{state}={','.join(item['name'] for item in drift if item['state'] == state)}"
+                for state in sorted({item["state"] for item in drift})
+            )
+            print(f"skills {rendered}")
+            return 1
     return 0
 
 

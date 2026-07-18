@@ -12,9 +12,9 @@ SCRIPT = ROOT / "scripts" / "install-skills"
 MANAGER = ROOT / "scripts" / "manage_installation.py"
 
 
-def run(target: Path):
+def run(target: Path, *arguments: str):
     return subprocess.run(
-        [str(SCRIPT), "--target", str(target)],
+        [str(SCRIPT), "--target", str(target), *arguments],
         cwd=ROOT,
         text=True,
         stdout=subprocess.PIPE,
@@ -35,6 +35,23 @@ def test_installer_links_every_skill_and_is_idempotent(tmp_path):
     second = run(target)
     assert second.returncode == 0, second.stderr
     assert f"linked=0 existing={len(expected)}" in second.stdout
+
+
+def test_check_detects_and_install_reconciles_stale_managed_skill(tmp_path):
+    target = tmp_path / "skills"
+    assert run(target).returncode == 0
+    stale = target / "deliver"
+    stale.unlink()
+
+    checked = run(target, "--check")
+    assert checked.returncode == 1
+    assert "stale=deliver" in checked.stdout
+
+    reconciled = run(target)
+    assert reconciled.returncode == 0, reconciled.stderr
+    assert stale.is_symlink()
+    assert stale.resolve() == ROOT / "skills" / "deliver"
+    assert run(target, "--check").returncode == 0
 
 
 def test_installer_preserves_existing_entries(tmp_path):

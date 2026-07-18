@@ -9,11 +9,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install-harness"
 
 
-def run(platform: str, home: Path, **extra_env):
+def run(platform: str, home: Path, *arguments: str, **extra_env):
     env = os.environ.copy()
     env.update({"HOME": str(home), **extra_env})
     return subprocess.run(
-        [str(SCRIPT), "--platform", platform],
+        [str(SCRIPT), "--platform", platform, *arguments],
         cwd=ROOT,
         env=env,
         text=True,
@@ -91,6 +91,27 @@ def test_installs_codex_skills_and_global_instructions(tmp_path):
     second = run("codex", tmp_path, CODEX_HOME=str(config))
     assert second.returncode == 0, second.stderr
     assert codex_config.read_text() == configured
+
+
+def test_optional_mcp_client_configuration_is_explicit_and_dynamic(tmp_path):
+    config = tmp_path / "codex-home"
+    config.mkdir()
+    result = run(
+        "codex",
+        tmp_path,
+        "--mcp-clients", "all",
+        CODEX_HOME=str(config),
+    )
+    assert result.returncode == 0, result.stderr
+    optional = {
+        "cursor": tmp_path / ".cursor/mcp.json",
+        "agy": tmp_path / ".gemini/config/mcp_config.json",
+        "kiro": tmp_path / ".kiro/settings/mcp.json",
+    }
+    for client, path in optional.items():
+        registration = json.loads(path.read_text())["mcpServers"]["agent-fabric"]
+        assert registration["env"]["AGENT_FABRIC_SEAT"] == client
+        assert "AGENT_FABRIC_PROJECT_PATH" not in registration["env"]
 
 
 def test_codex_skill_override_conflict_fails_without_rewriting_config(tmp_path):

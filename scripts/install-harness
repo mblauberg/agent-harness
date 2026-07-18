@@ -3,9 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLATFORM=""
+MCP_CLIENTS="primary"
 
 usage() {
-  echo "usage: install-harness --platform <claude|codex>" >&2
+  echo "usage: install-harness --platform <claude|codex> [--mcp-clients <primary|all>]" >&2
 }
 
 while [[ $# -gt 0 ]]; do
@@ -13,6 +14,11 @@ while [[ $# -gt 0 ]]; do
     --platform)
       [[ $# -ge 2 ]] || { usage; exit 2; }
       PLATFORM="$2"
+      shift 2
+      ;;
+    --mcp-clients)
+      [[ $# -ge 2 ]] || { usage; exit 2; }
+      MCP_CLIENTS="$2"
       shift 2
       ;;
     -h|--help)
@@ -41,6 +47,11 @@ case "$PLATFORM" in
     ;;
 esac
 
+case "$MCP_CLIENTS" in
+  primary|all) ;;
+  *) usage; exit 2 ;;
+esac
+
 provenant_bin_dir="${PROVENANT_BIN_DIR:-$HOME/.local/bin}"
 provenant_command="$provenant_bin_dir/provenant"
 provenant_source="$ROOT/scripts/provenant"
@@ -55,12 +66,20 @@ fi
 
 state_directory="${AGENT_FABRIC_STATE_DIRECTORY:-$HOME/.local/state/agent-harness/fabric}"
 claude_mcp_config="${CLAUDE_MCP_CONFIG:-$HOME/.claude.json}"
+mcp_platform="$PLATFORM"
+if [[ "$MCP_CLIENTS" == "all" ]]; then
+  mcp_platform="all"
+fi
+codex_mcp_config="${CODEX_MCP_CONFIG:-${CODEX_HOME:-$HOME/.codex}/config.toml}"
 mcp_args=(
-  --platform "$PLATFORM"
+  --platform "$mcp_platform"
   --agents-home "$ROOT"
   --state-directory "$state_directory"
   --claude-config "$claude_mcp_config"
-  --codex-config "$platform_home/config.toml"
+  --codex-config "$codex_mcp_config"
+  --cursor-config "${CURSOR_MCP_CONFIG:-$HOME/.cursor/mcp.json}"
+  --agy-config "${AGY_MCP_CONFIG:-$HOME/.gemini/config/mcp_config.json}"
+  --kiro-config "${KIRO_MCP_CONFIG:-$HOME/.kiro/settings/mcp.json}"
 )
 
 "$ROOT/scripts/configure-agent-fabric-mcp.py" "${mcp_args[@]}" --preflight

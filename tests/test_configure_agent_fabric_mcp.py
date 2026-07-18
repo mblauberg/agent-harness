@@ -31,6 +31,9 @@ def run_configure(tmp_path: Path, *arguments: str) -> subprocess.CompletedProces
             "--state-directory", str(tmp_path / "state"),
             "--claude-config", str(tmp_path / "claude.json"),
             "--codex-config", str(tmp_path / "codex.toml"),
+            "--cursor-config", str(tmp_path / "cursor.json"),
+            "--agy-config", str(tmp_path / "agy.json"),
+            "--kiro-config", str(tmp_path / "kiro.json"),
             *arguments,
         ],
         cwd=ROOT,
@@ -40,9 +43,14 @@ def run_configure(tmp_path: Path, *arguments: str) -> subprocess.CompletedProces
     )
 
 
-def test_configures_both_global_clients_without_a_fixed_project_path(tmp_path: Path) -> None:
+def test_configures_all_global_clients_without_a_fixed_project_path(tmp_path: Path) -> None:
     claude_config = tmp_path / "claude.json"
     codex_config = tmp_path / "codex.toml"
+    optional_configs = {
+        "cursor": tmp_path / "cursor.json",
+        "agy": tmp_path / "agy.json",
+        "kiro": tmp_path / "kiro.json",
+    }
     claude_config.write_text(json.dumps({
         "unrelatedSecret": "never-print-claude",
         "mcpServers": {
@@ -64,6 +72,17 @@ command = "/old/proxy"
 AGENT_FABRIC_PROJECT_PATH = "/wrong/project"
 AGENT_FABRIC_CAPABILITY = "never-print-capability"
 """)
+    for path in optional_configs.values():
+        path.write_text(json.dumps({
+            "unrelatedSecret": "never-print-optional",
+            "mcpServers": {
+                "other": {"command": "other"},
+                "agent-fabric": {
+                    "command": "/old/proxy",
+                    "env": {"AGENT_FABRIC_PROJECT_PATH": "/wrong/project"},
+                },
+            },
+        }))
 
     result = run_configure(tmp_path)
 
@@ -83,6 +102,14 @@ AGENT_FABRIC_CAPABILITY = "never-print-capability"
         "command": str(ROOT / "scripts" / "agent-fabric-mcp"),
         "env": {**expected_common, "AGENT_FABRIC_SEAT": "codex", "AGENT_FABRIC_CLIENT_LABEL": "codex"},
     }
+    for client, path in optional_configs.items():
+        value = json.loads(path.read_text())
+        assert value["mcpServers"]["agent-fabric"] == {
+            "command": str(ROOT / "scripts" / "agent-fabric-mcp"),
+            "env": {**expected_common, "AGENT_FABRIC_SEAT": client, "AGENT_FABRIC_CLIENT_LABEL": client},
+        }
+        assert value["mcpServers"]["other"] == {"command": "other"}
+        assert value["unrelatedSecret"] == "never-print-optional"
     assert claude["mcpServers"]["other"] == {"command": "other"}
     assert claude["unrelatedSecret"] == "never-print-claude"
     assert codex["custom"] == {"secret": "never-print-codex"}
@@ -93,10 +120,12 @@ AGENT_FABRIC_CAPABILITY = "never-print-capability"
 
     original_claude = claude_config.read_bytes()
     original_codex = codex_config.read_bytes()
+    original_optional = {client: path.read_bytes() for client, path in optional_configs.items()}
     second = run_configure(tmp_path)
     assert second.returncode == 0, second.stderr
     assert claude_config.read_bytes() == original_claude
     assert codex_config.read_bytes() == original_codex
+    assert {client: path.read_bytes() for client, path in optional_configs.items()} == original_optional
 
 
 def test_check_reports_only_agent_fabric_entry_status(tmp_path: Path) -> None:
@@ -106,7 +135,50 @@ def test_check_reports_only_agent_fabric_entry_status(tmp_path: Path) -> None:
     assert checked.returncode == 0, checked.stderr
     assert "agent-fabric MCP verified platform=claude" in checked.stdout
     assert "agent-fabric MCP verified platform=codex" in checked.stdout
+    assert "agent-fabric MCP verified platform=cursor" in checked.stdout
+    assert "agent-fabric MCP verified platform=agy" in checked.stdout
+    assert "agent-fabric MCP verified platform=kiro" in checked.stdout
     assert "AGENT_FABRIC_" not in checked.stdout + checked.stderr
+
+
+@pytest.mark.parametrize("client", ["cursor", "agy", "kiro"])
+def test_project_scoped_optional_registration_requires_explicit_scope(
+    tmp_path: Path, client: str,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+
+    implicit = run_configure(
+        tmp_path, "--platform", client, "--project-path", str(project),
+    )
+    assert implicit.returncode == 3
+    assert "--registration-scope project" in implicit.stderr
+
+    configured = run_configure(
+        tmp_path,
+        "--platform", client,
+        "--registration-scope", "project",
+        "--project-path", str(project),
+    )
+    assert configured.returncode == 0, configured.stderr
+    value = json.loads((tmp_path / f"{client}.json").read_text())
+    assert value["mcpServers"]["agent-fabric"]["env"]["AGENT_FABRIC_PROJECT_PATH"] == str(project)
+
+
+@pytest.mark.parametrize("platform", ["all", "claude", "codex"])
+def test_project_scoped_registration_rejects_primary_or_multi_client_targets(
+    tmp_path: Path, platform: str,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    result = run_configure(
+        tmp_path,
+        "--platform", platform,
+        "--registration-scope", "project",
+        "--project-path", str(project),
+    )
+    assert result.returncode == 3
+    assert "single optional client" in result.stderr
 
 
 def test_preflight_rejects_malformed_codex_without_mutating_claude(tmp_path: Path) -> None:

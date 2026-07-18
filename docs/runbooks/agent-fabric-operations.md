@@ -125,7 +125,8 @@ not preserve the workspace working directory need project-scoped registration.
 Subdirectories intentionally inherit the nearest ancestor project's seat.
 
 The harness installer configures the project-dynamic global entry for its
-selected primary client. Configure or verify both Claude Code and Codex from
+selected primary client. Pass `--mcp-clients all` to reconcile all five client
+registries during an install. Configure or verify every supported client from
 the harness checkout with:
 
 ```sh
@@ -136,10 +137,20 @@ scripts/configure-agent-fabric-mcp.py --platform all --check
 The command atomically replaces only the `agent-fabric` entry in each client
 configuration and reports only that entry's status. It never prints
 capabilities or unrelated configuration. Its global entries omit
-`AGENT_FABRIC_PROJECT_PATH`; Claude Code and Codex preserve cwd and must use
-nearest-ancestor discovery. A fixed `AGENT_FABRIC_PROJECT_PATH` remains a
-manual, project-scoped compatibility path only for a client that cannot preserve
-its workspace cwd. Never add it to a global Claude Code or Codex entry.
+`AGENT_FABRIC_PROJECT_PATH` and use nearest-ancestor discovery. A client that
+cannot preserve its workspace cwd can be configured only as one explicit
+project-scoped optional client:
+
+```sh
+scripts/configure-agent-fabric-mcp.py \
+  --platform cursor \
+  --registration-scope project \
+  --project-path "$project_root"
+```
+
+Project scope requires an existing canonical directory and is refused for
+`all`, Claude Code and Codex. Never reuse a project-scoped registration as a
+global entry.
 Existing files are updated with an atomic exchange: the displaced identity and
 bytes must match the composed snapshot, and the requested direct path or
 symlink must still resolve to the installed inode. On any mismatch the command
@@ -394,7 +405,9 @@ project session is ready to launch:
    `$HOME/.agents/scripts/agent-fabric workspace trust "$project_root"` before
    opening the Console. This first-use step is automatic under the global
    harness; never substitute a parent, wildcard, home directory or sibling
-   collection.
+   collection. The Console then uses the daemon's typed private bootstrap to
+   create or rotate least-privilege local operator authority for that exact
+   trusted root; there is no manual capability or database provisioning step.
 2. Create or select the draft project session. If several sessions are
    attachable, pass its stable ID with `--session`.
 3. Open the complete, verified accepted-evidence row and choose

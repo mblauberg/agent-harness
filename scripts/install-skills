@@ -3,9 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET=""
+CHECK=false
 
 usage() {
-  echo "usage: install-skills --target <global-skills-directory>" >&2
+  echo "usage: install-skills --target <global-skills-directory> [--check]" >&2
 }
 
 while [[ $# -gt 0 ]]; do
@@ -14,6 +15,10 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || { usage; exit 2; }
       TARGET="$2"
       shift 2
+      ;;
+    --check)
+      CHECK=true
+      shift
       ;;
     -h|--help)
       usage
@@ -37,7 +42,14 @@ if [[ -L "$TARGET" ]] \
   exit 0
 fi
 
-exec "$ROOT/scripts/manage_installation.py" install \
+if [[ "$CHECK" == true ]]; then
+  exec "$ROOT/scripts/manage_installation.py" check \
+    --source "$ROOT/skills" \
+    --target "$TARGET"
+fi
+
+exec "$ROOT/scripts/manage_installation.py" reconcile \
   --source "$ROOT/skills" \
   --target "$TARGET" \
+  --renames "$ROOT/config/skill-renames.json" \
   --summary

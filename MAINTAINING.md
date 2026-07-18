@@ -72,8 +72,10 @@ live backup folders as the normal safety boundary.
 
 Record a public rename in `config/skill-renames.json`. Test the managed
 reconciliation path; do not rely on users deleting or replacing global links by
-hand. Preview with `scripts/manage_installation.py plan`, then reconcile with the
-rename registry. Never claim or overwrite an unmanaged target.
+hand. Preview source and target state with `scripts/manage_installation.py plan`,
+or check an installed tree with `scripts/install-skills --target PATH --check`.
+The ordinary installer reconciles stale managed links and the rename registry.
+Never claim or overwrite an unmanaged target.
 
 ## Change the delivery kernel
 
