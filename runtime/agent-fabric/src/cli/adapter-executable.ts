@@ -5,27 +5,54 @@ import { verifyAdapterCompatibility } from "../adapters/compatibility.js";
 import { loadFabricConfig } from "../config/index.js";
 import { FabricError } from "../errors.js";
 
-function option(arguments_: string[], name: string): string | undefined {
-  const index = arguments_.indexOf(name);
-  return index === -1 ? undefined : arguments_[index + 1];
+const VALUE_OPTIONS = [
+  "--adapter",
+  "--agents-home",
+  "--config",
+  "--compatibility",
+  "--compatibility-schema",
+] as const;
+
+type ValueOption = typeof VALUE_OPTIONS[number];
+
+function parseArguments(arguments_: string[]): Partial<Record<ValueOption, string>> {
+  const allowed = new Set<string>(VALUE_OPTIONS);
+  const parsed: Partial<Record<ValueOption, string>> = {};
+  for (let index = 0; index < arguments_.length; index += 2) {
+    const name = arguments_[index];
+    if (name === undefined || !allowed.has(name)) {
+      throw new Error(`adapter executable received unknown option: ${name ?? "<missing>"}`);
+    }
+    const option = name as ValueOption;
+    if (parsed[option] !== undefined) {
+      throw new Error(`adapter executable received duplicate option: ${option}`);
+    }
+    const value = arguments_[index + 1];
+    if (value === undefined || value.length === 0 || value.startsWith("-")) {
+      throw new Error(`adapter executable requires a value for ${option}`);
+    }
+    parsed[option] = value;
+  }
+  return parsed;
 }
 
 export async function resolveAdapterExecutableCli(arguments_: string[]): Promise<string> {
-  const adapterId = option(arguments_, "--adapter");
-  if (adapterId === undefined || adapterId.length === 0) {
+  const parsed = parseArguments(arguments_);
+  const adapterId = parsed["--adapter"];
+  if (adapterId === undefined) {
     throw new Error("adapter executable requires --adapter <id>");
   }
   const agentsHome = resolve(
-    option(arguments_, "--agents-home") ?? process.env.AGENTS_HOME ?? join(homedir(), ".agents"),
+    parsed["--agents-home"] ?? process.env.AGENTS_HOME ?? join(homedir(), ".agents"),
   );
   const compatibilityPath = resolve(
-    option(arguments_, "--compatibility") ?? join(agentsHome, "config", "adapter-compatibility.yaml"),
+    parsed["--compatibility"] ?? join(agentsHome, "config", "adapter-compatibility.yaml"),
   );
   const configPath = resolve(
-    option(arguments_, "--config") ?? join(agentsHome, "config", "agent-fabric.yaml"),
+    parsed["--config"] ?? join(agentsHome, "config", "agent-fabric.yaml"),
   );
   const schemaPath = resolve(
-    option(arguments_, "--compatibility-schema") ??
+    parsed["--compatibility-schema"] ??
       join(agentsHome, "runtime", "agent-fabric", "schemas", "adapter-compatibility.schema.json"),
   );
   const config = await loadFabricConfig({ globalPath: configPath, agentsHome });

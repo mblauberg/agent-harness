@@ -94,4 +94,45 @@ describe("adapter executable resolver CLI", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("adapter is not active in trusted Fabric configuration");
   });
+
+  it("rejects a value-taking option with no value", async () => {
+    const result = await runSourceCli([
+      "adapter", "executable", "--adapter", "agy", "--compatibility",
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("adapter executable requires a value for --compatibility");
+  });
+
+  it("rejects a flag-looking option value", async () => {
+    const result = await runSourceCli([
+      "adapter", "executable", "--adapter", "agy", "--compatibility", "--config", "fixture.yaml",
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("adapter executable requires a value for --compatibility");
+  });
+
+  it("rejects an unknown option", async () => {
+    const result = await runSourceCli([
+      "adapter", "executable", "--adapter", "agy", "--compatibilty", "fixture.yaml",
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("adapter executable received unknown option: --compatibilty");
+  });
+
+  it.each([
+    ["--adapter", ["--adapter", "agy", "--adapter", "agy"]],
+    ["--config", ["--adapter", "agy", "--config", "one.yaml", "--config", "two.yaml"]],
+  ])("rejects duplicate %s options", async (option, arguments_) => {
+    const result = await runSourceCli(["adapter", "executable", ...arguments_]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(`adapter executable received duplicate option: ${option}`);
+  });
 });
