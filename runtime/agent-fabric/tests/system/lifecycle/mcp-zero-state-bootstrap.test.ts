@@ -159,6 +159,57 @@ describe("fresh Agent Fabric launch bootstrap", () => {
     await access(paths.databasePath);
   });
 
+  it("replays an active tagged roster byte-for-byte after session revision advances", async () => {
+    const { projectRoot, paths, agentsHome } = await fixture();
+    const environment = {
+      AGENT_FABRIC_STATE_DIRECTORY: paths.stateDirectory,
+      AGENT_FABRIC_RUNTIME_DIRECTORY: paths.runtimeDirectory,
+      AGENTS_HOME: agentsHome,
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      TMPDIR: process.env.TMPDIR ?? "/tmp",
+      ...(process.env.HOME === undefined ? {} : { HOME: process.env.HOME }),
+    };
+    await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cliMain, "bootstrap", "--seat", "codex"],
+      { cwd: projectRoot, env: environment, timeout: 15_000 },
+    );
+    const peer = await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cliMain, "bootstrap", "--seat", "claude"],
+      { cwd: projectRoot, env: environment, timeout: 15_000 },
+    );
+    const active = JSON.parse(peer.stdout) as { generation: string; projectSessionId: string };
+    const generationDirectory = join(
+      paths.stateDirectory,
+      "seats",
+      projectKey(projectRoot),
+      "generations",
+      active.generation,
+    );
+    const before = await Promise.all(["codex.json", "claude.json", "codex.cap", "claude.cap"].map(
+      async (file) => readFile(join(generationDirectory, file), "utf8"),
+    ));
+    const database = new Database(paths.databasePath);
+    try {
+      database.prepare("UPDATE project_sessions SET revision=revision+1 WHERE project_session_id=?")
+        .run(active.projectSessionId);
+    } finally {
+      database.close();
+    }
+
+    const replay = await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cliMain, "bootstrap", "--seat", "codex"],
+      { cwd: projectRoot, env: environment, timeout: 15_000 },
+    );
+
+    expect(JSON.parse(replay.stdout)).toMatchObject({ generation: active.generation });
+    await expect(Promise.all(["codex.json", "claude.json", "codex.cap", "claude.cap"].map(
+      async (file) => readFile(join(generationDirectory, file), "utf8"),
+    ))).resolves.toEqual(before);
+  });
+
   it("replays a legacy bootstrap generation without rewriting its immutable metadata", async () => {
     const { projectRoot, paths, agentsHome } = await fixture();
     const environment = {
