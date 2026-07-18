@@ -516,3 +516,31 @@ def test_retrospect_closes_the_quality_flywheel_without_log_bloat():
     assert "one dated log per run" in skill
     assert "proposal-first and read-only by default" in skill
     assert "user-approved scope" in skill
+
+
+def test_current_docs_use_live_issue_and_durable_decision_owners():
+    specs_index = (ROOT / "docs" / "specs" / "README.md").read_text()
+    handoffs = (ROOT / "docs" / "handoffs" / "README.md").read_text()
+    historical_specs = (
+        ROOT / "docs" / "specs" / "harness" / "lifecycle.md",
+        ROOT / "docs" / "specs" / "agent-fabric" / "activation.md",
+        ROOT / "docs" / "specs" / "agent-fabric" / "provider-write-containment.md",
+    )
+
+    assert "issues/141" in specs_index
+    assert "No active handoffs." in handoffs
+    assert not (ROOT / "docs" / "handoffs" / "consolidated-harness-cli.md").exists()
+    assert (ROOT / "docs" / "adr" / "0013-thin-provenant-cli.md").is_file()
+    for path in historical_specs:
+        text = path.read_text()
+        assert "owns current delivery" not in text
+        assert "own delivery state" not in text
+
+
+def test_current_architecture_and_install_bootstrap_use_user_terminology():
+    architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text()
+    installer = (ROOT / "scripts" / "install-harness").read_text()
+
+    assert re.search(r"\bhuman(?:s)?\b|human-", architecture, re.IGNORECASE) is None
+    assert "explicit user authority" in installer
+    assert "explicit human authority" not in installer

@@ -1,11 +1,15 @@
-# Consolidated harness CLI
+# ADR 0013 — Thin `provenant` CLI for command discovery
 
-**Status:** accepted thin CLI; implemented by issue #266
+**Status:** Accepted 2026-07-18 (user, [issue
+#266](https://github.com/mblauberg/provenant/issues/266))
 
 **Date:** 18 July 2026
 
-**Canonical owner:** this document records the accepted surface and its
-expansion boundary.
+## Context
+
+Provenant had several stable command entry points but no single discovery
+surface. Agents had to know those command names in advance, while a unified
+execution layer would have duplicated Fabric and routing ownership.
 
 ## Decision
 
@@ -68,18 +72,12 @@ client connects to Fabric's MCP surface to coordinate work. A provider is an
 execution adapter that Fabric can select for an answer-bearing action. Global
 instructions or an installed CLI establish neither role on their own.
 
-Current work is tracked separately:
-
-- [#264](https://github.com/mblauberg/provenant/issues/264) established
-  update-tolerant provider admission by identity and interface contract rather
-  than executable version or hash. The front door does not alter that policy.
-- Kiro is registered as a Fabric MCP client and its optional open-weight ACP
-  provider is active through the CLI's existing subscription session.
-- OpenCode loads the global harness instructions and its optional ACP provider
-  admits only explicit `opencode/*` account models. It is not a Fabric MCP seat.
-
-`provenant help` reports these distinctions and names unresolved owning issues. It
-must not present installed, configured or proposed integrations as active.
+[Issue #264](https://github.com/mblauberg/provenant/issues/264) established
+update-tolerant provider admission by identity and interface contract rather
+than executable version or hash. The front door does not alter that policy or
+establish client/provider activation. `provenant help` must distinguish the
+roles and must not present an installed, configured or proposed integration as
+active.
 
 ## Accepted slice and expansion gate
 

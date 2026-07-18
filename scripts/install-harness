@@ -90,7 +90,7 @@ if [[ "$PLATFORM" == "codex" ]]; then
 fi
 "$ROOT/scripts/configure-agent-fabric-mcp.py" "${mcp_args[@]}"
 
-bootstrap="Read and follow \`$ROOT/AGENTS.md\` and \`$ROOT/HARNESS.md\` before making orchestration, delegation, model-routing or memory decisions. Platform/system policy and explicit human authority lead; the nearest project instruction may specialise or strengthen the global harness but may not silently broaden authority, weaken safety gates or redefine global cross-project memory policy."
+bootstrap="Read and follow \`$ROOT/AGENTS.md\` and \`$ROOT/HARNESS.md\` before making orchestration, delegation, model-routing or memory decisions. Platform/system policy and explicit user authority lead; the nearest project instruction may specialise or strengthen the global harness but may not silently broaden authority, weaken safety gates or redefine global cross-project memory policy."
 
 if [[ ! -e "$instructions" && ! -L "$instructions" ]]; then
   {
