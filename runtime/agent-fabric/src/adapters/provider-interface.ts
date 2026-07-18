@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { FabricError } from "../errors.js";
 
@@ -6,6 +9,7 @@ type ProbeResult = { stdout: string; stderr: string; exitCode: number };
 export type ProviderProbeRunner = (input: {
   executable: string;
   args: string[];
+  cwd?: string;
   stdin?: string;
   closeOnFirstLine?: boolean;
   timeoutMs: number;
@@ -16,6 +20,7 @@ const PROBE_TIMEOUT_MS = 15_000;
 
 const runProbe: ProviderProbeRunner = async (input) => await new Promise((resolve, reject) => {
   const child = spawn(input.executable, input.args, {
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     env: {
       PATH: process.env.PATH ?? "/usr/bin:/bin",
       ...(process.env.HOME === undefined ? {} : { HOME: process.env.HOME }),
@@ -107,12 +112,28 @@ export async function probeProviderInterface(
         },
       })}\n`;
       const kiro = input.adapterId === "kiro-acp";
-      const [result, help] = kiro
-        ? await Promise.all([
-            runner({ executable: input.executable, args: ["acp", "--agent-engine", "v2"], stdin: request, closeOnFirstLine: true, timeoutMs: PROBE_TIMEOUT_MS }),
-            runner({ executable: input.executable, args: ["acp", "--help"], timeoutMs: PROBE_TIMEOUT_MS }),
-          ])
-        : [await runner({ executable: input.executable, args: ["acp"], stdin: request, closeOnFirstLine: true, timeoutMs: PROBE_TIMEOUT_MS }), undefined];
+      let result: ProbeResult;
+      let help: ProbeResult | undefined;
+      if (kiro) {
+        [result, help] = await Promise.all([
+          runner({ executable: input.executable, args: ["acp", "--agent-engine", "v2"], stdin: request, closeOnFirstLine: true, timeoutMs: PROBE_TIMEOUT_MS }),
+          runner({ executable: input.executable, args: ["acp", "--help"], timeoutMs: PROBE_TIMEOUT_MS }),
+        ]);
+      } else {
+        const cwd = await mkdtemp(join(tmpdir(), "agent-fabric-opencode-probe-"));
+        try {
+          result = await runner({
+            executable: input.executable,
+            args: ["acp", "--pure", "--cwd", cwd],
+            cwd,
+            stdin: request,
+            closeOnFirstLine: true,
+            timeoutMs: PROBE_TIMEOUT_MS,
+          });
+        } finally {
+          await rm(cwd, { recursive: true, force: true });
+        }
+      }
       const line = result.stdout.split(/\r?\n/u).find((item) => item.trim().length > 0);
       const response: unknown = line === undefined ? undefined : JSON.parse(line);
       const negotiated = typeof response === "object" && response !== null ? Reflect.get(response, "result") : undefined;

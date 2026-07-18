@@ -44,6 +44,7 @@ describe("provider conformance smoke evidence", () => {
     expect(source).toContain('adapterId === "opencode-acp"');
     expect(source).toContain('providerConfig: "unchanged"');
     expect(source).toContain('fabricCapability: "not-provided"');
+    expect(source.indexOf("const providerConfigBefore")).toBeLessThan(source.indexOf("await verifyProviderConformance"));
     expect(source).not.toContain("executableSha256");
   });
 });

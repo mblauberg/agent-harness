@@ -1,3 +1,5 @@
+import { access } from "node:fs/promises";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { probeProviderInterface } from "../../src/adapters/provider-interface.ts";
@@ -48,14 +50,20 @@ describe("provider non-answer interface conformance", () => {
   });
 
   it("proves the OpenCode ACP v1 initialize handshake without a model turn", async () => {
-    const run = vi.fn(async () => ({
+    let disposableCwd: string | undefined;
+    const run = vi.fn(async (input: { cwd?: string }) => {
+      disposableCwd = input.cwd;
+      return ({
       stdout: '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentInfo":{"name":"OpenCode","version":"1.17.18"}}}\n',
       stderr: "",
       exitCode: 0,
-    }));
+      });
+    });
     await expect(probeProviderInterface({ adapterId: "opencode-acp", executable: "/opencode" }, run))
       .resolves.toMatchObject({ adapterId: "opencode-acp", conformant: true, probe: "acp-v1-initialize", version: "1.17.18" });
-    expect(run).toHaveBeenCalledWith(expect.objectContaining({ args: ["acp"] }));
+    expect(disposableCwd).toEqual(expect.any(String));
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ args: ["acp", "--pure", "--cwd", disposableCwd], cwd: disposableCwd }));
+    await expect(access(disposableCwd!)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rejects Kiro ACP when the effort interface disappears", async () => {

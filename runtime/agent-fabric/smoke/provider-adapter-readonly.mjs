@@ -54,6 +54,10 @@ const pinnedExecutable = expandPath(implementation.executable);
 if (await realpath(providerExecutable) !== await realpath(pinnedExecutable)) {
   throw new Error("provider executable does not match the compatibility path");
 }
+const providerConfigRoot = adapterId === "opencode-acp"
+  ? join(process.env.XDG_CONFIG_HOME ?? join(process.env.HOME ?? "", ".config"), "opencode")
+  : undefined;
+const providerConfigBefore = providerConfigRoot === undefined ? undefined : await optionalTreeDigest(providerConfigRoot);
 const providerConformance = await verifyProviderConformance({
   adapterId,
   executable: pinnedExecutable,
@@ -127,10 +131,6 @@ async function optionalTreeDigest(root) {
 }
 
 const beforeDigest = await workspaceDigest(workspace);
-const providerConfigRoot = adapterId === "opencode-acp"
-  ? join(process.env.XDG_CONFIG_HOME ?? join(process.env.HOME ?? "", ".config"), "opencode")
-  : undefined;
-const providerConfigBefore = providerConfigRoot === undefined ? undefined : await optionalTreeDigest(providerConfigRoot);
 const args = [
   "--import", join(agentsRoot, "node_modules/tsx/dist/loader.mjs"),
   "--conditions=source",
