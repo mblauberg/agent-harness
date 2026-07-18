@@ -22,8 +22,18 @@ case "$AGENTS_ROOT" in /*) ;; *) echo "AGENTS_HOME must be absolute" >&2; exit 2
 FABRIC_ROOT="$AGENTS_ROOT/runtime/agent-fabric"
 DIST_MCP="$FABRIC_ROOT/dist/mcp/main.js"
 
-if [ -f "$DIST_MCP" ] && ! find "$FABRIC_ROOT/src" -type f -name '*.ts' -newer "$DIST_MCP" -print -quit | grep -q .; then
-  exec node "$DIST_MCP" "$@"
+if [ -f "$DIST_MCP" ]; then
+  if [ ! -d "$FABRIC_ROOT/src" ]; then
+    echo "agent-fabric-mcp: Fabric source tree is unavailable: $FABRIC_ROOT/src" >&2
+    exit 1
+  fi
+  if ! NEWER_SOURCE=$(find "$FABRIC_ROOT/src" -type f -name '*.ts' -newer "$DIST_MCP" -print); then
+    echo "agent-fabric-mcp: Fabric source freshness check failed: $FABRIC_ROOT/src" >&2
+    exit 1
+  fi
+  if [ -z "$NEWER_SOURCE" ]; then
+    exec node "$DIST_MCP" "$@"
+  fi
 fi
 
 # Source-tree fallback for development checkouts without a build.
