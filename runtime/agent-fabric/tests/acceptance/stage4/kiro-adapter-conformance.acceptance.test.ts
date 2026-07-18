@@ -105,6 +105,26 @@ describe("Stage 4 Kiro ACP adapter public contract", () => {
     }
   });
 
+  it("admits Kiro's advertised auto alias through the checked-in Fabric policy", async () => {
+    const validate = requireStage4PublicFunction("validateAdapterModelSelection");
+    const base = {
+      compatibilityPath: repositoryPath("config/adapter-compatibility.yaml"),
+      schemaPath: repositoryPath("runtime/agent-fabric/schemas/adapter-compatibility.schema.json"),
+      adapterId: "kiro-acp",
+      requireEnabled: true,
+      modelFamily: "open-weight",
+    };
+
+    await expect(validate({ ...base, modelId: "auto" })).resolves.toMatchObject({
+      valid: true,
+      adapterId: "kiro-acp",
+      modelId: "auto",
+    });
+    await expect(validate({ ...base, modelId: "unknown-alias" })).rejects.toMatchObject({
+      code: "MODEL_NOT_ALLOWED",
+    });
+  });
+
   it("does not activate an enabled fixture while its ACP version/schema pins are unresolved", async () => {
     const fixture = await createCursorKiroCompatibilityFixture({ unresolvedAdapters: ["kiro-acp"] });
     try {
