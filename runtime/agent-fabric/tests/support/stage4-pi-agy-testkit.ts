@@ -45,10 +45,12 @@ export async function createResolvedStage4Compatibility(adapterId: Stage4Adapter
 }> {
   const directory = await mkdtemp(join(tmpdir(), `agent-fabric-${adapterId}-`));
   const executablePath = join(directory, `${adapterId}-fixture`);
+  const wrapperPath = join(directory, `${adapterId}-wrapper.js`);
   const protocolSchemaPath = join(directory, `${adapterId}-protocol.json`);
   const executableBytes = `${adapterId} deterministic fixture\n`;
   const schemaBytes = `${JSON.stringify({ schemaVersion: 1, protocolVersion: 1 })}\n`;
   await writeFile(executablePath, executableBytes, { mode: 0o700 });
+  await writeFile(wrapperPath, "export const fixtureWrapper = true;\n", { mode: 0o600 });
   await writeFile(protocolSchemaPath, schemaBytes, { mode: 0o600 });
   await writeWrapperPackageScaffold(directory);
   await commitFixtureRepository(directory);
@@ -70,7 +72,8 @@ export async function createResolvedStage4Compatibility(adapterId: Stage4Adapter
             installed_version: "1.0.0-fixture",
             executable: executablePath,
             executable_sha256: sha256(executableBytes),
-            wrapper_entrypoint: executablePath,
+            provider_identity: "apple-designated",
+            wrapper_entrypoint: wrapperPath,
           },
           contract: {
             adapter_version: 1,

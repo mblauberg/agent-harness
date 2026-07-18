@@ -56,7 +56,7 @@ import {
   parseWorkspaceWriteOfflineProjection,
   WORKSPACE_WRITE_OFFLINE_TOOLS,
 } from "./workspace-write-offline.js";
-import { verifyProviderExecutableDigest } from "../compatibility.js";
+import { verifyProviderConformance } from "../provider-conformance.js";
 
 export type ClaudeAgentSdkBoundary = ProviderBoundary;
 
@@ -596,8 +596,7 @@ type ClaudeMcpBridgeFactory = (session: ClaudeChairSession) => ClaudeChairMcpBri
 
 export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
   readonly #executable: string | undefined;
-  readonly #executableSha256: string | undefined;
-  readonly #verifyExecutable: typeof verifyProviderExecutableDigest;
+  readonly #verifyExecutable: typeof verifyProviderConformance;
   readonly #query: typeof query;
   readonly #bridgeFactory: BridgeFactory;
   readonly #mcpBridgeFactory: ClaudeMcpBridgeFactory;
@@ -606,8 +605,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
 
   constructor(options?: string | {
     executable?: string;
-    executableSha256?: string;
-    verifyExecutable?: typeof verifyProviderExecutableDigest;
+    verifyExecutable?: typeof verifyProviderConformance;
     query?: typeof query;
     bridgeFactory?: BridgeFactory;
     mcpBridgeFactory?: ClaudeMcpBridgeFactory;
@@ -615,16 +613,14 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
   }) {
     if (typeof options === "string" || options === undefined) {
       this.#executable = options;
-      this.#executableSha256 = undefined;
-      this.#verifyExecutable = verifyProviderExecutableDigest;
+      this.#verifyExecutable = verifyProviderConformance;
       this.#query = query;
       this.#bridgeFactory = createChairLaunchFabricBridge;
       this.#mcpBridgeFactory = createClaudeChairMcpBridge;
       this.#agentBridgeFactory = AgentSessionFabricBridge.create;
     } else {
       this.#executable = options.executable;
-      this.#executableSha256 = options.executableSha256;
-      this.#verifyExecutable = options.verifyExecutable ?? verifyProviderExecutableDigest;
+      this.#verifyExecutable = options.verifyExecutable ?? verifyProviderConformance;
       this.#query = options.query ?? query;
       this.#bridgeFactory = options.bridgeFactory ?? createChairLaunchFabricBridge;
       this.#mcpBridgeFactory = options.mcpBridgeFactory ?? createClaudeChairMcpBridge;
@@ -634,10 +630,7 @@ export class InstalledClaudeAgentSdkBoundary implements ClaudeAgentSdkBoundary {
 
   async #verifiedQuery(input: Parameters<typeof query>[0]): Promise<ReturnType<typeof query>> {
     if (this.#executable !== undefined) {
-      if (this.#executableSha256 === undefined) {
-        throw new ProviderAdapterError("PROVIDER_COMMAND_INVALID", "Claude executable digest is missing");
-      }
-      await this.#verifyExecutable(this.#executable, this.#executableSha256);
+      await this.#verifyExecutable({ adapterId: "claude-agent-sdk", executable: this.#executable });
     }
     return this.#query(input);
   }
@@ -946,13 +939,9 @@ export async function runClaudeAgentSdkAdapter(arguments_: string[] = process.ar
   const agentBridgeHandoff = takeAgentBridgeHandoff(process.env);
   const providerIndex = arguments_.indexOf("--provider-executable");
   const providerExecutable = providerIndex === -1 ? undefined : arguments_[providerIndex + 1];
-  const providerDigestIndex = arguments_.indexOf("--provider-executable-sha256");
-  const providerExecutableSha256 = providerDigestIndex === -1 ? undefined : arguments_[providerDigestIndex + 1];
   if (providerExecutable === undefined) throw new Error("claude-agent-sdk adapter requires --provider-executable");
-  if (providerExecutableSha256 === undefined) throw new Error("claude-agent-sdk adapter requires --provider-executable-sha256");
   const boundary = new InstalledClaudeAgentSdkBoundary({
     executable: providerExecutable,
-    executableSha256: providerExecutableSha256,
   });
   try {
     await serveAdapter(
