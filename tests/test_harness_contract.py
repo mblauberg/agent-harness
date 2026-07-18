@@ -44,6 +44,18 @@ def test_constitution_names_equal_primaries_and_router_has_current_codex_family(
     assert "GPT-5.6" in routing
 
 
+def test_first_use_fabric_trust_is_exact_and_does_not_provision():
+    agents = " ".join((ROOT / "AGENTS.md").read_text().split())
+    runbook = " ".join(
+        (ROOT / "docs" / "runbooks" / "agent-fabric-operations.md").read_text().split()
+    )
+    assert "exact canonical repository root" in agents
+    assert "never trust a parent, wildcard, home or sibling collection" in agents
+    assert "Standing global harness authority covers only automatic trust registration" in runbook
+    assert "Seat provisioning remains separately gated" in runbook
+    assert "trust a project root or provision" not in runbook
+
+
 def test_subagent_dispatch_contract_requires_task_class_bound_route_and_receipt():
     harness = (ROOT / "HARNESS.md").read_text()
     skill = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text()

@@ -8,7 +8,8 @@ Applies to: `runtime/agent-fabric` and `scripts/agent-fabric*`
 The following remain separate approvals. One does not imply another:
 
 1. build or install the local runtime outside an active implementation envelope;
-2. trust a project root or provision/rotate its operator and agent seats;
+2. trust any parent, wildcard, home, sibling collection or other root beyond
+   the exact current project, or provision/rotate operator and agent seats;
 3. enable a provider adapter after compatibility verification;
 4. install an auto-start/login service for the daemon;
 5. log into or consume quota from a provider;
@@ -16,9 +17,15 @@ The following remain separate approvals. One does not imply another:
 7. run a smoke that invokes a real provider adapter;
 8. accept the implementation, release it or publish Git state.
 
+Standing global harness authority covers only automatic trust registration for
+the exact current project's canonical Git root, or its canonical current
+directory when no repository exists. This trust grants no task, write,
+credential, provider, provisioning, acceptance or release authority. Seat
+provisioning remains separately gated.
+
 Read the active authority before acting. Prior activation evidence does not
-authorise a new root, login, registry mutation, provider call, acceptance,
-release or publication.
+authorise a different or broader root, login, registry mutation, provider call,
+acceptance, release or publication.
 
 ## Preflight
 
