@@ -113,6 +113,15 @@ when quota/API output is absent. Pi stays dormant until a pinned distinct
 open-model route, current Herdr integration and smoke evaluation exist; it may
 not broker Claude/OpenAI and claim distinct-family certification.
 
+Provider-subscription preferences are deliberately small and explicit. Agy is
+Gemini-first and optional/advisory until its Fabric route has repeatable
+subscription-backed evidence. Cursor prefers xAI/Grok first, then Composer.
+If neither is available, route an explicit recorded fallback through the
+family's native Claude, Codex or Agy adapter; do not rebroadcast that family
+through Cursor unless its current compatibility contract admits it. The
+ordered machine policy is in `config/model-routing.json`; it never authorises
+automatic retries or silent substitution.
+
 ## Diversity caveat
 
 Frontier families increasingly make *correlated* errors, so "ask another model" is weakening on its

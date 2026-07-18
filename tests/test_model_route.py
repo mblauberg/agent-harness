@@ -699,6 +699,19 @@ def test_agy_accepts_only_explicit_gemini_routing():
     assert forbidden_route["status"] == "adapter_family_forbidden"
 
 
+def test_optional_adapter_preference_policy_is_ordered_and_native_first_for_fallbacks():
+    catalog = json.loads((ROOT / "config" / "model-routing.json").read_text())
+
+    agy = catalog["adapters"]["agy"]["model_family_preferences"]
+    cursor = catalog["adapters"]["cursor"]["model_family_preferences"]
+
+    assert agy == {"preferred": ["google"], "fallback": {}}
+    assert cursor == {
+        "preferred": ["xai", "cursor-composer"],
+        "fallback": {"anthropic": "claude", "openai": "codex", "google": "agy"},
+    }
+
+
 def test_cursor_accepts_only_composer_and_grok_models():
     for model, family in (("composer-2-high", "cursor-composer"), ("cursor-grok-4.5-high", "xai")):
         allowed, allowed_route = resolve(
