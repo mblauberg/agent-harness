@@ -56,6 +56,12 @@ class LinkMutation(NamedTuple):
     installed: PathSnapshot
 
 
+class RollbackFailure(NamedTuple):
+    name: str
+    error_type: str
+    detail: str
+
+
 class StagedLink(NamedTuple):
     path: Path
     snapshot: PathSnapshot
@@ -467,8 +473,8 @@ def _validate_journal(journal: list[LinkMutation]) -> None:
 def _rollback_mutations(
     journal: list[LinkMutation],
     workspace: LinkRecoveryWorkspace,
-) -> list[str]:
-    preserved: list[str] = []
+) -> list[RollbackFailure]:
+    failures: list[RollbackFailure] = []
     for mutation in reversed(journal):
         try:
             if mutation.before.kind == "symlink":
@@ -484,9 +490,15 @@ def _rollback_mutations(
                 _atomic_remove_link(mutation.path, mutation.installed, workspace)
             else:
                 raise InstallError("managed rollback refuses non-link snapshot")
-        except (OSError, InstallError):
-            preserved.append(mutation.path.name)
-    return sorted(set(preserved))
+        except (OSError, InstallError) as exc:
+            failures.append(
+                RollbackFailure(
+                    mutation.path.name,
+                    type(exc).__name__,
+                    str(exc),
+                )
+            )
+    return failures
 
 
 def _plan(
@@ -830,17 +842,24 @@ def _execute_locked(action: str, source: Path, target: Path, renames: Path | Non
         # back here would create a known inconsistency.
         raise
     except (OSError, InstallError) as exc:
-        preserved = _rollback_mutations(journal, workspace)
-        sync_failed = False
+        rollback_failures = _rollback_mutations(journal, workspace)
+        sync_failure: OSError | None = None
         if journal or workspace.directory is not None:
             try:
                 _fsync_directory(target)
                 workspace.sync()
-            except OSError:
-                sync_failed = True
-        if preserved or sync_failed:
-            detail = ", ".join(preserved) if preserved else "directory-fsync"
-            raise InstallError("rollback preserved newer or uncertain path: " + detail) from exc
+            except OSError as sync_exc:
+                sync_failure = sync_exc
+        if rollback_failures or sync_failure is not None:
+            details = [
+                f"{failure.name}: {failure.error_type}: {failure.detail}"
+                for failure in rollback_failures
+            ]
+            if sync_failure is not None:
+                details.append(
+                    f"directory-fsync: {type(sync_failure).__name__}: {sync_failure}"
+                )
+            raise InstallError("rollback incomplete: " + "; ".join(details)) from exc
         raise
     finally:
         workspace.cleanup()

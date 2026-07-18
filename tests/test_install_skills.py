@@ -1,6 +1,7 @@
 from pathlib import Path
 import importlib.util
 import json
+import re
 import shutil
 import stat
 import subprocess
@@ -838,11 +839,67 @@ def test_writer_after_install_is_preserved_when_manifest_commit_fails(
         raise OSError("injected manifest failure")
 
     monkeypatch.setattr(module, "_write_manifest", fail_commit)
-    with pytest.raises(module.InstallError, match="preserved newer or uncertain path: alpha"):
+    with pytest.raises(
+        module.InstallError,
+        match=r"rollback incomplete: alpha: InstallError: .*restored newer path: alpha",
+    ):
         module.execute("install", source, target)
 
     assert (target / "alpha").resolve() == external
     assert not manifest_for(target).exists()
+
+
+def test_two_writers_during_rollback_surface_exact_displaced_recovery(
+    tmp_path, monkeypatch
+):
+    module = load_manager_module("managed_installer_two_writer_rollback")
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    module.execute("install", source, target)
+    live = target / "alpha"
+    live.unlink()
+    live.symlink_to(tmp_path / "stale")
+    writer_one = tmp_path / "writer-one"
+    writer_two = tmp_path / "writer-two"
+    writer_one.mkdir()
+    writer_two.mkdir()
+    original_exchange = module.atomic_exchange
+    exchange_count = 0
+    writer_two_identity = None
+
+    def two_writer_race(candidate, path):
+        nonlocal exchange_count, writer_two_identity
+        exchange_count += 1
+        if exchange_count == 2:
+            path.unlink()
+            path.symlink_to(writer_one)
+        original_exchange(candidate, path)
+        if exchange_count == 2:
+            path.unlink()
+            path.symlink_to(writer_two)
+            info = path.lstat()
+            writer_two_identity = (info.st_dev, info.st_ino, path.readlink())
+
+    def fail_commit(_target, _manifest):
+        raise OSError("injected manifest failure")
+
+    monkeypatch.setattr(module, "atomic_exchange", two_writer_race)
+    monkeypatch.setattr(module, "_write_manifest", fail_commit)
+    with pytest.raises(module.InstallError) as raised:
+        module.execute("reconcile", source, target)
+
+    detail = str(raised.value)
+    recovery_match = re.search(
+        r"alpha: .*preserve recovery path (?P<path>\S+)", detail
+    )
+    assert recovery_match, detail
+    recovery = Path(recovery_match.group("path"))
+    info = live.lstat()
+    assert (info.st_dev, info.st_ino, live.readlink()) == writer_two_identity
+    assert live.resolve() == writer_two
+    assert recovery.is_symlink()
+    assert recovery.resolve(strict=False) == writer_one
+    assert "alpha" in json.loads(manifest_for(target).read_text())["managed"]
 
 
 def test_skill_directory_fsync_failure_rolls_back_and_fsyncs_rollback(
