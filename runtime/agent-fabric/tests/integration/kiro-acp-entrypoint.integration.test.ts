@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,7 +54,7 @@ describe("Kiro ACP provider entrypoint", () => {
       });
       await expect(transport.request("spawn", {
         actionId: "kiro:spawn:1",
-        payload: { cwd: directory, model: "qwen3-coder", modelFamily: "open-weight" },
+        payload: { cwd: directory, model: "qwen3-coder", modelFamily: "open-weight", effort: "high" },
       })).resolves.toEqual({ resumeReference: "kiro-session-1", sessionId: "kiro-session-1" });
       await expect(transport.request("dispatch", {
         actionId: "kiro:turn:1",
@@ -64,6 +64,7 @@ describe("Kiro ACP provider entrypoint", () => {
           resumeReference: "kiro-session-1",
           model: "qwen3-coder",
           modelFamily: "open-weight",
+          effort: "high",
           prompt: "bounded task",
         },
       })).resolves.toMatchObject({ status: "terminal", result: { text: "bounded response" } });
@@ -72,6 +73,11 @@ describe("Kiro ACP provider entrypoint", () => {
         operation: "release",
         payload: { cwd: directory, resumeReference: "kiro-session-1" },
       })).resolves.toMatchObject({ status: "terminal", result: { released: true, deleted: false } });
+      const records = (await readFile(transcript, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+      expect(records).toContainEqual({
+        direction: "argv",
+        value: ["acp", "--model", "qwen3-coder", "--effort", "high", "--agent-engine", "v2"],
+      });
     } finally {
       await transport.close();
     }

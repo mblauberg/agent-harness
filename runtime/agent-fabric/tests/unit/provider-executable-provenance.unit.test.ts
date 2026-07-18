@@ -20,6 +20,7 @@ function port(overrides: Partial<ProviderIdentityPort> = {}): ProviderIdentityPo
       ownerUid: 501,
       mode: 0o755,
     })),
+    verifySignature: vi.fn(async () => undefined),
     signingIdentity: vi.fn(async () => ({ teamId: "Q6L2SF6YDW", identifier: "com.anthropic.claude-code" })),
     currentUid: vi.fn(() => 501),
     ...overrides,
@@ -57,6 +58,18 @@ describe("provider executable identity", () => {
       .rejects.toMatchObject({ code: "ADAPTER_IDENTITY_MISMATCH" });
   });
 
+  it("fails closed before identity extraction when strict signature verification fails", async () => {
+    const signingIdentity = vi.fn(async () => ({ teamId: "94KV3E626L", identifier: "kiro-cli" }));
+    await expect(verifyProviderExecutableIdentity({
+      adapterId: "kiro-acp",
+      executable: "/fixture/example/.local/bin/kiro-cli",
+    }, port({
+      verifySignature: vi.fn(async () => { throw new Error("invalid signature"); }),
+      signingIdentity,
+    }))).rejects.toMatchObject({ code: "ADAPTER_IDENTITY_MISMATCH" });
+    expect(signingIdentity).not.toHaveBeenCalled();
+  });
+
   it("fails closed on an unsafe Agy executable", async () => {
     await expect(verifyProviderExecutableIdentity({
       adapterId: "agy",
@@ -74,11 +87,15 @@ describe("provider executable identity", () => {
   });
 
   it("admits the stable Kiro shim by Amazon signing identity", async () => {
+    const verifySignature = vi.fn(async () => undefined);
+    const signingIdentity = vi.fn(async () => ({ teamId: "94KV3E626L", identifier: "kiro-cli" }));
     await expect(verifyProviderExecutableIdentity({
       adapterId: "kiro-acp",
       executable: "/fixture/example/.local/bin/kiro-cli",
-    }, port({ signingIdentity: vi.fn(async () => ({ teamId: "94KV3E626L", identifier: "kiro-cli" })) })))
+    }, port({ verifySignature, signingIdentity })))
       .resolves.toMatchObject({ assurance: "full-vendor-identity" });
+    expect(verifySignature).toHaveBeenCalledWith("/fixture/example/.local/bin/kiro-cli");
+    expect(verifySignature.mock.invocationCallOrder[0]).toBeLessThan(signingIdentity.mock.invocationCallOrder[0] ?? 0);
   });
 
   it("labels Cursor partial identity and checks its signed helper and Node", async () => {

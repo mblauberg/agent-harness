@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   KiroAcpStdioClient,
@@ -143,6 +143,28 @@ describe("Kiro adapter model policy", () => {
 });
 
 describe("Kiro ACP managed session boundary", () => {
+  it.each(["low", "medium", "high", "xhigh", "max"])("passes supported %s effort into Kiro client creation", async (effort) => {
+    const directory = await mkdtemp(join(tmpdir(), "kiro-acp-effort-supported-"));
+    temporaryDirectories.push(directory);
+    const created: Array<{ model: string; effort?: string; cwd: string }> = [];
+    const boundary = createKiroAcpBoundary({
+      clientFactory: (options) => {
+        created.push(options);
+        return {
+          start: async () => undefined,
+          newSession: async () => ({ sessionId: `kiro-${effort}` }),
+          loadSession: async (sessionId) => ({ sessionId }),
+          prompt: async () => ({ stopReason: "end_turn", text: "done" }),
+          closeSession: async () => undefined,
+          stop: async () => undefined,
+        } satisfies KiroAcpClient;
+      },
+    });
+    await boundary.spawn({ cwd: directory, model: "qwen3-coder", effort });
+    expect(created).toEqual([{ model: "qwen3-coder", effort, cwd: directory }]);
+    await boundary.shutdown();
+  });
+
   it("binds spawn, stable resume, turns, and release to one admitted session", async () => {
     const directory = await mkdtemp(join(tmpdir(), "kiro-acp-boundary-"));
     temporaryDirectories.push(directory);
@@ -154,7 +176,7 @@ describe("Kiro ACP managed session boundary", () => {
       closeSession: async () => undefined,
       stop: async () => undefined,
     };
-    const created: Array<{ model?: string; cwd: string }> = [];
+    const created: Array<{ model: string; effort?: string; cwd: string }> = [];
     const boundary = createKiroAcpBoundary({
       clientFactory: (options) => {
         created.push(options);
@@ -162,7 +184,7 @@ describe("Kiro ACP managed session boundary", () => {
       },
     });
 
-    await expect(boundary.spawn({ cwd: directory, model: "qwen3-coder" })).resolves.toEqual({
+    await expect(boundary.spawn({ cwd: directory, model: "qwen3-coder", effort: "xhigh" })).resolves.toEqual({
       resumeReference: "kiro-session-1",
       sessionId: "kiro-session-1",
     });
@@ -170,6 +192,7 @@ describe("Kiro ACP managed session boundary", () => {
       cwd: directory,
       resumeReference: "kiro-session-1",
       model: "qwen3-coder",
+      effort: "xhigh",
       prompt: "bounded task",
     })).resolves.toEqual({
       resumeReference: "kiro-session-1",
@@ -181,7 +204,17 @@ describe("Kiro ACP managed session boundary", () => {
       released: true,
       deleted: false,
     });
-    expect(created).toEqual([{ model: "qwen3-coder", cwd: directory }]);
+    expect(created).toEqual([{ model: "qwen3-coder", effort: "xhigh", cwd: directory }]);
+  });
+
+  it("rejects unsupported effort before starting Kiro", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "kiro-acp-effort-"));
+    temporaryDirectories.push(directory);
+    const clientFactory = vi.fn(() => { throw new Error("must not start"); });
+    const boundary = createKiroAcpBoundary({ clientFactory });
+    await expect(boundary.spawn({ cwd: directory, model: "qwen3-coder", effort: "ultra" }))
+      .rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(clientFactory).not.toHaveBeenCalled();
   });
 
   it("manages two sessions independently and reports unmanaged sessions unhealthy", async () => {
