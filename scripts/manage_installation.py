@@ -452,6 +452,40 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+def _integrity(source: Path, target: Path) -> list[dict[str, str]]:
+    """Report the installed catalogue without claiming ownership of foreign entries."""
+    skills = _skills(source)
+    items: list[dict[str, str]] = []
+    for name, source_path in skills.items():
+        destination = target / name
+        snapshot = _capture_path(destination)
+        if _same_link_snapshot(destination, source_path, snapshot):
+            state = "present"
+        elif snapshot.kind == "absent":
+            state = "missing"
+        elif snapshot.kind == "symlink":
+            state = "foreign"
+        else:
+            try:
+                state = "present" if _sha_skill(destination) == _sha_skill(source_path) else "noncanonical"
+            except (OSError, InstallError):
+                state = "noncanonical"
+        items.append({"name": name, "scope": "required", "state": state})
+
+    if target.is_dir():
+        for destination in sorted(target.iterdir()):
+            name = destination.name
+            if name == ".DS_Store" or name in skills or not destination.is_symlink():
+                continue
+            try:
+                destination.resolve(strict=False).relative_to(source)
+                state = "noncanonical"
+            except (OSError, ValueError):
+                state = "foreign"
+            items.append({"name": name, "scope": "extra", "state": state})
+    return items
+
+
 def _write_manifest(target: Path, manifest: dict[str, Any]) -> None:
     path = _manifest_path(target)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -585,8 +619,17 @@ def _execute_locked(action: str, source: Path, target: Path, renames: Path | Non
     source = source.resolve()
     target = target.resolve()
     manifest = _load_manifest(target)
-    if action in {"plan", "check"}:
+    if action == "plan":
         return {"schema_version": 1, "action": action, "items": _plan(source, target, manifest), "changed": []}
+    if action == "check":
+        items = _integrity(source, target)
+        return {
+            "schema_version": 1,
+            "action": action,
+            "ok": all(item["state"] == "present" for item in items if item["scope"] == "required"),
+            "items": items,
+            "changed": [],
+        }
     target.mkdir(parents=True, exist_ok=True)
     rename_registry = _load_renames(renames) if action == "reconcile" else []
     skills = _skills(source)
@@ -614,7 +657,7 @@ def _execute_locked(action: str, source: Path, target: Path, renames: Path | Non
         if action in {"install", "reconcile"}:
             for item in items:
                 name, state = item["name"], item["state"]
-                if state == "missing" or (action == "reconcile" and state == "stale"):
+                if state in {"missing", "stale"}:
                     destination = target / name
                     _mutate_link(
                         destination, post_rename_snapshots[name], str(skills[name]), journal, workspace,
@@ -622,7 +665,13 @@ def _execute_locked(action: str, source: Path, target: Path, renames: Path | Non
                     history = list(manifest["managed"].get(name, {}).get("history", []))
                     manifest["managed"][name] = _entry(name, skills[name], history)
                     changed.append(name)
-                elif action == "reconcile" and state == "retired-missing":
+                elif state == "retired-managed":
+                    _mutate_link(
+                        target / name, post_rename_snapshots[name], None, journal, workspace,
+                    )
+                    del manifest["managed"][name]
+                    changed.append(name)
+                elif state == "retired-missing":
                     del manifest["managed"][name]
                     changed.append(name)
         elif action == "uninstall-managed":
@@ -680,21 +729,29 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, InstallError) as exc:
         print(f"conflicting: {exc}", file=sys.stderr)
         return 3
+    if args.action == "check":
+        warnings = [item for item in result["items"] if item["scope"] == "extra" and item["state"] != "present"]
+        if warnings:
+            detail = ", ".join(f'{item["name"]}={item["state"]}' for item in warnings)
+            print(f"warning: unmanaged skill links outside catalogue: {detail}", file=sys.stderr)
+    if args.action == "check" and not result["ok"]:
+        print(json.dumps(result, indent=2))
+        failures = ", ".join(
+            f'{item["name"]}={item["state"]}'
+            for item in result["items"]
+            if item["scope"] == "required" and item["state"] != "present"
+        )
+        print(f"conflicting: skill installation integrity failed: {failures}", file=sys.stderr)
+        return 3
     if args.summary:
+        if args.action == "check":
+            print(f"skills checked={len(result['items'])} target={args.target}")
+            return 0
         linked = len(result["changed"])
         existing = sum(item["state"] in {"managed", "compatible", "unmanaged"} for item in result["items"]) - linked
         print(f"skills linked={linked} existing={existing} target={args.target}")
     else:
         print(json.dumps(result, indent=2))
-    if args.action == "check":
-        drift = [item for item in result["items"] if item["state"] not in {"managed", "compatible"}]
-        if drift:
-            rendered = " ".join(
-                f"{state}={','.join(item['name'] for item in drift if item['state'] == state)}"
-                for state in sorted({item["state"] for item in drift})
-            )
-            print(f"skills {rendered}")
-            return 1
     return 0
 
 

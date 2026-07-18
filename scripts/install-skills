@@ -48,8 +48,13 @@ if [[ "$CHECK" == true ]]; then
     --target "$TARGET"
 fi
 
-exec "$ROOT/scripts/manage_installation.py" reconcile \
+"$ROOT/scripts/manage_installation.py" reconcile \
   --source "$ROOT/skills" \
   --target "$TARGET" \
   --renames "$ROOT/config/skill-renames.json" \
+  --summary
+
+exec "$ROOT/scripts/manage_installation.py" check \
+  --source "$ROOT/skills" \
+  --target "$TARGET" \
   --summary
