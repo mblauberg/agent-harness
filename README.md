@@ -48,6 +48,11 @@ Install either platform independently, or both:
 ```sh
 git clone https://github.com/mblauberg/provenant.git "$HOME/.agents"
 export AGENTS_HOME="$HOME/.agents"   # skills read this at runtime; persist it in the shell rc
+cd "$AGENTS_HOME"
+
+# install the pinned workspace dependencies and compile Fabric before its first use
+npm ci
+"$AGENTS_HOME/scripts/agent-fabric-warm"
 
 "$AGENTS_HOME/scripts/install-harness" --platform claude
 "$AGENTS_HOME/scripts/install-harness" --platform codex
