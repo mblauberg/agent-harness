@@ -7,11 +7,10 @@ name: Dependabot auto-merge
 # ruleset's single required check (`ci-status`) reports green, so there is no
 # pull_request_target/pwn-request surface here at all.
 #
-# @anthropic-ai/claude-agent-sdk is excluded even at patch level (issue #195):
-# config/adapter-compatibility.yaml pins it by version, artifact, lock
-# integrity, entrypoint and schema, and CI's portable-fixtures mode bypasses
-# those pins, so a green SDK bump can still leave enabled Claude activation
-# fail-closed until the pins are refreshed alongside it (as in issue #169).
+# The primary SDK and CLI packages are excluded even at patch level (issues
+# #195 and #208): config/adapter-compatibility.yaml pins their executable and
+# protocol closure, so dependency updates require matching compatibility and
+# conformance evidence rather than unattended auto-merge.
 on:
   pull_request:
 
@@ -44,7 +43,9 @@ jobs:
       - name: Enable auto-merge for patch-level updates
         if: >-
           steps.metadata.outputs.update-type == 'version-update:semver-patch' &&
-          !contains(steps.metadata.outputs.dependency-names, '@anthropic-ai/claude-agent-sdk')
+          !contains(steps.metadata.outputs.dependency-names, '@anthropic-ai/claude-agent-sdk') &&
+          !contains(steps.metadata.outputs.dependency-names, '@anthropic-ai/claude-code') &&
+          !contains(steps.metadata.outputs.dependency-names, '@openai/codex')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
@@ -53,7 +54,9 @@ jobs:
       - name: Log skip for excluded or non-patch updates
         if: >-
           steps.metadata.outputs.update-type != 'version-update:semver-patch' ||
-          contains(steps.metadata.outputs.dependency-names, '@anthropic-ai/claude-agent-sdk')
+          contains(steps.metadata.outputs.dependency-names, '@anthropic-ai/claude-agent-sdk') ||
+          contains(steps.metadata.outputs.dependency-names, '@anthropic-ai/claude-code') ||
+          contains(steps.metadata.outputs.dependency-names, '@openai/codex')
         env:
           UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
           DEPENDENCY_NAMES: ${{ steps.metadata.outputs.dependency-names }}

@@ -115,6 +115,7 @@ const args = [
   wrapperPath,
   "--journal", join(directory, "journal.sqlite3"),
   "--provider-executable", pinnedExecutable,
+  "--provider-executable-sha256", executableSha256,
   ...(provider === undefined ? [] : ["--allowed-provider", provider]),
 ];
 const transport = new AdapterProcessTransport({ command: [process.execPath, ...args], environment: {}, responseTimeoutMs: 120_000 });

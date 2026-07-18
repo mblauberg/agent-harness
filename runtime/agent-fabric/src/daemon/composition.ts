@@ -136,7 +136,9 @@ export async function composeDaemonConfiguration(options: {
     }
     if (policy.providerExecutable !== undefined) {
       if (!isAbsolute(policy.providerExecutable)) throw new TypeError(`${adapterId} provider executable must be absolute`);
+      if (policy.providerExecutableSha256 === undefined) throw new TypeError(`${adapterId} provider executable has no pinned digest`);
       resolvedCommand = replaceUniqueOption(resolvedCommand, "--provider-executable", policy.providerExecutable);
+      resolvedCommand = replaceUniqueOption(resolvedCommand, "--provider-executable-sha256", policy.providerExecutableSha256);
     } else if (adapterId !== "claude-agent-sdk") {
       throw new TypeError(`${adapterId} compatibility entry has no pinned provider executable`);
     }
