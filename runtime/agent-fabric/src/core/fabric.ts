@@ -183,6 +183,8 @@ import type {
   ArtifactResult,
   AuthorityResult,
   BarrierResult,
+  BootstrapMcpSeatInput,
+  BootstrapMcpSeatResult,
   BudgetDimensionResult,
   BudgetResult,
   CapabilityRotationResult,
@@ -203,6 +205,7 @@ import type {
   TeamResult,
 } from "./contracts.js";
 import { currentMcpSeatGeneration } from "./mcp-seat-generation.js";
+import { bootstrapCurrentMcpSeat as bootstrapMcpSeatCustody } from "./bootstrap-mcp-custody.js";
 import { FabricReadPolicy } from "./read-policy.js";
 import { ArtifactRegistry } from "../artifacts/registry.js";
 import { resolveRunArtifactRoot } from "../artifacts/run-root.js";
@@ -2424,6 +2427,18 @@ export class Fabric {
         credentials,
       };
     })();
+  }
+
+  bootstrapCurrentMcpSeat(input: BootstrapMcpSeatInput): BootstrapMcpSeatResult {
+    return bootstrapMcpSeatCustody({
+      database: this.#database,
+      clock: this.#clock,
+      workspaceRoots: this.#workspaceRoots,
+      capabilityKey: this.#capabilityKey,
+      canonicalWorkspaceRoot,
+      normaliseAuthority,
+      bindCurrentMcpSeats: (binding) => this.bindCurrentMcpSeats(binding),
+    }, input);
   }
 
   connect(token: string): FabricClient {

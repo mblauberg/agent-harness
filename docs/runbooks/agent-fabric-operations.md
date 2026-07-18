@@ -214,6 +214,24 @@ narrowed authority and their own capability. Swapping Claude and Codex
 leadership requires typed handoff/takeover custody; it does not change the
 protocol or create a fallback chain.
 
+### First use in an exact trusted project
+
+An unprovisioned Claude or Codex global MCP exposes exactly one tool:
+`fabric_bootstrap`. Call it without arguments. The proxy derives its validated
+seat from `AGENT_FABRIC_SEAT` and the exact project root from its working
+directory. The daemon atomically creates one deterministic, narrow scoping run;
+the same MCP connection then emits `tools/list_changed` and exposes the normal
+Fabric tools. A concurrent second primary joins that run as its peer and rotates
+the normal two-seat generation.
+
+Bootstrap never launches a provider and accepts no model, policy, root, run or
+agent identifiers. Its fixed authority reads only the exact project root,
+writes only its bootstrap run directory and Fabric coordination/evidence, and
+denies secrets, deployment, irreversible actions and tool egress. An untrusted
+root fails closed. The local fallback is `provenant fabric bootstrap --seat
+claude|codex`; it invokes the same composition. Public `mcp provision` retains
+its full-roster requirement.
+
 In production Console, Launch is available only when the dedicated
 `projectSessions.prepareLaunch` operation and explicit operator-action commit
 surface are negotiated. The selected live Project row supplies the session

@@ -2,6 +2,8 @@ import { OPERATOR_ACTIONS, type OperatorAction } from "@local/agent-fabric-proto
 
 import type {
   BudgetResult,
+  BootstrapMcpSeatInput,
+  BootstrapMcpSeatResult,
   CurrentMcpSeatBindingInput,
   CurrentMcpSeatBindingResult,
   EventsAfterResult,
@@ -355,6 +357,26 @@ export class FabricDaemonClient {
       throw new Error("daemon returned an invalid current MCP seat binding result");
     }
     return result as CurrentMcpSeatBindingResult;
+  }
+
+  async bootstrapMcpSeat(input: BootstrapMcpSeatInput): Promise<BootstrapMcpSeatResult> {
+    const result = await this.#call("bootstrapMcpSeat", input);
+    if (
+      !isRecord(result) ||
+      typeof result.projectId !== "string" ||
+      result.canonicalRoot !== input.canonicalRoot ||
+      typeof result.bootstrapRunDirectory !== "string" ||
+      typeof result.generation !== "string" ||
+      !Array.isArray(result.credentials) ||
+      !result.credentials.every((credential) =>
+        isRecord(credential) &&
+        (credential.seat === "claude" || credential.seat === "codex") &&
+        typeof credential.agentId === "string" &&
+        isPositiveInteger(credential.expectedPrincipalGeneration) &&
+        typeof credential.capability === "string"
+      )
+    ) throw new Error("daemon returned an invalid MCP bootstrap result");
+    return result as BootstrapMcpSeatResult;
   }
 
   async provisionLocalOperator(

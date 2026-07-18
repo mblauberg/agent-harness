@@ -28,7 +28,8 @@ def test_source_wrapper_preserves_caller_cwd_for_project_seat_resolution(tmp_pat
 
     assert result.returncode == 0
     assert f"not provisioned for {tmp_path}" in result.stderr
-    assert "Fabric tools are unavailable until seats are provisioned" in result.stderr
+    assert "exact-root bootstrap is available" in result.stderr
+    assert "Fabric tools are unavailable until seats are provisioned" not in result.stderr
     assert "runtime/agent-fabric or an ancestor project" not in result.stderr
 
 

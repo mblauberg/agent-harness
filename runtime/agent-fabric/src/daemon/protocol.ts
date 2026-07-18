@@ -1,5 +1,5 @@
 import type { FabricClient } from "../core/fabric.js";
-import type { CurrentMcpSeatBindingInput } from "../core/contracts.js";
+import type { BootstrapMcpSeatInput, CurrentMcpSeatBindingInput } from "../core/contracts.js";
 import type { AuthorityInput, MessageInput, RecoveryEvidence } from "../domain/types.js";
 import { isBudgetUnitKey } from "../domain/unit-keys.js";
 import { FABRIC_PROTOCOL_LIMITS, type FabricProtocolLimits } from "../transport/bounded-ndjson.js";
@@ -781,6 +781,20 @@ export function bindCurrentMcpSeatsInput(params: Record<string, unknown>): Curre
     chairLeaseId: requiredString(params, "chairLeaseId"),
     expiresAt: requiredString(params, "expiresAt"),
     bindings,
+  };
+}
+
+export function bootstrapMcpSeatInput(params: Record<string, unknown>): BootstrapMcpSeatInput {
+  exactFields(params, ["canonicalRoot", "trustRecordDigest", "seat", "expiresAt"], "MCP zero-state bootstrap");
+  const seat = requiredString(params, "seat");
+  if (seat !== "claude" && seat !== "codex") throw new TypeError("MCP bootstrap seat must be claude or codex");
+  const trustRecordDigest = requiredString(params, "trustRecordDigest");
+  if (!/^sha256:[0-9a-f]{64}$/u.test(trustRecordDigest)) throw new TypeError("MCP bootstrap trust digest is invalid");
+  return {
+    canonicalRoot: requiredString(params, "canonicalRoot"),
+    trustRecordDigest,
+    seat,
+    expiresAt: requiredString(params, "expiresAt"),
   };
 }
 
