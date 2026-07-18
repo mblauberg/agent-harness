@@ -12,6 +12,7 @@ export type ProviderProbeRunner = (input: {
 }) => Promise<ProbeResult>;
 
 const MAX_OUTPUT = 1024 * 1024;
+const PROBE_TIMEOUT_MS = 15_000;
 
 const runProbe: ProviderProbeRunner = async (input) => await new Promise((resolve, reject) => {
   const child = spawn(input.executable, input.args, {
@@ -78,7 +79,7 @@ export async function probeProviderInterface(
         method: "initialize",
         params: { clientInfo: { name: "agent-fabric-probe", version: "1" }, capabilities: {} },
       })}\n`;
-      const result = await runner({ executable: input.executable, args: ["app-server"], stdin: request, closeOnFirstLine: true, timeoutMs: 5_000 });
+      const result = await runner({ executable: input.executable, args: ["app-server"], stdin: request, closeOnFirstLine: true, timeoutMs: PROBE_TIMEOUT_MS });
       const line = result.stdout.split(/\r?\n/u).find((item) => item.trim().length > 0);
       const response: unknown = line === undefined ? undefined : JSON.parse(line);
       const initialized = typeof response === "object" && response !== null ? Reflect.get(response, "result") : undefined;
@@ -100,7 +101,7 @@ export async function probeProviderInterface(
           clientInfo: { name: "agent-fabric-probe", version: "1" },
         },
       })}\n`;
-      const result = await runner({ executable: input.executable, args: ["acp", "--agent-engine", "v2"], stdin: request, closeOnFirstLine: true, timeoutMs: 5_000 });
+      const result = await runner({ executable: input.executable, args: ["acp", "--agent-engine", "v2"], stdin: request, closeOnFirstLine: true, timeoutMs: PROBE_TIMEOUT_MS });
       const line = result.stdout.split(/\r?\n/u).find((item) => item.trim().length > 0);
       const response: unknown = line === undefined ? undefined : JSON.parse(line);
       const negotiated = typeof response === "object" && response !== null ? Reflect.get(response, "result") : undefined;
@@ -116,8 +117,8 @@ export async function probeProviderInterface(
     const flags = REQUIRED_FLAGS[input.adapterId];
     if (flags === undefined) throw new Error(`no interface probe is defined for ${input.adapterId}`);
     const [help, version] = await Promise.all([
-      runner({ executable: input.executable, args: ["--help"], timeoutMs: 5_000 }),
-      runner({ executable: input.executable, args: ["--version"], timeoutMs: 5_000 }),
+      runner({ executable: input.executable, args: ["--help"], timeoutMs: PROBE_TIMEOUT_MS }),
+      runner({ executable: input.executable, args: ["--version"], timeoutMs: PROBE_TIMEOUT_MS }),
     ]);
     const helpText = `${help.stdout}\n${help.stderr}`;
     if (help.exitCode !== 0 || version.exitCode !== 0 || flags.some((flag) => !helpText.includes(flag))) {
