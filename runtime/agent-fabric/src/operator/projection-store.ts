@@ -33,9 +33,7 @@ import type {
   ProjectionEventsResult,
   ProjectionEvent,
   DeclaredRunProgress,
-  RunIdentity,
   RunProjection,
-  RunWorkstreamIdentity,
   Timestamp,
 } from "@local/agent-fabric-protocol";
 import {
@@ -55,6 +53,7 @@ import type { AuthenticatedOperatorCredential, OperatorStore } from "./store.js"
 import { renderSafeMessageBody } from "./message-safety.js";
 import { HERDR_CONTROL_ADAPTER_ID } from "../integrations/herdr-fabric-ports.js";
 import { readControlEligibility, type ResolvedControlTarget } from "./control-eligibility.js";
+import { projectRunIdentity } from "./run-identity-projection.js";
 
 export type OperatorProjectionStoreOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
@@ -1258,7 +1257,7 @@ export class OperatorProjectionStore {
               ? { declaredProgress: this.#declaredRunProgress(runId) }
               : {}),
             ...(runIdentityProjection === "include"
-              ? { identity: this.#runIdentity(run) }
+              ? { identity: projectRunIdentity(this.#database, run) }
               : {}),
           },
           detailRef: {
@@ -1655,69 +1654,9 @@ export class OperatorProjectionStore {
           ? { declaredProgress: this.#declaredRunProgress(detailRef.coordinationRunId) }
           : {}),
         ...(runIdentityProjection === "include"
-          ? { identity: this.#runIdentity(stored) }
+          ? { identity: projectRunIdentity(this.#database, stored) }
           : {}),
       },
-    };
-  }
-
-  /**
-   * Fabric-declared run identity for one coordination run row: the run kind,
-   * the chair as coordination lead, the explicit delivery-workstream
-   * parent/child group and the run's last committed event time. Every field
-   * is read from the runs/workstreams/events tables in the caller's open
-   * transaction; a stored workstream state outside the closed contract fails
-   * the read rather than projecting a fabricated state. Accepted-scope and
-   * current-plan refs are deferred to the plan-declaration package.
-   */
-  #runIdentity(run: Row): RunIdentity {
-    const runId = text(run, "run_id");
-    const workstreams = this.#database.prepare(`
-      SELECT workstream_id, delivery_run_id, lead_agent_id, state, updated_at
-        FROM workstreams WHERE coordination_run_id=?
-       ORDER BY workstream_id
-    `).all(runId).map((value): RunWorkstreamIdentity => {
-      const workstream = row(value, "run workstream identity");
-      const state = text(workstream, "state");
-      if (
-        state !== "active" && state !== "complete" && state !== "cancelled" &&
-        state !== "degraded" && state !== "abandoned"
-      ) {
-        throw new ProjectFabricCoreError(
-          "RECOVERY_REQUIRED",
-          `stored workstream state is outside the closed contract: ${state}`,
-        );
-      }
-      return {
-        workstreamId: parseIdentifier<"WorkstreamId">(
-          text(workstream, "workstream_id"),
-          "runIdentity.workstreamId",
-        ),
-        deliveryRunId: parseIdentifier<"DeliveryRunId">(
-          text(workstream, "delivery_run_id"),
-          "runIdentity.deliveryRunId",
-        ),
-        leadAgentId: parseIdentifier<"AgentId">(
-          text(workstream, "lead_agent_id"),
-          "runIdentity.leadAgentId",
-        ),
-        state,
-        lastEventAt: toTimestamp(integer(workstream, "updated_at"), "runIdentity.workstreamLastEventAt"),
-      };
-    });
-    const lastEvent = this.#database.prepare(`
-      SELECT MAX(created_at) AS last_event_at FROM events WHERE run_id=?
-    `).get(runId);
-    const lastEventAt = isRow(lastEvent) &&
-        typeof lastEvent.last_event_at === "number" &&
-        Number.isSafeInteger(lastEvent.last_event_at)
-      ? lastEvent.last_event_at
-      : integer(run, "created_at");
-    return {
-      runKind: "coordination",
-      chairAgentId: parseIdentifier<"AgentId">(text(run, "chair_agent_id"), "runIdentity.chairAgentId"),
-      workstreams,
-      lastEventAt: toTimestamp(lastEventAt, "runIdentity.lastEventAt"),
     };
   }
 

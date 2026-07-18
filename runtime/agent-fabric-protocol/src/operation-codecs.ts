@@ -2489,7 +2489,7 @@ const runWorkstreamIdentityCodec = objectCodec({
   deliveryRunId: identifier,
   leadAgentId: identifier,
   state: enumeration(["active", "complete", "cancelled", "degraded", "abandoned"]),
-  lastEventAt: timestamp,
+  updatedAt: timestamp,
 });
 // The coordination arm is the only current run-kind arm. Accepted-scope and
 // current-plan refs are deliberately deferred to the plan-declaration
@@ -2499,7 +2499,7 @@ const runIdentityCodec = objectCodec({
   runKind: literal("coordination"),
   chairAgentId: identifier,
   workstreams: arrayOf(runWorkstreamIdentityCodec, { maximum: 1024 }),
-  lastEventAt: timestamp,
+  lastEventAt: nullable(timestamp),
 });
 const runSummaryCodec = objectCodec({
   kind: literal("run"),

@@ -51,14 +51,14 @@ export function runDetailLines(summary: ConsoleRunSummary): readonly RunDetailLi
     { label: "Progress", value: declaredProgressDetailLabel(summary.declaredProgress) },
     { label: "Run kind", value: identity.runKind },
     { label: "Lead", value: identity.chairAgentId },
-    { label: "Last event", value: identity.lastEventAt },
+    { label: "Last event", value: identity.lastEventAt ?? "none recorded" },
     ...(identity.workstreams.length === 0
       ? [{ label: "Workstreams", value: "none recorded" }]
       : identity.workstreams.map((workstream) => ({
           label: `Workstream ${workstream.workstreamId}`,
           value: `delivery ${workstream.deliveryRunId} | lead ${workstream.leadAgentId} | ${
             workstream.state
-          } | last event ${workstream.lastEventAt}`,
+          } | updated ${workstream.updatedAt}`,
         }))),
   ];
 }

@@ -327,7 +327,7 @@ describe("declared run progress fail-closed mapping", () => {
       deliveryRunId: "delivery_01",
       leadAgentId: "lead_01",
       state: "active",
-      lastEventAt: observedAt,
+      updatedAt: observedAt,
     }],
     lastEventAt: observedAt,
   };

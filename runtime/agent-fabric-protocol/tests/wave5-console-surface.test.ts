@@ -1251,7 +1251,7 @@ describe("negotiated run-identity result shape", () => {
     deliveryRunId: "delivery_01",
     leadAgentId: "lead_01",
     state: "active",
-    lastEventAt: observedAt,
+    updatedAt: observedAt,
   } as const;
   const coordinationIdentity = {
     runKind: "coordination",
@@ -1305,7 +1305,11 @@ describe("negotiated run-identity result shape", () => {
   });
 
   it("accepts the coordination identity arm with and without workstreams on rows and detail", () => {
-    for (const identity of [coordinationIdentity, { ...coordinationIdentity, workstreams: [] }]) {
+    for (const identity of [
+      coordinationIdentity,
+      { ...coordinationIdentity, workstreams: [] },
+      { ...coordinationIdentity, lastEventAt: null },
+    ]) {
       expect(parseOperationResult(
         FABRIC_OPERATIONS.projectionViewPage,
         runsPage({ ...legacySummary, identity }),

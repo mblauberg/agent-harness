@@ -2753,7 +2753,7 @@ describe("run identity presentation", () => {
       runKind: "coordination",
       chairAgentId: "agent-chair" as never,
       workstreams: [],
-      lastEventAt: timestamp,
+      lastEventAt: null,
     });
     const presented = presentFabricConsole(
       dataset,
@@ -2764,7 +2764,7 @@ describe("run identity presentation", () => {
     expect(presented.masterRows[0]?.secondary).toContain("coordination");
     expect(presented.detail?.lines).toContainEqual({ label: "Run kind", value: "coordination" });
     expect(presented.detail?.lines).toContainEqual({ label: "Lead", value: "agent-chair" });
-    expect(presented.detail?.lines).toContainEqual({ label: "Last event", value: timestamp });
+    expect(presented.detail?.lines).toContainEqual({ label: "Last event", value: "none recorded" });
     expect(presented.detail?.lines).toContainEqual({ label: "Workstreams", value: "none recorded" });
   });
 
@@ -2778,14 +2778,14 @@ describe("run identity presentation", () => {
           deliveryRunId: "delivery-console" as never,
           leadAgentId: "agent-console-lead" as never,
           state: "active",
-          lastEventAt: timestamp,
+          updatedAt: timestamp,
         },
         {
           workstreamId: "ws-docs" as never,
           deliveryRunId: "delivery-docs" as never,
           leadAgentId: "agent-docs-lead" as never,
           state: "complete",
-          lastEventAt: timestamp,
+          updatedAt: timestamp,
         },
       ],
       lastEventAt: timestamp,
@@ -2802,11 +2802,11 @@ describe("run identity presentation", () => {
     expect(presented.masterRows[0]?.secondary).toContain("coordination | 2 workstreams");
     expect(presented.detail?.lines).toContainEqual({
       label: "Workstream ws-console",
-      value: `delivery delivery-console | lead agent-console-lead | active | last event ${timestamp}`,
+      value: `delivery delivery-console | lead agent-console-lead | active | updated ${timestamp}`,
     });
     expect(presented.detail?.lines).toContainEqual({
       label: "Workstream ws-docs",
-      value: `delivery delivery-docs | lead agent-docs-lead | complete | last event ${timestamp}`,
+      value: `delivery delivery-docs | lead agent-docs-lead | complete | updated ${timestamp}`,
     });
   });
 });

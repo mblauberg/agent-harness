@@ -101,21 +101,23 @@ export type DeclaredRunProgress =
 
 /**
  * One delivery workstream inside its coordination run's explicit parent/child
- * identity group. Every field is a Fabric-owned workstream fact; state is the
- * closed stored workstream state, never inferred from panes or processes.
+ * identity group. Every field is a Fabric-owned workstream fact; state and
+ * update time come from the stored workstream row, never from an inferred
+ * process or event.
  */
 export type RunWorkstreamIdentity = {
   workstreamId: WorkstreamId;
   deliveryRunId: DeliveryRunId;
   leadAgentId: AgentId;
   state: "active" | "complete" | "cancelled" | "degraded" | "abandoned";
-  lastEventAt: Timestamp;
+  updatedAt: Timestamp;
 };
 
 /**
  * Fabric-declared run identity. The current cut carries the coordination arm
  * only: the run kind, the chair as the coordination lead, the explicit
- * delivery-workstream parent/child group and the run's last-event time.
+ * delivery-workstream parent/child group and the run's latest committed event
+ * time when one exists.
  *
  * Accepted-scope and current-plan refs are deliberately deferred: no
  * run-level scope or plan binding authority exists in Fabric yet, so they
@@ -126,7 +128,7 @@ export type RunIdentity = {
   runKind: "coordination";
   chairAgentId: AgentId;
   workstreams: readonly RunWorkstreamIdentity[];
-  lastEventAt: Timestamp;
+  lastEventAt: Timestamp | null;
 };
 
 export type OperatorProjectionSnapshot = {

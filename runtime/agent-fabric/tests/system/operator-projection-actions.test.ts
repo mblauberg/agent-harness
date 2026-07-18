@@ -1139,7 +1139,7 @@ describe("operator projection store", () => {
         deliveryRunId: "delivery_01",
         leadAgentId: "lead_01",
         state: "active",
-        lastEventAt: new Date(now - 700).toISOString(),
+        updatedAt: new Date(now - 700).toISOString(),
       }],
       lastEventAt: new Date(now - 300).toISOString(),
     };
@@ -1189,6 +1189,94 @@ describe("operator projection store", () => {
       throw new Error("expected a live unnegotiated run detail");
     }
     expect(detailUnnegotiated.detail.value).not.toHaveProperty("identity");
+  });
+
+  it("reports no last event instead of relabelling run creation time", () => {
+    const fixture = setupProjection();
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    fixture.database.prepare(`
+      DELETE FROM observer_event_sequence
+       WHERE event_id IN (SELECT event_id FROM events WHERE run_id='run_01')
+    `).run();
+    fixture.database.prepare("DELETE FROM events WHERE run_id='run_01'").run();
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+
+    const result = fixture.projections.viewPage({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "runs",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 5,
+    }, "include", "include", "include", "include");
+
+    expect(result).toMatchObject({
+      status: "page",
+      rows: [{ fact: { value: { summary: { identity: { lastEventAt: null } } } } }],
+    });
+  });
+
+  it("fails closed before a run identity exceeds its 1024-workstream contract", () => {
+    const fixture = setupProjection();
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    fixture.database.exec(`
+      INSERT INTO agents(run_id, agent_id, authority_id, provider_session_ref, lifecycle)
+      VALUES ('run_01', 'lead_bound', 'authority_01', 'provider_session_bound', 'ready');
+      WITH RECURSIVE sequence(value) AS (
+        SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 1024
+      )
+      INSERT INTO workstreams(
+        workstream_id, project_session_id, coordination_run_id, fabric_task_id,
+        lead_agent_id, delivery_run_id, revision, state, created_at, updated_at
+      )
+      SELECT
+        printf('ws_bound_%04d', value), 'session_01', 'run_01', 'task_01',
+        'lead_bound', printf('delivery_bound_%04d', value), 1, 'active', ${String(now)}, ${String(now)}
+      FROM sequence;
+    `);
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    const request: OperatorViewPageRequest<"runs"> = {
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "runs",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 5,
+    };
+
+    expect(fixture.projections.viewPage(request, "include", "include", "include", "include"))
+      .toMatchObject({ status: "page", rows: [{ fact: { value: { summary: { identity: {
+        workstreams: expect.arrayContaining([expect.objectContaining({ workstreamId: "ws_bound_1024" })]),
+      } } } } }] });
+
+    fixture.database.prepare(`
+      INSERT INTO workstreams(
+        workstream_id, project_session_id, coordination_run_id, fabric_task_id,
+        lead_agent_id, delivery_run_id, revision, state, created_at, updated_at
+      ) VALUES ('ws_bound_1025', 'session_01', 'run_01', 'task_01', 'lead_bound',
+                'delivery_bound_1025', 1, 'active', ?, ?)
+    `).run(now, now);
+
+    const overflowSnapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    const overflowRequest = { ...request, snapshotRevision: overflowSnapshot.snapshotRevision };
+    expect(() => fixture.projections.viewPage(overflowRequest, "include", "include", "include", "include"))
+      .toThrowError(expect.objectContaining({ code: "RESOURCE_EXHAUSTED" }));
   });
 
   it("fails a run identity read closed when a stored workstream state leaves the contract", () => {
