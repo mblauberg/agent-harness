@@ -73,6 +73,15 @@ export type IssueLocalOperatorSessionCapabilityInput = {
   launchEnvelopeExpiresAt: string;
 };
 
+export type OpenLocalOperatorTakeoverCapabilityInput = {
+  projectId: string;
+  canonicalRoot: string;
+  trustRecordDigest: string;
+  projectCapability: { capabilityId: string; token: string };
+  projectSessionId: string;
+  expiresAt: string;
+};
+
 export type RotateLocalOperatorPrincipalInput = {
   projectId: string;
   operatorId: string;
@@ -859,6 +868,32 @@ export function issueLocalOperatorSessionCapabilityInput(
     actions: uniqueActions(params.actions, allowed, "actions"),
     expiresAt: requiredString(params, "expiresAt"),
     launchEnvelopeExpiresAt: requiredString(params, "launchEnvelopeExpiresAt"),
+  };
+}
+
+export function openLocalOperatorTakeoverCapabilityInput(
+  params: Record<string, unknown>,
+): OpenLocalOperatorTakeoverCapabilityInput {
+  exactFields(params, [
+    "projectId",
+    "canonicalRoot",
+    "trustRecordDigest",
+    "projectCapability",
+    "projectSessionId",
+    "expiresAt",
+  ], "local operator takeover capability");
+  const projectCapability = requiredRecord(params, "projectCapability");
+  exactFields(projectCapability, ["capabilityId", "token"], "project capability credential");
+  return {
+    projectId: requiredString(params, "projectId"),
+    canonicalRoot: requiredString(params, "canonicalRoot"),
+    trustRecordDigest: requiredString(params, "trustRecordDigest"),
+    projectCapability: {
+      capabilityId: requiredString(projectCapability, "capabilityId"),
+      token: requiredString(projectCapability, "token"),
+    },
+    projectSessionId: requiredString(params, "projectSessionId"),
+    expiresAt: requiredString(params, "expiresAt"),
   };
 }
 

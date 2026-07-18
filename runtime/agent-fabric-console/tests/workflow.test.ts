@@ -553,11 +553,11 @@ describe("typed Console workflow planner", () => {
       runId: "run_implement",
       budgetRef: "budget_workflow",
       scopes: {
-        project: { scopeId: "scope_project", limits: { concurrent_turns: 2 } },
-        projectSession: { scopeId: "scope_session", limits: { concurrent_turns: 2 } },
-        coordinationRun: { scopeId: "scope_run", limits: { concurrent_turns: 1 } },
+        project: { scopeId: "scope_project", limits: { provider_calls: 2, concurrent_turns: 2 } },
+        projectSession: { scopeId: "scope_session", limits: { provider_calls: 2, concurrent_turns: 2 } },
+        coordinationRun: { scopeId: "scope_run", limits: { provider_calls: 1, concurrent_turns: 1 } },
       },
-      launchReservation: { amounts: { concurrent_turns: 1 } },
+      launchReservation: { amounts: { provider_calls: 1, concurrent_turns: 1 } },
     };
     const packet = {
       schemaVersion: 1,
@@ -585,7 +585,7 @@ describe("typed Console workflow planner", () => {
         irreversibleActions: { allowed: false },
         network: { toolEgress: "none" },
         expiresAt: "2026-07-18T01:00:00.000Z",
-        budget: { concurrent_turns: 1 },
+        budget: { provider_calls: 1, concurrent_turns: 1 },
       },
       provider: {
         adapterId: "claude-agent-sdk",
