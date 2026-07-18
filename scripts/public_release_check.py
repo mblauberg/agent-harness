@@ -20,17 +20,28 @@ from typing import Callable, Iterator, Mapping
 
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED = {
-    "ACKNOWLEDGEMENTS.md",
-    "README.md",
+REQUIRED_LEGAL_FILES = frozenset({
     "LICENSE",
     "NOTICE",  # Apache-2.0 §4(d) attribution aggregate (Epic #124 Workstream E)
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSES/grill-me-pocock-MIT.txt",
+    "LICENSES/impeccable-APACHE-2.0.txt",
+    "LICENSES/modern-screenshot-MIT.txt",
+    "LICENSES/playwright-cli-APACHE-2.0.txt",
+    "LICENSES/skill-optimizer-MIT.txt",
+    "LICENSES/typescript-clean-code-bmad-MIT.txt",
+    "LICENSES/ui-ux-pro-max-MIT.txt",
+    "LICENSES/vercel-react-best-practices-MIT.txt",
+})
+REQUIRED_PUBLIC_FILES = frozenset({
+    "ACKNOWLEDGEMENTS.md",
+    "README.md",
     "MAINTAINING.md",
     "SECURITY.md",
-    "THIRD_PARTY_NOTICES.md",
     "docs/ARCHITECTURE.md",
     "docs/worktrees.md",
-}
+})
+REQUIRED = REQUIRED_LEGAL_FILES | REQUIRED_PUBLIC_FILES
 FORBIDDEN_TRACKED = {
     ".DS_Store",
     ".claude/settings.local.json",
@@ -2002,9 +2013,12 @@ def tracked_files() -> list[str]:
 
 def scan_paths(paths: list[str], root: Path = ROOT) -> list[str]:
     errors: list[str] = []
+    tracked = set(paths)
     for required in sorted(REQUIRED):
         if not (root / required).is_file():
             errors.append(f"missing required public file: {required}")
+        elif required not in tracked:
+            errors.append(f"required public file is not tracked: {required}")
     for relative in paths:
         if relative in FORBIDDEN_TRACKED or any(relative.startswith(p) for p in FORBIDDEN_PREFIXES):
             errors.append(f"forbidden tracked path: {relative}")
