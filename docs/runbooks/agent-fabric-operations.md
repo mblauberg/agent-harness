@@ -207,9 +207,14 @@ Every client uses a separate stdio proxy process:
 ```text
 AGENT_FABRIC_SOCKET_PATH=<same socket>
 AGENT_FABRIC_STATE_DIRECTORY=<private fabric state directory>
-AGENT_FABRIC_SEAT=<agy|claude|codex|cursor|kiro>
+AGENT_FABRIC_SEAT=<claude|codex>
+AGENT_FABRIC_CLIENT_LABEL=<agy|claude|codex|cursor|kiro|opencode>
 scripts/agent-fabric-mcp
 ```
+
+The seat selects one of Fabric's two primary MCP identities. The client label
+identifies the connecting surface; optional clients use the `codex` seat and
+retain their own label.
 
 Reviewed operator launch custody creates the project session, run and one
 generation-fenced chair. Agents cannot create runs through MCP. Peers receive
