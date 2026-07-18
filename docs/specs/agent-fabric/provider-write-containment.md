@@ -4,9 +4,10 @@
 
 This specification owns the fixed containment matrix for
 `workspace-write-offline`. [Issue
-#22](https://github.com/mblauberg/provenant/issues/22) owns current delivery,
-execution and decision state. This specification grants no implementation,
-provider-call or write authority.
+#22](https://github.com/mblauberg/provenant/issues/22) records its completed
+delivery and decision history. This specification grants no implementation,
+provider-call or write authority; a change requires a current linked GitHub
+issue and Project Status.
 
 This specification is the live matrix owner. The superseded implementation
 pack was retired from the working tree under [issue

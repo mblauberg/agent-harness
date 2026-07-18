@@ -6,7 +6,7 @@ Provenant is an agent harness: a gated delivery lifecycle for coding agents.
 This repository is an operating system for agent work, not a prompt collection.
 It implements a general agentic SDLC that can be used for software, research,
 analysis, documentation and other evidence-bearing work. The objective is
-quality per human attention-hour: agents create depth and verification; humans
+quality per user attention-hour: agents create depth and verification; users
 retain scarce judgement at consequential gates.
 
 `AGENTS.md` is the tiny bootstrap every operator sees. `HARNESS.md` is the
@@ -14,14 +14,14 @@ compact runtime constitution. Skills load procedural depth only when triggered.
 This document preserves the design intent so future maintainers can change the
 harness without rediscovering it from individual skills.
 
-## Lifecycle and human gates
+## Lifecycle and user gates
 
 Every run takes the same shape; what scales with risk is review pressure. At
 `routine`, the chair plus objective and native checks are enough, so routine work
 can complete without the other family. From `substantial` up, the review leg owes
 both a fresh-context native reviewer and the other primary, and
 `skills/deliver/scripts/validate_delivery.py` fails any receipt that reaches
-acceptance missing either. The three gold gates are the only places a human must
+acceptance missing either. The three gold gates are the only places a user must
 decide; everything inside the `deliver` kernel is agent work bound to one receipt.
 
 One palette carries the whole document. Every diagram below uses it, and no
@@ -29,7 +29,7 @@ colour means two things:
 
 | Colour | Meaning |
 |---|---|
-| Gold | a human decides here |
+| Gold | a user decides here |
 | Green | a blocking leg: it can stop the run |
 | Purple | an advisory leg: it never blocks, and a skipped leg is recorded |
 | Blue | a participant that authors or decides, and so may never certify |
@@ -43,10 +43,10 @@ a run. Purple is reserved for the bonus families, which never can.
 
 ```mermaid
 flowchart TB
-    accTitle: The full delivery lifecycle and its three human gates
-    accDescr: Session prepares context and scope produces the specification, risk tier and authority. A human gate approves the specification or sends it back to scope. Inside the deliver kernel, execute runs implement, tdd, refactor or diagnose, then deterministic verification runs, then a separate conditional evaluate gate runs only when behaviour is stochastic or judgement bearing, then an independent review in a fresh context that never authored the work. Review pressure scales with risk: routine work needs only the chair and its native checks, while substantial and above owe both a fresh native reviewer and the other primary family. A failed check or a blocking finding returns to execute for a repair budget scaled to task complexity, roughly 1-2 cycles for routine work and up to 5 for complex work — a guardrail against unbounded loops, not a target. The human acceptance gate accepts, rescopes or stops. Any external action needs a separate human authorisation before release and observation. A failed observation opens diagnose. Every path that returns work to scope, a structural review finding, a rescope at the acceptance gate, diagnostic evidence and the retrospect flywheel, converges on one back-to-scope collector rather than five separate return edges.
+    accTitle: The full delivery lifecycle and its three user gates
+    accDescr: Session prepares context and scope produces the specification, risk tier and authority. A user gate approves the specification or sends it back to scope. Inside the deliver kernel, execute runs implement, tdd, refactor or diagnose, then deterministic verification runs, then a separate conditional evaluate gate runs only when behaviour is stochastic or judgement bearing, then an independent review in a fresh context that never authored the work. Review pressure scales with risk: routine work needs only the chair and its native checks, while substantial and above owe both a fresh native reviewer and the other primary family. A failed check or a blocking finding returns to execute for a repair budget scaled to task complexity, roughly 1-2 cycles for routine work and up to 5 for complex work — a guardrail against unbounded loops, not a target. The user acceptance gate accepts, rescopes or stops. Any external action needs a separate user authorisation before release and observation. A failed observation opens diagnose. Every path that returns work to scope, a structural review finding, a rescope at the acceptance gate, diagnostic evidence and the retrospect flywheel, converges on one back-to-scope collector rather than five separate return edges.
     SE(["session"]) --> SC["scope<br/>spec, risk tier, authority"]
-    SC --> G1{{"HUMAN GATE<br/>approve spec, risk tier, one-way doors"}}
+    SC --> G1{{"USER GATE<br/>approve spec, risk tier, one-way doors"}}
     G1 -. "send back" .-> SC
     G1 == "authority" ==> DEL
 
@@ -62,10 +62,10 @@ flowchart TB
       RV -. "repair, at most 2 cycles" .-> EX
     end
 
-    RV --> G2{{"HUMAN GATE<br/>acceptance"}}
+    RV --> G2{{"USER GATE<br/>acceptance"}}
     G2 -. "stop" .-> HALT(["stop"])
     G2 -- "accept" --> RT["retrospect"]
-    G2 == "accept, external action" ==> G3{{"HUMAN GATE<br/>authorise the external action"}}
+    G2 == "accept, external action" ==> G3{{"USER GATE<br/>authorise the external action"}}
     G3 --> RL["release and observe"]
     RL -. "observation failed" .-> DG["diagnose"]
     RL --> RT
@@ -76,10 +76,10 @@ flowchart TB
     RT == "flywheel: next cycle" ==> RS
     RS(["back to scope"]) ==> SC
 
-    classDef human fill:#8a6d1f,stroke:#f0c674,color:#ffffff,stroke-width:2px
+    classDef user fill:#8a6d1f,stroke:#f0c674,color:#ffffff,stroke-width:2px
     classDef blocking fill:#2c6e49,stroke:#8fd0aa,color:#ffffff,stroke-width:2px
     classDef inert fill:#57606a,stroke:#adb5bd,color:#ffffff,stroke-width:2px
-    class G1,G2,G3 human
+    class G1,G2,G3 user
     class VF,EV,RV blocking
     class HALT inert
     style DEL fill:none,stroke:#6e7781,stroke-width:1px
@@ -108,7 +108,7 @@ instead of accumulating retrospective logs. `autopilot` adds crash-safe
 persistence for genuinely sprawling run-until-STOP work, but does not replace
 the ordinary delivery loop.
 
-Human approval is required for:
+User approval is required for:
 
 - the specification and unresolved acceptance criteria;
 - one-way-door architecture and risk-tier downgrades;
@@ -125,7 +125,7 @@ stream of micro-approvals.
 its portable state machine. It selects one profile from
 `config/delivery-profiles.json`: software, research, analysis, document or
 agent product. The high-stakes overlay adds source-authority, privacy,
-qualified-review and explicit human-action controls without multiplying the
+qualified-review and explicit user-action controls without multiplying the
 base profiles.
 
 The state machine is enforced rather than advisory.
@@ -136,12 +136,12 @@ the ones a run can actually occupy.
 ```mermaid
 stateDiagram-v2
     accTitle: The delivery-run state machine
-    accDescr: A delivery run moves through twelve normal states: draft, scoped, approved, executing, verifying, reviewing, repairing, awaiting_acceptance, accepted, awaiting_release, observing and closed. Verifying returns to executing when a deterministic check fails. Reviewing returns to repairing when a blocking finding stands, and repairing returns to verifying so that a repair is re-verified rather than trusted. Awaiting_acceptance also returns to repairing when the human sends the work back. Three side states, blocked, cancelled and degraded, sit apart from the normal lifecycle. Any normal state may be interrupted into one of them, and recovery resumes exactly the interrupted state, so they are drawn as a separate group rather than wired to every state.
+    accDescr: A delivery run moves through twelve normal states: draft, scoped, approved, executing, verifying, reviewing, repairing, awaiting_acceptance, accepted, awaiting_release, observing and closed. Verifying returns to executing when a deterministic check fails. Reviewing returns to repairing when a blocking finding stands, and repairing returns to verifying so that a repair is re-verified rather than trusted. Awaiting_acceptance also returns to repairing when the user sends the work back. Three side states, blocked, cancelled and degraded, sit apart from the normal lifecycle. Any normal state may be interrupted into one of them, and recovery resumes exactly the interrupted state, so they are drawn as a separate group rather than wired to every state.
     [*] --> draft
 
     state "normal lifecycle" as run {
         draft --> scoped
-        scoped --> approved : human approves the spec
+        scoped --> approved : user approves the spec
         approved --> executing : authority granted
         executing --> verifying
         verifying --> executing : deterministic check failed
@@ -149,8 +149,8 @@ stateDiagram-v2
         reviewing --> repairing : blocking finding
         reviewing --> awaiting_acceptance : review clean
         repairing --> verifying : the repair is re-verified
-        awaiting_acceptance --> repairing : human sends the work back
-        awaiting_acceptance --> accepted : human accepts
+        awaiting_acceptance --> repairing : user sends the work back
+        awaiting_acceptance --> accepted : user accepts
         accepted --> awaiting_release
         awaiting_release --> observing : external action authorised
         observing --> closed : observation passes
@@ -164,11 +164,11 @@ stateDiagram-v2
         degraded
     }
 
-    classDef human fill:#8a6d1f,stroke:#f0c674,color:#ffffff,stroke-width:2px
+    classDef user fill:#8a6d1f,stroke:#f0c674,color:#ffffff,stroke-width:2px
     classDef blocking fill:#2c6e49,stroke:#8fd0aa,color:#ffffff,stroke-width:2px
     classDef interrupt fill:#8b3a3a,stroke:#e8a0a0,color:#ffffff,stroke-width:2px
     classDef inert fill:#57606a,stroke:#adb5bd,color:#ffffff,stroke-width:2px
-    class approved,awaiting_acceptance,accepted,awaiting_release human
+    class approved,awaiting_acceptance,accepted,awaiting_release user
     class verifying,reviewing blocking
     class blocked,cancelled,degraded interrupt
     class closed inert
@@ -184,7 +184,7 @@ gate. `validate_delivery.py` enforces that rule, not the picture.
 Repair is the transition that people get wrong. `repairing` returns to
 `verifying`, never straight to acceptance, so a repair is re-verified rather
 than trusted, and `repair_cycles` must equal the number of `repairing`
-transitions in the recorded history. A human at `awaiting_acceptance` can send
+transitions in the recorded history. A user at `awaiting_acceptance` can send
 the work back to `repairing` as well as accept it. `closed` requires a passing
 observation.
 
@@ -218,17 +218,17 @@ design decision and `engineering-docs` owns canonical placement. `playwright`,
 UI finding contract. `caveman` is a presentation overlay only; it cannot narrow
 evidence, authority, high-stakes clarity or an artifact's domain-writing rules.
 
-`release` promotes one digest-pinned, human-accepted artifact through a separately
+`release` promotes one digest-pinned, user-accepted artifact through a separately
 authorised `deploy`, `publish`, `share`, `send` or `activate` action. Targets are
 typed as environments, recipients or audiences; execution may use an approved
-command, connector or named human operation. Completion requires target-visible
+command, connector or named user operation. Completion requires target-visible
 proof and an observation/reversal contract; a successful command by itself is
 not proof.
 
 ## Equal primaries, accountable ownership
 
 Claude Code and Codex are equal primary orchestrators. Whichever harness the
-human starts is the session chair and owns authority, user communication, run
+user starts is the session chair and owns authority, user communication, run
 state and synthesis. On substantial work it combines:
 
 1. native same-family subagents for parallel depth, which author and so may never
@@ -242,7 +242,7 @@ Legs 2 and 3 both load-bear from `substantial` up.
 Bonus-family failure never blocks the workflow. The other primary is required for
 the substantial review contract, and there is no degradation note that buys past
 it: a run may execute without that leg, but `validate_delivery.py` rejects the
-receipt once it reaches acceptance. The only relief is a human-approved risk
+receipt once it reaches acceptance. The only relief is a user-approved risk
 downgrade carrying an approver, a reason and evidence.
 Provider-backed external workers, including the other primary, Agy/Gemini and
 other bonus families, run through Agent Fabric. Direct CLIs are preflight or an
@@ -255,10 +255,10 @@ cannot.
 ```mermaid
 flowchart TB
     accTitle: Review topology, blocking and non-blocking legs
-    accDescr: The human starts one client, and that client is the session chair. The chair fans out to native authoring subagents in its own family for parallel depth; because they write the work they may never certify it, and neither may the chair, which decides. Review then runs on two load-bearing legs from the substantial tier upwards. The first is a fresh-context native reviewer in the chair's own family that never authored the surface under review. The second reaches the other primary family through Agent Fabric. Both legs are drawn solid because either can block the run, and the delivery validator rejects a receipt that reaches acceptance missing either one. Bonus families such as Gemini and xAI attach through the same fabric as advisory pressure, drawn dashed because they never block on absence, quota or failure; a skipped leg is recorded. Herdr observes and wakes, drawn dotted, and never decides. Only a participant that neither authored nor decided the surface may sign the certificate.
-    HU(["human"]) ==> CH
+    accDescr: The user starts one client, and that client is the session chair. The chair fans out to native authoring subagents in its own family for parallel depth; because they write the work they may never certify it, and neither may the chair, which decides. Review then runs on two load-bearing legs from the substantial tier upwards. The first is a fresh-context native reviewer in the chair's own family that never authored the surface under review. The second reaches the other primary family through Agent Fabric. Both legs are drawn solid because either can block the run, and the delivery validator rejects a receipt that reaches acceptance missing either one. Bonus families such as Gemini and xAI attach through the same fabric as advisory pressure, drawn dashed because they never block on absence, quota or failure; a skipped leg is recorded. Herdr observes and wakes, drawn dotted, and never decides. Only a participant that neither authored nor decided the surface may sign the certificate.
+    HU(["user"]) ==> CH
 
-    CH["session chair<br/>the client the human started<br/>owns authority, run state, gates, synthesis<br/>it decides, so it never certifies"]
+    CH["session chair<br/>the client the user started<br/>owns authority, run state, gates, synthesis<br/>it decides, so it never certifies"]
 
     CH ==> SUB["native authoring subagents<br/>same family, parallel depth<br/>they author, so they never certify"]
     SUB ==> CH
@@ -276,13 +276,13 @@ flowchart TB
     CERT ==> CH
     HD["Herdr<br/>panes and wake signals"] -. "observes and wakes, never decides" .-> CH
 
-    classDef human fill:#8a6d1f,stroke:#f0c674,color:#ffffff,stroke-width:2px
+    classDef user fill:#8a6d1f,stroke:#f0c674,color:#ffffff,stroke-width:2px
     classDef actor fill:#1f5f8b,stroke:#7fb3d5,color:#ffffff,stroke-width:2px
     classDef transport fill:#2a6b7c,stroke:#8fcfdd,color:#ffffff,stroke-width:2px
     classDef blocking fill:#2c6e49,stroke:#8fd0aa,color:#ffffff,stroke-width:2px
     classDef advisory fill:#5a4b8a,stroke:#c0a8e8,color:#ffffff,stroke-width:2px
     classDef inert fill:#57606a,stroke:#adb5bd,color:#ffffff,stroke-width:2px
-    class HU human
+    class HU user
     class CH,SUB actor
     class AF transport
     class NRV,OP,CERT blocking
@@ -372,7 +372,7 @@ excluded from context scans.
 harness-owned skill links. A versioned manifest records ownership, source
 tree digests, the bound target and rename history beside the target skills
 directory. Unmanaged paths are never claimed or overwritten; changed managed
-targets fail for human resolution and link
+targets fail for user resolution and link
 mutations roll back if the manifest commit fails.
 Provider bootstraps remain small and share the same precedence sentence.
 
@@ -416,7 +416,7 @@ packs are research inputs, not wholesale imports.
 
 Substantial runs record risk and authority, chair/stage ownership, actual model
 lineage, checks and evals, reviewer independence, repair cycles, disagreements,
-degradation, retained artifacts and human-gate state. Deterministic checks come
+degradation, retained artifacts and user-gate state. Deterministic checks come
 before judgement. A fluent answer without trajectory evidence is not complete.
 
 ## Design constraints for maintainers
