@@ -46,7 +46,7 @@ Install either platform independently, or both:
 
 ```sh
 git clone https://github.com/mblauberg/provenant.git "$HOME/.agents"
-export AGENTS_HOME="$HOME/.agents"   # skills read this at runtime; persist it in the shell rc
+export AGENTS_HOME="$HOME/.agents"   # optional override; the installed harness defaults here
 cd "$AGENTS_HOME"
 
 # install the pinned workspace dependencies and compile Fabric before its first use
@@ -69,9 +69,11 @@ It also links the thin `provenant` command into
 `${PROVENANT_BIN_DIR:-$HOME/.local/bin}` and warns when that directory is not
 on `PATH`; it never edits shell startup files. `provenant doctor` delegates to
 the Fabric doctor.
-An instruction symlink or file referencing both shared instructions is
-accepted. Other files are preserved; the installer exits 3 and
-prints the bootstrap line to add. `provenant doctor` checks Fabric configuration
+Instruction links or files referencing both shared instructions are accepted;
+others stay untouched. Exit 3 means a command collision, incompatible
+instruction target, or managed skill-link conflict needs action;
+instruction conflicts include a bootstrap line.
+`provenant doctor` checks Fabric configuration
 and enabled adapters; `provenant check` is the full repository gate.
 
 The checked-in profile enables Claude, Codex, Agy, Cursor, Kiro and OpenCode.

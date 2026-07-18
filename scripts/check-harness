@@ -11,8 +11,8 @@ fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [[ -x "${HARNESS_PYTHON:-}" ]]; then
   PYTHON="$HARNESS_PYTHON"
-elif [[ -x "$HOME/miniforge3/bin/python" ]]; then
-  PYTHON="$HOME/miniforge3/bin/python"
+elif [[ -x "$ROOT/.venv/bin/python" ]]; then
+  PYTHON="$ROOT/.venv/bin/python"
 else
   PYTHON="$(command -v python3)"
 fi
