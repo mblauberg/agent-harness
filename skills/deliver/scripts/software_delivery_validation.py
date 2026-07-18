@@ -73,7 +73,8 @@ def validate_git_revision(
           f"artifact {artifact_id}.git_revision.commit is invalid", invalid_type)
     _fail(not isinstance(tree, str) or not OID.fullmatch(tree),
           f"artifact {artifact_id}.git_revision.tree is invalid", invalid_type)
-    _fail(not digest or unavailable, f"artifact {artifact_id}.git_revision requires a digest", invalid_type)
+    _fail(bool(digest) or bool(unavailable),
+          f"artifact {artifact_id}.git_revision must use commit and tree without digest fields", invalid_type)
     if not verify_hashes:
         return
     _fail(workspace_root is None, "verify_hashes requires workspace_root", invalid_type)
@@ -89,16 +90,9 @@ def validate_git_revision(
             ["git", "-C", str(repository_root), "rev-parse", f"{commit}^{{tree}}"],
             check=True, capture_output=True, text=True,
         ).stdout.strip()
-        archive = subprocess.run(
-            ["git", "-C", str(repository_root), "archive", "--format=tar", commit],
-            check=True, capture_output=True,
-        ).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         raise invalid_type(f"artifact {artifact_id}.git_revision cannot resolve the committed artifact") from exc
     _fail(live_tree != tree, f"artifact {artifact_id}.git_revision tree does not match commit", invalid_type)
-    import hashlib
-    actual = "sha256:" + hashlib.sha256(archive).hexdigest()
-    _fail(actual != digest, f"artifact {artifact_id} digest does not match the committed Git archive", invalid_type)
 
 
 def validate_git_artifact(

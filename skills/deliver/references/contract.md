@@ -51,10 +51,14 @@ Each `delegations[]` item contains `actor` plus a complete V2 scope. Its Fabric
 envelope inherits the parent's exact approval binding and must narrow every
 authority dimension. Partial delegations and any widening fail closed.
 
-Artifact digests use `sha256:<64 lowercase hex>`. Local paths are relative to
-the explicit workspace root; validate with `--workspace-root` and
+Non-Git artifact digests use `sha256:<64 lowercase hex>`. Local paths are
+relative to the explicit workspace root; validate with `--workspace-root` and
 `--verify-hashes`. External URIs require `digest_unavailable_reason` when bytes
-cannot be bound.
+cannot be bound. A `git_revision` is the sole digest exception: it has exactly
+`repository`, `commit` and `tree`, omits both `digest` and
+`digest_unavailable_reason`, and is verified by resolving the exact commit and
+requiring its available tree object to equal the declared tree. It cannot also
+declare a path or URI.
 
 From the project root:
 
@@ -111,10 +115,12 @@ profile justification.
 
 After a pull request merges, a software receipt may add the closed
 `software_delivery` binding while it remains `awaiting_acceptance`. Its
-canonical artifact uses `git_revision` (`repository`, `commit`, `tree`) and a
-SHA-256 digest of `git archive --format=tar <commit>`, verified against the live
-local repository. The binding also names local, digest-verified JSON artifacts
-with contracts `github-pull-request-evidence`, `github-ci-evidence` and
+canonical artifact uses `git_revision` (`repository`, `commit`, `tree`) with no
+second archive or per-file digest. Validation resolves the exact commit from
+the live local repository, requires the declared tree object to be available
+and equal to the commit's tree, and rejects any digest field. The binding also
+names local, digest-verified JSON artifacts with contracts
+`github-pull-request-evidence`, `github-ci-evidence` and
 `code-review-evidence`. The PR binds reviewed head to merge commit; required
 `ci-status` binds the merge commit; every passing primary review is retained;
 and the merged tree must equal the reviewed head tree.

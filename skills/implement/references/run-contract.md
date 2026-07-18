@@ -35,9 +35,10 @@ Validate from the project root:
 The exact `.agent-run/<id>/` receipt and its raw operational artifacts stay
 local, ignored and validator-readable. Never force-track them, even when a
 programme requires per-lane receipts. Project the durable tested-tree facts,
-review verdicts, artifact digests and pending gates into tracked project docs,
-fixtures and the PR evidence index. That curated projection is public evidence;
-it does not replace or weaken validation of the private canonical receipt.
+review verdicts, artifact identities and pending gates into tracked project
+docs, fixtures and the PR evidence index. That curated projection is public
+evidence; it does not replace or weaken validation of the private canonical
+receipt.
 
 `awaiting_acceptance` is machine-ready, not complete. User acceptance and any
 production promotion remain separate gates.
@@ -52,8 +53,8 @@ review artifacts. The binder reads PR and `ci-status` truth through the
 authenticated GitHub API, holds an exclusive receipt lock, keeps the receipt
 at `awaiting_acceptance` and adds:
 
-- a canonical `git_revision` artifact whose digest is the exact merged commit's
-  Git archive;
+- a canonical `git_revision` artifact bound directly to the exact merged commit
+  and its resolved tree, with no archive or per-file digest;
 - readable, hash-bound `github-pull-request-evidence` and
   `github-ci-evidence` JSON; and
 - one readable `code-review-evidence` JSON artifact for every passing review

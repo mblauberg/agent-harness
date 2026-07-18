@@ -240,10 +240,13 @@ Afterwards:
    authenticated GitHub API; it does not accept caller-authored success flags.
    Review arguments are pre-existing typed exact-head artifacts, not verdicts
    created by the binder. It holds an exclusive receipt lock, stages the whole
-   update and fails if the reviewed and merged trees differ. Do not request
-   acceptance or promotion authority until validation passes. Explicit user
-   acceptance advances this same receipt to `accepted` and then
-   `awaiting_release`; release binds it directly and never reconstructs it.
+   update and fails if the reviewed and merged trees differ. The source artifact
+   records the exact Git commit and resolved tree without a second archive or
+   per-file hash; local PR, CI and review JSON remain SHA-256 verified. Do not
+   request acceptance or promotion authority until validation passes. Explicit
+   user acceptance advances this same receipt to `accepted` and then
+   `awaiting_release`; release binds the same exact artifact identity and never
+   reconstructs it.
 2. Confirm the issue closed (`Closes #N`) or close it with its terminal reason
    recorded, and confirm Status is `Done`.
 3. After syncing the main checkout, keep the fabric dist warm so

@@ -61,17 +61,14 @@ def merged_software_delivery(workspace: Path) -> dict:
     git(workspace, "commit", "--allow-empty", "-m", "merge pull request")
     merged = git(workspace, "rev-parse", "HEAD").strip()
     tree = git(workspace, "rev-parse", "HEAD^{tree}").strip()
-    archive = git(workspace, "archive", "--format=tar", merged, text=False)
-
     run = REFERENCE.make_reference_run("software", ROOT)
     MATERIALISE.materialise_reference_run(run, workspace, ROOT)
     run["authority"]["allowed_source_paths"] = ["."]
     run["artifacts"].append({
         "id": "merged-source",
         "git_revision": {"repository": ".", "commit": merged, "tree": tree},
-        "media_type": "application/x-git-archive",
+        "media_type": "application/x-git-revision",
         "artifact_type": "source",
-        "digest": "sha256:" + hashlib.sha256(archive).hexdigest(),
         "class": "canonical",
         "owner": "delivery-chair",
         "retention": "project-policy",
@@ -137,7 +134,7 @@ def accept_for_release(run: dict, *, observing: bool = False) -> None:
         run["observation"]["status"] = "active"
 
 
-def test_merged_software_binding_is_hash_verified_and_rejects_reviewed_tree_drift(tmp_path):
+def test_merged_software_binding_rejects_reviewed_tree_drift(tmp_path):
     run = merged_software_delivery(tmp_path)
     DELIVERY.validate(run, ROOT, workspace_root=tmp_path, verify_hashes=True)
 
@@ -148,6 +145,57 @@ def test_merged_software_binding_is_hash_verified_and_rejects_reviewed_tree_drif
     artifact = next(item for item in run["artifacts"] if item["id"] == "github-pr")
     artifact["digest"] = "sha256:" + hashlib.sha256(pr_path.read_bytes()).hexdigest()
     with pytest.raises(DELIVERY.Invalid, match="does not bind the merged revision"):
+        DELIVERY.validate(run, ROOT, workspace_root=tmp_path, verify_hashes=True)
+
+
+def test_git_revision_uses_commit_and_resolved_tree_without_redundant_archive_digest(tmp_path):
+    run = merged_software_delivery(tmp_path)
+
+    DELIVERY.validate(run, ROOT, workspace_root=tmp_path, verify_hashes=True)
+
+
+def test_git_revision_rejects_digest_fields_and_commit_tree_mismatch(tmp_path):
+    run = merged_software_delivery(tmp_path)
+    artifact = next(item for item in run["artifacts"] if item["id"] == "merged-source")
+    artifact["digest"] = "sha256:" + "0" * 64
+    with pytest.raises(DELIVERY.Invalid, match="must use commit and tree without digest fields"):
+        DELIVERY.validate(run, ROOT, workspace_root=tmp_path, verify_hashes=True)
+
+    artifact.pop("digest")
+    artifact["git_revision"]["tree"] = "0" * 40
+    with pytest.raises(DELIVERY.Invalid, match="tree does not match commit"):
+        DELIVERY.validate(run, ROOT, workspace_root=tmp_path, verify_hashes=True)
+
+
+def test_git_revision_cannot_also_claim_a_path(tmp_path):
+    run = merged_software_delivery(tmp_path)
+    artifact = next(item for item in run["artifacts"] if item["id"] == "merged-source")
+    artifact["path"] = "product.txt"
+
+    with pytest.raises(DELIVERY.Invalid, match="requires exactly one path, uri or git_revision"):
+        DELIVERY.validate(run, ROOT, workspace_root=tmp_path, verify_hashes=True)
+
+
+def test_git_revision_rejects_an_unavailable_tree_object(tmp_path):
+    run = merged_software_delivery(tmp_path)
+    artifact = next(item for item in run["artifacts"] if item["id"] == "merged-source")
+    tree = artifact["git_revision"]["tree"]
+    (tmp_path / ".git" / "objects" / tree[:2] / tree[2:]).unlink()
+
+    with pytest.raises(DELIVERY.Invalid, match="cannot resolve the committed artifact"):
+        DELIVERY.validate(run, ROOT, workspace_root=tmp_path, verify_hashes=True)
+
+
+def test_non_git_local_artifacts_still_require_and_verify_sha256(tmp_path):
+    run = merged_software_delivery(tmp_path)
+    artifact = next(item for item in run["artifacts"] if item["id"] == "github-pr")
+    digest = artifact.pop("digest")
+    with pytest.raises(DELIVERY.Invalid, match="requires digest xor digest_unavailable_reason"):
+        DELIVERY.validate(run, ROOT, workspace_root=tmp_path, verify_hashes=True)
+
+    artifact["digest"] = digest
+    (tmp_path / artifact["path"]).write_text("{}\n")
+    with pytest.raises(DELIVERY.Invalid, match="digest does not match live bytes"):
         DELIVERY.validate(run, ROOT, workspace_root=tmp_path, verify_hashes=True)
 
 
@@ -166,13 +214,21 @@ def test_merged_software_delivery_progresses_through_ready_and_complete_release_
         "action_types": ["activate"], "target_ids": ["local-agent-fabric"],
         "target_environment_tiers": ["development"], "external_communication": False,
     })
+    source_revision = next(
+        item for item in run["artifacts"] if item["id"] == "merged-source"
+    )["git_revision"]
     release["artifact"] = {
         "id": "merged-source",
-        "digest": next(item for item in run["artifacts"] if item["id"] == "merged-source")["digest"],
+        "git_revision": source_revision,
         "acceptance_receipt": "RUN.json",
     }
     release["release_authority"]["artifact_ids"] = ["merged-source"]
     assert RELEASE.validate(release, "ready", workspace_root=ready_workspace) == []
+    release["artifact"]["git_revision"] = {**source_revision, "tree": "0" * 40}
+    assert "artifact.git_revision must match the accepted delivery Git revision" in RELEASE.validate(
+        release, "ready", workspace_root=ready_workspace,
+    )
+    release["artifact"]["git_revision"] = source_revision
 
     complete_workspace = tmp_path / "complete"
     run = merged_software_delivery(complete_workspace)
@@ -183,7 +239,9 @@ def test_merged_software_delivery_progresses_through_ready_and_complete_release_
     complete["release_authority"].update(release["release_authority"])
     complete["artifact"] = {
         "id": "merged-source",
-        "digest": next(item for item in run["artifacts"] if item["id"] == "merged-source")["digest"],
+        "git_revision": next(
+            item for item in run["artifacts"] if item["id"] == "merged-source"
+        )["git_revision"],
         "acceptance_receipt": "RUN.json",
     }
     assert RELEASE.validate(complete, "complete", workspace_root=complete_workspace) == []
@@ -278,4 +336,8 @@ def test_binder_materialises_the_post_merge_chain_without_advancing_acceptance(t
     bound = json.loads(receipt.read_text())
     assert bound["status"] == "awaiting_acceptance"
     assert bound["human_gates"]["acceptance"]["status"] == "pending"
+    merged_source = next(item for item in bound["artifacts"] if item["id"] == "merged-source")
+    assert merged_source["media_type"] == "application/x-git-revision"
+    assert "digest" not in merged_source
+    assert "digest_unavailable_reason" not in merged_source
     DELIVERY.validate(bound, ROOT, workspace_root=tmp_path, verify_hashes=True)

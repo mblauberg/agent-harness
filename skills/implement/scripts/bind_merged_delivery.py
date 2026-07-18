@@ -122,9 +122,6 @@ def main(argv: list[str] | None = None) -> int:
             head_tree = str(git(workspace, "rev-parse", f"{head_commit}^{{tree}}")).strip()
             merge_tree = str(git(workspace, "rev-parse", f"{merge_commit}^{{tree}}")).strip()
             fail(head_tree != merge_tree, "merged tree differs from reviewed PR head")
-            archive = git(workspace, "archive", "--format=tar", merge_commit, text=False)
-            assert isinstance(archive, bytes)
-
             checks = github(
                 f"repos/{args.repository}/commits/{merge_commit}/check-runs"
                 "?check_name=ci-status&filter=latest&per_page=100"
@@ -172,8 +169,7 @@ def main(argv: list[str] | None = None) -> int:
             additions = [{
                 "id": "merged-source",
                 "git_revision": {"repository": ".", "commit": merge_commit, "tree": merge_tree},
-                "media_type": "application/x-git-archive", "artifact_type": "source",
-                "digest": "sha256:" + hashlib.sha256(archive).hexdigest(),
+                "media_type": "application/x-git-revision", "artifact_type": "source",
                 "class": "canonical", "owner": "delivery-chair", "retention": "project-policy",
             }]
             for artifact_id, raw in payloads:

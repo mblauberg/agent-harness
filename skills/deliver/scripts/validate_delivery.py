@@ -190,7 +190,7 @@ def _validate_artifacts(
             fail(item.get("retention") not in profile["evidence_policy"]["retention"], f"evidence artifact {artifact_id} retention violates the profile policy")
         digest = item.get("digest")
         unavailable = item.get("digest_unavailable_reason")
-        fail(bool(digest) == bool(unavailable), f"artifact {artifact_id} requires digest xor digest_unavailable_reason")
+        fail(not item.get("git_revision") and bool(digest) == bool(unavailable), f"artifact {artifact_id} requires digest xor digest_unavailable_reason")
         if digest:
             _digest(digest, f"artifact {artifact_id}.digest")
         if path and verify_hashes:
