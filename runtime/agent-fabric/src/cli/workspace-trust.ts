@@ -267,9 +267,10 @@ export async function runWorkspaceTrust(
   return await withRegistryMutationLock(paths.stateDirectory, async () => {
     const current = await readRegistry(registryPath);
     const currentEntry = current.entries.find((item) => item.canonicalPath === canonicalPath);
+    const currentEntryIdentityMatches = currentEntry !== undefined && await identityMatches(currentEntry);
     const currentEntryIsLive = currentEntry !== undefined &&
       (currentEntry.expiresAt === undefined || timestamp(currentEntry.expiresAt, "workspace expiry") > now.getTime()) &&
-      await identityMatches(currentEntry);
+      currentEntryIdentityMatches;
     if (currentEntryIsLive && profileValue === undefined && expiresAt === undefined) {
       return {
         schemaVersion: 1,
@@ -278,7 +279,7 @@ export async function runWorkspaceTrust(
         entry: { ...currentEntry, allowedProfiles: [...currentEntry.allowedProfiles] },
       };
     }
-    if (currentEntry === undefined) {
+    if (currentEntry === undefined || !currentEntryIdentityMatches) {
       const broadened = current.entries.find((item) => item.canonicalPath.startsWith(`${canonicalPath}${sep}`));
       if (broadened !== undefined) throw new Error(`workspace trust refuses ancestor broadening over ${broadened.canonicalPath}`);
     }

@@ -192,6 +192,21 @@ describe("machine-local workspace trust", () => {
     });
   });
 
+  it("rejects ancestor broadening when the exact-root record has stale identity", async () => {
+    const value = await fixture();
+    await runWorkspaceTrust(["trust", value.workspace], value.paths);
+    const nested = join(value.workspace, "nested");
+    await mkdir(nested);
+    await runWorkspaceTrust(["trust", nested], value.paths);
+
+    await rename(value.workspace, join(value.root, "workspace-original"));
+    await mkdir(value.workspace);
+    await mkdir(nested);
+
+    await expect(runWorkspaceTrust(["trust", value.workspace], value.paths))
+      .rejects.toThrow(/ancestor broadening/u);
+  });
+
   it("applies explicit profile and expiry changes to an already trusted exact root", async () => {
     const value = await fixture();
     await runWorkspaceTrust(["trust", value.workspace], value.paths);
