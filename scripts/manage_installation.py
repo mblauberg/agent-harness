@@ -252,6 +252,7 @@ def _prepare_renames(source: Path, target: Path, manifest: dict[str, Any], renam
             "new_destination": new_destination,
             "new_source": skills[new],
             "create_new": create_new,
+            "manage_new": new in managed or new in creating,
             "entry": _entry(new, skills[new], list(target_history[new])),
         })
     return operations
@@ -279,7 +280,8 @@ def _apply_renames(manifest: dict[str, Any], operations: list[dict[str, Any]]) -
                 operation["old_destination"].symlink_to(operation["old_source"])
         raise InstallError(f"rename application failed and was rolled back: {exc}") from exc
     for operation in operations:
-        manifest["managed"][operation["new"]] = operation["entry"]
+        if operation["manage_new"]:
+            manifest["managed"][operation["new"]] = operation["entry"]
         manifest["managed"].pop(operation["old"], None)
 
 
