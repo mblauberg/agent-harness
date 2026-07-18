@@ -1988,6 +1988,8 @@ function actionAvailability(authenticated: AuthenticatedOperatorCredential): Ope
   for (const action of authenticated.actions) {
     if (action === "launch") {
       actions.push("project-session-launch");
+    } else if (action === "takeover") {
+      actions.push("chair-bridge-recovery");
     } else if (action === "pause" || action === "resume" || action === "cancel" || action === "steer" || action === "git") {
       actions.push(action);
     } else if (action === "drain") {

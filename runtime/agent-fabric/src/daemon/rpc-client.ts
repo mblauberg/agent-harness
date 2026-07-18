@@ -18,6 +18,8 @@ import type {
   LocalOperatorProvisioningResult,
   LocalOperatorSessionCapabilityInput,
   LocalOperatorSessionCapabilityResult,
+  LocalOperatorTakeoverCapabilityInput,
+  LocalOperatorTakeoverCapabilityResult,
 } from "../operator/store.js";
 import { TimedNdjsonTransport } from "../transport/ndjson-rpc.js";
 import { isRecord, type DaemonInitializeResult } from "./protocol.js";
@@ -226,6 +228,58 @@ function localOperatorSessionCapabilityResult(value: unknown): LocalOperatorSess
   return { ...common, issued: false };
 }
 
+function localOperatorTakeoverCapabilityResult(value: unknown): LocalOperatorTakeoverCapabilityResult {
+  if (!isRecord(value)) throw new Error("daemon returned an invalid local operator takeover capability result");
+  exactResultFields(value, [
+    "projectId", "operatorId", "capabilityId", "projectSessionId", "projectAuthorityGeneration",
+    "sessionGeneration", "principalGeneration", "kind", "actions", "issuedAt", "expiresAt",
+    "credential", "recoveryIntent",
+  ], "local operator takeover capability result");
+  const credential = operatorCredential(value.credential);
+  const intent = value.recoveryIntent;
+  if (
+    typeof value.projectId !== "string" ||
+    typeof value.operatorId !== "string" ||
+    typeof value.capabilityId !== "string" ||
+    typeof value.projectSessionId !== "string" ||
+    !isPositiveInteger(value.projectAuthorityGeneration) ||
+    !isPositiveInteger(value.sessionGeneration) ||
+    !isPositiveInteger(value.principalGeneration) ||
+    value.kind !== "takeover" ||
+    !Array.isArray(value.actions) ||
+    value.actions.length !== 2 ||
+    value.actions[0] !== "read" ||
+    value.actions[1] !== "takeover" ||
+    typeof value.issuedAt !== "string" ||
+    typeof value.expiresAt !== "string" ||
+    credential === undefined ||
+    credential.capabilityId !== value.capabilityId ||
+    !isRecord(intent) ||
+    intent.kind !== "chair-bridge-recovery" ||
+    intent.schemaVersion !== 1 ||
+    intent.path !== "abandon" ||
+    intent.projectSessionId !== value.projectSessionId ||
+    typeof intent.coordinationRunId !== "string" ||
+    typeof intent.lossId !== "string" ||
+    typeof intent.recoveryManifestDigest !== "string" ||
+    !isPositiveInteger(intent.expectedSessionRevision) ||
+    !isPositiveInteger(intent.expectedSessionGeneration) ||
+    !isPositiveInteger(intent.expectedRunRevision) ||
+    !isPositiveInteger(intent.expectedChairGeneration) ||
+    !isPositiveInteger(intent.expectedPrincipalGeneration) ||
+    !isPositiveInteger(intent.expectedBridgeRevision) ||
+    !isPositiveInteger(intent.expectedLostBridgeGeneration) ||
+    !isPositiveInteger(intent.expectedProviderSessionGeneration) ||
+    typeof intent.providerAdapterId !== "string" ||
+    typeof intent.providerContractDigest !== "string" ||
+    typeof intent.reason !== "string" ||
+    intent.reason.length === 0
+  ) {
+    throw new Error("daemon returned an invalid local operator takeover capability result");
+  }
+  return value as unknown as LocalOperatorTakeoverCapabilityResult;
+}
+
 function localOperatorPrincipalRotationResult(value: unknown): LocalOperatorPrincipalRotationResult {
   if (!isRecord(value)) throw new Error("daemon returned an invalid local operator principal rotation result");
   exactResultFields(value, [
@@ -339,6 +393,14 @@ export class FabricDaemonClient {
       throw new Error("daemon did not issue a fresh local Console session capability");
     }
     return result;
+  }
+
+  async openLocalOperatorConsoleTakeoverCapability(
+    input: Omit<LocalOperatorTakeoverCapabilityInput, "authenticatedSubjectHash">,
+  ): Promise<LocalOperatorTakeoverCapabilityResult> {
+    return localOperatorTakeoverCapabilityResult(
+      await this.#call("openLocalOperatorConsoleTakeoverCapability", input),
+    );
   }
 
   async rotateLocalOperatorPrincipal(

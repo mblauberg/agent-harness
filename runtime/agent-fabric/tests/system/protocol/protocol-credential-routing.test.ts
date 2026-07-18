@@ -183,6 +183,14 @@ describe("public protocol credential routing", () => {
     expect(consequential).not.toContain(FABRIC_OPERATIONS.operatorRepositoryRead);
     expect(consequential.every((operation) => operationsForPrincipal("operator").has(operation as never))).toBe(true);
 
+    const takeover = operatorOperationsForActions(["takeover"]);
+    expect(takeover).toEqual(expect.arrayContaining([
+      FABRIC_OPERATIONS.operatorActionPreview,
+      FABRIC_OPERATIONS.operatorActionCommit,
+      FABRIC_OPERATIONS.operatorActionStatus,
+      FABRIC_OPERATIONS.operatorActionReconcile,
+    ]));
+
     const lifecycle = operatorOperationsForActions(["drain", "stop"]);
     expect(lifecycle).toEqual(expect.arrayContaining([
       FABRIC_OPERATIONS.operatorActionPreview,

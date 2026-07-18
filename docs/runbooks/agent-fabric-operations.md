@@ -228,6 +228,17 @@ separate explicit confirmation gesture. Sessions projected as `launching` or
 `launch_ambiguous` rehydrate through status-only observation; Console never
 redispatches or invokes generic action reconciliation for launch custody.
 
+If a selected session is `recovery_required`, Console asks the daemon to derive one loss-bound takeover capability and
+server-authored recovery intent. Do not copy loss IDs or construct recovery payloads by hand. Abandon remains a
+destructive action: inspect the preview, then use the separate explicit Confirm gesture. On confirmed
+abandon, the daemon may repair historical launch accounting only from the exact terminal-success provider action
+(`provider_calls=1`, retained `concurrent_turns=0`); other unknown capacity remains unknown.
+
+Cancel may terminalise a `draft` or `awaiting_launch` session without provider I/O only when it has no run, membership,
+launch custody, reservation, gate or prior operator effect. A live Console attachment is transport, not lifecycle work,
+and does not block this path. Once any such lifecycle evidence exists, use its owning recovery or cancellation flow;
+zero cancelled tasks must be reported as rejected, never as a successful task cancellation.
+
 For visible pairing, Herdr attaches panes or observer renderers while messages still travel through the durable fabric mailbox. For headless orchestration, no pane is required. Both profiles can coexist in one run.
 
 Herdr provides pane visibility and process supervision. Fabric events are

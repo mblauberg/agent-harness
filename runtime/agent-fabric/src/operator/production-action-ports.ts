@@ -42,6 +42,7 @@ import {
   ProviderActionAdmissionTransactionError,
   type ProviderActionTicket,
 } from "../application/provider-action-admission.js";
+import { cancelEffectFreeProjectSession } from "./effect-free-session-cancellation.js";
 
 type Row = Record<string, unknown>;
 
@@ -1677,6 +1678,9 @@ class ProductionOperatorActions {
 
   #cancel(target: ResolvedControlTarget, request: OperatorEffectRequest): OperatorEffectOutcome {
     if (request.intent.kind !== "control" || request.intent.action !== "cancel") unsupported();
+    if (target.scopeKind === "session" && target.runs.length === 0) {
+      return this.#cancelEffectFreeSession(target, request, this.#effectScope(request));
+    }
     const reason = request.intent.reason;
     const commandId = request.commandId;
     let cancelledTasks = 0;
@@ -1708,6 +1712,10 @@ class ProductionOperatorActions {
            WHERE coordination_run_id=? AND task_id=? AND state='paused'
         `).run(this.#clock(), task.runId, task.taskId);
       }
+      if (cancelledTasks === 0) {
+        outcome = { status: "rejected", code: "state-changed", evidenceRefs: [] };
+        return;
+      }
       touchProjectSessionMembershipRevision(
         this.#database,
         target.projectSessionId,
@@ -1718,6 +1726,29 @@ class ProductionOperatorActions {
       this.#storeCustodyOutcome(this.#effectScope(request), request.commandId, outcome);
     })();
     return outcome!;
+  }
+
+  #cancelEffectFreeSession(
+    target: ResolvedControlTarget,
+    request: OperatorEffectRequest,
+    scope: EffectScope,
+  ): OperatorEffectOutcome {
+    if (request.intent.kind !== "control" || request.intent.action !== "cancel") unsupported();
+    return cancelEffectFreeProjectSession({
+      database: this.#database,
+      clock: this.#clock,
+      input: {
+        projectSessionId: target.projectSessionId,
+        expectedRevision: target.revision,
+        expectedGeneration: target.sessionGeneration,
+        reason: request.intent.reason,
+        commandId: request.commandId,
+      },
+      storeCustodyOutcome: (outcome) => this.#storeCustodyOutcome(scope, request.commandId, outcome),
+      ...(this.#retireVolatileProjectSession === undefined
+        ? {}
+        : { retireVolatileProjectSession: this.#retireVolatileProjectSession }),
+    });
   }
 
   #settleCancelledTask(

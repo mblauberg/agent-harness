@@ -177,7 +177,7 @@ describe("fresh Agent Fabric launch bootstrap", () => {
       deniedActions: [],
       disclosure: { level: "forbidden" } as const,
       expiresAt: "2099-01-01T00:00:00.000Z",
-      budget: { provider_calls: 10 },
+      budget: { provider_calls: 10, concurrent_turns: 1 },
     };
     const normalisedAuthority = normaliseLaunchChairAuthority(chairAuthority, projectRoot);
     const resourcePlan = {
@@ -187,11 +187,11 @@ describe("fresh Agent Fabric launch bootstrap", () => {
       runId: "run_fresh_launch_01",
       budgetRef: "budget_fresh_launch_01",
       scopes: {
-        project: { scopeId: "scope_fresh_project_01", limits: { provider_calls: 10 } },
-        projectSession: { scopeId: "scope_fresh_session_01", limits: { provider_calls: 10 } },
-        coordinationRun: { scopeId: "scope_fresh_run_01", limits: { provider_calls: 10 } },
+        project: { scopeId: "scope_fresh_project_01", limits: { provider_calls: 10, concurrent_turns: 1 } },
+        projectSession: { scopeId: "scope_fresh_session_01", limits: { provider_calls: 10, concurrent_turns: 1 } },
+        coordinationRun: { scopeId: "scope_fresh_run_01", limits: { provider_calls: 10, concurrent_turns: 1 } },
       },
-      launchReservation: { amounts: { provider_calls: 1 } },
+      launchReservation: { amounts: { provider_calls: 1, concurrent_turns: 1 } },
     };
     const resourcePlanText = canonicalJson(resourcePlan);
     const resourcePlanRef = {
@@ -321,6 +321,20 @@ describe("fresh Agent Fabric launch bootstrap", () => {
       chair_generation: number;
       chair_lease_id: string;
     };
+    expect(database.prepare(`
+      SELECT dimension.used, dimension.reserved, dimension.usage_unknown
+        FROM resource_dimensions dimension
+        JOIN resource_scopes scope ON scope.scope_id=dimension.scope_id
+       WHERE scope.project_id=? AND scope.scope_kind='project'
+         AND dimension.unit_key='provider_calls'
+    `).get(console.projectId)).toEqual({ used: 1, reserved: 0, usage_unknown: 0 });
+    expect(database.prepare(`
+      SELECT dimension.used, dimension.reserved, dimension.usage_unknown
+        FROM resource_dimensions dimension
+        JOIN resource_scopes scope ON scope.scope_id=dimension.scope_id
+       WHERE scope.project_id=? AND scope.scope_kind='project'
+         AND dimension.unit_key='concurrent_turns'
+    `).get(console.projectId)).toEqual({ used: 0, reserved: 0, usage_unknown: 0 });
     database.close();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString();
     const provisioned = await provisionMcpSeats([

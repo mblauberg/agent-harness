@@ -39,6 +39,11 @@ import { retireProjectSessionBridges } from "./bridge-retirement.js";
 import { canonicalJson, integer, isRow, row, sha256, text, type Row } from "./store-support.js";
 import { assertSafeLaunchProviderInput } from "./provider-input-safety.js";
 import {
+  reconcileUnknownLaunchUsage as reconcileUnknownLaunchUsageOwner,
+  type LaunchUsageReconciliationInput,
+  type LaunchUsageReconciliationResult,
+} from "./launch-usage-reconciliation.js";
+import {
   ProviderActionAdmissionCoordinator,
   type ProviderActionTicket,
 } from "../application/provider-action-admission.js";
@@ -805,6 +810,10 @@ export class LaunchCustodyService {
     if (!isAbsolute(this.#fabricSocketPath)) throw new TypeError("Fabric socket path must be absolute");
   }
 
+  reconcileUnknownLaunchUsage(input: LaunchUsageReconciliationInput): LaunchUsageReconciliationResult {
+    return reconcileUnknownLaunchUsageOwner(this.#database, this.#clock, input);
+  }
+
   releaseProviderActionPreflightAfterRollback(ticket: ProviderActionTicket, failure: unknown): void {
     if (ticket.disposition !== "resolving" || ticket.scope.kind !== "run-action") return;
     if (!isDeterministicClosedPreflightFailure(failure)) return;
@@ -1510,6 +1519,7 @@ export class LaunchCustodyService {
     const now = this.#clock();
     const result = this.#database.transaction((): ChairRecoveryCommit => {
       this.#assertChairAbandonReady(abandonIntent);
+      this.#reconcileKnownLaunchUsageForAbandon(abandonIntent);
       const changed = this.#database.prepare(`
         UPDATE chair_bridge_recovery_custody
            SET state='committing', revision=revision+1, updated_at=?
@@ -1625,6 +1635,45 @@ export class LaunchCustodyService {
     })();
     try { this.#retireVolatileProjectSession?.(abandonIntent.projectSessionId); } catch { /* durable fencing already committed */ }
     return result;
+  }
+
+  #reconcileKnownLaunchUsageForAbandon(
+    intent: Extract<ChairBridgeRecoveryIntent, { path: "abandon" }>,
+  ): void {
+    const binding = this.#database.prepare(`
+      SELECT session.project_id, custody.provider_adapter_id, custody.provider_action_id,
+             custody.reservation_id, reservation.revision
+        FROM project_session_launch_custody custody
+        JOIN project_sessions session ON session.project_session_id=custody.project_session_id
+        JOIN resource_reservations reservation ON reservation.reservation_id=custody.reservation_id
+       WHERE custody.project_session_id=? AND custody.coordination_run_id=?
+    `).get(intent.projectSessionId, intent.coordinationRunId);
+    if (!isRow(binding)) return;
+    const unknownUnits = this.#database.prepare(`
+      SELECT DISTINCT unit_key FROM resource_reservation_dimensions
+       WHERE reservation_id=? AND usage_unknown=1 ORDER BY unit_key
+    `).all(text(binding, "reservation_id")).map((value) => text(row(value, "unknown launch unit"), "unit_key"));
+    const observedUsage: Record<string, number> = {};
+    if (unknownUnits.includes("provider_calls")) observedUsage.provider_calls = 1;
+    if (unknownUnits.includes("concurrent_turns")) observedUsage.concurrent_turns = 0;
+    if (Object.keys(observedUsage).length === 0) return;
+    this.reconcileUnknownLaunchUsage({
+      projectId: text(binding, "project_id"),
+      projectSessionId: intent.projectSessionId,
+      coordinationRunId: intent.coordinationRunId,
+      providerAdapterId: text(binding, "provider_adapter_id"),
+      providerActionId: text(binding, "provider_action_id"),
+      reservationId: text(binding, "reservation_id"),
+      expectedReservationRevision: integer(binding, "revision"),
+      observedUsage,
+      evidenceDigest: jsonEvidenceDigest({
+        kind: "deterministic-launch-provider-call",
+        lossId: intent.lossId,
+        recoveryManifestDigest: intent.recoveryManifestDigest,
+        providerAdapterId: text(binding, "provider_adapter_id"),
+        providerActionId: text(binding, "provider_action_id"),
+      }),
+    });
   }
 
   #assertChairAbandonReady(intent: Extract<ChairBridgeRecoveryIntent, { path: "abandon" }>): void {

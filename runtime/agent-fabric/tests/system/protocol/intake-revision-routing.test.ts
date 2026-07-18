@@ -357,11 +357,11 @@ function implementationRequest(
     runId: "run_implementation_target",
     budgetRef: "budget_implementation",
     scopes: {
-      project: { scopeId: "scope_implementation_project", limits: { concurrent_turns: 2 } },
-      projectSession: { scopeId: "scope_implementation_session", limits: { concurrent_turns: 2 } },
-      coordinationRun: { scopeId: "scope_implementation_run", limits: { concurrent_turns: 1 } },
+      project: { scopeId: "scope_implementation_project", limits: { provider_calls: 2, concurrent_turns: 2 } },
+      projectSession: { scopeId: "scope_implementation_session", limits: { provider_calls: 2, concurrent_turns: 2 } },
+      coordinationRun: { scopeId: "scope_implementation_run", limits: { provider_calls: 1, concurrent_turns: 1 } },
     },
-    launchReservation: { amounts: { concurrent_turns: 1 } },
+    launchReservation: { amounts: { provider_calls: 1, concurrent_turns: 1 } },
   });
   const resourcePlanRef = {
     path: (
@@ -390,7 +390,7 @@ function implementationRequest(
       },
       sourcePaths: ["runtime/agent-fabric-console"],
       artifactPaths: [".agent-run/run_implementation_target"],
-      budget: { concurrent_turns: 1 },
+      budget: { provider_calls: 1, concurrent_turns: 1 },
     },
     provider: {
       adapterId: "fake",
@@ -685,11 +685,11 @@ describe("intake revision public routing", () => {
         runId: "run_implementation_target",
         budgetRef: "budget_implementation",
         scopes: {
-          project: { scopeId: "scope_implementation_project", limits: { concurrent_turns: 2 } },
-          projectSession: { scopeId: "scope_implementation_session", limits: { concurrent_turns: 2 } },
-          coordinationRun: { scopeId: "scope_implementation_run", limits: { concurrent_turns: 1 } },
+          project: { scopeId: "scope_implementation_project", limits: { provider_calls: 2, concurrent_turns: 2 } },
+          projectSession: { scopeId: "scope_implementation_session", limits: { provider_calls: 2, concurrent_turns: 2 } },
+          coordinationRun: { scopeId: "scope_implementation_run", limits: { provider_calls: 1, concurrent_turns: 1 } },
         },
-        launchReservation: { amounts: { concurrent_turns: 1 } },
+        launchReservation: { amounts: { provider_calls: 1, concurrent_turns: 1 } },
       });
       const resourcePlanRef = {
         path: ".agent-run/run_implementation_target/launch-resources.json" as never,
@@ -714,7 +714,7 @@ describe("intake revision public routing", () => {
           },
           sourcePaths: ["runtime/agent-fabric-console"],
           artifactPaths: [".agent-run/run_implementation_target"],
-          budget: { concurrent_turns: 1 },
+          budget: { provider_calls: 1, concurrent_turns: 1 },
         },
         provider: {
           adapterId: "fake",

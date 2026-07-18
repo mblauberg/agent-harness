@@ -3,6 +3,7 @@ import type { OperatorActionIntent } from "@local/agent-fabric-protocol";
 export function operatorIntentRevision(intent: OperatorActionIntent): number | null {
   if (intent.kind === "control") return intent.target.expectedRevision;
   if (intent.kind === "project-session-launch") return intent.expectedSessionRevision;
+  if (intent.kind === "chair-bridge-recovery") return intent.expectedBridgeRevision;
   if (intent.kind === "project-session-drain" || intent.kind === "project-session-stop") {
     return intent.expectedSessionRevision;
   }

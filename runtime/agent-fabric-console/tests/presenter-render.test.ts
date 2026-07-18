@@ -1203,6 +1203,87 @@ describe("structured presenter and responsive Fabric renderer", () => {
     ]));
   });
 
+  it("enables Project-row cancel only for an exact live effect-free prelaunch session", () => {
+    const dataset = richDataset();
+    const project = dataset.pages.project.rows[0];
+    const snapshot = dataset.snapshot;
+    if (
+      project === undefined ||
+      snapshot?.session.freshness !== "live" || snapshot.session.value === null
+    ) {
+      throw new Error("live Project session fixture unavailable");
+    }
+    const guarded: FabricConsoleDataset = {
+      ...dataset,
+      productionActionPlanning: true,
+      snapshot: {
+        ...snapshot,
+        session: {
+          ...snapshot.session,
+          value: { ...snapshot.session.value, state: "draft" },
+        },
+      },
+      pages: {
+        ...dataset.pages,
+        project: {
+          ...dataset.pages.project,
+          rows: [{
+            ...project,
+            detailRef: { kind: "project", projectId, expectedRevision: 7 },
+            actionAvailability: {
+              state: "available",
+              actions: ["cancel"],
+              requiresPreview: true,
+            },
+          }],
+        },
+      },
+    };
+    const base = controllerState();
+    const controller: ConsoleControllerState = {
+      ...base,
+      activeView: "project",
+      selectionByView: {
+        ...base.selectionByView,
+        project: { stableId: project.stableId, revision: project.revision },
+      },
+    };
+
+    expect(presentFabricConsole(
+      guarded,
+      controller,
+      createFabricUiState({ draft: "cancel unused draft" }),
+      { columns: 80, rows: 24 },
+    ).actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "action:cancel", enabled: true }),
+    ]));
+    expect(presentFabricConsole(
+      guarded,
+      controller,
+      createFabricUiState({ draft: "" }),
+      { columns: 80, rows: 24 },
+    ).actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "action:cancel", enabled: false, reason: "enter-a-reason" }),
+    ]));
+
+    const wrongState = {
+      ...guarded,
+      snapshot: {
+        ...snapshot,
+        session: {
+          ...snapshot.session,
+          value: { ...snapshot.session.value, state: "active" as const },
+        },
+      },
+    } satisfies FabricConsoleDataset;
+    expect(presentFabricConsole(
+      wrongState,
+      controller,
+      createFabricUiState({ draft: "cancel active session" }),
+      { columns: 80, rows: 24 },
+    ).actions).toStrictEqual([]);
+  });
+
   it("keeps typed launch, Git and promotion entry points discoverable with capability reasons", () => {
     const dataset = richDataset();
     const project = dataset.pages.project.rows[0];
