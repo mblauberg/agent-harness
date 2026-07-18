@@ -142,6 +142,21 @@ content retains its caller-owned mode. Conflict handling never rolls that object
 back over a pathname that a concurrent writer may have changed. Reconcile both
 the current client configuration and recovery object before rerunning.
 
+Primary provider execution uses the exact Claude Code and Codex packages in
+the root lockfile, not mutable global or Homebrew installations. On the
+supported host, restore and verify that closure with:
+
+```sh
+npm ci --no-audit --no-fund
+npm run compatibility:check:primary
+```
+
+The verifier checks the repository-local launchers, native executables,
+protocol schemas and Fabric wrapper provenance. Each primary wrapper also
+re-hashes its expected native executable immediately before starting a new
+provider process. A missing or changed artifact fails closed; CLI updates are
+deliberate lockfile and compatibility-pin changes.
+
 The resolved `.cap` file must remain a private regular file with mode `0600`.
 The adjacent `.json` file is secret-free metadata and is checked against the
 canonical project, project key, seat and credential path before use. Never
