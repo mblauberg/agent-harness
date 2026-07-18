@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import stat
 import tempfile
 import sys
 from typing import Any
@@ -23,6 +25,29 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 class InstallError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class PathIdentity:
+    device: int
+    inode: int
+    mode: int
+    size: int
+    modified_ns: int
+
+
+@dataclass(frozen=True)
+class PathSnapshot:
+    kind: str
+    identity: PathIdentity | None
+    link_target: str | None
+
+
+@dataclass(frozen=True)
+class LinkMutation:
+    path: Path
+    before: PathSnapshot
+    installed: PathSnapshot
 
 
 def _now() -> str:
@@ -97,38 +122,121 @@ def _load_manifest(target: Path) -> dict[str, Any]:
     return data
 
 
-def _same_link(destination: Path, source: Path) -> bool:
-    if not destination.is_symlink():
+def _path_identity(value: os.stat_result) -> PathIdentity:
+    return PathIdentity(
+        value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns,
+    )
+
+
+def _capture_path(path: Path) -> PathSnapshot:
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        return PathSnapshot("absent", None, None)
+    identity = _path_identity(before)
+    if not stat.S_ISLNK(before.st_mode):
+        return PathSnapshot("other", identity, None)
+    try:
+        link_target = os.readlink(path)
+        after = path.lstat()
+    except FileNotFoundError as exc:
+        raise InstallError(f"managed path changed while snapshotting: {path.name}") from exc
+    if _path_identity(after) != identity or os.readlink(path) != link_target:
+        raise InstallError(f"managed path changed while snapshotting: {path.name}")
+    return PathSnapshot("symlink", identity, link_target)
+
+
+def _snapshot_paths(target: Path, names: set[str]) -> dict[str, PathSnapshot]:
+    return {name: _capture_path(target / name) for name in names}
+
+
+def _same_link_snapshot(destination: Path, source: Path, snapshot: PathSnapshot) -> bool:
+    if snapshot.kind != "symlink" or snapshot.link_target is None:
         return False
     try:
-        return destination.resolve(strict=False) == source.resolve()
-    except OSError:
+        return (destination.parent / snapshot.link_target).resolve(strict=False) == source.resolve()
+    except (OSError, RuntimeError):
         return False
 
 
-def _plan(source: Path, target: Path, manifest: dict[str, Any]) -> list[dict[str, str]]:
+def _assert_path_unchanged(path: Path, expected: PathSnapshot) -> None:
+    if _capture_path(path) != expected:
+        raise InstallError(f"managed path changed before managed mutation: {path.name}")
+
+
+def _mutate_link(
+    path: Path,
+    expected: PathSnapshot,
+    source: Path | None,
+    journal: list[LinkMutation],
+) -> None:
+    _assert_path_unchanged(path, expected)
+    if expected.kind == "symlink":
+        path.unlink()
+    elif expected.kind != "absent":
+        raise InstallError(f"managed mutation refuses non-link path: {path.name}")
+    if source is not None:
+        path.symlink_to(source)
+    journal.append(LinkMutation(path, expected, _capture_path(path)))
+
+
+def _rollback_mutations(journal: list[LinkMutation]) -> list[str]:
+    preserved: list[str] = []
+    for mutation in reversed(journal):
+        current = _capture_path(mutation.path)
+        if current != mutation.installed:
+            preserved.append(mutation.path.name)
+            continue
+        try:
+            if current.kind == "symlink":
+                mutation.path.unlink()
+            elif current.kind != "absent":
+                preserved.append(mutation.path.name)
+                continue
+            if mutation.before.kind == "symlink":
+                assert mutation.before.link_target is not None
+                mutation.path.symlink_to(mutation.before.link_target)
+            elif mutation.before.kind != "absent":
+                preserved.append(mutation.path.name)
+        except FileExistsError:
+            preserved.append(mutation.path.name)
+    return sorted(set(preserved))
+
+
+def _plan(
+    source: Path,
+    target: Path,
+    manifest: dict[str, Any],
+    snapshots: dict[str, PathSnapshot] | None = None,
+) -> list[dict[str, str]]:
     skills = _skills(source)
     managed = manifest["managed"]
+    snapshots = snapshots or _snapshot_paths(target, set(skills) | set(managed))
     items = []
     for name, source_path in skills.items():
         destination = target / name
+        snapshot = snapshots[name]
         entry = managed.get(name)
         if entry is None:
-            state = "unmanaged" if destination.exists() or destination.is_symlink() else "missing"
-        elif _same_link(destination, source_path):
+            if _same_link_snapshot(destination, source_path, snapshot):
+                state = "compatible"
+            else:
+                state = "missing" if snapshot.kind == "absent" else "unmanaged"
+        elif _same_link_snapshot(destination, source_path, snapshot):
             state = "managed" if entry.get("source_sha256") == _sha_skill(source_path) else "stale"
-        elif destination.is_symlink() and not destination.exists():
+        elif snapshot.kind == "symlink":
             state = "stale"
-        elif not destination.exists() and not destination.is_symlink():
+        elif snapshot.kind == "absent":
             state = "stale"
         else:
             state = "conflicting"
         items.append({"name": name, "state": state})
     for name in sorted(set(managed) - set(skills)):
         destination = target / name
-        if _same_link(destination, Path(managed[name].get("source_target", "/missing"))):
+        snapshot = snapshots[name]
+        if _same_link_snapshot(destination, Path(managed[name].get("source_target", "/missing")), snapshot):
             state = "retired-managed"
-        elif not destination.exists() and not destination.is_symlink():
+        elif snapshot.kind == "absent":
             state = "retired-missing"
         else:
             state = "conflicting"
@@ -181,7 +289,13 @@ def _load_renames(path: Path | None) -> list[dict[str, str]]:
     return renames
 
 
-def _prepare_renames(source: Path, target: Path, manifest: dict[str, Any], renames: list[dict[str, str]]) -> list[dict[str, Any]]:
+def _prepare_renames(
+    source: Path,
+    target: Path,
+    manifest: dict[str, Any],
+    renames: list[dict[str, str]],
+    snapshots: dict[str, PathSnapshot],
+) -> list[dict[str, Any]]:
     skills = _skills(source)
     managed = manifest["managed"]
     operations: list[dict[str, Any]] = []
@@ -196,11 +310,13 @@ def _prepare_renames(source: Path, target: Path, manifest: dict[str, Any], renam
             continue
         old_destination = target / old
         new_destination = target / new
+        old_snapshot = snapshots[old]
+        new_snapshot = snapshots[new]
         old_source = Path(managed[old]["source_target"])
-        if (old_destination.exists() or old_destination.is_symlink()) and not _same_link(old_destination, old_source):
+        if old_snapshot.kind != "absent" and not _same_link_snapshot(old_destination, old_source, old_snapshot):
             raise InstallError(f"conflicting managed rename source: {old}")
-        new_is_correct = _same_link(new_destination, skills[new])
-        if (new_destination.exists() or new_destination.is_symlink()) and not new_is_correct:
+        new_is_correct = _same_link_snapshot(new_destination, skills[new], new_snapshot)
+        if new_snapshot.kind != "absent" and not new_is_correct:
             raise InstallError(f"conflicting rename target: {new}")
         if new_is_correct and new in managed and Path(managed[new]["source_target"]).resolve() != skills[new]:
             raise InstallError(f"conflicting managed rename target: {new}")
@@ -215,52 +331,38 @@ def _prepare_renames(source: Path, target: Path, manifest: dict[str, Any], renam
             "old": old,
             "new": new,
             "old_destination": old_destination,
-            "old_source": old_source,
+            "old_snapshot": old_snapshot,
             "new_destination": new_destination,
             "new_source": skills[new],
+            "new_snapshot": new_snapshot,
             "create_new": create_new,
+            "claim_new": create_new or new in managed,
             "entry": _entry(new, skills[new], list(target_history[new])),
         })
     return operations
 
 
-def _apply_renames(manifest: dict[str, Any], operations: list[dict[str, Any]]) -> None:
-    applied: list[dict[str, Any]] = []
-    try:
-        for operation in operations:
-            if operation["create_new"]:
-                operation["new_destination"].symlink_to(operation["new_source"])
-            try:
-                if operation["old_destination"].is_symlink():
-                    operation["old_destination"].unlink()
-            except OSError:
-                if operation["create_new"]:
-                    operation["new_destination"].unlink(missing_ok=True)
-                raise
-            applied.append(operation)
-    except OSError as exc:
-        for operation in reversed(applied):
-            if operation["create_new"] and operation["new_destination"].is_symlink():
-                operation["new_destination"].unlink()
-            if not operation["old_destination"].exists() and not operation["old_destination"].is_symlink():
-                operation["old_destination"].symlink_to(operation["old_source"])
-        raise InstallError(f"rename application failed and was rolled back: {exc}") from exc
+def _apply_renames(
+    manifest: dict[str, Any],
+    operations: list[dict[str, Any]],
+    journal: list[LinkMutation],
+) -> None:
     for operation in operations:
-        manifest["managed"][operation["new"]] = operation["entry"]
+        if operation["create_new"]:
+            _mutate_link(
+                operation["new_destination"], operation["new_snapshot"], operation["new_source"], journal,
+            )
+        if operation["old_snapshot"].kind == "symlink":
+            _mutate_link(
+                operation["old_destination"], operation["old_snapshot"], None, journal,
+            )
+    claimed = {operation["new"] for operation in operations if operation["claim_new"]}
+    for operation in operations:
         manifest["managed"].pop(operation["old"], None)
-
-
-def _snapshot_links(target: Path, names: set[str]) -> dict[str, str | None]:
-    return {name: os.readlink(target / name) if (target / name).is_symlink() else None for name in names}
-
-
-def _restore_links(target: Path, snapshot: dict[str, str | None]) -> None:
-    for name, raw in snapshot.items():
-        destination = target / name
-        if destination.is_symlink():
-            destination.unlink()
-        if raw is not None:
-            destination.symlink_to(raw)
+    for name in claimed:
+        manifest["managed"][name] = next(
+            operation["entry"] for operation in reversed(operations) if operation["new"] == name
+        )
 
 
 def execute(action: str, source: Path, target: Path, renames: Path | None = None) -> dict[str, Any]:
@@ -270,31 +372,34 @@ def execute(action: str, source: Path, target: Path, renames: Path | None = None
     if action in {"plan", "check"}:
         return {"schema_version": 1, "action": action, "items": _plan(source, target, manifest), "changed": []}
     target.mkdir(parents=True, exist_ok=True)
+    rename_registry = _load_renames(renames) if action == "reconcile" else []
+    skills = _skills(source)
+    tracked = set(manifest["managed"]) | set(skills)
+    tracked |= {item[key] for item in rename_registry for key in ("from", "to")}
+    snapshots = _snapshot_paths(target, tracked)
     rename_operations: list[dict[str, Any]] = []
     if action == "reconcile":
-        rename_operations = _prepare_renames(source, target, manifest, _load_renames(renames))
-    items = _plan(source, target, manifest)
+        rename_operations = _prepare_renames(source, target, manifest, rename_registry, snapshots)
+    items = _plan(source, target, manifest, snapshots)
     renamed_old = {operation["old"] for operation in rename_operations}
     conflicts = [item["name"] for item in items if item["state"] == "conflicting" and item["name"] not in renamed_old]
     if conflicts:
         raise InstallError("conflicting managed targets: " + ", ".join(conflicts))
-    tracked = set(manifest["managed"]) | {item["name"] for item in items}
-    tracked |= {operation["new"] for operation in rename_operations}
-    snapshot = _snapshot_links(target, tracked)
     changed: list[str] = [operation["new"] for operation in rename_operations]
+    journal: list[LinkMutation] = []
     try:
         if rename_operations:
-            _apply_renames(manifest, rename_operations)
-            items = _plan(source, target, manifest)
+            _apply_renames(manifest, rename_operations, journal)
+            post_rename_snapshots = _snapshot_paths(target, set(manifest["managed"]) | set(skills))
+            items = _plan(source, target, manifest, post_rename_snapshots)
+        else:
+            post_rename_snapshots = snapshots
         if action in {"install", "reconcile"}:
-            skills = _skills(source)
             for item in items:
                 name, state = item["name"], item["state"]
                 if state == "missing" or (action == "reconcile" and state == "stale"):
                     destination = target / name
-                    if destination.is_symlink():
-                        destination.unlink()
-                    destination.symlink_to(skills[name])
+                    _mutate_link(destination, post_rename_snapshots[name], skills[name], journal)
                     history = list(manifest["managed"].get(name, {}).get("history", []))
                     manifest["managed"][name] = _entry(name, skills[name], history)
                     changed.append(name)
@@ -304,19 +409,22 @@ def execute(action: str, source: Path, target: Path, renames: Path | None = None
         elif action == "uninstall-managed":
             for name, entry in list(manifest["managed"].items()):
                 destination = target / name
-                if _same_link(destination, Path(entry.get("source_target", "/missing"))):
-                    destination.unlink()
+                snapshot = snapshots[name]
+                if _same_link_snapshot(destination, Path(entry.get("source_target", "/missing")), snapshot):
+                    _mutate_link(destination, snapshot, None, journal)
                     del manifest["managed"][name]
                     changed.append(name)
-                elif destination.exists() or destination.is_symlink():
+                elif snapshot.kind != "absent":
                     raise InstallError(f"conflicting managed target changed outside harness: {name}")
                 else:
                     del manifest["managed"][name]
         else:
             raise InstallError(f"unsupported action: {action}")
         _write_manifest(target, manifest)
-    except (OSError, InstallError):
-        _restore_links(target, snapshot)
+    except (OSError, InstallError) as exc:
+        preserved = _rollback_mutations(journal)
+        if preserved:
+            raise InstallError("rollback preserved newer path: " + ", ".join(preserved)) from exc
         raise
     return {"schema_version": 1, "action": action, "items": _plan(source, target, manifest), "changed": changed}
 
@@ -336,12 +444,12 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     if args.summary:
         linked = len(result["changed"])
-        existing = sum(item["state"] in {"managed", "unmanaged"} for item in result["items"]) - linked
+        existing = sum(item["state"] in {"managed", "compatible", "unmanaged"} for item in result["items"]) - linked
         print(f"skills linked={linked} existing={existing} target={args.target}")
     else:
         print(json.dumps(result, indent=2))
     if args.action == "check":
-        drift = [item for item in result["items"] if item["state"] not in {"managed", "unmanaged"}]
+        drift = [item for item in result["items"] if item["state"] not in {"managed", "compatible"}]
         if drift:
             rendered = " ".join(
                 f"{state}={','.join(item['name'] for item in drift if item['state'] == state)}"

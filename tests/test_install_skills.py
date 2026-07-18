@@ -3,6 +3,7 @@ import importlib.util
 import json
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -10,6 +11,15 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install-skills"
 MANAGER = ROOT / "scripts" / "manage_installation.py"
+
+
+def load_manager_module(name: str):
+    spec = importlib.util.spec_from_file_location(name, MANAGER)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def run(target: Path, *arguments: str):
@@ -66,6 +76,22 @@ def test_installer_preserves_existing_entries(tmp_path):
     assert result.returncode == 0, result.stderr
     assert marker.read_text() == "owned elsewhere\n"
     assert not existing.is_symlink()
+    checked = run(target, "--check")
+    assert checked.returncode == 1
+    assert "unmanaged=scope" in checked.stdout
+
+
+def test_check_accepts_unmanaged_exact_link_as_compatible(tmp_path):
+    target = tmp_path / "skills"
+    target.mkdir()
+    (target / "scope").symlink_to(ROOT / "skills" / "scope")
+
+    checked = run(target, "--check")
+
+    assert checked.returncode == 1
+    assert "unmanaged=scope" not in checked.stdout
+    assert '"name": "scope"' in checked.stdout
+    assert '"state": "compatible"' in checked.stdout
 
 
 def test_directory_symlink_to_canonical_skills_is_preserved_without_manifest(tmp_path):
@@ -143,6 +169,21 @@ def test_plan_is_read_only_and_distinguishes_missing_and_unmanaged(tmp_path):
     assert {item["name"]: item["state"] for item in plan["items"]} == {"alpha": "unmanaged", "beta": "missing"}
     assert not manifest_for(target).exists()
     assert not (target / "beta").exists()
+
+
+def test_check_treats_only_exact_unmanaged_links_as_compatible(tmp_path):
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    target.mkdir()
+    for name in ("alpha", "beta"):
+        (target / name).symlink_to(source / name)
+
+    result = manager(target, "check", source)
+
+    assert result.returncode == 0, result.stderr
+    states = {item["name"]: item["state"] for item in json.loads(result.stdout)["items"]}
+    assert states == {"alpha": "compatible", "beta": "compatible"}
+    assert not manifest_for(target).exists()
 
 
 def test_install_records_versioned_ownership_without_overwriting_unmanaged(tmp_path):
@@ -250,6 +291,24 @@ def test_plain_install_then_reconcile_merges_an_already_installed_rename(tmp_pat
     assert not (target / "alpha").exists()
 
 
+def test_rename_reconcile_preserves_compatible_unmanaged_target_without_claiming_it(tmp_path):
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    assert manager(target, "install", source).returncode == 0
+    (source / "alpha").rename(source / "gamma")
+    (target / "gamma").symlink_to(source / "gamma")
+    renames = tmp_path / "renames.json"
+    renames.write_text(json.dumps({"schema_version": 1, "renames": [{"from": "alpha", "to": "gamma"}]}))
+
+    result = manager(target, "reconcile", source, renames)
+
+    assert result.returncode == 0, result.stderr
+    manifest = json.loads(manifest_for(target).read_text())
+    assert "alpha" not in manifest["managed"]
+    assert "gamma" not in manifest["managed"]
+    assert (target / "gamma").resolve() == (source / "gamma").resolve()
+
+
 def test_manifest_is_bound_to_one_target_root(tmp_path):
     source = tiny_source(tmp_path)
     first = tmp_path / "first"
@@ -294,10 +353,7 @@ def test_full_skill_tree_digest_marks_executable_mode_change_stale(tmp_path):
 
 
 def test_manifest_commit_failure_rolls_back_link_mutations(tmp_path, monkeypatch):
-    spec = importlib.util.spec_from_file_location("managed_installer_failure", MANAGER)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader
-    spec.loader.exec_module(module)
+    module = load_manager_module("managed_installer_failure")
     source = tiny_source(tmp_path)
     target = tmp_path / "installed"
 
@@ -344,3 +400,82 @@ def test_rename_reconcile_preflights_all_conflicts_before_mutation(tmp_path):
     assert (target / "alpha").is_symlink()
     assert not (target / "gamma").exists()
     assert "alpha" in json.loads(manifest_for(target).read_text())["managed"]
+
+
+def test_stale_reconcile_rejects_path_race_without_overwriting_newer_entry(tmp_path, monkeypatch):
+    module = load_manager_module("managed_installer_stale_race")
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    module.execute("install", source, target)
+    stale = target / "alpha"
+    stale.unlink()
+    stale.symlink_to(tmp_path / "missing")
+    external = tmp_path / "external"
+    external.mkdir()
+    original_assert = module._assert_path_unchanged
+    raced = False
+
+    def race(path, snapshot):
+        nonlocal raced
+        if path == stale and not raced:
+            raced = True
+            stale.unlink()
+            stale.symlink_to(external)
+        return original_assert(path, snapshot)
+
+    monkeypatch.setattr(module, "_assert_path_unchanged", race)
+    with pytest.raises(module.InstallError, match="changed before managed mutation"):
+        module.execute("reconcile", source, target)
+    assert stale.resolve() == external
+    assert json.loads(manifest_for(target).read_text())["managed"]["alpha"]
+
+
+def test_rename_reconcile_rolls_back_created_target_but_preserves_raced_source(tmp_path, monkeypatch):
+    module = load_manager_module("managed_installer_rename_race")
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    module.execute("install", source, target)
+    (source / "alpha").rename(source / "gamma")
+    renames = tmp_path / "renames.json"
+    renames.write_text(json.dumps({"schema_version": 1, "renames": [{"from": "alpha", "to": "gamma"}]}))
+    old = target / "alpha"
+    external = tmp_path / "external"
+    external.mkdir()
+    original_assert = module._assert_path_unchanged
+    raced = False
+
+    def race(path, snapshot):
+        nonlocal raced
+        if path == old and not raced:
+            raced = True
+            old.unlink()
+            old.symlink_to(external)
+        return original_assert(path, snapshot)
+
+    monkeypatch.setattr(module, "_assert_path_unchanged", race)
+    with pytest.raises(module.InstallError, match="changed before managed mutation"):
+        module.execute("reconcile", source, target, renames)
+    assert old.resolve() == external
+    assert not (target / "gamma").exists()
+    assert "alpha" in json.loads(manifest_for(target).read_text())["managed"]
+
+
+def test_rollback_never_overwrites_link_changed_after_install(tmp_path, monkeypatch):
+    module = load_manager_module("managed_installer_rollback_race")
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    external = tmp_path / "external"
+    external.mkdir()
+
+    def fail_commit(_target, _manifest):
+        installed = target / "alpha"
+        installed.unlink()
+        installed.symlink_to(external)
+        raise OSError("injected manifest failure")
+
+    monkeypatch.setattr(module, "_write_manifest", fail_commit)
+    with pytest.raises(module.InstallError, match="rollback preserved newer path: alpha"):
+        module.execute("install", source, target)
+    assert (target / "alpha").resolve() == external
+    assert not (target / "beta").exists()
+    assert not manifest_for(target).exists()

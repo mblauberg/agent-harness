@@ -105,18 +105,23 @@ atomically revokes the prior roster, stages the complete immutable filesystem
 generation and compare-and-swaps a private `current.json` pointer. There is no
 flat-seat fallback or second accepted generation.
 
-Installers and operators configure the project-dynamic Claude Code and Codex
-entries through `scripts/configure-agent-fabric-mcp.py`; `--platform all`
-configures both and `--check` verifies only their `agent-fabric` entries. Those
-global entries contain the proxy command, state directory, seat and client
-label, and omit `AGENT_FABRIC_PROJECT_PATH`. A fixed project path remains
-available only as a separately scoped compatibility entry for a client that
-cannot preserve workspace cwd. It is not valid in global Claude Code and Codex
-registration. Existing-file updates use an atomic exchange with displaced-byte
+Installers and operators configure project-dynamic Agy, Claude Code, Codex,
+Cursor and Kiro entries through `scripts/configure-agent-fabric-mcp.py`;
+`--platform all` configures all five and `--check` verifies only their
+`agent-fabric` entries. Global entries contain the proxy command plus three
+non-secret variables: state directory, seat and client label. They omit
+`AGENT_FABRIC_PROJECT_PATH`. A fixed project path is available only through an
+explicitly project-scoped, single optional-client compatibility entry and adds
+that fourth variable for a client that cannot preserve workspace cwd; it is
+refused for `all`, Claude Code and Codex.
+Existing-file updates use an atomic exchange with displaced-byte
 and installed-path verification. Concurrent configuration drift produces a
 typed conflict and retains the displaced object without symlink following or
 chmod inside a fresh owner-only `0700` recovery directory; conflict handling
-never rolls back over the live client pathname.
+never rolls back over the live client pathname. Multi-client writes emit one
+committed receipt immediately after each durable client update. A later client
+conflict exits with typed partial-state output naming the committed and failed
+clients plus the canonical check-and-reconcile recovery command.
 
 Clients use lock-safe on-demand bootstrap: they attach to a compatible
 incumbent before database preflight, or elect one daemon and inspect/publish

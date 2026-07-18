@@ -32,6 +32,14 @@ class RegistrationConflictError(RegistrationError):
     pass
 
 
+class PartialRegistrationError(RegistrationError):
+    def __init__(self, committed: list[str], failed: str, cause: Exception):
+        super().__init__(str(cause))
+        self.committed = tuple(committed)
+        self.failed = failed
+        self.cause = cause
+
+
 @dataclass(frozen=True)
 class FileIdentity:
     device: int
@@ -506,17 +514,39 @@ def main(argv: list[str] | None = None) -> int:
                 print("missing: agent-fabric MCP registration for " + ", ".join(missing))
                 return 1
         elif not args.preflight:
+            committed: list[str] = []
             for proposal in proposals:
                 if proposal.status != "existing":
-                    write_proposal(proposal)
+                    try:
+                        write_proposal(proposal)
+                    except (OSError, RegistrationError) as exc:
+                        if committed:
+                            raise PartialRegistrationError(committed, proposal.client, exc) from exc
+                        raise
+                    committed.append(proposal.client)
+                    print(
+                        "agent-fabric MCP committed "
+                        f"platform={proposal.client} config={proposal.snapshot.target_path}",
+                        flush=True,
+                    )
         for proposal in proposals:
             verb = (
                 "verified" if args.check else
                 f"preflight-{proposal.status}" if args.preflight else
                 "existing" if proposal.status == "existing" else "configured"
             )
-            print(f"agent-fabric MCP {verb} platform={proposal.client} config={proposal.snapshot.target_path}")
+            if not (not args.check and not args.preflight and proposal.status != "existing"):
+                print(f"agent-fabric MCP {verb} platform={proposal.client} config={proposal.snapshot.target_path}")
         return 0
+    except PartialRegistrationError as exc:
+        print(
+            "partial: agent-fabric MCP registration "
+            f"committed={','.join(exc.committed)} failed={exc.failed} "
+            "recovery=rerun --platform all --check then reconcile reported missing clients; "
+            f"cause={exc.cause}",
+            file=sys.stderr,
+        )
+        return 4
     except (OSError, RegistrationError) as exc:
         print(f"conflicting: {exc}", file=sys.stderr)
         return 3

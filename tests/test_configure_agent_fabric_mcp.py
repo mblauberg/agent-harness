@@ -266,10 +266,57 @@ def test_platform_all_revalidates_codex_after_writing_claude(tmp_path: Path, mon
     ])
 
     captured = capsys.readouterr()
-    assert result == 3
-    assert "Codex config changed" in captured.err
+    assert result == 4
+    assert "partial:" in captured.err
+    assert "committed=claude" in captured.err
+    assert "failed=codex" in captured.err
+    assert "recovery=rerun --platform all --check" in captured.err
+    assert "agent-fabric MCP committed platform=claude" in captured.out
     assert codex_config.read_text() == external
     assert json.loads(claude_config.read_text())["mcpServers"]["agent-fabric"]["env"]["AGENT_FABRIC_SEAT"] == "claude"
+
+
+def test_platform_all_reports_every_commit_before_late_fifth_client_conflict(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    configurer = load_configurer()
+    paths = {
+        "claude": tmp_path / "claude.json",
+        "codex": tmp_path / "codex.toml",
+        "cursor": tmp_path / "cursor.json",
+        "agy": tmp_path / "agy.json",
+        "kiro": tmp_path / "kiro.json",
+    }
+    paths["claude"].write_text("{}\n")
+    paths["codex"].write_text("[unrelated]\nvalue = true\n")
+    for client in ("cursor", "agy", "kiro"):
+        paths[client].write_text("{}\n")
+    external = '{"external":"late-conflict"}\n'
+    write_proposal = configurer.write_proposal
+
+    def late_conflict(proposal):
+        write_proposal(proposal)
+        if proposal.client == "agy":
+            paths["kiro"].write_text(external)
+
+    monkeypatch.setattr(configurer, "write_proposal", late_conflict)
+    result = configurer.main([
+        "--agents-home", str(ROOT),
+        "--state-directory", str(tmp_path / "state"),
+        "--claude-config", str(paths["claude"]),
+        "--codex-config", str(paths["codex"]),
+        "--cursor-config", str(paths["cursor"]),
+        "--agy-config", str(paths["agy"]),
+        "--kiro-config", str(paths["kiro"]),
+    ])
+
+    captured = capsys.readouterr()
+    assert result == 4
+    for client in ("claude", "codex", "cursor", "agy"):
+        assert f"agent-fabric MCP committed platform={client}" in captured.out
+    assert "committed=claude,codex,cursor,agy" in captured.err
+    assert "failed=kiro" in captured.err
+    assert paths["kiro"].read_text() == external
 
 
 @pytest.mark.parametrize("client", ["claude", "codex"])
@@ -658,12 +705,16 @@ def test_absent_target_replaced_after_link_fails_closed_with_recovery(tmp_path: 
     recovery.unlink()
 
 
-def test_operations_docs_define_dynamic_primary_registration_and_bounded_fixed_paths() -> None:
+def test_operations_docs_define_all_dynamic_clients_and_bounded_fixed_paths() -> None:
     runbook = (ROOT / "docs/runbooks/agent-fabric-operations.md").read_text()
     runtime_readme = (ROOT / "runtime/agent-fabric/README.md").read_text()
     for document in (runbook, runtime_readme):
+        normalized = " ".join(document.split())
         assert "configure-agent-fabric-mcp.py" in document
         assert "AGENT_FABRIC_PROJECT_PATH" in document
         assert "Claude Code and Codex" in document
         assert "cannot preserve" in document
+        assert "all five" in document
+        assert "three non-secret" in normalized
+        assert "fourth" in document
     assert "Registry entries bind `AGENT_FABRIC_PROJECT_PATH`" not in runbook

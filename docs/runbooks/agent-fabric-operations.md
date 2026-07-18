@@ -161,6 +161,12 @@ content retains its caller-owned mode. Conflict handling never rolls that object
 back over a pathname that a concurrent writer may have changed. Reconcile both
 the current client configuration and recovery object before rerunning.
 
+For a multi-client write, each successful update emits a `committed` receipt
+before the next client is attempted. A later conflict exits `4` with a typed
+`partial` line naming the committed clients, failed client and recovery: rerun
+`--platform all --check`, then reconcile only the clients reported missing. It
+never describes an earlier committed client as rolled back.
+
 Primary provider execution uses the locked Claude Agent SDK and the installed,
 vendor-signed Claude Code and Codex CLIs through repository-owned wrappers. On
 the supported host, restore the package closure and verify both boundaries
@@ -456,9 +462,11 @@ agy mcp list
 
 The current Agy CLI uses a Bubble Tea TUI for `mcp list` and fails when no TTY
 is available. In headless verification, inspect only the `agent-fabric` object
-in `~/.gemini/config/mcp_config.json` and confirm its command plus the four
-non-secret `AGENT_FABRIC_*` seat-selection variables; never print capability
-files or unrelated registry values.
+in `~/.gemini/config/mcp_config.json`. A global dynamic entry has its command
+plus three non-secret `AGENT_FABRIC_*` variables: state directory, seat and
+client label. An explicitly project-scoped optional-client entry adds the
+fourth, `AGENT_FABRIC_PROJECT_PATH`. Never print capability files or unrelated
+registry values.
 
 Resolve the active credential and metadata paths for one project seat without
 printing the capability:
