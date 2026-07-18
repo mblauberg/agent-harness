@@ -99,6 +99,8 @@ if [[ ! -e "$instructions" && ! -L "$instructions" ]]; then
     echo "$bootstrap"
   } > "$instructions"
   echo "instructions created=$instructions"
+elif [[ -L "$instructions" && "$instructions" -ef "$ROOT/AGENTS.md" ]]; then
+  echo "instructions existing=$instructions"
 elif grep -Fq "$ROOT/AGENTS.md" "$instructions" && grep -Fq "$ROOT/HARNESS.md" "$instructions"; then
   echo "instructions existing=$instructions"
 else
