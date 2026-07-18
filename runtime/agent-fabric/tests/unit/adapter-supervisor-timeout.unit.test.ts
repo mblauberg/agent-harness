@@ -81,6 +81,10 @@ describe("adapter supervisor timeout selection", () => {
     );
 
     try {
+      await expect(supervisor.request("fake", "attach", {
+        fixtureDurationMs: 6,
+      })).resolves.toEqual({ method: "attach" });
+
       await expect(supervisor.request("fake", "dispatch", {
         operation: "send_turn",
         fixtureDurationMs: 6,
@@ -99,7 +103,7 @@ describe("adapter supervisor timeout selection", () => {
       await supervisor.close();
     }
 
-    expect(transportFixture.requestedTimeouts).toEqual([5_020, 5_020, 5_020]);
+    expect(transportFixture.requestedTimeouts).toEqual([5_020, 5_020, 5_020, 5_020]);
     expect(transportFixture.closes).toBe(1);
   });
 });

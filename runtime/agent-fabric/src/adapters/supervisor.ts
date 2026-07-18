@@ -100,7 +100,7 @@ function parseBridgeHealth(value: unknown, kind: "chair" | "child"): boolean {
 }
 
 function isLongProviderOperation(method: string, params: Record<string, unknown>): boolean {
-  if (method === "spawn" || method === "compact") return true;
+  if (method === "spawn" || method === "attach" || method === "compact") return true;
   return method === "dispatch" && (
     params.operation === "send_turn" ||
     params.operation === "steer" ||
