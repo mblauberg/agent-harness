@@ -275,6 +275,31 @@ def test_reconcile_applies_safe_managed_rename_with_history(tmp_path):
     assert (target / "gamma").resolve() == (source / "gamma").resolve()
 
 
+def test_reconcile_preserves_compatible_unmanaged_rename_target(tmp_path):
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    assert manager(target, "install", source).returncode == 0
+    (source / "alpha").rename(source / "gamma")
+    unmanaged = target / "gamma"
+    unmanaged.symlink_to(source / "gamma")
+    renames = tmp_path / "renames.json"
+    renames.write_text(json.dumps({"schema_version": 1, "renames": [{"from": "alpha", "to": "gamma"}]}))
+
+    reconciled = manager(target, "reconcile", source, renames)
+
+    assert reconciled.returncode == 0, reconciled.stderr
+    manifest = json.loads(manifest_for(target).read_text())
+    assert set(manifest["managed"]) == {"beta"}
+    assert unmanaged.is_symlink()
+    assert unmanaged.resolve() == (source / "gamma").resolve()
+
+    uninstalled = manager(target, "uninstall-managed", source)
+
+    assert uninstalled.returncode == 0, uninstalled.stderr
+    assert unmanaged.is_symlink()
+    assert unmanaged.resolve() == (source / "gamma").resolve()
+
+
 def test_reconcile_merges_two_sources_into_one_target(tmp_path):
     source = tiny_source(tmp_path)
     target = tmp_path / "installed"
