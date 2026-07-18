@@ -9,6 +9,9 @@ import type { BootstrapMcpSeatInput, BootstrapMcpSeatResult, CurrentMcpSeatBindi
 
 type Row = Record<string, unknown>;
 
+const BOOTSTRAP_AUTHORITY_LIFETIME_MS = 31 * 24 * 60 * 60 * 1_000;
+const MCP_SEAT_RENEWAL_WINDOW_MS = 60 * 60 * 1_000;
+
 export type BootstrapMcpCustody = {
   database: Database.Database;
   clock: () => number;
@@ -37,6 +40,24 @@ function numberField(row: Row, field: string): number {
   const value = row[field];
   if (typeof value !== "number" || !Number.isSafeInteger(value)) throw new Error("database field " + field + " is not an integer");
   return value;
+}
+
+function authorityExpiry(authorityJson: string): number {
+  const value: unknown = JSON.parse(authorityJson);
+  if (!isRow(value) || typeof value.expiresAt !== "string") {
+    throw new Error("bootstrap authority expiry is invalid");
+  }
+  const expiresAt = Date.parse(value.expiresAt);
+  if (!Number.isFinite(expiresAt)) throw new Error("bootstrap authority expiry is invalid");
+  return expiresAt;
+}
+
+function authorityWithExpiry(authorityJson: string, expiresAt: string): string {
+  const value: unknown = JSON.parse(authorityJson);
+  if (!isRow(value) || typeof value.expiresAt !== "string") {
+    throw new Error("bootstrap authority expiry is invalid");
+  }
+  return canonicalJson({ ...value, expiresAt });
 }
 
 function canonicalJson(value: unknown): string {
@@ -84,6 +105,9 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
         "SELECT project_id,trust_record_digest FROM projects WHERE canonical_root=?",
       ).get(canonicalRoot);
       const now = custody.clock();
+      const bootstrapAuthorityExpiresAt = new Date(
+        Math.max(requestedExpiry, now + BOOTSTRAP_AUTHORITY_LIFETIME_MS),
+      ).toISOString();
       if (existingProject === undefined) {
         custody.database.prepare(`
           INSERT INTO projects(project_id,canonical_root,trust_record_digest,revision,authority_generation,created_at,updated_at)
@@ -136,7 +160,10 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
           deployment: { allowed: false },
           irreversibleActions: { allowed: false },
           network: { toolEgress: "none" },
-          expiresAt: input.expiresAt,
+          // The narrow authority remains bounded but intentionally outlives its
+          // short-lived bearer seats so exact-trust renewal needs no authority
+          // mutation or lifecycle reconstruction.
+          expiresAt: bootstrapAuthorityExpiresAt,
           budget: {},
         }, canonicalRoot);
         const authorityJson = canonicalJson(authority);
@@ -170,7 +197,7 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
         custody.database.prepare(`
           INSERT INTO capabilities(token_hash,run_id,agent_id,principal_generation,expires_at)
           VALUES (?,?,?,1,?)
-        `).run(sha256(initialCapability), runId, chairAgentId, requestedExpiry);
+        `).run(sha256(initialCapability), runId, chairAgentId, Date.parse(bootstrapAuthorityExpiresAt));
         custody.database.prepare(`
           INSERT INTO run_chair_leases(project_session_id,run_id,lease_id,holder_agent_id,generation,status,updated_at)
           VALUES (?,?,?,?,1,'active',?)
@@ -188,9 +215,10 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
         `).run(projectSessionId, runId, authorityRef, now);
       }
 
-      const run = rowOrNotFound(custody.database.prepare(`
+      let run = rowOrNotFound(custody.database.prepare(`
         SELECT session.revision AS session_revision,session.generation AS session_generation,
-               run.revision AS run_revision,run.chair_agent_id,run.chair_generation,run.chair_lease_id
+               run.revision AS run_revision,run.authority_revision,
+               run.chair_agent_id,run.chair_generation,run.chair_lease_id
           FROM project_sessions session JOIN runs run ON run.project_session_id=session.project_session_id
          WHERE session.project_session_id=? AND run.run_id=?
       `).get(projectSessionId, runId), "bootstrap run");
@@ -201,11 +229,16 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
       `).get(projectId);
       const currentChairAgentId = stringField(run, "chair_agent_id");
       const chairSeat = currentChairAgentId.startsWith("codex_") ? "codex" : "claude";
+      let requestedSeatAlreadyBound = false;
       if (isRow(active)) {
         const member = custody.database.prepare(
           "SELECT 1 FROM mcp_seat_generation_members WHERE generation=? AND seat=?",
         ).get(active.generation, input.seat);
-        if (member !== undefined) {
+        requestedSeatAlreadyBound = member !== undefined;
+        if (
+          member !== undefined &&
+          numberField(active, "expires_at") - now > MCP_SEAT_RENEWAL_WINDOW_MS
+        ) {
           const generation = stringField(active, "generation");
           const bindings = custody.database.prepare(`
             SELECT seat,agent_id AS agentId,principal_generation AS expectedPrincipalGeneration
@@ -259,6 +292,96 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
         }
       }
 
+      if (requestedSeatAlreadyBound) {
+        const currentAuthorities = custody.database.prepare(`
+          SELECT agent.agent_id,agent.authority_id,authority.parent_authority_id,
+                 authority.authority_json,MAX(capability.principal_generation) AS principal_generation
+            FROM agents agent
+            JOIN authorities authority ON authority.authority_id=agent.authority_id
+            JOIN mcp_seat_generation_members seat
+              ON seat.run_id=agent.run_id AND seat.agent_id=agent.agent_id AND seat.generation=?
+            JOIN capabilities capability
+              ON capability.run_id=agent.run_id AND capability.agent_id=agent.agent_id
+           WHERE agent.run_id=?
+           GROUP BY agent.agent_id,agent.authority_id,authority.parent_authority_id,authority.authority_json
+           ORDER BY authority.parent_authority_id IS NOT NULL,agent.agent_id
+        `).all(
+          stringField(rowOrNotFound(active, "active MCP seat generation"), "generation"),
+          runId,
+        ).map((value) => rowOrNotFound(value, "bootstrap authority"));
+        if (currentAuthorities.some((authority) => authorityExpiry(stringField(authority, "authority_json")) < requestedExpiry)) {
+          const currentRunRevision = numberField(run, "run_revision");
+          const nextRunRevision = currentRunRevision + 1;
+          const currentAuthorityRevision = numberField(run, "authority_revision");
+          const nextAuthorityRevision = currentAuthorityRevision + 1;
+          const successorIds = new Map<string, string>();
+          let successorAuthorityRef: string | undefined;
+          for (const authority of currentAuthorities) {
+            const oldAuthorityId = stringField(authority, "authority_id");
+            const successorAuthorityId = `${oldAuthorityId}:renewal:${nextAuthorityRevision}`;
+            const parentAuthorityId = authority.parent_authority_id === null
+              ? null
+              : successorIds.get(stringField(authority, "parent_authority_id"));
+            if (authority.parent_authority_id !== null && parentAuthorityId === undefined) {
+              throw new Error("bootstrap authority parent is missing");
+            }
+            const authorityJson = authorityWithExpiry(
+              stringField(authority, "authority_json"),
+              bootstrapAuthorityExpiresAt,
+            );
+            custody.database.prepare(`
+              INSERT INTO authorities(authority_id,run_id,parent_authority_id,authority_json,authority_hash,created_at)
+              VALUES (?,?,?,?,?,?)
+            `).run(successorAuthorityId, runId, parentAuthorityId, authorityJson, sha256(authorityJson), now);
+            const agentUpdated = custody.database.prepare(
+              "UPDATE agents SET authority_id=? WHERE run_id=? AND agent_id=? AND authority_id=?",
+            ).run(successorAuthorityId, runId, stringField(authority, "agent_id"), oldAuthorityId);
+            if (agentUpdated.changes !== 1) {
+              throw new FabricError("DEDUPE_CONFLICT", "bootstrap roster authority changed");
+            }
+            successorIds.set(oldAuthorityId, successorAuthorityId);
+            if (parentAuthorityId === null) successorAuthorityRef = sha256Digest(authorityJson);
+
+            const nextPrincipalGeneration = numberField(authority, "principal_generation") + 1;
+            const agentId = stringField(authority, "agent_id");
+            const token = capabilityToken(custody.capabilityKey, runId, agentId, nextPrincipalGeneration);
+            custody.database.prepare(`
+              UPDATE capabilities SET revoked_at=? WHERE run_id=? AND agent_id=? AND revoked_at IS NULL
+            `).run(now, runId, agentId);
+            custody.database.prepare(`
+              INSERT INTO capabilities(token_hash,run_id,agent_id,principal_generation,expires_at)
+              VALUES (?,?,?,?,?)
+            `).run(sha256(token), runId, agentId, nextPrincipalGeneration, Date.parse(bootstrapAuthorityExpiresAt));
+          }
+          if (successorAuthorityRef === undefined) throw new Error("bootstrap chair authority is missing");
+          const updated = custody.database.prepare(`
+            UPDATE runs SET authority_ref=?,authority_revision=?,revision=?
+             WHERE run_id=? AND authority_revision=? AND revision=?
+          `).run(
+            successorAuthorityRef,
+            nextAuthorityRevision,
+            nextRunRevision,
+            runId,
+            currentAuthorityRevision,
+            currentRunRevision,
+          );
+          if (updated.changes !== 1) throw new FabricError("DEDUPE_CONFLICT", "bootstrap authority generation changed");
+          custody.database.prepare(`
+            INSERT INTO run_authority_revisions(
+              project_session_id,coordination_run_id,authority_revision,authority_ref,
+              git_allowlist_epoch,git_allowlist_digest,activated_at_run_revision,created_at
+            ) VALUES (?,?,?,?,1,NULL,?,?)
+          `).run(projectSessionId, runId, nextAuthorityRevision, successorAuthorityRef, nextRunRevision, now);
+          run = rowOrNotFound(custody.database.prepare(`
+            SELECT session.revision AS session_revision,session.generation AS session_generation,
+                   run.revision AS run_revision,run.authority_revision,
+                   run.chair_agent_id,run.chair_generation,run.chair_lease_id
+              FROM project_sessions session JOIN runs run ON run.project_session_id=session.project_session_id
+             WHERE session.project_session_id=? AND run.run_id=?
+          `).get(projectSessionId, runId), "renewed bootstrap run");
+        }
+      }
+
       const requestedAgentId = input.seat === chairSeat
         ? currentChairAgentId
         : `${input.seat}_bootstrap_peer_${identityDigest.slice(0, 16)}`;
@@ -282,14 +405,29 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
         custody.database.prepare(`
           INSERT INTO capabilities(token_hash,run_id,agent_id,principal_generation,expires_at)
           VALUES (?,?,?,1,?)
-        `).run(sha256(token), runId, requestedAgentId, requestedExpiry);
+        `).run(
+          sha256(token),
+          runId,
+          requestedAgentId,
+          authorityExpiry(stringField(chairAuthority, "authority_json")),
+        );
       }
 
       const bindings = custody.database.prepare(`
-        SELECT CASE WHEN agent_id=? THEN ? ELSE ? END AS seat,agent_id AS agentId,1 AS expectedPrincipalGeneration
-          FROM agents WHERE run_id=? ORDER BY seat
-      `).all(currentChairAgentId, chairSeat, chairSeat === "codex" ? "claude" : "codex", runId) as CurrentMcpSeatBindingInput["bindings"];
-      const expiresAt = isRow(active)
+        SELECT CASE WHEN agent.agent_id=? THEN ? ELSE ? END AS seat,
+               agent.agent_id AS agentId,MAX(capability.principal_generation) AS expectedPrincipalGeneration
+          FROM agents agent JOIN capabilities capability
+            ON capability.run_id=agent.run_id AND capability.agent_id=agent.agent_id
+         WHERE agent.run_id=? AND capability.revoked_at IS NULL AND capability.expires_at>?
+         GROUP BY agent.agent_id ORDER BY seat
+      `).all(
+        currentChairAgentId,
+        chairSeat,
+        chairSeat === "codex" ? "claude" : "codex",
+        runId,
+        now,
+      ) as CurrentMcpSeatBindingInput["bindings"];
+      const expiresAt = isRow(active) && !requestedSeatAlreadyBound
         ? new Date(numberField(active, "expires_at")).toISOString()
         : input.expiresAt;
       const expectedPreviousGeneration = isRow(active) ? stringField(active, "generation") : null;

@@ -232,6 +232,16 @@ root fails closed. The local fallback is `provenant fabric bootstrap --seat
 claude|codex`; it invokes the same composition. Public `mcp provision` retains
 its full-roster requirement.
 
+Bootstrap seats are short-lived bearers over a bounded bootstrap authority
+that deliberately outlives them. When a bootstrap seat is expired or within
+one hour of expiry, the Claude/Codex MCP proxy automatically revalidates trust
+for the exact current root and asks the daemon to rotate the complete roster.
+The daemon compare-and-swaps only the current generation and revokes every
+predecessor token; the project session, run and chair do not change. If exact
+trust or the generation changed, renewal fails closed. Stop and restart a
+stale proxy after another host completes the cutover. Operator-created runs
+continue to use the explicit `mcp provision` flow below.
+
 In production Console, Launch is available only when the dedicated
 `projectSessions.prepareLaunch` operation and explicit operator-action commit
 surface are negotiated. The selected live Project row supplies the session
