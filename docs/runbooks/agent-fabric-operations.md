@@ -294,8 +294,11 @@ The active optional reviewer routes are exact and subscription-authenticated:
 | --- | --- | --- |
 | Agy | `Gemini 3.1 Pro (High)` | Google / high |
 | Cursor | `cursor-grok-4.5-high` | xAI / high |
+| OpenCode | `opencode/<catalogue-model>` | generic-open / variant in model id |
 
-Do not set or persist provider API keys for these routes. The wrappers forward
+Do not set or persist provider API keys for these routes. OpenCode is limited to
+its `opencode/*` account catalogue; select an effort variant only when that
+catalogue advertises it. The wrappers forward
 only the minimal process environment (`HOME`, `PATH` and `TMPDIR`) and use the
 provider CLIs' existing subscription sessions. `scripts/model-route resolve`
 must report the exact family, model and high effort through `--adapter-gate

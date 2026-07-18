@@ -41,6 +41,20 @@ async function fixture(scenario = "happy", overrides: Partial<KiroAcpClientOptio
 }
 
 describe("Kiro ACP stdio client", () => {
+  it("selects an explicitly advertised OpenCode model through ACP before the first turn", async () => {
+    const { client, directory, transcript } = await fixture("config-model", {
+      model: "opencode/deepseek-v4-flash-free",
+      configureModelOnSessionStart: true,
+    });
+    await client.start();
+    await expect(client.newSession(directory)).resolves.toEqual({ sessionId: "kiro-session-1" });
+    await client.stop();
+
+    const text = await readFile(transcript, "utf8");
+    expect(text).toContain('"method":"session/set_config_option"');
+    expect(text).toContain('"configId":"model","value":"opencode/deepseek-v4-flash-free"');
+  });
+
   it("negotiates ACP v1, creates a session with an absolute cwd, streams bounded text, and closes it", async () => {
     const { client, directory, transcript } = await fixture();
     await client.start();

@@ -32,7 +32,7 @@ export type ProviderIdentityPort = {
 
 export type ProviderIdentityObservation = ProviderPathObservation & {
   adapterId: string;
-  assurance: "full-vendor-identity" | "partial-signed-helpers";
+  assurance: "full-vendor-identity" | "partial-signed-helpers" | "owner-controlled-install-root";
   signing: Array<{ path: string; teamId: string; identifier: string }>;
 };
 
@@ -100,6 +100,7 @@ export async function verifyProviderExecutableIdentity(input: {
   adapterId: string;
   executable: string;
   cursorInstallRoot?: string;
+  providerInstallRoot?: string;
 }, port: ProviderIdentityPort = SYSTEM_PORT): Promise<ProviderIdentityObservation> {
   if (!isAbsolute(input.executable)) {
     throw new FabricError("ADAPTER_PATH_UNSAFE", `provider executable must be absolute: ${input.executable}`);
@@ -115,6 +116,28 @@ export async function verifyProviderExecutableIdentity(input: {
       adapterId: input.adapterId,
       assurance: "full-vendor-identity",
       signing: [{ path: executable.canonicalPath, ...signing }],
+    };
+  }
+  if (input.adapterId === "opencode-acp" && input.providerInstallRoot !== undefined) {
+    const rootObservation = await port.inspectDirectory(input.providerInstallRoot);
+    const root = rootObservation.canonicalPath;
+    const contained = relative(root, executable.canonicalPath);
+    if (contained.length === 0 || contained.startsWith("..") || isAbsolute(contained)) {
+      throw new FabricError("ADAPTER_PATH_UNSAFE", "OpenCode launcher is outside its canonical install root");
+    }
+    assertSafeFile(executable, port.currentUid());
+    for (let current = dirname(executable.canonicalPath); current.startsWith(root); current = dirname(current)) {
+      const metadata = await port.inspectDirectory(current);
+      if (metadata.ownerUid !== port.currentUid() || (metadata.mode & 0o022) !== 0 || !metadata.directory) {
+        throw new FabricError("ADAPTER_PATH_UNSAFE", `OpenCode install component is unsafe: ${current}`);
+      }
+      if (current === root) break;
+    }
+    return {
+      ...executable,
+      adapterId: input.adapterId,
+      assurance: "owner-controlled-install-root",
+      signing: [],
     };
   }
   if (input.adapterId !== "cursor-agent" || input.cursorInstallRoot === undefined) {

@@ -25,6 +25,7 @@ COMPATIBILITY_ADAPTER_IDS = {
     "agy": "agy",
     "cursor": "cursor-agent",
     "kiro": "kiro-acp",
+    "opencode": "opencode-acp",
     "pi": "pi-rpc",
 }
 EFFORT_ORDER = {name: index for index, name in enumerate(("low", "medium", "high", "xhigh", "max", "ultra"))}

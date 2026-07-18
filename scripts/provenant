@@ -28,7 +28,7 @@ Thin front door; each command delegates to its existing owner:
 
 Fabric clients and providers are separate roles.
 Kiro provider activation: issue #265.
-OpenCode provider registration: issue #253.
+OpenCode provider: enabled for explicit opencode/* account models.
 EOF
 }
 

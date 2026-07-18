@@ -45,6 +45,17 @@ describe("provider non-answer interface conformance", () => {
       .resolves.toMatchObject({ adapterId: "kiro-acp", conformant: true, probe: "acp-v1-initialize" });
   });
 
+  it("proves the OpenCode ACP v1 initialize handshake without a model turn", async () => {
+    const run = vi.fn(async () => ({
+      stdout: '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentInfo":{"name":"OpenCode","version":"1.17.18"}}}\n',
+      stderr: "",
+      exitCode: 0,
+    }));
+    await expect(probeProviderInterface({ adapterId: "opencode-acp", executable: "/opencode" }, run))
+      .resolves.toMatchObject({ adapterId: "opencode-acp", conformant: true, probe: "acp-v1-initialize", version: "1.17.18" });
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ args: ["acp"] }));
+  });
+
   it("fails closed when a required interface disappears", async () => {
     const run = vi.fn(async () => ({ stdout: "--print --model", stderr: "", exitCode: 0 }));
     await expect(probeProviderInterface({ adapterId: "agy", executable: "/agy" }, run))

@@ -57,6 +57,7 @@ const PROVIDER_IDENTITY_POLICY: Readonly<Record<string, string>> = {
   agy: "apple-designated",
   "cursor-agent": "cursor-partial-signed-helpers",
   "kiro-acp": "apple-designated",
+  "opencode-acp": "owner-controlled-install-root",
 };
 
 /**
@@ -902,6 +903,9 @@ export async function verifyAdapterCompatibility(input: {
       }
       if (adapterId === "cursor-agent" && typeof adapter.implementation.cursor_install_root !== "string") {
         throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", "enabled Cursor adapter has no canonical install root");
+      }
+      if (adapterId === "opencode-acp" && typeof adapter.implementation.provider_install_root !== "string") {
+        throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", "enabled OpenCode adapter has no canonical install root");
       }
     }
     if (input.requireEnabled) {

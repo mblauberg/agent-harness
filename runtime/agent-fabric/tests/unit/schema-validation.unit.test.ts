@@ -20,6 +20,7 @@ const requiredRealAdapters = [
   "cursor-agent",
   "herdr",
   "kiro-acp",
+  "opencode-acp",
   "pi-rpc",
 ] as const;
 
@@ -96,7 +97,7 @@ describe("Stage 1 versioned JSON Schemas", () => {
       throw new TypeError("adapter compatibility must contain an adapters object");
     }
     expect(Object.keys(adapters).sort()).toEqual([...requiredRealAdapters].sort());
-    const enabledAdapters = new Set(["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent"]);
+    const enabledAdapters = new Set(["agy", "claude-agent-sdk", "codex-app-server", "cursor-agent", "opencode-acp"]);
     for (const adapterId of requiredRealAdapters) {
       const adapter = adapters[adapterId];
       expect(isJsonObject(adapter), `${adapterId} must be an object`).toBe(true);
@@ -120,6 +121,18 @@ describe("Stage 1 versioned JSON Schemas", () => {
       contract: { protocol_version: "stream-json-cli" },
       model_family_constraints: {
         allowed: ["cursor-composer", "xai", "anthropic", "openai", "google"],
+      },
+    });
+    expect(adapters["opencode-acp"]).toMatchObject({
+      implementation: {
+        executable: "/opt/homebrew/bin/opencode",
+        provider_install_root: "/opt/homebrew/Cellar/opencode",
+        provider_identity: "owner-controlled-install-root",
+      },
+      contract: { protocol_version: 1 },
+      model_family_constraints: {
+        allowed: ["generic-open"],
+        allowed_model_patterns: ["opencode/*"],
       },
     });
     const claude = adapters["claude-agent-sdk"];

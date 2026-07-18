@@ -37,6 +37,7 @@ export type KiroAcpClientOptions = {
   closeTimeoutMs?: number;
   maximumLineBytes?: number;
   maximumOutputBytes?: number;
+  configureModelOnSessionStart?: boolean;
 };
 
 function positiveInteger(value: number, name: string): number {
@@ -184,7 +185,40 @@ export class KiroAcpStdioClient {
 
   async newSession(cwd: string): Promise<{ sessionId: string }> {
     const result = await this.#send("session/new", { cwd: requireAbsoluteCwd(cwd), mcpServers: [] });
-    return { sessionId: requireString(result.sessionId, "session/new sessionId") };
+    const sessionId = requireString(result.sessionId, "session/new sessionId");
+    if (this.#options.configureModelOnSessionStart === true) {
+      const model = requireString(this.#options.model, "configured model");
+      this.#requireSelectableModel(result.configOptions, model);
+      const configured = await this.#send("session/set_config_option", { sessionId, configId: "model", value: model });
+      this.#requireCurrentModel(configured.configOptions, model);
+    }
+    return { sessionId };
+  }
+
+  #requireSelectableModel(value: unknown, model: string): void {
+    const option = this.#modelOption(value);
+    const options = option.options;
+    if (!Array.isArray(options) || !options.some((candidate) => isRecord(candidate) && candidate.value === model)) {
+      throw new ProviderAdapterError("ADAPTER_MODEL_FORBIDDEN", "ACP provider did not advertise the requested model", { model });
+    }
+  }
+
+  #requireCurrentModel(value: unknown, model: string): void {
+    const option = this.#modelOption(value);
+    if (option.currentValue !== model) {
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "ACP provider did not activate the requested model", { model });
+    }
+  }
+
+  #modelOption(value: unknown): JsonObject {
+    if (!Array.isArray(value)) {
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "ACP provider model config options are missing");
+    }
+    const option = value.find((candidate) => isRecord(candidate) && candidate.id === "model" && candidate.type === "select");
+    if (!isRecord(option)) {
+      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "ACP provider model selector is missing");
+    }
+    return option;
   }
 
   async loadSession(sessionId: string, cwd: string): Promise<{ sessionId: string }> {

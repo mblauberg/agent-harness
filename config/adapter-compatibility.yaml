@@ -239,3 +239,33 @@ adapters:
       route_role: open-model-worker
     official_source_url: "https://kiro.dev/docs/cli/acp/"
     unresolved_pins: []
+
+  opencode-acp:
+    enabled: true
+    delivery_stage: 4
+    implementation:
+      kind: native-cli
+      command: opencode
+      executable: "/opt/homebrew/bin/opencode"
+      provider_install_root: "/opt/homebrew/Cellar/opencode"
+      provider_identity: owner-controlled-install-root
+      wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/optional/opencode-acp.ts"
+    contract:
+      adapter_version: 1
+      protocol: agent-client-protocol
+      protocol_version: 1
+      schema_source: "runtime/agent-fabric/schemas/upstream/agent-client-protocol-schema-v1.19.0.json"
+      schema_sha256: "92c1dfcda10dd47e99127500a3763da2b471f9ac61e12b9bf0430c32cf953796"
+      capability_fixture_version: 1
+    runtime_range:
+      platforms:
+        - darwin-arm64
+    model_family_constraints:
+      allowed:
+        - generic-open
+      allowed_model_patterns:
+        - "opencode/*"
+      requires_explicit_model: true
+      route_role: optional-free-account-worker
+    official_source_url: "https://opencode.ai/docs/acp/"
+    unresolved_pins: []

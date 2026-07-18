@@ -72,9 +72,11 @@
     },
     "copilot": {"endpoint_provider": "github", "fixed_model_family": null, "effort_transport": "flag"},
     "kiro": {"endpoint_provider": "aws", "fixed_model_family": null, "effort_transport": "flag"},
+    "opencode": {"endpoint_provider": "opencode", "fixed_model_family": "generic-open", "effort_transport": "model-id"},
     "pi": {"endpoint_provider": "configured", "fixed_model_family": null, "effort_transport": "none"}
   },
   "model_patterns": [
+    {"pattern": "^opencode/", "family": "generic-open"},
     {"pattern": "claude|fable|opus|sonnet|haiku", "family": "anthropic"},
     {"pattern": "gpt|codex|^o1|^o3|^o4", "family": "openai"},
     {"pattern": "gemini", "family": "google"},

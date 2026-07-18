@@ -127,6 +127,7 @@ export async function composeDaemonConfiguration(options: {
       adapterId,
       executable: policy.providerExecutable,
       ...(policy.cursorInstallRoot === undefined ? {} : { cursorInstallRoot: policy.cursorInstallRoot }),
+      ...(policy.providerInstallRoot === undefined ? {} : { providerInstallRoot: policy.providerInstallRoot }),
     });
     let resolvedCommand = command.map((part) => expandTrustedCommandPart(part, options.agentsHome, options.stateDirectory));
     if (policy.wrapperEntrypoint === undefined) throw new TypeError(`${adapterId} compatibility entry has no pinned fabric wrapper`);
@@ -152,6 +153,9 @@ export async function composeDaemonConfiguration(options: {
       }
       if (policy.cursorInstallRoot !== undefined) {
         resolvedCommand = replaceUniqueOption(resolvedCommand, "--provider-install-root", policy.cursorInstallRoot);
+      }
+      if (policy.providerInstallRoot !== undefined) {
+        resolvedCommand = replaceUniqueOption(resolvedCommand, "--provider-install-root", policy.providerInstallRoot);
       }
     } else if (adapterId !== "claude-agent-sdk") {
       throw new TypeError(`${adapterId} compatibility entry has no pinned provider executable`);

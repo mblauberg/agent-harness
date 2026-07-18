@@ -94,4 +94,34 @@ describe("provider executable identity", () => {
     expect(result.assurance).toBe("partial-signed-helpers");
     expect(signingIdentity).toHaveBeenCalledTimes(2);
   });
+
+  it("admits an updated OpenCode executable only inside its safe owner-controlled install root", async () => {
+    const result = await verifyProviderExecutableIdentity({
+      adapterId: "opencode-acp",
+      executable: "/opt/homebrew/Cellar/opencode/1.17.18/bin/opencode",
+      providerInstallRoot: "/opt/homebrew/Cellar/opencode",
+    }, port({
+      inspectDirectory: vi.fn(async (path: string) => ({
+        canonicalPath: path,
+        directory: true,
+        ownerUid: 501,
+        mode: 0o755,
+      })),
+    }));
+
+    expect(result).toMatchObject({
+      assurance: "owner-controlled-install-root",
+      canonicalPath: "/opt/homebrew/Cellar/opencode/1.17.18/bin/opencode",
+      sha256: "a".repeat(64),
+      signing: [],
+    });
+  });
+
+  it("rejects OpenCode outside its canonical install root", async () => {
+    await expect(verifyProviderExecutableIdentity({
+      adapterId: "opencode-acp",
+      executable: "/tmp/opencode",
+      providerInstallRoot: "/opt/homebrew/Cellar/opencode",
+    }, port())).rejects.toMatchObject({ code: "ADAPTER_PATH_UNSAFE" });
+  });
 });

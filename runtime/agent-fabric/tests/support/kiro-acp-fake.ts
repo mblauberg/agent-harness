@@ -43,7 +43,35 @@ input.on("line", (line) => {
     return;
   }
   if (value.method === "session/new") {
-    result(value.id, { sessionId: "kiro-session-1" });
+    result(value.id, {
+      sessionId: "kiro-session-1",
+      ...(scenario === "config-model" ? {
+        configOptions: [{
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "opencode/default-free",
+          options: [
+            { value: "opencode/default-free", name: "Default" },
+            { value: "opencode/deepseek-v4-flash-free", name: "DeepSeek" },
+          ],
+        }],
+      } : {}),
+    });
+    return;
+  }
+  if (value.method === "session/set_config_option") {
+    result(value.id, {
+      configOptions: [{
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: (value.params as JsonObject).value,
+        options: [],
+      }],
+    });
     return;
   }
   if (value.method === "session/load") {

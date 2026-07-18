@@ -31,10 +31,12 @@ function absoluteCwd(value: unknown): string {
   return cwd;
 }
 
-export function createKiroAcpBoundary(options: {
+export function createManagedAcpBoundary(options: {
   clientFactory(input: { model: string; cwd: string }): KiroAcpClient;
   verifyExecutable?: () => Promise<unknown>;
+  providerName?: string;
 }): KiroAcpBoundary & { shutdown(): Promise<void> } {
+  const providerName = options.providerName ?? "Kiro ACP";
   type ManagedSession = { client: KiroAcpClient; cwd: string; model: string };
   const sessions = new Map<string, ManagedSession>();
 
@@ -54,15 +56,15 @@ export function createKiroAcpBoundary(options: {
     const sessionId = requiredString(payload.resumeReference, "resumeReference");
     const session = sessions.get(sessionId);
     if (session === undefined) {
-      throw new ProviderAdapterError("PROVIDER_SESSION_NOT_ATTACHED", "Kiro ACP has no active managed session");
+      throw new ProviderAdapterError("PROVIDER_SESSION_NOT_ATTACHED", `${providerName} has no active managed session`);
     }
     if (payload.cwd !== undefined && absoluteCwd(payload.cwd) !== session.cwd) {
-      throw new ProviderAdapterError("PROVIDER_CWD_MISMATCH", "Kiro ACP cwd changed within a managed session");
+      throw new ProviderAdapterError("PROVIDER_CWD_MISMATCH", `${providerName} cwd changed within a managed session`);
     }
     if (payload.model !== undefined) {
       const requestedModel = requiredString(payload.model, "model");
       if (requestedModel !== session.model) {
-        throw new ProviderAdapterError("PROVIDER_MODEL_MISMATCH", "Kiro ACP model changed within a managed session");
+        throw new ProviderAdapterError("PROVIDER_MODEL_MISMATCH", `${providerName} model changed within a managed session`);
       }
     }
     return { ...session, sessionId };
@@ -87,7 +89,7 @@ export function createKiroAcpBoundary(options: {
       try {
         const session = await created.newSession(cwd);
         if (sessions.has(session.sessionId)) {
-          throw new ProviderAdapterError("PROVIDER_SESSION_CONFLICT", "Kiro ACP returned an already managed session ID");
+          throw new ProviderAdapterError("PROVIDER_SESSION_CONFLICT", `${providerName} returned an already managed session ID`);
         }
         sessions.set(session.sessionId, { client: created, cwd, model });
         return { resumeReference: session.sessionId, sessionId: session.sessionId };
@@ -99,7 +101,7 @@ export function createKiroAcpBoundary(options: {
     async attach() {
       throw new ProviderAdapterError(
         "CAPABILITY_UNAVAILABLE",
-        "Kiro ACP attach is disabled until persisted provider model lineage can be verified",
+        `${providerName} attach is disabled until persisted provider model lineage can be verified`,
       );
     },
     async sendTurn(payload) {
@@ -108,7 +110,7 @@ export function createKiroAcpBoundary(options: {
       return { resumeReference: current.sessionId, sessionId: current.sessionId, ...result };
     },
     async interrupt() {
-      throw new ProviderAdapterError("CAPABILITY_UNAVAILABLE", "Kiro ACP interrupt is not advertised");
+      throw new ProviderAdapterError("CAPABILITY_UNAVAILABLE", `${providerName} interrupt is not advertised`);
     },
     async release(payload) {
       const current = active(payload);
@@ -123,6 +125,8 @@ export function createKiroAcpBoundary(options: {
     shutdown,
   };
 }
+
+export const createKiroAcpBoundary = createManagedAcpBoundary;
 
 export function createKiroAcpAdapter(options: {
   boundary: KiroAcpBoundary;

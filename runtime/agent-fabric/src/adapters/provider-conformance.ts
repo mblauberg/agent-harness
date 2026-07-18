@@ -27,6 +27,7 @@ export async function verifyProviderConformance(input: {
   adapterId: string;
   executable: string;
   cursorInstallRoot?: string;
+  providerInstallRoot?: string;
 }): Promise<ProviderConformanceObservation> {
   const identity = await verifyProviderExecutableIdentity(input);
   const interfaceObservation = await probeProviderInterface(input);
