@@ -155,6 +155,11 @@ async function main(arguments_: string[]): Promise<void> {
     await inspect(arguments_.slice(1));
     return;
   }
+  if (arguments_[0] === "adapter" && arguments_[1] === "executable") {
+    const { resolveAdapterExecutableCli } = await import("./adapter-executable.js");
+    process.stdout.write(`${await resolveAdapterExecutableCli(arguments_.slice(2))}\n`);
+    return;
+  }
   if (arguments_[0] === "receipt" && arguments_[1] === "verify") {
     await verifyReceipt(arguments_.slice(2));
     return;
@@ -227,7 +232,7 @@ async function main(arguments_: string[]): Promise<void> {
     return;
   }
   throw new Error(
-    "usage: agent-fabric status|doctor [--project PATH] [--agents-home PATH] [--trusted-config PATH] [--compatibility PATH] [--compatibility-schema PATH] | inspect [--database PATH] [--runtime-directory PATH] [--json] | workspace trust|inspect|list|revoke [PATH] | retention status|preview [--database PATH] | retention archive --run-id ID --output ABSOLUTE_DIRECTORY [--database PATH] | receipt verify --run-receipt PATH | daemon run (...) | observe --socket PATH --capability-file PATH --run-id ID --cursor PATH [--once] [--interval-ms N] | herdr steer (...) | mcp provision --project PATH --project-session-id ID --session-revision N --session-generation N --run-id ID --run-revision N --chair-seat SEAT --chair-agent-id ID --chair-generation N --chair-lease-id ID --seat-bindings SEAT=AGENT@GENERATION,... --expires-at ISO_TIMESTAMP | mcp seat-path --project PATH --seat SEAT",
+    "usage: agent-fabric status|doctor [--project PATH] [--agents-home PATH] [--trusted-config PATH] [--compatibility PATH] [--compatibility-schema PATH] | inspect [--database PATH] [--runtime-directory PATH] [--json] | adapter executable --adapter ID [--agents-home PATH] [--config PATH] [--compatibility PATH] [--compatibility-schema PATH] | workspace trust|inspect|list|revoke [PATH] | retention status|preview [--database PATH] | retention archive --run-id ID --output ABSOLUTE_DIRECTORY [--database PATH] | receipt verify --run-receipt PATH | daemon run (...) | observe --socket PATH --capability-file PATH --run-id ID --cursor PATH [--once] [--interval-ms N] | herdr steer (...) | mcp provision --project PATH --project-session-id ID --session-revision N --session-generation N --run-id ID --run-revision N --chair-seat SEAT --chair-agent-id ID --chair-generation N --chair-lease-id ID --seat-bindings SEAT=AGENT@GENERATION,... --expires-at ISO_TIMESTAMP | mcp seat-path --project PATH --seat SEAT",
   );
 }
 

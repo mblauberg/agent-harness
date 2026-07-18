@@ -255,12 +255,17 @@ cd runtime/agent-fabric
 node smoke/provider-adapter-readonly.mjs \
   --adapter agy --model 'Gemini 3.1 Pro (High)' \
   --model-family google --effort high \
-  --provider-executable "$(command -v agy)"
+  --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter agy)"
 node smoke/provider-adapter-readonly.mjs \
   --adapter cursor-agent --model cursor-grok-4.5-high \
   --model-family xai --effort high \
-  --provider-executable "$(command -v cursor-agent)"
+  --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter cursor-agent)"
 ```
+
+`adapter executable` prints only the validated executable path from the active
+adapter's compatibility entry. It fails closed before the provider smoke if the
+adapter is inactive, the pinned executable is missing or any compatibility
+artifact no longer matches its recorded hash.
 
 Claude reviewers and one-task workers start fresh and release when done. For a
 retained Claude pair, checkpoint and compact at each stage or work-unit
