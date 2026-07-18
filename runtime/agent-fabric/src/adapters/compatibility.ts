@@ -43,6 +43,14 @@ async function verifyHash(path: string, expected: string): Promise<void> {
   }
 }
 
+/** Re-hashes a compatibility-selected provider executable immediately before spawn. */
+export async function verifyProviderExecutableDigest(path: string, expected: string): Promise<void> {
+  if (!/^[0-9a-f]{64}$/u.test(expected)) {
+    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `adapter executable digest is invalid: ${path}`);
+  }
+  await verifyHash(path, expected);
+}
+
 const execFileAsync = promisify(execFile);
 
 export type WrapperProvenance = {
