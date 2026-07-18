@@ -6,6 +6,7 @@ import { defaultDaemonStartOptions } from "./default-daemon-options.js";
 import type { FabricPaths } from "./paths.js";
 import {
   installSeatGeneration,
+  markLegacyBootstrapSeatGeneration,
   parseMcpSeat,
   resolveSeatProject,
   type SeatMetadata,
@@ -113,6 +114,11 @@ export async function bootstrapMcpSeat(input: {
       if (cause instanceof Error && cause.message.includes("existing MCP seat generation differs")) {
         try {
           installed = await install(stagedSeats(false));
+          await markLegacyBootstrapSeatGeneration({
+            stateDirectory: input.paths.stateDirectory,
+            projectPath: result.canonicalRoot,
+            generation: result.generation,
+          });
         } catch (legacyCause: unknown) {
           if (!(legacyCause instanceof Error) || !legacyCause.message.includes("active MCP seat generation changed")) {
             throw legacyCause;

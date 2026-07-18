@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,11 +6,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveMcpCapability, resolveRenewableMcpCapability } from "../../src/mcp/credentials.ts";
+import { markLegacyBootstrapSeatGeneration } from "../../src/cli/seat-store.ts";
 
 const cleanup: string[] = [];
 const GENERATION_NEAREST = "a".repeat(64);
 const GENERATION_EXPIRY = "b".repeat(64);
 const GENERATION_EXPLICIT = "c".repeat(64);
+const GENERATION_MIGRATED = "d".repeat(64);
 
 afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -20,6 +22,7 @@ async function createCurrentSeatDirectory(
   stateDirectory: string,
   projectPath: string,
   generation: string,
+  previousGeneration: string | null = null,
 ): Promise<{ key: string; directory: string }> {
   const key = createHash("sha256").update(projectPath).digest("hex").slice(0, 24);
   const seatRoot = join(stateDirectory, "seats", key);
@@ -28,7 +31,7 @@ async function createCurrentSeatDirectory(
   await writeFile(join(seatRoot, "current.json"), `${JSON.stringify({
     schemaVersion: 1,
     projectKey: key,
-    previousGeneration: null,
+    previousGeneration,
     generation,
   })}\n`, { mode: 0o600 });
   return { key, directory };
@@ -178,7 +181,72 @@ describe("MCP capability loading", () => {
     }
   });
 
-  it("keeps ordinary operator seats usable until their explicit expiry", async () => {
+  it.each([
+    ["near expiry", 30 * 60 * 1_000],
+    ["expired", -1_000],
+  ])("migrates a verified %s legacy bootstrap seat", async (_label, remainingMs) => {
+    const directory = await mkdtemp(join(tmpdir(), "fabric-mcp-legacy-seat-expiry-"));
+    cleanup.push(directory);
+    const stateDirectory = join(directory, "state");
+    const project = join(directory, "project");
+    await Promise.all([mkdir(project), mkdir(stateDirectory, { mode: 0o700 })]);
+    const projectPath = await realpath(project);
+    const legacy = await createCurrentSeatDirectory(stateDirectory, projectPath, GENERATION_EXPIRY);
+    const legacyCredentialPath = join(legacy.directory, "codex.cap");
+    const legacyMetadataPath = join(legacy.directory, "codex.json");
+    const legacyMetadata = `${JSON.stringify({
+      schemaVersion: 1,
+      projectKey: legacy.key,
+      projectPath,
+      generation: GENERATION_EXPIRY,
+      previousGeneration: null,
+      projectSessionId: "opaque-session",
+      runId: "opaque-run",
+      seat: "codex",
+      agentId: "codex",
+      role: "chair",
+      credentialPath: legacyCredentialPath,
+      expiresAt: new Date(Date.now() + remainingMs).toISOString(),
+    })}\n`;
+    await writeFile(legacyCredentialPath, `afc_${"d".repeat(43)}\n`, { mode: 0o600 });
+    await writeFile(legacyMetadataPath, legacyMetadata, { mode: 0o600 });
+    await markLegacyBootstrapSeatGeneration({ stateDirectory, projectPath, generation: GENERATION_EXPIRY });
+    const migratedCapability = `afc_${"e".repeat(43)}`;
+    const renew = vi.fn(async () => {
+      const migrated = await createCurrentSeatDirectory(
+        stateDirectory,
+        projectPath,
+        GENERATION_MIGRATED,
+        GENERATION_EXPIRY,
+      );
+      const migratedCredentialPath = join(migrated.directory, "codex.cap");
+      await writeFile(migratedCredentialPath, `${migratedCapability}\n`, { mode: 0o600 });
+      await writeFile(join(migrated.directory, "codex.json"), `${JSON.stringify({
+        schemaVersion: 1,
+        projectKey: migrated.key,
+        projectPath,
+        generation: GENERATION_MIGRATED,
+        previousGeneration: GENERATION_EXPIRY,
+        originKind: "bootstrap",
+        projectSessionId: "opaque-session",
+        runId: "opaque-run",
+        seat: "codex",
+        agentId: "codex",
+        role: "chair",
+        credentialPath: migratedCredentialPath,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString(),
+      })}\n`, { mode: 0o600 });
+    });
+
+    await expect(resolveRenewableMcpCapability({
+      AGENT_FABRIC_SEAT: "codex",
+      AGENT_FABRIC_STATE_DIRECTORY: stateDirectory,
+    }, projectPath, renew)).resolves.toBe(migratedCapability);
+    expect(renew).toHaveBeenCalledOnce();
+    await expect(readFile(legacyMetadataPath, "utf8")).resolves.toBe(legacyMetadata);
+  });
+
+  it("keeps provisioned and unverified legacy seats non-renewing", async () => {
     const directory = await mkdtemp(join(tmpdir(), "fabric-mcp-operator-seat-expiry-"));
     cleanup.push(directory);
     const stateDirectory = join(directory, "state");
@@ -193,13 +261,13 @@ describe("MCP capability loading", () => {
     const credentialPath = join(seatDirectory, "codex.cap");
     await writeFile(credentialPath, `afc_${"d".repeat(43)}\n`, { mode: 0o600 });
     const metadataPath = join(seatDirectory, "codex.json");
-    const metadata = (expiresAt: string) => ({
+    const metadata = (expiresAt: string, originKind: "provisioned" | null = "provisioned") => ({
       schemaVersion: 1,
       projectKey: key,
       projectPath,
       generation: GENERATION_EXPIRY,
       previousGeneration: null,
-      originKind: "provisioned",
+      ...(originKind === null ? {} : { originKind }),
       projectSessionId: `session_bootstrap_${"f".repeat(32)}`,
       runId: "run",
       seat: "codex",
@@ -216,6 +284,18 @@ describe("MCP capability loading", () => {
     expect(renew).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledOnce();
     await writeFile(metadataPath, `${JSON.stringify(metadata(new Date(Date.now() - 1_000).toISOString()))}\n`, { mode: 0o600 });
+    await expect(resolveRenewableMcpCapability(environment, projectPath, renew, warn)).rejects.toThrow(/expired/u);
+    expect(renew).not.toHaveBeenCalled();
+    await writeFile(metadataPath, `${JSON.stringify(metadata(
+      new Date(Date.now() + 30 * 60 * 1_000).toISOString(),
+      null,
+    ))}\n`, { mode: 0o600 });
+    await expect(resolveRenewableMcpCapability(environment, projectPath, renew, warn)).resolves.toMatch(/^afc_/u);
+    expect(renew).not.toHaveBeenCalled();
+    await writeFile(metadataPath, `${JSON.stringify(metadata(
+      new Date(Date.now() - 1_000).toISOString(),
+      null,
+    ))}\n`, { mode: 0o600 });
     await expect(resolveRenewableMcpCapability(environment, projectPath, renew, warn)).rejects.toThrow(/expired/u);
     expect(renew).not.toHaveBeenCalled();
   });

@@ -2,7 +2,12 @@ import { constants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 
-import { MCP_SEATS, projectKey, resolveSeatPaths } from "../cli/seat-store.js";
+import {
+  MCP_SEATS,
+  projectKey,
+  readLegacyBootstrapSeatGeneration,
+  resolveSeatPaths,
+} from "../cli/seat-store.js";
 
 const CAPABILITY_PATTERN = /^af[bc]_[A-Za-z0-9_-]{43}$/u;
 const MCP_SEAT_RENEWAL_WINDOW_MS = 60 * 60 * 1_000;
@@ -125,7 +130,9 @@ async function resolveProjectSeatFile(
       }
       const remainingMs = Date.parse(metadata.expiresAt) - Date.now();
       const bootstrapSeat = "originKind" in metadata && metadata.originKind === "bootstrap";
-      if (bootstrapSeat && remainingMs <= MCP_SEAT_RENEWAL_WINDOW_MS) {
+      const verifiedLegacyBootstrapSeat = !("originKind" in metadata) &&
+        await readLegacyBootstrapSeatGeneration({ stateDirectory, projectPath: candidate }) === paths.generation;
+      if ((bootstrapSeat || verifiedLegacyBootstrapSeat) && remainingMs <= MCP_SEAT_RENEWAL_WINDOW_MS) {
         throw new McpSeatRenewalRequiredError(
           `agent fabric MCP seat ${seat} ${remainingMs <= 0 ? "expired" : "expires"} at ${metadata.expiresAt}`,
         );

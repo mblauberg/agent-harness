@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { runWorkspaceTrust } from "../../../src/cli/workspace-trust.ts";
 import type { FabricPaths } from "../../../src/cli/paths.ts";
-import { projectKey } from "../../../src/cli/seat-store.ts";
+import { projectKey, readLegacyBootstrapSeatGeneration } from "../../../src/cli/seat-store.ts";
 import { callTool } from "../../support/mcp-testkit.ts";
 import { terminateTrackedTestProcess, trackTestProcess } from "../../support/test-process-registry.ts";
 
@@ -197,6 +197,10 @@ describe("fresh Agent Fabric launch bootstrap", () => {
 
     expect(JSON.parse(replay.stdout)).toMatchObject({ generation: bootstrapped.generation });
     await expect(readFile(metadataPath, "utf8")).resolves.toBe(legacyText);
+    await expect(readLegacyBootstrapSeatGeneration({
+      stateDirectory: paths.stateDirectory,
+      projectPath: projectRoot,
+    })).resolves.toBe(bootstrapped.generation);
 
     const crossedLegacy = { ...legacyMetadata, agentId: "crossed-agent" };
     await writeFile(metadataPath, `${JSON.stringify(crossedLegacy, null, 2)}\n`, { mode: 0o600 });
@@ -240,6 +244,10 @@ describe("fresh Agent Fabric launch bootstrap", () => {
 
     expect(JSON.parse(replay.stdout)).toMatchObject({ generation: bootstrapped.generation });
     await expect(readFile(metadataPath, "utf8")).resolves.toBe(legacyText);
+    await expect(readLegacyBootstrapSeatGeneration({
+      stateDirectory: paths.stateDirectory,
+      projectPath: projectRoot,
+    })).resolves.toBe(bootstrapped.generation);
     await expect(readFile(join(seatRoot, "current.json"), "utf8").then(JSON.parse)).resolves.toMatchObject({
       generation: bootstrapped.generation,
     });
