@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -114,10 +115,12 @@ function agyCommandResult(result: ProviderCommandResult, fallbackReference?: str
 }
 
 const CURSOR_RECORD_TYPES = new Set(["system", "user", "thinking", "assistant", "result"]);
+const CURSOR_SAFE_RECORD_FIELDS = new Set(["is_error", "message", "result", "session_id", "subtype", "type"]);
 
 function cursorCommandResult(result: ProviderCommandResult): Record<string, unknown> {
   const records: Record<string, unknown>[] = [];
-  for (const line of result.stdout.split(/\r?\n/u).filter((item) => item.trim().length > 0)) {
+  const lines = result.stdout.split(/\r?\n/u).filter((item) => item.trim().length > 0);
+  for (const [recordIndex, line] of lines.entries()) {
     let value: unknown;
     try {
       value = JSON.parse(line);
@@ -130,7 +133,21 @@ function cursorCommandResult(result: ProviderCommandResult): Record<string, unkn
       );
     }
     if (!isRecord(value) || typeof value.type !== "string" || !CURSOR_RECORD_TYPES.has(value.type)) {
-      throw new ProviderAdapterError("PROVIDER_RESPONSE_INVALID", "Cursor stream contained an unknown record type");
+      const recordType = isRecord(value) && typeof value.type === "string" ? value.type : "";
+      throw new ProviderAdapterError(
+        "PROVIDER_RESPONSE_INVALID",
+        "Cursor stream contained an unsupported record type",
+        {
+          recordIndex,
+          recordTypeSha256: createHash("sha256").update(recordType).digest("hex"),
+          recordTypeLength: Buffer.byteLength(recordType),
+          recordFields: isRecord(value)
+            ? Object.keys(value)
+              .filter((field) => CURSOR_SAFE_RECORD_FIELDS.has(field))
+              .sort()
+            : [],
+        },
+      );
     }
     records.push(value);
   }
