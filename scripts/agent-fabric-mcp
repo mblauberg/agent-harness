@@ -20,9 +20,10 @@ HARNESS_ROOT=$(dirname -- "$SCRIPT_DIR")
 AGENTS_ROOT=${AGENTS_HOME:-$HARNESS_ROOT}
 case "$AGENTS_ROOT" in /*) ;; *) echo "AGENTS_HOME must be absolute" >&2; exit 2 ;; esac
 FABRIC_ROOT="$AGENTS_ROOT/runtime/agent-fabric"
+DIST_MCP="$FABRIC_ROOT/dist/mcp/main.js"
 
-if [ -f "$FABRIC_ROOT/dist/mcp/main.js" ]; then
-  exec node "$FABRIC_ROOT/dist/mcp/main.js" "$@"
+if [ -f "$DIST_MCP" ] && ! find "$FABRIC_ROOT/src" -type f -name '*.ts' -newer "$DIST_MCP" -print -quit | grep -q .; then
+  exec node "$DIST_MCP" "$@"
 fi
 
 # Source-tree fallback for development checkouts without a build.

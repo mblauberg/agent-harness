@@ -6,6 +6,65 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def run_launcher_fixture(tmp_path: Path, *, dist_mtime_ns: int | None, source_mtime_ns: int) -> list[str]:
+    agents_home = tmp_path / "agents"
+    source = agents_home / "runtime" / "agent-fabric" / "src" / "mcp" / "main.ts"
+    dist = agents_home / "runtime" / "agent-fabric" / "dist" / "mcp" / "main.js"
+    loader = agents_home / "node_modules" / "tsx" / "dist" / "loader.mjs"
+    fake_bin = tmp_path / "bin"
+    fake_node = fake_bin / "node"
+    source.parent.mkdir(parents=True)
+    loader.parent.mkdir(parents=True)
+    fake_bin.mkdir()
+    source.write_text("// source\n")
+    loader.write_text("// loader\n")
+    fake_node.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+    fake_node.chmod(0o755)
+    os.utime(source, ns=(source_mtime_ns, source_mtime_ns))
+    if dist_mtime_ns is not None:
+        dist.parent.mkdir(parents=True)
+        dist.write_text("// dist\n")
+        os.utime(dist, ns=(dist_mtime_ns, dist_mtime_ns))
+
+    result = subprocess.run(
+        [str(ROOT / "scripts" / "agent-fabric-mcp")],
+        env={
+            **os.environ,
+            "AGENTS_HOME": str(agents_home),
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    return result.stdout.splitlines()
+
+
+def test_wrapper_rejects_dist_when_source_is_newer(tmp_path: Path) -> None:
+    invoked = run_launcher_fixture(tmp_path, dist_mtime_ns=1_000_000_000, source_mtime_ns=2_000_000_000)
+
+    assert invoked[-1].endswith("/runtime/agent-fabric/src/mcp/main.ts")
+
+
+def test_wrapper_uses_fresh_dist(tmp_path: Path) -> None:
+    invoked = run_launcher_fixture(tmp_path, dist_mtime_ns=2_000_000_000, source_mtime_ns=1_000_000_000)
+
+    assert invoked == [str(tmp_path / "agents" / "runtime" / "agent-fabric" / "dist" / "mcp" / "main.js")]
+
+
+def test_wrapper_uses_source_loader_when_dist_is_missing(tmp_path: Path) -> None:
+    invoked = run_launcher_fixture(tmp_path, dist_mtime_ns=None, source_mtime_ns=1_000_000_000)
+
+    assert invoked == [
+        "--import",
+        str(tmp_path / "agents" / "node_modules" / "tsx" / "dist" / "loader.mjs"),
+        str(tmp_path / "agents" / "runtime" / "agent-fabric" / "src" / "mcp" / "main.ts"),
+    ]
+
+
 def test_source_wrapper_preserves_caller_cwd_for_project_seat_resolution(tmp_path: Path) -> None:
     state = tmp_path / "state"
     state.mkdir(mode=0o700)
