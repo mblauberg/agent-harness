@@ -20,7 +20,8 @@ decisions.
   authorised); provenant-local process, not harness doctrine.
 - **Fabric trust:** before first Fabric use, automatically trust only the exact
   canonical repository root (or current project directory when there is no
-  repository); never trust a parent, wildcard, home or sibling collection.
+  repository) with `$HOME/.agents/scripts/agent-fabric workspace trust`; never
+  trust a parent, wildcard, home or sibling collection.
 - **Style:** terse for inter-agent, mechanical, and status traffic;
   domain-appropriate user prose. Load `$caveman` only when requested.
 

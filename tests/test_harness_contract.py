@@ -56,6 +56,17 @@ def test_first_use_fabric_trust_is_exact_and_does_not_provision():
     assert "trust a project root or provision" not in runbook
 
 
+def test_first_use_fabric_trust_uses_the_global_home_launcher():
+    agents = " ".join((ROOT / "AGENTS.md").read_text().split())
+    runbook = " ".join(
+        (ROOT / "docs" / "runbooks" / "agent-fabric-operations.md").read_text().split()
+    )
+    command = '$HOME/.agents/scripts/agent-fabric workspace trust'
+    assert command in agents
+    assert f'{command} "$project_root"' in runbook
+    assert '`scripts/agent-fabric workspace trust "$project_root"`' not in runbook
+
+
 def test_subagent_dispatch_contract_requires_task_class_bound_route_and_receipt():
     harness = (ROOT / "HARNESS.md").read_text()
     skill = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text()
