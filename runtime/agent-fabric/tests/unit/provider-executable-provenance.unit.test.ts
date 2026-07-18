@@ -60,7 +60,7 @@ describe("provider executable identity", () => {
   it("fails closed on an unsafe Agy executable", async () => {
     await expect(verifyProviderExecutableIdentity({
       adapterId: "agy",
-      executable: "/Users/example/.local/bin/agy",
+      executable: "/home/example/.local/bin/agy",
     }, port({
       inspectPath: vi.fn(async (path: string) => ({
         canonicalPath: path,
@@ -76,7 +76,7 @@ describe("provider executable identity", () => {
   it("admits the stable Kiro shim by Amazon signing identity", async () => {
     await expect(verifyProviderExecutableIdentity({
       adapterId: "kiro-acp",
-      executable: "/Users/example/.local/bin/kiro-cli",
+      executable: "/home/example/.local/bin/kiro-cli",
     }, port({ signingIdentity: vi.fn(async () => ({ teamId: "94KV3E626L", identifier: "kiro-cli" })) })))
       .resolves.toMatchObject({ assurance: "full-vendor-identity" });
   });
@@ -87,8 +87,8 @@ describe("provider executable identity", () => {
       : { teamId: "HX7739G8FX", identifier: "node" });
     const result = await verifyProviderExecutableIdentity({
       adapterId: "cursor-agent",
-      executable: "/Users/example/.local/share/cursor-agent/versions/current/cursor-agent",
-      cursorInstallRoot: "/Users/example/.local/share/cursor-agent",
+      executable: "/home/example/.local/share/cursor-agent/versions/current/cursor-agent",
+      cursorInstallRoot: "/home/example/.local/share/cursor-agent",
     }, port({ signingIdentity }));
 
     expect(result.assurance).toBe("partial-signed-helpers");
