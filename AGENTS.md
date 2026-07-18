@@ -16,12 +16,12 @@ decisions.
 - **GitHub (this repo only):** issue, branch, PR, merge and Project-status
   mechanics live in `docs/runbooks/github-workflow.md` (agent merges
   authorised); provenant-local process, not harness doctrine.
-- **Fabric trust:** before first Fabric use, automatically trust only the exact
-  canonical repository root (or current project directory when there is no
-  repository) with `$HOME/.agents/scripts/agent-fabric workspace trust`; never
-  trust a parent, wildcard, home or sibling collection. When that exact root
-  has no seat, call the global MCP's no-argument `fabric_bootstrap`; the same
-  MCP connection then exposes its normal tools.
+- **Fabric trust:** before first use, explicitly trust only the exact canonical
+  repository root (or current non-Git directory) with
+  `$HOME/.agents/scripts/agent-fabric workspace trust`; never trust a parent,
+  wildcard, home or sibling collection. If no seat exists, call
+  `fabric_bootstrap`. On `WORKSPACE_NOT_TRUSTED`, run its exact recovery command
+  and retry `fabric_bootstrap`; the same MCP connection exposes normal tools.
 - **CLI:** use `provenant help` for discovery; route answer-bearing external
   work through `$orchestrate` and Fabric.
 - **Style:** terse for inter-agent, mechanical, and status traffic;

@@ -52,7 +52,10 @@ describe("zero-state MCP bootstrap", () => {
         databasePath: join(stateDirectory, "fabric-v1.sqlite3"),
         socketPath: join(root, "runtime", "fabric-v1.sock"),
       },
-    })).rejects.toMatchObject({ code: "WORKSPACE_NOT_TRUSTED" });
+    })).rejects.toMatchObject({
+      code: "WORKSPACE_NOT_TRUSTED",
+      message: `Fabric bootstrap requires the exact current project root to be trusted; run $HOME/.agents/scripts/agent-fabric workspace trust '${root}' and retry fabric_bootstrap`,
+    });
   });
 
   it("creates one deterministic scoping run and converges a second primary into its peer seat", async () => {

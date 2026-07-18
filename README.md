@@ -93,10 +93,11 @@ locks. Provenant revalidates vendor identity, wrapper provenance and each
 bounded provider interface at point of use, so an ordinary signed CLI update
 does not require a compatibility-table edit.
 
-On first Fabric use in a project, the agent trusts only its exact canonical Git
-root (or current directory outside Git). If no seat exists, it calls the global
-MCP's no-argument `fabric_bootstrap`; the same connection then exposes normal
-Fabric tools. No project onboarding is needed.
+First use: the agent explicitly trusts only the exact canonical Git root (or
+current non-Git directory) with `$HOME/.agents/scripts/agent-fabric workspace
+trust`, then calls the MCP's no-argument `fabric_bootstrap` when no seat
+exists. If bootstrap runs first, `WORKSPACE_NOT_TRUSTED` provides the recovery
+command. The same connection exposes Fabric tools; no project files needed.
 
 <details>
 <summary>Installation details: filesystem layout, Codex config and uninstall</summary>

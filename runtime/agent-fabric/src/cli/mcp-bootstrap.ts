@@ -28,6 +28,10 @@ export class McpBootstrapError extends Error {
   }
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
 export async function bootstrapMcpSeat(input: {
   environment: NodeJS.ProcessEnv;
   cwd: string;
@@ -46,7 +50,7 @@ export async function bootstrapMcpSeat(input: {
   } catch (cause: unknown) {
     throw new McpBootstrapError(
       "WORKSPACE_NOT_TRUSTED",
-      "Fabric bootstrap requires the exact current project root to be trusted",
+      `Fabric bootstrap requires the exact current project root to be trusted; run $HOME/.agents/scripts/agent-fabric workspace trust ${shellQuote(canonicalRoot)} and retry fabric_bootstrap`,
       { cause },
     );
   }
