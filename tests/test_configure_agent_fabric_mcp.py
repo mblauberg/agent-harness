@@ -1,5 +1,6 @@
 import json
 import importlib.util
+import io
 import os
 from pathlib import Path
 import stat
@@ -327,6 +328,72 @@ def test_platform_all_reports_commits_and_typed_recovery_on_late_conflict(
     assert '"unrelated": "concurrent-opencode-write"' in paths["opencode"].read_text()
     assert "agent-fabric" in paths["opencode"].read_text()
     assert "configured platform=opencode" in recovery_output.out
+
+
+@pytest.mark.parametrize("failure", ["write", "flush", "closed"])
+def test_committed_receipt_output_failure_reports_partial_state_and_stops(
+    tmp_path: Path, monkeypatch, failure: str,
+) -> None:
+    configurer = load_configurer()
+    paths = {
+        "claude": tmp_path / "claude.json",
+        "codex": tmp_path / "codex.toml",
+        "cursor": tmp_path / "cursor.json",
+        "agy": tmp_path / "agy.json",
+        "kiro": tmp_path / "kiro.json",
+        "opencode": tmp_path / "opencode.jsonc",
+    }
+    paths["claude"].write_text('{}\n')
+    paths["codex"].write_text('[unrelated]\nvalue = "before"\n')
+    for client in ("cursor", "agy", "kiro", "opencode"):
+        paths[client].write_text('{}\n')
+    writes: list[str] = []
+    write_proposal = configurer.write_proposal
+
+    def tracked_write(proposal):
+        writes.append(proposal.client)
+        write_proposal(proposal)
+
+    class FailingOutput:
+        def write(self, value: str) -> int:
+            if failure == "write":
+                raise BrokenPipeError("injected stdout write failure")
+            return len(value)
+
+        def flush(self) -> None:
+            if failure == "flush":
+                raise BrokenPipeError("injected stdout flush failure")
+
+    output = io.StringIO() if failure == "closed" else FailingOutput()
+    if failure == "closed":
+        output.close()
+    error_output = io.StringIO()
+    monkeypatch.setattr(configurer, "write_proposal", tracked_write)
+    monkeypatch.setattr(configurer.sys, "stdout", output)
+    monkeypatch.setattr(configurer.sys, "stderr", error_output)
+
+    result = configurer.main([
+        "--agents-home", str(ROOT),
+        "--state-directory", str(tmp_path / "state"),
+        "--claude-config", str(paths["claude"]),
+        "--codex-config", str(paths["codex"]),
+        "--cursor-config", str(paths["cursor"]),
+        "--agy-config", str(paths["agy"]),
+        "--kiro-config", str(paths["kiro"]),
+        "--opencode-config", str(paths["opencode"]),
+    ])
+
+    diagnostic = error_output.getvalue()
+    assert result == 4
+    assert writes == ["claude"]
+    assert "agent-fabric" in paths["claude"].read_text()
+    assert paths["codex"].read_text() == '[unrelated]\nvalue = "before"\n'
+    assert "partial-state: agent-fabric MCP registration" in diagnostic
+    assert "cause=receipt-output" in diagnostic
+    assert "committed=claude" in diagnostic
+    assert "remaining=codex,cursor,agy,kiro,opencode" in diagnostic
+    assert f"config={paths['claude']}" in diagnostic
+    assert "recovery=restore stdout, inspect the committed configuration, then rerun --platform all" in diagnostic
 
 
 @pytest.mark.parametrize("client", ["claude", "codex"])
@@ -732,3 +799,9 @@ def test_operations_docs_define_dynamic_primary_registration_and_bounded_fixed_p
     assert "exit code `4`" in runbook
     assert "partial-state" in runbook
     assert "Registry entries bind `AGENT_FABRIC_PROJECT_PATH`" not in runbook
+    verification = runbook.split("## Verify registrations", 1)[1].split("\n## ", 1)[0]
+    assert "opencode mcp list" in verification
+    assert "exactly three global" in verification
+    assert "four non-secret" not in verification
+    assert "AGENT_FABRIC_PROJECT_PATH" in verification
+    assert "explicit project-scoped compatibility" in verification

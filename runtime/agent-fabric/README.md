@@ -123,7 +123,10 @@ following or chmod inside a fresh owner-only `0700` recovery directory;
 conflict handling never rolls back over the live client pathname. Multi-client
 apply flushes each committed receipt immediately. If a later client conflicts,
 a typed `partial-state` result identifies the committed and remaining clients
-and the reconcile-and-rerun recovery action.
+and the reconcile-and-rerun recovery action. If stdout write or flush fails
+after a durable commit, apply stops before the next client, attempts a typed
+stderr result naming the committed client, remaining clients and configuration
+path, and exits `4` even if stderr is unavailable too.
 
 Clients use lock-safe on-demand bootstrap: they attach to a compatible
 incumbent before database preflight, or elect one daemon and inspect/publish

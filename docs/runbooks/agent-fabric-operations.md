@@ -155,7 +155,12 @@ During apply, each successful changed-client write flushes its committed receipt
 before the next client begins. If a later client conflicts, exit code `4` emits
 a `partial-state` result naming the committed and remaining clients plus the
 reconcile-and-rerun recovery action. A conflict before any commit retains exit
-code `3`. Rerunning `--platform all` after reconciliation is idempotent.
+code `3`. If stdout write or flush fails after a durable commit, the command
+stops before the next client, attempts the same typed result on stderr and exits
+`4`; the result names the committed client, remaining clients, configuration
+path and recovery action. Exit `4` remains the partial-state signal even when
+stderr is unavailable too. Rerunning `--platform all` after reconciliation is
+idempotent.
 Existing files are updated with an atomic exchange: the displaced identity and
 bytes must match the composed snapshot, and the requested direct path or
 symlink must still resolve to the installed inode. On any mismatch the command
@@ -460,13 +465,18 @@ codex mcp list
 cursor-agent mcp list
 kiro-cli mcp list
 agy mcp list
+opencode mcp list
 ```
 
 The current Agy CLI uses a Bubble Tea TUI for `mcp list` and fails when no TTY
 is available. In headless verification, inspect only the `agent-fabric` object
-in `~/.gemini/config/mcp_config.json` and confirm its command plus the four
-non-secret `AGENT_FABRIC_*` seat-selection variables; never print capability
-files or unrelated registry values.
+in `~/.gemini/config/mcp_config.json` and confirm its command.
+Confirm exactly three global variables: `AGENT_FABRIC_STATE_DIRECTORY`,
+`AGENT_FABRIC_SEAT` and
+`AGENT_FABRIC_CLIENT_LABEL`. Confirm `AGENT_FABRIC_PROJECT_PATH` is absent.
+That fourth variable is valid only in an explicit project-scoped compatibility
+entry for a client that cannot preserve cwd. Never print capability files or
+unrelated registry values.
 
 Resolve the active credential and metadata paths for one project seat without
 printing the capability:

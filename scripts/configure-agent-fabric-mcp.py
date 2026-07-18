@@ -33,6 +33,10 @@ class RegistrationConflictError(RegistrationError):
     pass
 
 
+class RegistrationOutputError(RegistrationError):
+    pass
+
+
 def _client_label(client: str) -> str:
     return CLIENT_LABELS.get(client, client.title())
 
@@ -473,10 +477,36 @@ def write_proposal(proposal: ConfigProposal) -> None:
 
 
 def _report(proposal: ConfigProposal, verb: str) -> None:
-    print(
-        f"agent-fabric MCP {verb} platform={proposal.client} config={proposal.snapshot.target_path}",
-        flush=True,
+    try:
+        print(
+            f"agent-fabric MCP {verb} platform={proposal.client} config={proposal.snapshot.target_path}",
+            flush=True,
+        )
+    except (OSError, ValueError) as exc:
+        raise RegistrationOutputError(f"agent-fabric MCP receipt output failed: {exc}") from exc
+
+
+def _report_partial_state(
+    *,
+    cause: str,
+    committed: list[str],
+    remaining: list[str],
+    config: Path,
+    error: BaseException,
+    recovery: str,
+) -> None:
+    diagnostic = (
+        "partial-state: agent-fabric MCP registration "
+        f"cause={cause} committed={','.join(committed)} "
+        f"remaining={','.join(remaining) or 'none'} config={config} "
+        f"error={str(error).replace(chr(10), ' ')}; recovery={recovery}"
     )
+    try:
+        print(diagnostic, file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        # Exit code 4 remains the machine-readable partial-state signal when
+        # the diagnostic stream is unavailable too.
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -552,25 +582,57 @@ def main(argv: list[str] | None = None) -> int:
             committed: list[str] = []
             for index, proposal in enumerate(proposals):
                 if proposal.status == "existing":
-                    _report(proposal, "existing")
+                    try:
+                        _report(proposal, "existing")
+                    except RegistrationOutputError as exc:
+                        if not committed:
+                            raise
+                        _report_partial_state(
+                            cause="receipt-output",
+                            committed=committed,
+                            remaining=[candidate.client for candidate in proposals[index:]],
+                            config=proposal.snapshot.target_path,
+                            error=exc,
+                            recovery=(
+                                "restore stdout, inspect the committed configuration, "
+                                "then rerun --platform all"
+                            ),
+                        )
+                        return 4
                     continue
                 try:
                     write_proposal(proposal)
                 except (OSError, RegistrationError) as exc:
                     if not committed:
                         raise
-                    remaining = ",".join(candidate.client for candidate in proposals[index:])
-                    print(
-                        "partial-state: agent-fabric MCP registration "
-                        f"committed={','.join(committed)} remaining={remaining} "
-                        f"conflict={exc}; recovery=reconcile the reported configuration and any "
-                        "recovery file, then rerun --platform all",
-                        file=sys.stderr,
-                        flush=True,
+                    _report_partial_state(
+                        cause="config-conflict",
+                        committed=committed,
+                        remaining=[candidate.client for candidate in proposals[index:]],
+                        config=proposal.snapshot.target_path,
+                        error=exc,
+                        recovery=(
+                            "reconcile the reported configuration and any recovery file, "
+                            "then rerun --platform all"
+                        ),
                     )
                     return 4
                 committed.append(proposal.client)
-                _report(proposal, "configured")
+                try:
+                    _report(proposal, "configured")
+                except RegistrationOutputError as exc:
+                    _report_partial_state(
+                        cause="receipt-output",
+                        committed=committed,
+                        remaining=[candidate.client for candidate in proposals[index + 1:]],
+                        config=proposal.snapshot.target_path,
+                        error=exc,
+                        recovery=(
+                            "restore stdout, inspect the committed configuration, "
+                            "then rerun --platform all"
+                        ),
+                    )
+                    return 4
             return 0
     except (OSError, RegistrationError) as exc:
         print(f"conflicting: {exc}", file=sys.stderr)
