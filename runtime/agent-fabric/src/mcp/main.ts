@@ -16,6 +16,7 @@ import { bootstrapMcpSeat } from "../cli/mcp-bootstrap.js";
 
 const paths = resolveFabricPaths();
 const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH ?? paths.socketPath;
+const effectivePaths = { ...paths, socketPath };
 
 let handle: FabricMcpServerHandle;
 try {
@@ -45,7 +46,7 @@ try {
       const bootstrapped = await bootstrapMcpSeat({
         environment: process.env,
         cwd: process.cwd(),
-        paths,
+        paths: effectivePaths,
       });
       return {
         socketPath,

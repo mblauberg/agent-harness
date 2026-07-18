@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
 import { createConnection } from "node:net";
-import { join, resolve } from "node:path";
 
 import {
   DECLARED_RUN_PROGRESS_FEATURE,
@@ -36,6 +34,7 @@ import {
   type DaemonStartOptions,
 } from "../daemon/client.js";
 import { resolveFabricPaths, type FabricPaths } from "../cli/paths.js";
+import { defaultDaemonStartOptions } from "../cli/default-daemon-options.js";
 import { trustedWorkspaceIdentity } from "../cli/workspace-trust.js";
 
 const PROJECT_ACTIONS = ["launch", "read"] as const;
@@ -307,30 +306,6 @@ async function sessionCredential(
     expiresAt,
     launchEnvelopeExpiresAt: expiresAt,
   });
-}
-
-function defaultDaemonOptions(
-  paths: FabricPaths,
-  agentsHomeValue: string | undefined,
-): DaemonStartOptions {
-  const agentsHome = resolve(
-    agentsHomeValue ?? process.env.AGENTS_HOME ?? join(homedir(), ".agents"),
-  );
-  return {
-    ...paths,
-    configuration: {
-      globalConfigPath: join(agentsHome, "config", "agent-fabric.yaml"),
-      compatibilityPath: join(agentsHome, "config", "adapter-compatibility.yaml"),
-      compatibilitySchemaPath: join(
-        agentsHome,
-        "runtime",
-        "agent-fabric",
-        "schemas",
-        "adapter-compatibility.schema.json",
-      ),
-      agentsHome,
-    },
-  };
 }
 
 function protocolFailureAnnotation(error: Error): ProtocolFailureAnnotation {
@@ -614,7 +589,7 @@ export async function openLocalOperatorConsoleSession(
   try {
     daemon = await startFabricDaemon({
       ...(options.daemon === undefined
-        ? defaultDaemonOptions(paths, options.agentsHome)
+        ? defaultDaemonStartOptions(paths, options.agentsHome ?? process.env.AGENTS_HOME)
         : { ...paths, ...options.daemon }),
     });
   } catch (error: unknown) {
