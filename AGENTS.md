@@ -21,7 +21,9 @@ decisions.
 - **Fabric trust:** before first Fabric use, automatically trust only the exact
   canonical repository root (or current project directory when there is no
   repository) with `$HOME/.agents/scripts/agent-fabric workspace trust`; never
-  trust a parent, wildcard, home or sibling collection.
+  trust a parent, wildcard, home or sibling collection. When that exact root
+  has no seat, call the global MCP's no-argument `fabric_bootstrap`; the same
+  MCP connection then exposes its normal tools.
 - **Style:** terse for inter-agent, mechanical, and status traffic;
   domain-appropriate user prose. Load `$caveman` only when requested.
 

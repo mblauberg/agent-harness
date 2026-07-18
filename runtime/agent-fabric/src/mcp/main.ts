@@ -7,13 +7,15 @@ import {
 } from "./server.js";
 import { McpSeatNotProvisionedError, resolveMcpCapability } from "./credentials.js";
 import { resolveFabricPaths } from "../cli/paths.js";
+import { bootstrapMcpSeat } from "../cli/mcp-bootstrap.js";
 
 // Stdio MCP proxy entry point (spec section 14): one proxy process per client,
 // each connecting to the shared daemon socket with its own capability. The
 // proxy holds no fabric state and enforces no policy; the daemon derives the
 // principal from the capability, never from MCP arguments.
 
-const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH ?? resolveFabricPaths().socketPath;
+const paths = resolveFabricPaths();
+const socketPath = process.env.AGENT_FABRIC_SOCKET_PATH ?? paths.socketPath;
 
 let handle: FabricMcpServerHandle;
 try {
@@ -34,8 +36,23 @@ try {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(2);
   }
-  process.stderr.write(`warning: ${error.message}; Fabric tools are unavailable until seats are provisioned\n`);
-  handle = createUnprovisionedMcpServer();
+  process.stderr.write(`warning: ${error.message}; exact-root bootstrap is available\n`);
+  handle = createUnprovisionedMcpServer({
+    bootstrap: async () => {
+      const bootstrapped = await bootstrapMcpSeat({
+        environment: process.env,
+        cwd: process.cwd(),
+        paths,
+      });
+      return {
+        socketPath,
+        capability: bootstrapped.credential,
+        ...(process.env.AGENT_FABRIC_CLIENT_LABEL === undefined
+          ? {}
+          : { clientLabel: process.env.AGENT_FABRIC_CLIENT_LABEL }),
+      };
+    },
+  });
 }
 delete process.env.AGENT_FABRIC_CAPABILITY;
 

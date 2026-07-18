@@ -25,6 +25,7 @@ import {
 } from "../lifecycle/local-receipt-authority.js";
 import {
   bindCurrentMcpSeatsInput,
+  bootstrapMcpSeatInput,
   FABRIC_DAEMON_VERSION,
   daemonInitializeParams,
   daemonInitializeResult,
@@ -438,6 +439,8 @@ const servePrivateControlConnection = (socket: Socket): void => {
       switch (request.method) {
         case "bindCurrentMcpSeats":
           return fabric.bindCurrentMcpSeats(bindCurrentMcpSeatsInput(request.params));
+        case "bootstrapMcpSeat":
+          return fabric.bootstrapCurrentMcpSeat(bootstrapMcpSeatInput(request.params));
         case "provisionLocalOperator":
           return fabric.provisionLocalOperator(await withTrustedLocalSubject(
             provisionLocalOperatorInput(request.params),

@@ -192,6 +192,24 @@ async function main(arguments_: string[]): Promise<void> {
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     return;
   }
+  if (
+    (arguments_[0] === "bootstrap" && arguments_.length === 3 && arguments_[1] === "--seat") ||
+    (arguments_[0] === "mcp" && arguments_[1] === "bootstrap" && arguments_.length === 4 && arguments_[2] === "--seat")
+  ) {
+    const seat = arguments_[0] === "bootstrap" ? arguments_[2] : arguments_[3];
+    const [{ bootstrapMcpSeat }, { resolveFabricPaths }] = await Promise.all([
+      import("./mcp-bootstrap.js"),
+      import("./paths.js"),
+    ]);
+    const output = await bootstrapMcpSeat({
+      environment: { ...process.env, AGENT_FABRIC_SEAT: seat },
+      cwd: process.cwd(),
+      paths: resolveFabricPaths(),
+    });
+    const { credential: _credential, ...publicOutput } = output;
+    process.stdout.write(`${JSON.stringify(publicOutput, null, 2)}\n`);
+    return;
+  }
   if (arguments_[0] === "mcp" && arguments_[1] === "seat-path") {
     const [{ mcpSeatPath }, { resolveFabricPaths }] = await Promise.all([
       import("./mcp-provision.js"),
@@ -232,7 +250,7 @@ async function main(arguments_: string[]): Promise<void> {
     return;
   }
   throw new Error(
-    "usage: agent-fabric status|doctor [--project PATH] [--agents-home PATH] [--trusted-config PATH] [--compatibility PATH] [--compatibility-schema PATH] | inspect [--database PATH] [--runtime-directory PATH] [--json] | adapter executable --adapter ID [--agents-home PATH] [--config PATH] [--compatibility PATH] [--compatibility-schema PATH] | workspace trust|inspect|list|revoke [PATH] | retention status|preview [--database PATH] | retention archive --run-id ID --output ABSOLUTE_DIRECTORY [--database PATH] | receipt verify --run-receipt PATH | daemon run (...) | observe --socket PATH --capability-file PATH --run-id ID --cursor PATH [--once] [--interval-ms N] | herdr steer (...) | mcp provision --project PATH --project-session-id ID --session-revision N --session-generation N --run-id ID --run-revision N --chair-seat SEAT --chair-agent-id ID --chair-generation N --chair-lease-id ID --seat-bindings SEAT=AGENT@GENERATION,... --expires-at ISO_TIMESTAMP | mcp seat-path --project PATH --seat SEAT",
+    "usage: agent-fabric status|doctor [--project PATH] [--agents-home PATH] [--trusted-config PATH] [--compatibility PATH] [--compatibility-schema PATH] | bootstrap --seat claude|codex | inspect [--database PATH] [--runtime-directory PATH] [--json] | adapter executable --adapter ID [--agents-home PATH] [--config PATH] [--compatibility PATH] [--compatibility-schema PATH] | workspace trust|inspect|list|revoke [PATH] | retention status|preview [--database PATH] | retention archive --run-id ID --output ABSOLUTE_DIRECTORY [--database PATH] | receipt verify --run-receipt PATH | daemon run (...) | observe --socket PATH --capability-file PATH --run-id ID --cursor PATH [--once] [--interval-ms N] | herdr steer (...) | mcp provision --project PATH --project-session-id ID --session-revision N --session-generation N --run-id ID --run-revision N --chair-seat SEAT --chair-agent-id ID --chair-generation N --chair-lease-id ID --seat-bindings SEAT=AGENT@GENERATION,... --expires-at ISO_TIMESTAMP | mcp seat-path --project PATH --seat SEAT",
   );
 }
 

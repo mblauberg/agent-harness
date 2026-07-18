@@ -38,18 +38,49 @@ export type FabricMcpServerHandle = {
   close(): Promise<void>;
 };
 
-export function createUnprovisionedMcpServer(): FabricMcpServerHandle {
+export function createUnprovisionedMcpServer(options?: {
+  bootstrap: () => Promise<FabricMcpServerOptions>;
+}): FabricMcpServerHandle {
   const server = new Server(
     { name: "agent-fabric", version: "1.0.0" },
-    { capabilities: { tools: {}, resources: {} } },
+    { capabilities: { tools: { listChanged: true }, resources: {} } },
   );
-  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: [] }));
+  let protocolClose: (() => Promise<void>) | undefined;
+  const bootstrapTool = {
+    name: "fabric_bootstrap",
+    description: "Create the exact trusted project's first narrow scoping custody and install this primary seat.",
+    inputSchema: { type: "object" as const, additionalProperties: false, properties: {} },
+  };
+  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: options === undefined ? [] : [bootstrapTool] }));
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (options === undefined || request.params.name !== "fabric_bootstrap") throw new Error(`unknown tool: ${request.params.name}`);
+    const args = request.params.arguments ?? {};
+    if (Object.keys(args).length !== 0) throw new TypeError("fabric_bootstrap accepts no arguments");
+    try {
+      let activated = await options.bootstrap();
+      try {
+        protocolClose = await configureFabricMcpServer(server, activated);
+      } catch (error: unknown) {
+        if (!(error instanceof ProtocolRemoteError) || error.code !== "AUTHENTICATION_FAILED") throw error;
+        activated = await options.bootstrap();
+        protocolClose = await configureFabricMcpServer(server, activated);
+      }
+      await server.sendToolListChanged();
+      return {
+        content: [{ type: "text", text: "Agent Fabric bootstrap complete; normal Fabric tools are now active." }],
+        structuredContent: { bootstrapped: true },
+      };
+    } catch (error: unknown) {
+      const payload = errorPayload(error);
+      return { content: [{ type: "text", text: JSON.stringify(payload) }], isError: true };
+    }
+  });
   server.setRequestHandler(ListResourcesRequestSchema, () => ({ resources: [] }));
   server.setRequestHandler(ListResourceTemplatesRequestSchema, () => ({ resourceTemplates: [] }));
   return {
     server,
     async close(): Promise<void> {
-      await server.close();
+      await Promise.allSettled([server.close(), protocolClose?.() ?? Promise.resolve()]);
     },
   };
 }
@@ -69,6 +100,9 @@ function errorPayload(error: unknown): { code: string; message: string } {
     return { code: error.code, message: "Agent Fabric protocol request failed" };
   }
   if (error instanceof TypeError) return { code: "MCP_INPUT_INVALID", message: error.message };
+  if (isRecord(error) && typeof error.code === "string" && typeof error.message === "string") {
+    return { code: error.code, message: error.message };
+  }
   return { code: "FABRIC_MCP_REQUEST_FAILED", message: "Agent Fabric MCP request failed" };
 }
 
@@ -102,7 +136,7 @@ function advertisedTool(descriptor: McpToolDescriptor): {
   };
 }
 
-export async function createFabricMcpServer(options: FabricMcpServerOptions): Promise<FabricMcpServerHandle> {
+async function configureFabricMcpServer(server: Server, options: FabricMcpServerOptions): Promise<() => Promise<void>> {
   if (!/^afc_[A-Za-z0-9_-]{43}$/u.test(options.capability)) {
     throw new TypeError("MCP requires an Agent Fabric agent capability");
   }
@@ -124,11 +158,6 @@ export async function createFabricMcpServer(options: FabricMcpServerOptions): Pr
   }
   const descriptors = buildMcpDescriptorSet(protocol.allowedOperations);
   const toolsByName = new Map(descriptors.tools.map((descriptor) => [descriptor.name, descriptor]));
-  const server = new Server(
-    { name: "agent-fabric", version: "1.0.0" },
-    { capabilities: { tools: {}, resources: {} } },
-  );
-
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: descriptors.tools.map(advertisedTool),
   }));
@@ -174,13 +203,22 @@ export async function createFabricMcpServer(options: FabricMcpServerOptions): Pr
     };
   });
 
+  return async () => protocol.close();
+}
+
+export async function createFabricMcpServer(options: FabricMcpServerOptions): Promise<FabricMcpServerHandle> {
+  const server = new Server(
+    { name: "agent-fabric", version: "1.0.0" },
+    { capabilities: { tools: {}, resources: {} } },
+  );
+  const closeProtocol = await configureFabricMcpServer(server, options);
   let closed = false;
   return {
     server,
     async close(): Promise<void> {
       if (closed) return;
       closed = true;
-      await Promise.allSettled([server.close(), protocol.close()]);
+      await Promise.allSettled([server.close(), closeProtocol()]);
     },
   };
 }
