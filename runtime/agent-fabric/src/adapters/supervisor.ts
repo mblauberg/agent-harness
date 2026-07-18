@@ -4,6 +4,7 @@ import { isAbsolute } from "node:path";
 import { AdapterProcessTransport, AdapterTransportError } from "./process.js";
 import { verifySpawnWrapperProvenance } from "./compatibility.js";
 import { assessAdapterModelPolicy } from "./model-selection.js";
+import { DEFAULT_PROVIDER_TURN_TIMEOUT_MS } from "./provider-deadlines.js";
 import { FabricError } from "../errors.js";
 import {
   chairLaunchChallengeDigest,
@@ -87,7 +88,6 @@ export type RetainedChairBridge = Readonly<{
 }>;
 
 const DEFAULT_CONTROL_TIMEOUT_MS = 30_000;
-const DEFAULT_PROVIDER_TURN_TIMEOUT_MS = 30 * 60_000;
 const DEFAULT_BRIDGE_HEALTH_INTERVAL_MS = 250;
 
 function parseBridgeHealth(value: unknown, kind: "chair" | "child"): boolean {

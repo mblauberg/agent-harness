@@ -1,0 +1,1 @@
+export const DEFAULT_PROVIDER_TURN_TIMEOUT_MS = 30 * 60_000;

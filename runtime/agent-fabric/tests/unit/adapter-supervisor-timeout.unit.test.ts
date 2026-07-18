@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const transportFixture = vi.hoisted(() => ({
   closes: 0,
@@ -52,6 +52,28 @@ vi.mock("../../src/adapters/process.ts", () => {
 import { AdapterSupervisor } from "../../src/adapters/supervisor.ts";
 
 describe("adapter supervisor timeout selection", () => {
+  beforeEach(() => {
+    transportFixture.closes = 0;
+    transportFixture.requestedTimeouts.length = 0;
+  });
+
+  it("uses the canonical 30-minute default for answer-bearing provider turns", async () => {
+    const supervisor = new AdapterSupervisor({
+      fake: { command: ["unused-by-timeout-fixture"], environment: {} },
+    });
+
+    try {
+      await expect(supervisor.request("fake", "dispatch", {
+        operation: "send_turn",
+        fixtureDurationMs: 300_001,
+      })).resolves.toEqual({ method: "dispatch" });
+    } finally {
+      await supervisor.close();
+    }
+
+    expect(transportFixture.requestedTimeouts).toEqual([30 * 60_000]);
+  });
+
   it("keeps provider turns beyond the control deadline but enforces their own deadline", async () => {
     const supervisor = new AdapterSupervisor(
       { fake: { command: ["unused-by-timeout-fixture"], environment: {} } },
