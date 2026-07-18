@@ -231,6 +231,7 @@ adapters:
       allowed:
         - open-weight
       allowed_model_patterns:
+        - "auto"
         - "deepseek-*"
         - "glm-*"
         - "minimax-*"
