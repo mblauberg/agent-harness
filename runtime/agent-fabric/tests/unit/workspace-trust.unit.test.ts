@@ -169,6 +169,92 @@ describe("machine-local workspace trust", () => {
     await expect(runWorkspaceTrust(["trust", value.workspace], value.paths)).rejects.toThrow(/ancestor broadening/u);
   });
 
+  it("reports an exact-root retrust as already trusted before checking descendants", async () => {
+    const value = await fixture();
+    const first = await runWorkspaceTrust(
+      ["trust", value.workspace],
+      value.paths,
+      new Date("2026-07-11T04:00:00.000Z"),
+    );
+    const nested = join(value.workspace, "nested");
+    await mkdir(nested);
+    await runWorkspaceTrust(["trust", nested], value.paths);
+
+    await expect(runWorkspaceTrust(
+      ["trust", value.workspace],
+      value.paths,
+      new Date("2026-07-11T05:00:00.000Z"),
+    )).resolves.toEqual({
+      schemaVersion: 1,
+      trusted: true,
+      alreadyTrusted: true,
+      entry: first.entry,
+    });
+  });
+
+  it("rejects ancestor broadening when the exact-root record has stale identity", async () => {
+    const value = await fixture();
+    await runWorkspaceTrust(["trust", value.workspace], value.paths);
+    const nested = join(value.workspace, "nested");
+    await mkdir(nested);
+    await runWorkspaceTrust(["trust", nested], value.paths);
+
+    await rename(value.workspace, join(value.root, "workspace-original"));
+    await mkdir(value.workspace);
+    await mkdir(nested);
+
+    await expect(runWorkspaceTrust(["trust", value.workspace], value.paths))
+      .rejects.toThrow(/ancestor broadening/u);
+  });
+
+  it("applies explicit profile and expiry changes to an already trusted exact root", async () => {
+    const value = await fixture();
+    await runWorkspaceTrust(["trust", value.workspace], value.paths);
+    const nested = join(value.workspace, "nested");
+    await mkdir(nested);
+    await runWorkspaceTrust(["trust", nested], value.paths);
+    const now = new Date("2026-07-11T04:00:00.000Z");
+
+    await expect(runWorkspaceTrust([
+      "trust", value.workspace, "--profiles", "observed", "--expires-at", "2026-07-12T04:00:00.000Z",
+    ], value.paths, now)).resolves.toMatchObject({
+      trusted: true,
+      entry: {
+        approvedAt: now.toISOString(),
+        allowedProfiles: ["observed"],
+        expiresAt: "2026-07-12T04:00:00.000Z",
+      },
+    });
+  });
+
+  it("recovers an expired exact-root record with the plain trust command", async () => {
+    const value = await fixture();
+    const approved = new Date("2026-07-11T04:00:00.000Z");
+    await runWorkspaceTrust([
+      "trust", value.workspace, "--profiles", "observed", "--expires-at", "2026-07-12T04:00:00.000Z",
+    ], value.paths, approved);
+    const nested = join(value.workspace, "nested");
+    await mkdir(nested);
+    await runWorkspaceTrust(["trust", nested], value.paths, approved);
+    const retrustedAt = new Date("2026-07-13T04:00:00.000Z");
+
+    const result = await runWorkspaceTrust(["trust", value.workspace], value.paths, retrustedAt);
+    expect(result).toMatchObject({
+      trusted: true,
+      entry: {
+        canonicalPath: await realpath(value.workspace),
+        approvedAt: retrustedAt.toISOString(),
+        allowedProfiles: ["observed"],
+      },
+    });
+    expect(result.entry).not.toHaveProperty("expiresAt");
+    await expect(trustedWorkspaceIdentity({
+      stateDirectory: value.paths.stateDirectory,
+      canonicalRoot: value.workspace,
+      now: retrustedAt,
+    })).resolves.toMatchObject({ canonicalRoot: await realpath(value.workspace) });
+  });
+
   it("does not transfer trust when the path identity is replaced or becomes a symlink", async () => {
     const value = await fixture();
     await runWorkspaceTrust(["trust", value.workspace], value.paths);
