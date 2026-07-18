@@ -449,7 +449,7 @@ function insertProviderAction(
 }
 
 describe("current database baseline invariants", () => {
-  it("advances global revision only for material integration availability changes", () => {
+  it("keeps identical availability upserts stable while every stored change advances revision", () => {
     const database = openDatabase();
     const revision = (): number => (database.prepare(`
       SELECT revision FROM daemon_global_state WHERE singleton=1
@@ -470,15 +470,25 @@ describe("current database baseline invariants", () => {
         state=excluded.state,
         discovered_contract_json=excluded.discovered_contract_json,
         checked_at=excluded.checked_at
+      WHERE integration_availability.state IS NOT excluded.state
+         OR integration_availability.discovered_contract_json IS NOT excluded.discovered_contract_json
     `);
     refresh.run("native-desktop", "available", '{"version":1}', 200);
     expect(revision()).toBe(afterInsert);
+    expect(database.prepare(`
+      SELECT checked_at FROM integration_availability WHERE integration_id=?
+    `).get("native-desktop")).toEqual({ checked_at: 100 });
 
     refresh.run("native-desktop", "stale", '{"version":1}', 300);
     expect(revision()).toBe(afterInsert + 1);
 
     refresh.run("native-desktop", "stale", '{"version":2}', 400);
     expect(revision()).toBe(afterInsert + 2);
+
+    database.prepare(`
+      UPDATE integration_availability SET checked_at=? WHERE integration_id=?
+    `).run(500, "native-desktop");
+    expect(revision()).toBe(afterInsert + 3);
 
     database.close();
   });

@@ -386,6 +386,8 @@ export class HerdrDaemonIntegration {
           state=excluded.state,
           discovered_contract_json=excluded.discovered_contract_json,
           checked_at=excluded.checked_at
+        WHERE integration_availability.state IS NOT excluded.state
+           OR integration_availability.discovered_contract_json IS NOT excluded.discovered_contract_json
       `).run(HERDR_CONTROL_ADAPTER_ID, state, canonicalJson(contract), this.#clock());
     })();
     return { status: "completed", observed: presence.length, degraded };
@@ -614,6 +616,8 @@ export class HerdrDaemonIntegration {
         state=excluded.state,
         discovered_contract_json=excluded.discovered_contract_json,
         checked_at=excluded.checked_at
+      WHERE integration_availability.state IS NOT excluded.state
+         OR integration_availability.discovered_contract_json IS NOT excluded.discovered_contract_json
     `).run(HERDR_CONTROL_ADAPTER_ID, state, canonicalJson(contract), this.#clock());
   }
 
@@ -767,6 +771,8 @@ export class HerdrDaemonIntegration {
         state=excluded.state,
         discovered_contract_json=excluded.discovered_contract_json,
         checked_at=excluded.checked_at
+      WHERE integration_availability.state IS NOT excluded.state
+         OR integration_availability.discovered_contract_json IS NOT excluded.discovered_contract_json
     `).run(HERDR_CONTROL_ADAPTER_ID, state, contractJson, checkedAt);
   }
 }

@@ -6735,8 +6735,6 @@ CREATE TRIGGER global_revision_integration_availability_insert AFTER INSERT ON i
 
 CREATE TRIGGER global_revision_integration_availability_update
 AFTER UPDATE ON integration_availability
-WHEN OLD.state IS NOT NEW.state
-  OR OLD.discovered_contract_json IS NOT NEW.discovered_contract_json
 BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
 
 CREATE TRIGGER global_revision_launched_chair_bridge_insert
