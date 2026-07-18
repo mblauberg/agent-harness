@@ -2495,12 +2495,26 @@ const runWorkstreamIdentityCodec = objectCodec({
 // current-plan refs are deliberately deferred to the plan-declaration
 // package: no run-level scope or plan binding authority exists in Fabric
 // yet, and each lands as its own result-shape cutover.
-const runIdentityCodec = objectCodec({
+const runIdentityBaseCodec = objectCodec({
   runKind: literal("coordination"),
   chairAgentId: identifier,
   workstreams: arrayOf(runWorkstreamIdentityCodec, { maximum: 1024 }),
   lastEventAt: nullable(timestamp),
 });
+const runIdentityCodec = parserBacked(
+  runIdentityBaseCodec,
+  (value, path) => {
+    const identity = value as Record<string, unknown>;
+    const workstreams = identity.workstreams as ReadonlyArray<Record<string, unknown>>;
+    const workstreamIds = new Set(workstreams.map((workstream) => workstream.workstreamId));
+    const deliveryRunIds = new Set(workstreams.map((workstream) => workstream.deliveryRunId));
+    if (workstreamIds.size !== workstreams.length || deliveryRunIds.size !== workstreams.length) {
+      throw new TypeError(`${path}.workstreams must have unique workstreamId and deliveryRunId values`);
+    }
+    return value;
+  },
+  runIdentityBaseCodec.example,
+);
 const runSummaryCodec = objectCodec({
   kind: literal("run"),
   phase: text,
@@ -2731,6 +2745,13 @@ const operatorDetailReadResultCodec = parserBacked(
         : [fact.value as Record<string, unknown>];
     if (values.some((detail) => detail.kind !== detailRef.kind)) {
       throw new TypeError("operatorDetailRead detail kind does not match reference");
+    }
+    for (const detail of values) {
+      if (detail.kind !== "run" || detail.identity === undefined) continue;
+      const identity = detail.identity as Record<string, unknown>;
+      if (identity.chairAgentId !== detail.chairAgentId) {
+        throw new TypeError("operatorDetailRead identity chair must match the enclosing run chair");
+      }
     }
     return value;
   },

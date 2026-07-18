@@ -1321,6 +1321,33 @@ describe("negotiated run-identity result shape", () => {
     }
   });
 
+  it("rejects a detail identity whose chair contradicts the enclosing run", () => {
+    expect(() => parseOperationResult(
+      FABRIC_OPERATIONS.projectionDetailRead,
+      detailRead({
+        ...legacyDetail,
+        identity: { ...coordinationIdentity, chairAgentId: "chair_other" },
+      }),
+    )).toThrow("identity chair must match the enclosing run chair");
+  });
+
+  it("rejects duplicate workstream and delivery-run identities on rows and detail", () => {
+    for (const duplicate of [
+      { ...workstream, deliveryRunId: "delivery_02" },
+      { ...workstream, workstreamId: "ws_02" },
+    ]) {
+      const identity = { ...coordinationIdentity, workstreams: [workstream, duplicate] };
+      expect(() => parseOperationResult(
+        FABRIC_OPERATIONS.projectionViewPage,
+        runsPage({ ...legacySummary, identity }),
+      )).toThrow("workstreams must have unique workstreamId and deliveryRunId values");
+      expect(() => parseOperationResult(
+        FABRIC_OPERATIONS.projectionDetailRead,
+        detailRead({ ...legacyDetail, identity }),
+      )).toThrow("workstreams must have unique workstreamId and deliveryRunId values");
+    }
+  });
+
   it("rejects premature run kinds, plan or scope refs and unclosed workstream states", () => {
     // A delivery-workstream run-kind arm and the accepted-scope/current-plan
     // refs are deferred to their own cutovers; premature fields are rejected,
