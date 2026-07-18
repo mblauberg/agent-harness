@@ -295,24 +295,27 @@ export class HerdrDaemonIntegration {
         degraded += 1;
         degradedCurrent.add(registration.coordinationRunId);
       }
-      const previous = parsed.state === "unavailable" && registrationRuntimeFailure
-        ? priorPresence.find((entry) =>
-            entry.coordinationRunId === registration.coordinationRunId &&
-            entry.agentId === registration.agentId && entry.state === "available"
-          )
-        : undefined;
-      presence.push(previous ?? {
-          projectId: registration.projectId,
-          projectSessionId: registration.projectSessionId,
-          coordinationRunId: registration.coordinationRunId,
-          agentId: registration.agentId,
-          state: parsed.state,
-          paneRef: parsed.paneRef,
-          readiness: parsed.readiness,
-          observedAt: this.#clock(),
-        });
+      const previous = priorPresence.find((entry) =>
+        entry.coordinationRunId === registration.coordinationRunId &&
+        entry.agentId === registration.agentId
+      );
+      if (parsed.state === "unavailable" && registrationRuntimeFailure && previous?.state === "available") {
+        presence.push(previous);
+        continue;
+      }
+      const observation = {
+        projectId: registration.projectId,
+        projectSessionId: registration.projectSessionId,
+        coordinationRunId: registration.coordinationRunId,
+        agentId: registration.agentId,
+        state: parsed.state,
+        paneRef: parsed.paneRef,
+        readiness: parsed.readiness,
+      };
+      const unchanged = typeof previous?.observedAt === "number" &&
+        canonicalJson(previous) === canonicalJson({ ...observation, observedAt: previous.observedAt });
+      presence.push(unchanged ? previous : { ...observation, observedAt: this.#clock() });
     }
-    const generation = this.#nextAvailabilityGeneration();
     const state = this.#configuration.mode === "disabled"
       ? "unavailable"
       : hadRuntimeFailure && priorPresence.length > 0 ? "stale"
@@ -365,9 +368,8 @@ export class HerdrDaemonIntegration {
            WHERE project_session_id=? AND state='visibility_degraded'
         `).run(this.#clock(), projectSessionId);
       }
-      const contract = {
+      const contractBody = {
         schemaVersion: 1,
-        generation,
         operationFamily: HERDR_CONTROL_ADAPTER_ID,
         mode: this.#configuration.mode,
         detail: state === "available"
@@ -377,6 +379,10 @@ export class HerdrDaemonIntegration {
         degradedRunIds: [...ownedDegraded].sort(),
         recoveryRunIds: [...this.#priorRecoveryRunIds()].sort(),
         recoverySessionIds: [...this.#priorRecoverySessionIds()].sort(),
+      };
+      const contract = {
+        ...contractBody,
+        generation: this.#availabilityGeneration(state, contractBody),
       };
       this.#database.prepare(`
         INSERT INTO integration_availability(
@@ -462,16 +468,21 @@ export class HerdrDaemonIntegration {
     return registrations;
   }
 
-  #nextAvailabilityGeneration(): number {
+  #availabilityGeneration(state: string, contractBody: Record<string, JsonValue>): number {
     const value = this.#database.prepare(`
-      SELECT discovered_contract_json FROM integration_availability
+      SELECT state, discovered_contract_json FROM integration_availability
        WHERE integration_id=?
     `).get(HERDR_CONTROL_ADAPTER_ID);
     if (!isRow(value)) return 1;
     try {
       const contract: unknown = JSON.parse(text(value, "discovered_contract_json"));
       if (isJsonObjectValue(contract) && Number.isSafeInteger(contract.generation) && Number(contract.generation) >= 1) {
-        return Number(contract.generation) + 1;
+        const generation = Number(contract.generation);
+        if (
+          text(value, "state") === state &&
+          canonicalJson(contract) === canonicalJson({ ...contractBody, generation })
+        ) return generation;
+        return generation + 1;
       }
     } catch {
       // A malformed prior optional-integration row cannot confer a generation.
