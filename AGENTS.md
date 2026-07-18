@@ -4,12 +4,10 @@ Depth lives in adjacent `HARNESS.md`; both files are symlinked into
 `~/.claude`. Read it before orchestration, routing, delegation, memory or pane
 decisions.
 
-- **Objective:** quality per user attention-hour. Verify before handoff;
-  delegate aggressively; prefer curated docs to raw logs.
-- **Sub-agents:** use them; vary model and effort per `HARNESS.md`. Compress
-  mechanical returns.
-- **Memory:** durable project knowledge belongs in project docs, never only
-  harness-private memory. Private memory holds cross-project preferences only.
+- **Objective:** quality per user attention-hour. Verify, delegate and curate.
+- **Sub-agents:** use them; vary model and effort per `HARNESS.md`.
+- **Memory:** durable knowledge belongs in project docs. Private memory holds
+  cross-project preferences only.
 - **Git:** implementation branches and worktrees are pre-authorised, including
   parallel work. Use only `.worktrees/<task-agent>` in the owning repository,
   one writer each; see `docs/worktrees.md`. Deletion, force-removal, history
@@ -24,6 +22,8 @@ decisions.
   trust a parent, wildcard, home or sibling collection. When that exact root
   has no seat, call the global MCP's no-argument `fabric_bootstrap`; the same
   MCP connection then exposes its normal tools.
+- **CLI:** use `provenant help` for discovery; route answer-bearing external
+  work through `$orchestrate` and Fabric.
 - **Style:** terse for inter-agent, mechanical, and status traffic;
   domain-appropriate user prose. Load `$caveman` only when requested.
 
