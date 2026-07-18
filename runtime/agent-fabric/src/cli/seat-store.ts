@@ -13,6 +13,7 @@ export type SeatMetadata = {
   projectPath: string;
   generation: string;
   previousGeneration: string | null;
+  originKind?: "bootstrap" | "provisioned";
   projectSessionId: string;
   sessionRevision: number;
   sessionGeneration: number;
@@ -264,6 +265,7 @@ export async function installSeatGeneration(input: {
   generation: string;
   expectedPreviousGeneration: string | null;
   seats: Array<{ metadata: Omit<SeatMetadata, "credentialPath">; credential: string }>;
+  allowMissingPreviousGeneration?: boolean;
   beforeActivate?: () => void | Promise<void>;
 }): Promise<Array<{ seat: McpSeat; credentialPath: string; metadataPath: string }>> {
   if (!GENERATION_PATTERN.test(input.generation)) throw new Error("MCP seat generation is invalid");
@@ -339,7 +341,10 @@ export async function installSeatGeneration(input: {
         }
         return;
       }
-      if ((active?.generation ?? null) !== input.expectedPreviousGeneration) {
+      const crashConvergence = active === null &&
+        input.expectedPreviousGeneration !== null &&
+        input.allowMissingPreviousGeneration === true;
+      if (!crashConvergence && (active?.generation ?? null) !== input.expectedPreviousGeneration) {
         throw new Error("active MCP seat generation changed before filesystem cutover");
       }
       const pointer: SeatGenerationPointer = {

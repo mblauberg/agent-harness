@@ -86,6 +86,8 @@ import {
   type LocalOperatorProvisioningResult,
   type LocalOperatorSessionCapabilityInput,
   type LocalOperatorSessionCapabilityResult,
+  type LocalOperatorTakeoverCapabilityInput,
+  type LocalOperatorTakeoverCapabilityResult,
 } from "../operator/store.js";
 import { OperatorProjectionStore } from "../operator/projection-store.js";
 import {
@@ -181,6 +183,8 @@ import type {
   ArtifactResult,
   AuthorityResult,
   BarrierResult,
+  BootstrapMcpSeatInput,
+  BootstrapMcpSeatResult,
   BudgetDimensionResult,
   BudgetResult,
   CapabilityRotationResult,
@@ -201,6 +205,7 @@ import type {
   TeamResult,
 } from "./contracts.js";
 import { currentMcpSeatGeneration } from "./mcp-seat-generation.js";
+import { bootstrapCurrentMcpSeat as bootstrapMcpSeatCustody } from "./bootstrap-mcp-custody.js";
 import { FabricReadPolicy } from "./read-policy.js";
 import { ArtifactRegistry } from "../artifacts/registry.js";
 import { resolveRunArtifactRoot } from "../artifacts/run-root.js";
@@ -1413,6 +1418,12 @@ export class Fabric {
     return this.#operatorStore.openLocalOperatorConsoleSessionCapability(input);
   }
 
+  openLocalOperatorConsoleTakeoverCapability(
+    input: LocalOperatorTakeoverCapabilityInput,
+  ): LocalOperatorTakeoverCapabilityResult {
+    return this.#operatorStore.openLocalOperatorConsoleTakeoverCapability(input);
+  }
+
   rotateLocalOperatorPrincipal(
     input: LocalOperatorPrincipalRotationInput,
   ): LocalOperatorPrincipalRotationResult {
@@ -1713,7 +1724,10 @@ export class Fabric {
       : 1;
   }
 
-  #launchResourceUsage(providerAdapterId: string, providerActionId: string): Record<string, "unknown"> {
+  #launchResourceUsage(
+    providerAdapterId: string,
+    providerActionId: string,
+  ): Record<string, number | "unknown"> {
     const reservation = rowOrNotFound(this.#database.prepare(`
       SELECT r.amounts_json
         FROM project_session_launch_custody c
@@ -1724,7 +1738,12 @@ export class Fabric {
     if (!isRow(amounts) || Object.values(amounts).some((value) => !Number.isSafeInteger(value) || Number(value) < 0)) {
       throw new Error("launch reservation amounts are invalid");
     }
-    return Object.fromEntries(Object.keys(amounts).sort().map((unit) => [unit, "unknown"]));
+    return Object.fromEntries(Object.keys(amounts).sort().map((unit) => [
+      unit,
+      unit === "provider_calls" ? 1
+        : unit === "concurrent_turns" ? 0
+          : "unknown",
+    ]));
   }
 
   #terminalLaunchOutcome(
@@ -2408,6 +2427,36 @@ export class Fabric {
         credentials,
       };
     })();
+  }
+
+  bootstrapTrustedCurrentMcpSeat(
+    input: BootstrapMcpSeatInput,
+    revalidatedWorkspace: { canonicalRoot: string; trustRecordDigest: string },
+  ): BootstrapMcpSeatResult {
+    if (
+      canonicalWorkspaceRoot(revalidatedWorkspace.canonicalRoot) !== input.canonicalRoot ||
+      revalidatedWorkspace.canonicalRoot !== input.canonicalRoot ||
+      revalidatedWorkspace.trustRecordDigest !== input.trustRecordDigest
+    ) {
+      throw new FabricError("AUTHENTICATION_FAILED", "revalidated MCP workspace binding changed");
+    }
+    if (!this.#workspaceRoots.includes(revalidatedWorkspace.canonicalRoot)) {
+      this.#workspaceRoots.push(revalidatedWorkspace.canonicalRoot);
+      this.#workspaceRoots.sort();
+    }
+    return this.bootstrapCurrentMcpSeat(input);
+  }
+
+  bootstrapCurrentMcpSeat(input: BootstrapMcpSeatInput): BootstrapMcpSeatResult {
+    return bootstrapMcpSeatCustody({
+      database: this.#database,
+      clock: this.#clock,
+      workspaceRoots: this.#workspaceRoots,
+      capabilityKey: this.#capabilityKey,
+      canonicalWorkspaceRoot,
+      normaliseAuthority,
+      bindCurrentMcpSeats: (binding) => this.bindCurrentMcpSeats(binding),
+    }, input);
   }
 
   connect(token: string): FabricClient {

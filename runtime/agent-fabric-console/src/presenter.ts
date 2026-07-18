@@ -94,7 +94,8 @@ function rowActions(
     : new Set<OperatorAvailableAction>(["project-session-launch", "git", "promotion"]);
   return row.actionAvailability.actions
     .filter((action) => guidedServerActions?.has(action) !== true)
-    .filter((action) => !isControlAction(action) || hasExactRunControlState(row))
+    .filter((action) => !isControlAction(action) ||
+      hasExactRunControlState(row) || hasExactPrelaunchCancelState(action, row, dataset))
     .map((action) => {
     const reason = dataset.productionActionPlanning === true
       ? productionActionUnavailableReason(action, row, dataset, ui)
@@ -119,12 +120,33 @@ function hasExactRunControlState(row: ConsoleRow): boolean {
   return row.view === "runs" && row.detailRef?.kind === "run";
 }
 
+function hasExactPrelaunchCancelState(
+  action: OperatorAvailableAction,
+  row: ConsoleRow,
+  dataset: FabricConsoleDataset,
+): boolean {
+  const session = dataset.snapshot?.session;
+  return action === "cancel" &&
+    row.view === "project" &&
+    row.detailRef?.kind === "project" &&
+    session?.freshness === "live" &&
+    session.value !== null &&
+    row.detailRef.projectId === session.value.projectId &&
+    (session.value.state === "draft" || session.value.state === "awaiting_launch");
+}
+
 function productionActionUnavailableReason(
   action: OperatorAvailableAction,
   row: ConsoleRow,
   dataset: FabricConsoleDataset,
   ui: FabricConsoleUiState,
 ): string | null {
+  if (action === "cancel" && row.view === "project") {
+    if (!hasExactPrelaunchCancelState(action, row, dataset)) {
+      return "session-is-not-effect-free-prelaunch";
+    }
+    return ui.draft.trim().length === 0 ? "enter-a-reason" : null;
+  }
   if (
     action === "pause" || action === "resume" || action === "cancel" ||
     action === "steer"
@@ -162,6 +184,12 @@ function productionActionUnavailableReason(
     return parseArtifactReferenceDraft(ui.draft) !== null
       ? null
       : "enter-drain-receipt-ref";
+  }
+  if (action === "chair-bridge-recovery") {
+    const session = dataset.snapshot?.session;
+    return session?.freshness === "live" && session.value?.state === "recovery_required"
+      ? null
+      : "session-recovery-not-current";
   }
   return "typed-guided-entry-required";
 }

@@ -1,4 +1,4 @@
-import { access, chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AdapterProcessTransport } from "../../src/adapters/process.ts";
+import { AdapterSupervisor } from "../../src/adapters/supervisor.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -42,6 +43,61 @@ process.stdout.write((typeof result === "string" ? result : JSON.stringify(resul
 }
 
 describe("optional provider executable wrappers", () => {
+  it("lets an inner optional-provider timeout persist ambiguity before the outer response envelope expires", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "fabric-agy-timeout-envelope-"));
+    temporaryDirectories.push(directory);
+    const invocationMarker = join(directory, "provider-invocations");
+    const providerExecutable = join(directory, "hanging-provider.mjs");
+    await writeFile(
+      providerExecutable,
+      `#!/usr/bin/env node\nimport { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(invocationMarker)}, "invoked\\n");\nsetInterval(() => undefined, 1000);\n`,
+    );
+    await chmod(providerExecutable, 0o700);
+    const wrapperPath = fileURLToPath(new URL("../support/provider-wrapper-entrypoint.ts", import.meta.url));
+    const supervisor = new AdapterSupervisor({
+      agy: {
+        command: [
+          process.execPath,
+          "--import",
+          "tsx",
+          wrapperPath,
+          "--journal",
+          join(directory, "adapter.sqlite3"),
+          "--provider-executable",
+          providerExecutable,
+          "--cwd",
+          directory,
+        ],
+        environment: {
+          AGENT_FABRIC_TEST_ADAPTER: "agy",
+          AGENT_FABRIC_TEST_PROVIDER_TURN_TIMEOUT_MS: "500",
+        },
+      },
+    }, { controlTimeoutMs: 2_000, providerTurnTimeoutMs: 500 });
+    const request = {
+      actionId: "agy:timeout:1",
+      payload: {
+        model: "gemini-fixture",
+        modelFamily: "google",
+        prompt: "bounded fixture task",
+      },
+    };
+
+    try {
+      await expect(supervisor.request("agy", "spawn", request)).rejects.toMatchObject({
+        name: "PROVIDER_TIMEOUT",
+      });
+      await expect(supervisor.request("agy", "lookup_action", { actionId: request.actionId }))
+        .resolves.toMatchObject({ status: "ambiguous", executionCount: 1, effectCount: 0 });
+      await expect(supervisor.request("agy", "spawn", request)).rejects.toMatchObject({
+        name: "ACTION_RECONCILIATION_REQUIRED",
+      });
+      expect(await readFile(invocationMarker, "utf8")).toBe("invoked\n");
+    } finally {
+      await supervisor.close();
+    }
+  });
+
   it("reports Kiro ACP capabilities without eagerly spawning the provider", async () => {
     const directory = await mkdtemp(join(tmpdir(), "fabric-kiro-entrypoint-"));
     temporaryDirectories.push(directory);
@@ -175,14 +231,14 @@ describe("optional provider executable wrappers", () => {
   it.each([
     {
       adapterId: "agy",
-      source: "../../src/adapters/providers/optional/agy.ts",
+      source: "../support/provider-wrapper-entrypoint.ts",
       model: "gemini-fixture",
       modelFamily: "google",
       expectedReference: "3cbfa155-fc5f-4c6e-aa99-3a44d48262b4",
     },
     {
       adapterId: "cursor-agent",
-      source: "../../src/adapters/providers/optional/cursor-agent.ts",
+      source: "../support/provider-wrapper-entrypoint.ts",
       model: "composer-fixture",
       modelFamily: "cursor-composer",
       expectedReference: "provider-session-1",
@@ -202,10 +258,11 @@ describe("optional provider executable wrappers", () => {
         join(directory, "adapter.sqlite3"),
         "--provider-executable",
         providerExecutable,
+        ...(fixture.adapterId === "cursor-agent" ? ["--provider-install-root", directory] : []),
         "--cwd",
         directory,
       ],
-      environment: {},
+      environment: { AGENT_FABRIC_TEST_ADAPTER: fixture.adapterId },
       responseTimeoutMs: 2_000,
     });
     try {
@@ -214,6 +271,16 @@ describe("optional provider executable wrappers", () => {
         adapterId: fixture.adapterId,
         actionJournal: true,
       });
+      await expect(
+        transport.request("spawn", {
+          actionId: `${fixture.adapterId}:wrong-family`,
+          payload: {
+            model: fixture.model,
+            modelFamily: "open-weight",
+            prompt: "must not reach provider",
+          },
+        }),
+      ).rejects.toMatchObject({ name: "ADAPTER_FAMILY_FORBIDDEN" });
       await expect(
         transport.request("spawn", {
           actionId: `${fixture.adapterId}:spawn:1`,

@@ -32,7 +32,7 @@ Important boundaries:
 - `src/core/read-policy.ts`: chair/owner/participant scoped projections
 - `src/daemon/`: single-instance process, trusted composition and socket transport
 - `src/mcp/`: one input/output schema surface for both primary clients
-- `src/adapters/providers/`: isolated, pinned provider adapters
+- `src/adapters/providers/`: isolated provider adapters with contract-based CLI admission
 - `src/exports/`: receipt projection, schema enforcement and link verification
 - `migrations/0001-current-baseline.sql`: complete current schema, triggers and indexes
 - `schemas/database-baseline.v1.json`: pinned SQL and canonical catalogue digests

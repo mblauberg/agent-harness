@@ -87,11 +87,11 @@ const launchResourcePlanV1 = parseLaunchResourcePlanV1({
   runId: "run_launch_01",
   budgetRef: "budget_01",
   scopes: {
-    project: { scopeId: "scope_project_01", limits: { concurrent_turns: 4 } },
-    projectSession: { scopeId: "scope_session_01", limits: { concurrent_turns: 3 } },
-    coordinationRun: { scopeId: "scope_run_01", limits: { concurrent_turns: 2 } },
+    project: { scopeId: "scope_project_01", limits: { provider_calls: 4, concurrent_turns: 4 } },
+    projectSession: { scopeId: "scope_session_01", limits: { provider_calls: 3, concurrent_turns: 3 } },
+    coordinationRun: { scopeId: "scope_run_01", limits: { provider_calls: 2, concurrent_turns: 2 } },
   },
-  launchReservation: { amounts: { concurrent_turns: 1 } },
+  launchReservation: { amounts: { provider_calls: 1, concurrent_turns: 1 } },
 });
 const projectSessionLaunchCurrentState = parseProjectSessionLaunchCurrentState({
   schemaVersion: 1,

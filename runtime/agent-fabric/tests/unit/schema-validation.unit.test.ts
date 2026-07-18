@@ -104,39 +104,23 @@ describe("Stage 1 versioned JSON Schemas", () => {
         throw new TypeError(`${adapterId} must be an object`);
       }
       expect(adapter.enabled, `${adapterId} activation state`).toBe(enabledAdapters.has(adapterId));
-      const constraints = adapter.model_family_constraints;
-      // An adapter that admits no model family at all (visibility-only herdr,
-      // allowed: []) dispatches nothing, so it carries no pattern binding.
-      if (
-        isJsonObject(constraints) && constraints.requires_explicit_model === true &&
-        Array.isArray(constraints.allowed) && constraints.allowed.length > 0
-      ) {
-        expect(
-          Array.isArray(constraints.allowed_model_patterns) && constraints.allowed_model_patterns.length > 0,
-          `${adapterId} must bind self-reported family to a trusted model pattern`,
-        ).toBe(true);
-      }
     }
     expect(adapters.agy).toMatchObject({
       implementation: {
-        installed_version: "1.1.3",
         executable: "${USER_HOME}/.local/bin/agy",
-        executable_sha256: "fbfbad6da2f1e40daf6f7100d1967e40daeb004892ace250141d2445acc99038",
       },
-      contract: { protocol_version: "cli-1.1.3" },
-      runtime_range: { supported_cli_versions: ["1.1.3"] },
+      contract: { protocol_version: "headless-cli" },
+      model_family_constraints: { allowed: ["google", "anthropic"] },
     });
     expect(adapters["cursor-agent"]).toMatchObject({
       implementation: {
-        installed_version: "2026.07.13-7fe37d2",
-        source_build: "7fe37d2",
-        executable: "${USER_HOME}/.local/share/cursor-agent/versions/2026.07.13-7fe37d2/cursor-agent",
-        executable_sha256: "eed61c5224668c9236334c4c68936a16aecc37374b592f59e31eb50433817831",
-        bundle_entrypoint: "${USER_HOME}/.local/share/cursor-agent/versions/2026.07.13-7fe37d2/index.js",
-        bundle_entrypoint_sha256: "3fb2cfa7c182eb9e9a743af514ac67cec2ecf708db41055c18db639a8cac4518",
+        executable: "${USER_HOME}/.local/bin/cursor-agent",
+        cursor_install_root: "${USER_HOME}/.local/share/cursor-agent",
       },
-      contract: { protocol_version: "build-2026.07.13-7fe37d2" },
-      runtime_range: { supported_cli_versions: ["2026.07.13-7fe37d2"] },
+      contract: { protocol_version: "stream-json-cli" },
+      model_family_constraints: {
+        allowed: ["cursor-composer", "xai", "anthropic", "openai", "google"],
+      },
     });
     const claude = adapters["claude-agent-sdk"];
     if (!isJsonObject(claude) || !isJsonObject(claude.implementation)) {

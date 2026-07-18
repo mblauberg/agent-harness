@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { resolveMcpCapability } from "../../src/mcp/credentials.ts";
+import { resolveMcpCapability, resolveRenewableMcpCapability } from "../../src/mcp/credentials.ts";
 
 const cleanup: string[] = [];
 const GENERATION_NEAREST = "a".repeat(64);
@@ -132,7 +132,7 @@ describe("MCP capability loading", () => {
     await expect(resolveMcpCapability(environment, unprovisioned)).rejects.toThrow(/not provisioned/u);
   });
 
-  it("warns before project-seat expiry and fails closed after expiry", async () => {
+  it("automatically renews a near-expiry or expired project seat", async () => {
     const directory = await mkdtemp(join(tmpdir(), "fabric-mcp-project-seat-expiry-"));
     cleanup.push(directory);
     const stateDirectory = join(directory, "state");
@@ -153,6 +153,8 @@ describe("MCP capability loading", () => {
       projectPath,
       generation: GENERATION_EXPIRY,
       previousGeneration: null,
+      originKind: "bootstrap",
+      projectSessionId: `session_bootstrap_${"a".repeat(32)}`,
       runId: "run",
       seat: "codex",
       agentId: "codex",
@@ -161,12 +163,61 @@ describe("MCP capability loading", () => {
       expiresAt,
     });
     const environment = { AGENT_FABRIC_SEAT: "codex", AGENT_FABRIC_STATE_DIRECTORY: stateDirectory };
+    for (const expiresAt of [
+      new Date(Date.now() + 30 * 60 * 1_000).toISOString(),
+      new Date(Date.now() - 1_000).toISOString(),
+    ]) {
+      await writeFile(metadataPath, `${JSON.stringify(metadata(expiresAt))}\n`, { mode: 0o600 });
+      const renew = vi.fn(async () => {
+        await writeFile(metadataPath, `${JSON.stringify(metadata(new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString()))}\n`, { mode: 0o600 });
+      });
+      const warn = vi.fn();
+      await expect(resolveRenewableMcpCapability(environment, projectPath, renew, warn)).resolves.toMatch(/^afc_/u);
+      expect(renew).toHaveBeenCalledOnce();
+      expect(warn).not.toHaveBeenCalled();
+    }
+  });
+
+  it("keeps ordinary operator seats usable until their explicit expiry", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "fabric-mcp-operator-seat-expiry-"));
+    cleanup.push(directory);
+    const stateDirectory = join(directory, "state");
+    const project = join(directory, "project");
+    await Promise.all([mkdir(project), mkdir(stateDirectory, { mode: 0o700 })]);
+    const projectPath = await realpath(project);
+    const { key, directory: seatDirectory } = await createCurrentSeatDirectory(
+      stateDirectory,
+      projectPath,
+      GENERATION_EXPIRY,
+    );
+    const credentialPath = join(seatDirectory, "codex.cap");
+    await writeFile(credentialPath, `afc_${"d".repeat(43)}\n`, { mode: 0o600 });
+    const metadataPath = join(seatDirectory, "codex.json");
+    const metadata = (expiresAt: string) => ({
+      schemaVersion: 1,
+      projectKey: key,
+      projectPath,
+      generation: GENERATION_EXPIRY,
+      previousGeneration: null,
+      originKind: "provisioned",
+      projectSessionId: `session_bootstrap_${"f".repeat(32)}`,
+      runId: "run",
+      seat: "codex",
+      agentId: "codex",
+      role: "chair",
+      credentialPath,
+      expiresAt,
+    });
+    const environment = { AGENT_FABRIC_SEAT: "codex", AGENT_FABRIC_STATE_DIRECTORY: stateDirectory };
+    const renew = vi.fn(async () => undefined);
     const warn = vi.fn();
-    await writeFile(metadataPath, `${JSON.stringify(metadata(new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString()))}\n`, { mode: 0o600 });
-    await expect(resolveMcpCapability(environment, projectPath, warn)).resolves.toMatch(/^afc_/u);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("coordinate a full-roster renewal"));
+    await writeFile(metadataPath, `${JSON.stringify(metadata(new Date(Date.now() + 30 * 60 * 1_000).toISOString()))}\n`, { mode: 0o600 });
+    await expect(resolveRenewableMcpCapability(environment, projectPath, renew, warn)).resolves.toMatch(/^afc_/u);
+    expect(renew).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledOnce();
     await writeFile(metadataPath, `${JSON.stringify(metadata(new Date(Date.now() - 1_000).toISOString()))}\n`, { mode: 0o600 });
-    await expect(resolveMcpCapability(environment, projectPath, warn)).rejects.toThrow(/expired/u);
+    await expect(resolveRenewableMcpCapability(environment, projectPath, renew, warn)).rejects.toThrow(/expired/u);
+    expect(renew).not.toHaveBeenCalled();
   });
 
   it("binds a global registry process to an explicit provisioned project path", async () => {

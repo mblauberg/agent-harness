@@ -150,7 +150,7 @@ describe("daemon single-instance ownership", () => {
     }
   });
 
-  it("keeps ownership in the daemon child after its launcher is killed", async () => {
+  it("keeps ownership in the released daemon child after its launcher is killed", async () => {
     const directory = await mkdtemp(join(tmpdir(), "afdb-launcher-death-"));
     const options = {
       databasePath: join(directory, "state", "fabric.sqlite3"),
@@ -174,8 +174,12 @@ describe("daemon single-instance ownership", () => {
       launcher.once("exit", (code) => reject(new Error(`launcher helper exited early: ${String(code)}`)));
     });
     const value: unknown = JSON.parse(line);
-    if (typeof value !== "object" || value === null || !("pid" in value) || typeof value.pid !== "number") {
-      throw new Error("launcher helper returned an invalid daemon pid");
+    if (
+      typeof value !== "object" || value === null ||
+      !("pid" in value) || typeof value.pid !== "number" ||
+      !("released" in value) || value.released !== true
+    ) {
+      throw new Error("launcher helper did not confirm released daemon ownership");
     }
     const daemonPid = value.pid;
     launcher.kill("SIGKILL");

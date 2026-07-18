@@ -41,6 +41,18 @@ case "$PLATFORM" in
     ;;
 esac
 
+provenant_bin_dir="${PROVENANT_BIN_DIR:-$HOME/.local/bin}"
+provenant_command="$provenant_bin_dir/provenant"
+provenant_source="$ROOT/scripts/provenant"
+
+# Refuse a command collision before any installation mutation.
+if [[ -e "$provenant_command" || -L "$provenant_command" ]]; then
+  if [[ ! -L "$provenant_command" || "$(readlink "$provenant_command")" != "$provenant_source" ]]; then
+    echo "provenant command collision=$provenant_command" >&2
+    exit 3
+  fi
+fi
+
 state_directory="${AGENT_FABRIC_STATE_DIRECTORY:-$HOME/.local/state/agent-harness/fabric}"
 claude_mcp_config="${CLAUDE_MCP_CONFIG:-$HOME/.claude.json}"
 mcp_args=(
@@ -57,6 +69,18 @@ if [[ "$PLATFORM" == "codex" ]]; then
   "$ROOT/scripts/configure-codex-skill-overrides.py" --preflight \
     --config "$platform_home/config.toml"
 fi
+
+mkdir -p "$provenant_bin_dir"
+if [[ ! -L "$provenant_command" ]]; then
+  ln -s "$provenant_source" "$provenant_command"
+  echo "command installed=$provenant_command"
+else
+  echo "command existing=$provenant_command"
+fi
+case ":${PATH:-}:" in
+  *":$provenant_bin_dir:"*) ;;
+  *) echo "warning: $provenant_bin_dir is not on PATH" >&2 ;;
+esac
 
 mkdir -p "$platform_home"
 "$ROOT/scripts/install-skills" --target "$platform_home/skills"
@@ -75,6 +99,8 @@ if [[ ! -e "$instructions" && ! -L "$instructions" ]]; then
     echo "$bootstrap"
   } > "$instructions"
   echo "instructions created=$instructions"
+elif [[ -L "$instructions" && "$instructions" -ef "$ROOT/AGENTS.md" ]]; then
+  echo "instructions existing=$instructions"
 elif grep -Fq "$ROOT/AGENTS.md" "$instructions" && grep -Fq "$ROOT/HARNESS.md" "$instructions"; then
   echo "instructions existing=$instructions"
 else

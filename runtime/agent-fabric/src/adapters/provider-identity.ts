@@ -1,0 +1,153 @@
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative } from "node:path";
+import { promisify } from "node:util";
+
+import { FabricError } from "../errors.js";
+
+const execFileAsync = promisify(execFile);
+
+const VENDORS = {
+  "claude-agent-sdk": { teamId: "Q6L2SF6YDW", identifier: "com.anthropic.claude-code" },
+  "codex-app-server": { teamId: "2DC432GLL2", identifier: "codex" },
+  agy: { teamId: "EQHXZ8M8AV", identifier: "cli" },
+  "kiro-acp": { teamId: "94KV3E626L", identifier: "kiro-cli" },
+} as const;
+
+export type ProviderPathObservation = {
+  canonicalPath: string;
+  regularFile: boolean;
+  ownerUid: number;
+  mode: number;
+  sha256: string;
+};
+
+export type ProviderIdentityPort = {
+  inspectPath(path: string): Promise<ProviderPathObservation>;
+  inspectDirectory(path: string): Promise<{ canonicalPath: string; directory: boolean; ownerUid: number; mode: number }>;
+  signingIdentity(path: string): Promise<{ teamId: string; identifier: string }>;
+  currentUid(): number;
+};
+
+export type ProviderIdentityObservation = ProviderPathObservation & {
+  adapterId: string;
+  assurance: "full-vendor-identity" | "partial-signed-helpers";
+  signing: Array<{ path: string; teamId: string; identifier: string }>;
+};
+
+async function inspectPath(path: string): Promise<ProviderPathObservation> {
+  let canonicalPath: string;
+  try {
+    canonicalPath = await realpath(path);
+    const metadata = await stat(canonicalPath);
+    const bytes = await readFile(canonicalPath);
+    return {
+      canonicalPath,
+      regularFile: metadata.isFile(),
+      ownerUid: metadata.uid,
+      mode: metadata.mode & 0o777,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+  } catch (error: unknown) {
+    throw new FabricError("ADAPTER_ARTIFACT_MISSING", `provider executable is unavailable: ${path}`, { cause: error });
+  }
+}
+
+async function signingIdentity(path: string): Promise<{ teamId: string; identifier: string }> {
+  try {
+    const result = await execFileAsync("/usr/bin/codesign", ["-dv", "--verbose=4", path]);
+    const output = `${result.stdout}\n${result.stderr}`;
+    const teamId = /^TeamIdentifier=(.+)$/mu.exec(output)?.[1];
+    const identifier = /^Identifier=(.+)$/mu.exec(output)?.[1];
+    if (teamId === undefined || identifier === undefined) throw new Error("codesign identity fields are missing");
+    return { teamId, identifier };
+  } catch (error: unknown) {
+    throw new FabricError("ADAPTER_IDENTITY_MISMATCH", `provider signing identity is unavailable: ${path}`, { cause: error });
+  }
+}
+
+const SYSTEM_PORT: ProviderIdentityPort = {
+  inspectPath,
+  inspectDirectory: async (path) => {
+    const canonicalPath = await realpath(path);
+    const metadata = await lstat(canonicalPath);
+    return { canonicalPath, directory: metadata.isDirectory(), ownerUid: metadata.uid, mode: metadata.mode & 0o777 };
+  },
+  signingIdentity,
+  currentUid: () => process.getuid?.() ?? -1,
+};
+
+function assertSafeFile(observation: ProviderPathObservation, expectedOwner?: number): void {
+  if (!observation.regularFile || (observation.mode & 0o022) !== 0 ||
+      (expectedOwner !== undefined && observation.ownerUid !== expectedOwner)) {
+    throw new FabricError("ADAPTER_PATH_UNSAFE", `provider executable path is not a safe regular file: ${observation.canonicalPath}`);
+  }
+}
+
+function assertSigning(actual: { teamId: string; identifier: string }, expected: { teamId: string; identifier?: string }): void {
+  if (actual.teamId !== expected.teamId || (expected.identifier !== undefined && actual.identifier !== expected.identifier)) {
+    throw new FabricError("ADAPTER_IDENTITY_MISMATCH", "provider signing identity does not match the expected vendor");
+  }
+}
+
+/**
+ * Re-resolves and verifies the provider launcher immediately before provider
+ * spawn. Digests are returned as observations and are deliberately not an
+ * admission input: normal vendor updates must not require a registry edit.
+ */
+export async function verifyProviderExecutableIdentity(input: {
+  adapterId: string;
+  executable: string;
+  cursorInstallRoot?: string;
+}, port: ProviderIdentityPort = SYSTEM_PORT): Promise<ProviderIdentityObservation> {
+  if (!isAbsolute(input.executable)) {
+    throw new FabricError("ADAPTER_PATH_UNSAFE", `provider executable must be absolute: ${input.executable}`);
+  }
+  const executable = await port.inspectPath(input.executable);
+  const expectedVendor = VENDORS[input.adapterId as keyof typeof VENDORS];
+  if (expectedVendor !== undefined) {
+    assertSafeFile(executable);
+    const signing = await port.signingIdentity(executable.canonicalPath);
+    assertSigning(signing, expectedVendor);
+    return {
+      ...executable,
+      adapterId: input.adapterId,
+      assurance: "full-vendor-identity",
+      signing: [{ path: executable.canonicalPath, ...signing }],
+    };
+  }
+  if (input.adapterId !== "cursor-agent" || input.cursorInstallRoot === undefined) {
+    throw new FabricError("ADAPTER_COMPATIBILITY_INVALID", `provider identity policy is missing: ${input.adapterId}`);
+  }
+  const rootObservation = await port.inspectDirectory(input.cursorInstallRoot);
+  const root = rootObservation.canonicalPath;
+  const contained = relative(root, executable.canonicalPath);
+  if (contained.length === 0 || contained.startsWith("..") || isAbsolute(contained)) {
+    throw new FabricError("ADAPTER_PATH_UNSAFE", "Cursor launcher is outside its canonical install root");
+  }
+  assertSafeFile(executable, port.currentUid());
+  // Check every user-controlled directory below the declared root. The root
+  // and launcher must remain owned by the current user and non-writable by
+  // group/other; the unsigned shell/JS bundle is therefore labelled partial.
+  for (let current = dirname(executable.canonicalPath); current.startsWith(root); current = dirname(current)) {
+    const metadata = await port.inspectDirectory(current);
+    if (metadata.ownerUid !== port.currentUid() || (metadata.mode & 0o022) !== 0 || !metadata.directory) {
+      throw new FabricError("ADAPTER_PATH_UNSAFE", `Cursor install component is unsafe: ${current}`);
+    }
+    if (current === root) break;
+  }
+  const directory = dirname(executable.canonicalPath);
+  const helperPath = join(directory, "spawn-helper");
+  const nodePath = join(directory, "node");
+  const helper = await port.signingIdentity(helperPath);
+  const node = await port.signingIdentity(nodePath);
+  assertSigning(helper, { teamId: "DCNK4UB866" });
+  assertSigning(node, { teamId: "HX7739G8FX" });
+  return {
+    ...executable,
+    adapterId: input.adapterId,
+    assurance: "partial-signed-helpers",
+    signing: [{ path: helperPath, ...helper }, { path: nodePath, ...node }],
+  };
+}

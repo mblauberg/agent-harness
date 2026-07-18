@@ -1,5 +1,5 @@
 schema_version: 1
-verification_date: "2026-07-17"
+verification_date: "2026-07-18"
 adapter_contract_version: 1
 capability_fixture_version: 1
 activation_policy:
@@ -18,13 +18,13 @@ adapters:
       lock_integrity_sha512: "JhbLu6o1v2g9fjqkO+LDNPWrE0bgd9UeRQQ41JBGouAgows3KyPPYgU2WU0q7M2onuwQxR5plGDpas01F+oaUA=="
       entrypoint: "node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"
       entrypoint_sha256: "a66a151410072ee506ee1e8ec0afcfe00e1d0674643e3e31650f8108c3a6af6c"
-      executable: "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
-      executable_sha256: "09ecba2ab2df9b6ee5b0695e26f65dea60fb3b6af3d3542ee09f466838d1e574"
+      executable: "/opt/homebrew/bin/claude"
+      provider_identity: apple-designated
       wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/claude-agent-sdk.ts"
     contract:
       adapter_version: 1
       protocol: claude-agent-sdk+claude-code-cli
-      protocol_version: "sdk-0.3.211/cli-2.1.212"
+      protocol_version: "sdk-0.3.211"
       schema_source: "node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts"
       schema_sha256: "99962fa0d89201e6512fe6624d142c4ec02147aceed474e8c88ec224ead30400"
       capability_fixture_version: 1
@@ -36,12 +36,6 @@ adapters:
     model_family_constraints:
       allowed:
         - anthropic
-      allowed_model_patterns:
-        - "claude*"
-        - "fable*"
-        - "opus*"
-        - "sonnet*"
-        - "haiku*"
       requires_explicit_model: true
     official_source_url: "https://github.com/anthropics/claude-agent-sdk-typescript"
     unresolved_pins: []
@@ -51,34 +45,23 @@ adapters:
     delivery_stage: 3
     implementation:
       kind: native-cli
-      command: codex
-      installed_version: "0.144.5"
-      source_build: "rust-v0.144.5"
-      executable: "/opt/homebrew/Caskroom/codex/0.144.5/codex-aarch64-apple-darwin"
-      executable_sha256: "5e29ab10ca1171be158f7335dd6bd8ce1aaf9af1556939db36a5ee338be6f5f2"
+      executable: "/opt/homebrew/bin/codex"
+      provider_identity: apple-designated
       wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/codex-app-server.ts"
     contract:
       adapter_version: 1
       protocol: codex-app-server
-      protocol_version: "cli-0.144.5"
+      protocol_version: "app-server-initialize"
       schema_generator: "codex app-server generate-json-schema --experimental --out <directory>"
       schema_bundle: "runtime/agent-fabric/schemas/upstream/codex-app-server-0.144.1.bundle.json"
       schema_sha256: "cb82fd306ef371fcc787ec39032c5ec097e9c096a2c6fdeef3c39469dcadf48c"
       capability_fixture_version: 1
     runtime_range:
-      supported_cli_versions:
-        - "0.144.5"
       platforms:
         - darwin-arm64
     model_family_constraints:
       allowed:
         - openai
-      allowed_model_patterns:
-        - "gpt-*"
-        - "codex*"
-        - "o1*"
-        - "o3*"
-        - "o4*"
       # The installed Codex account is a ChatGPT subscription: the runtime
       # rejects explicit model ids (HTTP 400) and requires the account's
       # default model, so codex dispatch omits the model id (#190).
@@ -169,30 +152,25 @@ adapters:
     implementation:
       kind: native-cli
       command: agy
-      installed_version: "1.1.3"
-      source_build: null
       executable: "${USER_HOME}/.local/bin/agy"
-      executable_sha256: "fbfbad6da2f1e40daf6f7100d1967e40daeb004892ace250141d2445acc99038"
+      provider_identity: apple-designated
       wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/optional/agy.ts"
     contract:
       adapter_version: 1
       protocol: agy-cli
-      protocol_version: "cli-1.1.3"
+      protocol_version: "headless-cli"
       schema_source: "runtime/agent-fabric/schemas/normalised-provider-output.v1.schema.json"
       schema_sha256: "7fffad0b2a9eceee814cd04bc80cd5141f47fcc5a0eb056919b33983c168868c"
       capability_fixture_version: 1
     runtime_range:
-      supported_cli_versions:
-        - "1.1.3"
       platforms:
         - darwin-arm64
     model_family_constraints:
       allowed:
         - google
-      allowed_model_patterns:
-        - "gemini*"
+        - anthropic
       requires_explicit_model: true
-      route_role: gemini-or-antigravity-worker
+      route_role: google-primary-anthropic-fallback-worker
     official_source_url: "https://github.com/google-antigravity/antigravity-cli"
     unresolved_pins: []
 
@@ -202,32 +180,27 @@ adapters:
     implementation:
       kind: bundled-cli
       command: cursor-agent
-      installed_version: "2026.07.13-7fe37d2"
-      source_build: "7fe37d2"
-      executable: "${USER_HOME}/.local/share/cursor-agent/versions/2026.07.13-7fe37d2/cursor-agent"
-      executable_sha256: "eed61c5224668c9236334c4c68936a16aecc37374b592f59e31eb50433817831"
-      bundle_entrypoint: "${USER_HOME}/.local/share/cursor-agent/versions/2026.07.13-7fe37d2/index.js"
-      bundle_entrypoint_sha256: "3fb2cfa7c182eb9e9a743af514ac67cec2ecf708db41055c18db639a8cac4518"
+      executable: "${USER_HOME}/.local/bin/cursor-agent"
+      cursor_install_root: "${USER_HOME}/.local/share/cursor-agent"
+      provider_identity: cursor-partial-signed-helpers
       wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/optional/cursor-agent.ts"
     contract:
       adapter_version: 1
       protocol: cursor-agent-stream-json-cli
-      protocol_version: "build-2026.07.13-7fe37d2"
+      protocol_version: "stream-json-cli"
       schema_source: "runtime/agent-fabric/schemas/normalised-provider-output.v1.schema.json"
       schema_sha256: "7fffad0b2a9eceee814cd04bc80cd5141f47fcc5a0eb056919b33983c168868c"
       capability_fixture_version: 1
     runtime_range:
-      supported_cli_versions:
-        - "2026.07.13-7fe37d2"
       platforms:
         - darwin-arm64
     model_family_constraints:
       allowed:
         - cursor-composer
         - xai
-      allowed_model_patterns:
-        - "composer-*"
-        - "cursor-grok-*"
+        - anthropic
+        - openai
+        - google
       requires_explicit_model: true
     official_source_url: "https://cursor.com/docs/cli/overview"
     unresolved_pins: []
@@ -236,14 +209,10 @@ adapters:
     enabled: false
     delivery_stage: 4
     implementation:
-      kind: native-application-cli
+      kind: native-cli
       command: kiro-cli
-      installed_version: "2.12.1"
-      source_build: "packaged-2026-07-09T22:15:53.362635"
-      executable: "/Applications/Kiro CLI.app/Contents/MacOS/kiro-cli"
-      executable_sha256: "89995b38d718e79cd723c3e1f91c8bc245c6104d149561c12611a21c07ed8269"
-      package_manifest: "/Applications/Kiro CLI.app/Contents/Resources/manifest.json"
-      package_manifest_sha256: "4f4097a6dd94b80abad29b60747f298207ae206932b38a437be944872e91a004"
+      executable: "${USER_HOME}/.local/bin/kiro-cli"
+      provider_identity: apple-designated
       wrapper_entrypoint: "runtime/agent-fabric/src/adapters/providers/optional/kiro-acp.ts"
     contract:
       adapter_version: 1
@@ -254,8 +223,6 @@ adapters:
       schema_sha256: "92c1dfcda10dd47e99127500a3763da2b471f9ac61e12b9bf0430c32cf953796"
       capability_fixture_version: 1
     runtime_range:
-      supported_cli_versions:
-        - "2.12.1"
       minimum_macos: "10.13"
       platforms:
         - darwin-arm64

@@ -55,7 +55,7 @@ const operatorActionOperationBundles: Readonly<Record<OperatorAction, readonly F
     FABRIC_OPERATIONS.operatorActionCommit,
     FABRIC_OPERATIONS.operatorActionStatus,
   ],
-  takeover: [FABRIC_OPERATIONS.chairTakeover],
+  takeover: [FABRIC_OPERATIONS.chairTakeover, ...operatorActionMutations],
   steer: operatorActionMutations,
   pause: operatorActionMutations,
   resume: operatorActionMutations,

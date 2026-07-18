@@ -101,6 +101,7 @@ describe("daemon-owned Herdr production composition", () => {
     await fixture.fabric.close();
     const identity = projectIdentity(fixture.databasePath);
     seedProviderIdentity(fixture.databasePath);
+    let paneRef = "w2:p2";
     const fabric = await openFabric({
       databasePath: fixture.databasePath,
       workspaceRoots: [fixture.directory],
@@ -132,7 +133,7 @@ describe("daemon-owned Herdr production composition", () => {
             return {
               readiness: "ready" as const,
               ready: true as const,
-              paneRef: "w2:p2",
+              paneRef,
             };
           },
         }),
@@ -189,6 +190,33 @@ describe("daemon-owned Herdr production composition", () => {
             readiness: "ready",
           }],
         });
+        const firstRevision = (database.prepare(`
+          SELECT revision FROM daemon_global_state WHERE singleton=1
+        `).get() as { revision: number }).revision;
+
+        fixture.clock.advance(1_000);
+        await (fabric as any).runHerdrPresencePass();
+        expect(database.prepare(`
+          SELECT state, discovered_contract_json FROM integration_availability
+           WHERE integration_id='herdr-control-v1'
+        `).get()).toEqual(row);
+        expect(database.prepare(`
+          SELECT revision FROM daemon_global_state WHERE singleton=1
+        `).get()).toEqual({ revision: firstRevision });
+
+        paneRef = "w2:p3";
+        await (fabric as any).runHerdrPresencePass();
+        const changed = database.prepare(`
+          SELECT state, discovered_contract_json FROM integration_availability
+           WHERE integration_id='herdr-control-v1'
+        `).get() as { state: string; discovered_contract_json: string };
+        expect(JSON.parse(changed.discovered_contract_json)).toMatchObject({
+          generation: 2,
+          presence: [{ paneRef: "w2:p3" }],
+        });
+        expect(database.prepare(`
+          SELECT revision FROM daemon_global_state WHERE singleton=1
+        `).get()).toEqual({ revision: firstRevision + 1 });
       } finally {
         database.close();
       }

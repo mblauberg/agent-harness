@@ -7,6 +7,7 @@ import {
   mkdirSync,
   rmdirSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { join } from "node:path";
@@ -24,6 +25,7 @@ import {
 } from "../lifecycle/local-receipt-authority.js";
 import {
   bindCurrentMcpSeatsInput,
+  bootstrapMcpSeatInput,
   FABRIC_DAEMON_VERSION,
   daemonInitializeParams,
   daemonInitializeResult,
@@ -33,6 +35,7 @@ import {
   isDaemonRequest,
   isRecord,
   openLocalOperatorConsoleCapabilityInput,
+  openLocalOperatorTakeoverCapabilityInput,
   provisionLocalOperatorInput,
   rotateLocalOperatorPrincipalInput,
   type DaemonRequest,
@@ -130,6 +133,7 @@ const bootstrapCapability = process.env.AGENT_FABRIC_BOOTSTRAP_CAPABILITY;
 const bootstrapMode = process.env.AGENT_FABRIC_BOOTSTRAP_MODE;
 const bootstrapActionId = process.env.AGENT_FABRIC_BOOTSTRAP_ACTION_ID;
 const bootstrapElectionGeneration = Number(process.env.AGENT_FABRIC_BOOTSTRAP_ELECTION_GENERATION);
+const bootstrapCustody = process.env.AGENT_FABRIC_BOOTSTRAP_CUSTODY;
 const daemonLockPathsValue: unknown = JSON.parse(process.env.AGENT_FABRIC_DAEMON_LOCK_PATHS_JSON ?? "[]");
 const daemonLockPaths = Array.isArray(daemonLockPathsValue) && daemonLockPathsValue.every((value) => typeof value === "string")
   ? daemonLockPathsValue
@@ -162,6 +166,7 @@ if (
   runtimeDirectory === undefined ||
   bootstrapCapability === undefined
   || (bootstrapMode !== "production-election" && bootstrapMode !== "test-forced-process-locks")
+  || bootstrapCustody !== "parent-pipe-v1"
   || (bootstrapMode === "production-election" && (
     bootstrapActionId === undefined ||
     bootstrapActionId.trim().length === 0 ||
@@ -182,6 +187,27 @@ if (
 ) {
   throw new Error("agent fabric daemon environment is incomplete");
 }
+
+let bootstrapCustodyReleased = false;
+let bootstrapCustodyMessage = "";
+let bootstrapSocketOwned = false;
+const releaseBootstrapCustody = "release\n";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk: string) => {
+  if (bootstrapCustodyReleased) return;
+  bootstrapCustodyMessage += chunk;
+  if (!releaseBootstrapCustody.startsWith(bootstrapCustodyMessage)) process.exit(1);
+  if (bootstrapCustodyMessage === releaseBootstrapCustody) bootstrapCustodyReleased = true;
+});
+const failClosedOnBootstrapCustodyLoss = (): void => {
+  if (!bootstrapCustodyReleased) process.exit(1);
+};
+process.stdin.on("end", failClosedOnBootstrapCustodyLoss);
+process.stdin.on("error", failClosedOnBootstrapCustodyLoss);
+process.stdin.resume();
+process.once("exit", () => {
+  if (!bootstrapCustodyReleased && bootstrapSocketOwned) rmSync(socketPath, { force: true });
+});
 
 if (bootstrapMode === "production-election") {
   try {
@@ -414,6 +440,14 @@ const servePrivateControlConnection = (socket: Socket): void => {
       switch (request.method) {
         case "bindCurrentMcpSeats":
           return fabric.bindCurrentMcpSeats(bindCurrentMcpSeatsInput(request.params));
+        case "bootstrapMcpSeat": {
+          const bootstrapInput = bootstrapMcpSeatInput(request.params);
+          const trustedInput = await withTrustedLocalSubject(bootstrapInput);
+          return fabric.bootstrapTrustedCurrentMcpSeat(bootstrapInput, {
+            canonicalRoot: trustedInput.canonicalRoot,
+            trustRecordDigest: trustedInput.trustRecordDigest,
+          });
+        }
         case "provisionLocalOperator":
           return fabric.provisionLocalOperator(await withTrustedLocalSubject(
             provisionLocalOperatorInput(request.params),
@@ -429,6 +463,10 @@ const servePrivateControlConnection = (socket: Socket): void => {
         case "openLocalOperatorConsoleSessionCapability":
           return fabric.openLocalOperatorConsoleSessionCapability(await withTrustedLocalSubject(
             issueLocalOperatorSessionCapabilityInput(request.params),
+          ));
+        case "openLocalOperatorConsoleTakeoverCapability":
+          return fabric.openLocalOperatorConsoleTakeoverCapability(await withTrustedLocalSubject(
+            openLocalOperatorTakeoverCapabilityInput(request.params),
           ));
         case "rotateLocalOperatorPrincipal":
           return fabric.rotateLocalOperatorPrincipal(await withTrustedLocalSubject(
@@ -618,7 +656,20 @@ const server = createServer((socket) => {
 });
 
 const openServingSocket = async (): Promise<void> =>
-  await openRecoverableUnixListener(server, socketPath, { admissionFence: servingAdmission });
+  await openRecoverableUnixListener(server, socketPath, {
+    admissionFence: servingAdmission,
+    onListening: async () => {
+      bootstrapSocketOwned = true;
+      const barrierPath = process.env.NODE_ENV === "test"
+        ? process.env.AGENT_FABRIC_TEST_BOOTSTRAP_SOCKET_BARRIER_PATH
+        : undefined;
+      if (barrierPath === undefined) return;
+      writeFileSync(barrierPath, `${String(process.pid)}\n`, { flag: "wx", mode: 0o600 });
+      while (existsSync(barrierPath)) {
+        await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 20));
+      }
+    },
+  });
 
 await openServingSocket();
 fabric.markDaemonRuntimeRunning(daemonInstanceGeneration);

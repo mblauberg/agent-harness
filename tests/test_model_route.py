@@ -699,8 +699,28 @@ def test_agy_accepts_only_explicit_gemini_routing():
     assert forbidden_route["status"] == "adapter_family_forbidden"
 
 
-def test_cursor_accepts_only_composer_and_grok_models():
-    for model, family in (("composer-2-high", "cursor-composer"), ("cursor-grok-4.5-high", "xai")):
+def test_optional_adapter_preference_policy_is_ordered_and_native_first_for_fallbacks():
+    catalog = json.loads((ROOT / "config" / "model-routing.json").read_text())
+
+    agy = catalog["adapters"]["agy"]["model_family_preferences"]
+    cursor = catalog["adapters"]["cursor"]["model_family_preferences"]
+
+    assert agy == {"preferred": ["google", "anthropic"], "fallback": {}}
+    assert cursor == {
+        "preferred": ["xai", "cursor-composer"],
+        "fallback": {"anthropic": "claude", "openai": "codex", "google": "agy"},
+    }
+
+
+def test_cursor_accepts_preferred_and_supported_fallback_families_without_model_name_locks():
+    for model, family in (
+        ("composer-2-high", "cursor-composer"),
+        ("cursor-grok-4.5-high", "xai"),
+        ("gemini-3.1-pro", "google"),
+        ("claude-opus", "anthropic"),
+        ("gpt-5.6-sol", "openai"),
+        ("grokish-high", "xai"),
+    ):
         allowed, allowed_route = resolve(
             "--adapter", "cursor", "--model", model, "--alias", "flagship", "--role", "worker",
             "--adapter-gate", "direct-cli",
@@ -710,15 +730,10 @@ def test_cursor_accepts_only_composer_and_grok_models():
         assert allowed_route["model_family"] == family
 
     wrong_family, wrong_family_route = resolve(
-        "--adapter", "cursor", "--model", "gemini-3.1-pro", "--alias", "flagship", "--role", "worker"
-    )
-    wrong_pattern, wrong_pattern_route = resolve(
-        "--adapter", "cursor", "--model", "grokish-high", "--alias", "flagship", "--role", "worker"
+        "--adapter", "cursor", "--model", "qwen3-coder", "--alias", "flagship", "--role", "worker"
     )
     assert wrong_family.returncode == 1
     assert wrong_family_route["status"] == "adapter_family_forbidden"
-    assert wrong_pattern.returncode == 1
-    assert wrong_pattern_route["status"] == "adapter_model_forbidden"
 
 
 def test_kiro_accepts_only_open_weight_models():

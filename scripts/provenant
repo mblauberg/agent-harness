@@ -1,0 +1,64 @@
+#!/bin/sh
+set -eu
+
+script_path=$0
+while [ -L "$script_path" ]; do
+  link=$(readlink "$script_path")
+  case "$link" in
+    /*) script_path=$link ;;
+    *) script_path=$(dirname -- "$script_path")/$link ;;
+  esac
+done
+script_dir=$(CDPATH= cd -- "$(dirname -- "$script_path")" && pwd)
+
+usage() {
+  echo "usage: provenant <help|route|worktree|check|fabric|doctor> [arguments...]" >&2
+}
+
+help() {
+  cat <<'EOF'
+usage: provenant <command> [arguments...]
+
+Thin front door; each command delegates to its existing owner:
+  route ...      scripts/model-route ...
+  worktree ...   scripts/worktree ...
+  check ...      scripts/check-harness ...
+  fabric ...     scripts/agent-fabric ...
+  doctor         scripts/agent-fabric doctor
+
+Fabric clients and providers are separate roles.
+Kiro provider activation: issue #265.
+OpenCode provider registration: issue #253.
+EOF
+}
+
+[ "$#" -gt 0 ] || { usage; exit 2; }
+command=$1
+shift
+
+case "$command" in
+  help|-h|--help)
+    [ "$#" -eq 0 ] || { usage; exit 2; }
+    help
+    ;;
+  route)
+    exec "$script_dir/model-route" "$@"
+    ;;
+  worktree)
+    exec "$script_dir/worktree" "$@"
+    ;;
+  check)
+    exec "$script_dir/check-harness" "$@"
+    ;;
+  fabric)
+    exec "$script_dir/agent-fabric" "$@"
+    ;;
+  doctor)
+    [ "$#" -eq 0 ] || { usage; exit 2; }
+    exec "$script_dir/agent-fabric" doctor
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

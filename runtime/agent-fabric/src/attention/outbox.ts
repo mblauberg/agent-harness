@@ -310,6 +310,8 @@ export class NotificationOutbox {
           state=excluded.state,
           discovered_contract_json=excluded.discovered_contract_json,
           checked_at=excluded.checked_at
+        WHERE integration_availability.state IS NOT excluded.state
+           OR integration_availability.discovered_contract_json IS NOT excluded.discovered_contract_json
       `).run(context.integrationId, request.state, contractJson, this.#clock());
       this.#fault("attention:availability:after-update");
     });

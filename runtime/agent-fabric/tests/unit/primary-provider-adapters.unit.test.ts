@@ -104,6 +104,25 @@ async function journal(): Promise<SqliteAdapterActionJournal> {
   return new SqliteAdapterActionJournal(join(directory, "actions.sqlite3"));
 }
 
+function claudeZeroTurnErrorResult(sessionId: string): Record<string, unknown> {
+  return {
+    type: "result",
+    subtype: "error_during_execution",
+    session_id: sessionId,
+    uuid: `${sessionId}-result`,
+    duration_ms: 0,
+    duration_api_ms: 0,
+    is_error: true,
+    num_turns: 0,
+    stop_reason: null,
+    total_cost_usd: 0,
+    usage: { input_tokens: 0, output_tokens: 0 },
+    modelUsage: {},
+    permission_denials: [],
+    errors: ["You've hit your session limit · resets 1:20am (Australia/Brisbane)"],
+  };
+}
+
 async function fabricSocketFixture(principal: {
   agentId: string;
   projectSessionId: string;
@@ -768,6 +787,261 @@ describe("Claude Agent SDK fabric adapter", () => {
     actionJournal.close();
   });
 
+  it("classifies the exact Claude subscription-limit no-answer result as retryable no-effect", async () => {
+    const resetAt = 1_784_229_600_000;
+    const query = vi.fn(() => ({
+      close: vi.fn(),
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: "assistant",
+          session_id: "claude-limited-session",
+          uuid: "claude-rate-limit-assistant",
+          parent_tool_use_id: null,
+          error: "rate_limit",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "You've hit your session limit · resets 1:20am (Australia/Brisbane)" }],
+            usage: {
+              input_tokens: 0,
+              output_tokens: 0,
+              cache_creation_input_tokens: 0,
+              cache_read_input_tokens: 0,
+              server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 },
+            },
+          },
+        };
+        yield {
+          type: "rate_limit_event",
+          session_id: "claude-limited-session",
+          uuid: "claude-rate-limit-event",
+          rate_limit_info: {
+            status: "rejected",
+            resetsAt: resetAt,
+            rateLimitType: "five_hour",
+          },
+        };
+        yield claudeZeroTurnErrorResult("claude-limited-session");
+        throw new Error(
+          "Claude Code returned an error result: You've hit your session limit · resets 1:20am (Australia/Brisbane)",
+        );
+      },
+    }));
+    const actionJournal = await journal();
+    const boundary = new InstalledClaudeAgentSdkBoundary({ query: query as never });
+    const adapter = createClaudeAgentSdkAdapter({ boundary, journal: actionJournal });
+    const params = { actionId: "claude-subscription-limit", payload: { prompt: "review" } };
+
+    await expect(adapter.request("spawn", params)).rejects.toMatchObject({
+      code: "PROVIDER_SUBSCRIPTION_LIMIT",
+      details: {
+        retryable: true,
+        noEffect: true,
+        resetsAt: resetAt,
+        rateLimitType: "five_hour",
+      },
+    });
+    await expect(adapter.request("spawn", params)).rejects.toMatchObject({
+      code: "PROVIDER_SUBSCRIPTION_LIMIT",
+    });
+    expect(query).toHaveBeenCalledOnce();
+    await expect(adapter.request("lookup_action", { actionId: params.actionId })).resolves.toMatchObject({
+      status: "terminal",
+      history: ["prepared", "dispatched", "terminal"],
+      executionCount: 1,
+      effectCount: 0,
+      idempotencyProven: true,
+      result: {
+        status: "no-effect",
+        retryable: true,
+        errorCode: "PROVIDER_SUBSCRIPTION_LIMIT",
+        resetsAt: resetAt,
+        rateLimitType: "five_hour",
+      },
+    });
+    actionJournal.close();
+  });
+
+  it.each([
+    {
+      scenario: "partial answer",
+      actionId: "claude-limit-partial-answer",
+      query: () => ({
+        close: vi.fn(),
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: "assistant",
+            session_id: "claude-partial-session",
+            uuid: "claude-partial-answer",
+            parent_tool_use_id: null,
+            message: { content: [{ type: "text", text: "partial" }] },
+          };
+          yield {
+            type: "rate_limit_event",
+            session_id: "claude-partial-session",
+            uuid: "claude-partial-limit",
+            rate_limit_info: { status: "rejected", resetsAt: 1_784_229_600_000, rateLimitType: "five_hour" },
+          };
+          yield claudeZeroTurnErrorResult("claude-partial-session");
+          throw new Error("Claude Code returned an error result after partial answer");
+        },
+      }),
+    },
+    {
+      scenario: "timeout",
+      actionId: "claude-limit-timeout",
+      query: () => ({
+        close: vi.fn(),
+        async *[Symbol.asyncIterator]() {
+          throw new Error("provider timeout");
+          yield undefined;
+        },
+      }),
+    },
+    {
+      scenario: "disconnect",
+      actionId: "claude-limit-disconnect",
+      query: () => ({
+        close: vi.fn(),
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: "rate_limit_event",
+            session_id: "claude-disconnected-session",
+            uuid: "claude-disconnected-limit",
+            rate_limit_info: { status: "rejected", resetsAt: 1_784_229_600_000, rateLimitType: "five_hour" },
+          };
+          throw new Error("provider disconnected before terminal result");
+        },
+      }),
+    },
+    {
+      scenario: "unproven error",
+      actionId: "claude-limit-unproven",
+      query: () => ({
+        close: vi.fn(),
+        async *[Symbol.asyncIterator]() {
+          yield claudeZeroTurnErrorResult("claude-unproven-session");
+          throw new Error("Claude Code returned an uncorroborated error result");
+        },
+      }),
+    },
+    {
+      scenario: "rejected event without the matching rate-limit assistant",
+      actionId: "claude-limit-missing-assistant",
+      query: () => ({
+        close: vi.fn(),
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: "rate_limit_event",
+            session_id: "claude-missing-assistant-session",
+            uuid: "claude-missing-assistant-limit",
+            rate_limit_info: { status: "rejected", resetsAt: 1_784_229_600_000, rateLimitType: "five_hour" },
+          };
+          yield claudeZeroTurnErrorResult("claude-missing-assistant-session");
+          throw new Error("Claude Code returned an unrelated zero-turn error result");
+        },
+      }),
+    },
+    {
+      scenario: "rate-limit evidence from a different session",
+      actionId: "claude-limit-session-mismatch",
+      query: () => ({
+        close: vi.fn(),
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: "assistant",
+            session_id: "claude-other-session",
+            uuid: "claude-other-session-assistant",
+            parent_tool_use_id: null,
+            error: "rate_limit",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "structured limit" }],
+              usage: { input_tokens: 0, output_tokens: 0 },
+            },
+          };
+          yield {
+            type: "rate_limit_event",
+            session_id: "claude-terminal-session",
+            uuid: "claude-terminal-session-limit",
+            rate_limit_info: { status: "rejected", resetsAt: 1_784_229_600_000, rateLimitType: "five_hour" },
+          };
+          yield claudeZeroTurnErrorResult("claude-terminal-session");
+          throw new Error("Claude Code returned mismatched session evidence");
+        },
+      }),
+    },
+  ])("keeps a Claude $scenario ambiguous", async ({ actionId, query }) => {
+    const actionJournal = await journal();
+    const boundary = new InstalledClaudeAgentSdkBoundary({ query: query as never });
+    const adapter = createClaudeAgentSdkAdapter({ boundary, journal: actionJournal });
+
+    await expect(adapter.request("spawn", { actionId, payload: { prompt: "review" } }))
+      .rejects.not.toMatchObject({ code: "PROVIDER_SUBSCRIPTION_LIMIT" });
+    await expect(adapter.request("lookup_action", { actionId })).resolves.toMatchObject({
+      status: "ambiguous",
+      history: ["prepared", "dispatched", "ambiguous"],
+      executionCount: 1,
+      effectCount: 0,
+      idempotencyProven: false,
+    });
+    actionJournal.close();
+  });
+
+  it("does not apply Claude subscription no-effect policy to another provider adapter", async () => {
+    const actionJournal = await journal();
+    const boundary = codexBoundary();
+    vi.mocked(boundary.spawn).mockRejectedValueOnce(new ProviderAdapterError(
+      "PROVIDER_SUBSCRIPTION_LIMIT",
+      "foreign provider reused an open error code",
+      { retryable: true, noEffect: true },
+    ));
+    const adapter = createCodexAppServerAdapter({ boundary, journal: actionJournal });
+    const actionId = "codex-foreign-subscription-limit";
+
+    await expect(adapter.request("spawn", { actionId, payload: { prompt: "review" } }))
+      .rejects.toThrowError("foreign provider reused an open error code");
+    await expect(adapter.request("lookup_action", { actionId })).resolves.toMatchObject({
+      status: "ambiguous",
+      history: ["prepared", "dispatched", "ambiguous"],
+      effectCount: 0,
+      idempotencyProven: false,
+    });
+    actionJournal.close();
+  });
+
+  it("allows one distinct fresh Claude action after a proven subscription-limit no-effect", async () => {
+    const actionJournal = await journal();
+    const boundary = claudeBoundary();
+    vi.mocked(boundary.spawn)
+      .mockRejectedValueOnce(new ProviderAdapterError(
+        "PROVIDER_SUBSCRIPTION_LIMIT",
+        "Claude subscription limit rejected the turn before any answer or provider effect",
+        { retryable: true, noEffect: true, resetsAt: 1_784_229_600_000, rateLimitType: "five_hour" },
+      ))
+      .mockResolvedValueOnce({ resumeReference: "claude-after-reset", result: "clean" });
+    const adapter = createClaudeAgentSdkAdapter({ boundary, journal: actionJournal });
+
+    await expect(adapter.request("spawn", {
+      actionId: "claude-before-reset",
+      payload: { prompt: "review" },
+    })).rejects.toMatchObject({ code: "PROVIDER_SUBSCRIPTION_LIMIT" });
+    await expect(adapter.request("spawn", {
+      actionId: "claude-after-reset",
+      payload: { prompt: "review" },
+    })).resolves.toEqual({ resumeReference: "claude-after-reset", result: "clean" });
+    expect(boundary.spawn).toHaveBeenCalledTimes(2);
+    await expect(adapter.request("lookup_action", { actionId: "claude-before-reset" })).resolves.toMatchObject({
+      status: "terminal",
+      effectCount: 0,
+      result: { status: "no-effect" },
+    });
+    await expect(adapter.request("lookup_action", { actionId: "claude-after-reset" })).resolves.toMatchObject({
+      status: "terminal",
+      effectCount: 1,
+    });
+    actionJournal.close();
+  });
+
   it("records a compiled write-offline attempt in the existing adapter action journal", async () => {
     const actionJournal = await journal();
     const boundary = claudeBoundary();
@@ -1355,6 +1629,7 @@ describe("installed Claude chair launch boundary", () => {
     });
     const boundary = Reflect.construct(InstalledClaudeAgentSdkBoundary, [{
       executable: "/trusted/claude",
+      verifyExecutable: vi.fn(async () => undefined),
       query: queryFactory,
       bridgeFactory: async (input: Parameters<typeof createChairLaunchFabricBridge>[0]) => {
         bridge = await createChairLaunchFabricBridge(input);

@@ -8,7 +8,8 @@ Applies to: `runtime/agent-fabric` and `scripts/agent-fabric*`
 The following remain separate approvals. One does not imply another:
 
 1. build or install the local runtime outside an active implementation envelope;
-2. trust a project root or provision/rotate its operator and agent seats;
+2. trust any parent, wildcard, home, sibling collection or other root beyond
+   the exact current project, or provision/rotate operator and agent seats;
 3. enable a provider adapter after compatibility verification;
 4. install an auto-start/login service for the daemon;
 5. log into or consume quota from a provider;
@@ -16,9 +17,15 @@ The following remain separate approvals. One does not imply another:
 7. run a smoke that invokes a real provider adapter;
 8. accept the implementation, release it or publish Git state.
 
+Standing global harness authority covers only automatic trust registration for
+the exact current project's canonical Git root, or its canonical current
+directory when no repository exists. This trust grants no task, write,
+credential, provider, provisioning, acceptance or release authority. Seat
+provisioning remains separately gated.
+
 Read the active authority before acting. Prior activation evidence does not
-authorise a new root, login, registry mutation, provider call, acceptance,
-release or publication.
+authorise a different or broader root, login, registry mutation, provider call,
+acceptance, release or publication.
 
 ## Preflight
 
@@ -35,8 +42,9 @@ python3 skills/deliver/scripts/validate_delivery.py \
   '<canonical-run>/RUN.json' --workspace-root "$PWD" --verify-hashes
 ```
 
-Then verify the selected compatibility entries. External executable, package
-and schema artifacts are checked against their pinned hashes.
+Then verify the selected compatibility entries. Fabric library and protocol
+schema artifacts are checked against their pinned hashes. Provider CLI versions
+and digests are observed evidence, not admission locks.
 Repository-owned wrapper code carries Git provenance instead of a hash pin
 (`runtime/agent-fabric/src/adapters/compatibility.ts`): the wrapper
 entrypoint must resolve inside a Git repository, be tracked at HEAD and
@@ -44,10 +52,10 @@ byte-identical to its committed content, and its first-party source spans
 (the owning workspace package's src tree, local workspace dependency src
 trees and every consulted package manifest) must be diff-clean against HEAD.
 An empty or truncated span discovery is a hard verification failure, never a
-skip. Provenance is re-derived immediately before every adapter process
-spawn and must match the provenance verified at composition. Unresolved
-pins, missing artifacts, disabled entries or any provenance mismatch fail
-closed.
+skip. Provenance, adapter-specific vendor identity and the bounded non-answer
+provider interface are required at activation and revalidated at point of use.
+Unresolved contract gaps, missing artifacts, disabled entries or any
+provenance/identity/interface mismatch fail closed.
 
 ## Keep the CLI dist warm
 
@@ -142,6 +150,21 @@ content retains its caller-owned mode. Conflict handling never rolls that object
 back over a pathname that a concurrent writer may have changed. Reconcile both
 the current client configuration and recovery object before rerunning.
 
+Primary provider execution uses the exact Claude Code and Codex packages in
+the root lockfile, not mutable global or Homebrew installations. On the
+supported host, restore and verify that closure with:
+
+```sh
+npm ci --no-audit --no-fund
+npm run compatibility:check:primary
+```
+
+The verifier checks the stable provider launchers, native signing identity,
+non-answer interface, protocol schemas and Fabric wrapper provenance. Each
+provider wrapper revalidates its launcher, safe path and vendor identity
+immediately before a new provider process. Normal signed CLI updates need no
+registry edit; wrapper or protocol changes remain fail closed.
+
 The resolved `.cap` file must remain a private regular file with mode `0600`.
 The adjacent `.json` file is secret-free metadata and is checked against the
 canonical project, project key, seat and credential path before use. Never
@@ -191,6 +214,34 @@ narrowed authority and their own capability. Swapping Claude and Codex
 leadership requires typed handoff/takeover custody; it does not change the
 protocol or create a fallback chain.
 
+### First use in an exact trusted project
+
+An unprovisioned Claude or Codex global MCP exposes exactly one tool:
+`fabric_bootstrap`. Call it without arguments. The proxy derives its validated
+seat from `AGENT_FABRIC_SEAT` and the exact project root from its working
+directory. The daemon atomically creates one deterministic, narrow scoping run;
+the same MCP connection then emits `tools/list_changed` and exposes the normal
+Fabric tools. A concurrent second primary joins that run as its peer and rotates
+the normal two-seat generation.
+
+Bootstrap never launches a provider and accepts no model, policy, root, run or
+agent identifiers. Its fixed authority reads only the exact project root,
+writes only its bootstrap run directory and Fabric coordination/evidence, and
+denies secrets, deployment, irreversible actions and tool egress. An untrusted
+root fails closed. The local fallback is `provenant fabric bootstrap --seat
+claude|codex`; it invokes the same composition. Public `mcp provision` retains
+its full-roster requirement.
+
+Bootstrap seats are short-lived bearers over a bounded bootstrap authority
+that deliberately outlives them. When a bootstrap seat is expired or within
+one hour of expiry, the Claude/Codex MCP proxy automatically revalidates trust
+for the exact current root and asks the daemon to rotate the complete roster.
+The daemon compare-and-swaps only the current generation and revokes every
+predecessor token; the project session, run and chair do not change. If exact
+trust or the generation changed, renewal fails closed. Stop and restart a
+stale proxy after another host completes the cutover. Operator-created runs
+continue to use the explicit `mcp provision` flow below.
+
 In production Console, Launch is available only when the dedicated
 `projectSessions.prepareLaunch` operation and explicit operator-action commit
 surface are negotiated. The selected live Project row supplies the session
@@ -204,6 +255,17 @@ while a new generation or packet gets a new identity. Provider dispatch still re
 separate explicit confirmation gesture. Sessions projected as `launching` or
 `launch_ambiguous` rehydrate through status-only observation; Console never
 redispatches or invokes generic action reconciliation for launch custody.
+
+If a selected session is `recovery_required`, Console asks the daemon to derive one loss-bound takeover capability and
+server-authored recovery intent. Do not copy loss IDs or construct recovery payloads by hand. Abandon remains a
+destructive action: inspect the preview, then use the separate explicit Confirm gesture. On confirmed
+abandon, the daemon may repair historical launch accounting only from the exact terminal-success provider action
+(`provider_calls=1`, retained `concurrent_turns=0`); other unknown capacity remains unknown.
+
+Cancel may terminalise a `draft` or `awaiting_launch` session without provider I/O only when it has no run, membership,
+launch custody, reservation, gate or prior operator effect. A live Console attachment is transport, not lifecycle work,
+and does not block this path. Once any such lifecycle evidence exists, use its owning recovery or cancellation flow;
+zero cancelled tasks must be reported as rejected, never as a successful task cancellation.
 
 For visible pairing, Herdr attaches panes or observer renderers while messages still travel through the durable fabric mailbox. For headless orchestration, no pane is required. Both profiles can coexist in one run.
 
@@ -239,7 +301,7 @@ evidence; use another already-admitted review family or record the bonus leg as
 unavailable. Never bypass the gate with a direct CLI and claim Fabric evidence.
 
 Real provider smokes are local-only, consume subscription quota and require
-current provider-use authority. They traverse the pinned Fabric adapter
+current provider-use authority. They traverse the verified Fabric adapter
 request protocol, require exact spawn/turn/release sentinels and prove the
 isolated workspace stayed unchanged:
 
@@ -248,12 +310,17 @@ cd runtime/agent-fabric
 node smoke/provider-adapter-readonly.mjs \
   --adapter agy --model 'Gemini 3.1 Pro (High)' \
   --model-family google --effort high \
-  --provider-executable "$(command -v agy)"
+  --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter agy)"
 node smoke/provider-adapter-readonly.mjs \
   --adapter cursor-agent --model cursor-grok-4.5-high \
   --model-family xai --effort high \
-  --provider-executable "$(command -v cursor-agent)"
+  --provider-executable "$(../../scripts/agent-fabric adapter executable --adapter cursor-agent)"
 ```
+
+`adapter executable` prints only the validated executable path from the active
+adapter's compatibility entry. It fails closed before the provider smoke if the
+adapter is inactive, the stable executable is missing or its compatibility
+contract no longer conforms.
 
 Claude reviewers and one-task workers start fresh and release when done. For a
 retained Claude pair, checkpoint and compact at each stage or work-unit
@@ -285,8 +352,13 @@ stop a project session or daemon.
 Use this path when a reviewed project artifact is accepted and a new draft
 project session is ready to launch:
 
-1. Trust the canonical project root with `scripts/agent-fabric workspace trust
-   "$PWD"`, then open the Console for that exact root.
+1. Resolve the owning Git root (`git rev-parse --show-toplevel`), or the
+   canonical current project directory when no repository exists. Inspect that
+   exact root and, when absent, establish trust with
+   `$HOME/.agents/scripts/agent-fabric workspace trust "$project_root"` before
+   opening the Console. This first-use step is automatic under the global
+   harness; never substitute a parent, wildcard, home directory or sibling
+   collection.
 2. Create or select the draft project session. If several sessions are
    attachable, pass its stable ID with `--session`.
 3. Open the complete, verified accepted-evidence row and choose

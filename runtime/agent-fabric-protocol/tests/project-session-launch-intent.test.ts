@@ -86,11 +86,11 @@ const resourcePlan = {
   runId: "run_launch_01",
   budgetRef: "budget_01",
   scopes: {
-    project: { scopeId: "scope_project_01", limits: { concurrent_turns: 4 } },
-    projectSession: { scopeId: "scope_session_01", limits: { concurrent_turns: 3 } },
-    coordinationRun: { scopeId: "scope_run_01", limits: { concurrent_turns: 2 } },
+    project: { scopeId: "scope_project_01", limits: { provider_calls: 4, concurrent_turns: 4 } },
+    projectSession: { scopeId: "scope_session_01", limits: { provider_calls: 3, concurrent_turns: 3 } },
+    coordinationRun: { scopeId: "scope_run_01", limits: { provider_calls: 2, concurrent_turns: 2 } },
   },
-  launchReservation: { amounts: { concurrent_turns: 1 } },
+  launchReservation: { amounts: { provider_calls: 1, concurrent_turns: 1 } },
 } as const;
 
 const launchCurrentState = {
@@ -262,6 +262,32 @@ describe("launch resource plan v1", () => {
       ...resourcePlan,
       launchReservation: { amounts: { arbitrary_unit: 1 } },
     })).toThrowError(/qualified resource unit|invalid key/iu);
+  });
+
+  it("requires exactly one reserved provider call with capacity at every ancestor", () => {
+    for (const providerCalls of [undefined, 0, 2] as const) {
+      const amounts = providerCalls === undefined
+        ? { concurrent_turns: 1 }
+        : { provider_calls: providerCalls, concurrent_turns: 1 };
+      expect(() => parseLaunchResourcePlanV1({
+        ...resourcePlan,
+        launchReservation: { amounts },
+      })).toThrowError(/launchReservation\.amounts\.provider_calls must equal 1/iu);
+    }
+    for (const scopeName of ["project", "projectSession", "coordinationRun"] as const) {
+      for (const providerCalls of [undefined, 0] as const) {
+        const limits = { ...resourcePlan.scopes[scopeName].limits } as Record<string, number>;
+        if (providerCalls === undefined) delete limits.provider_calls;
+        else limits.provider_calls = providerCalls;
+        expect(() => parseLaunchResourcePlanV1({
+          ...resourcePlan,
+          scopes: {
+            ...resourcePlan.scopes,
+            [scopeName]: { ...resourcePlan.scopes[scopeName], limits },
+          },
+        })).toThrowError(new RegExp(`scopes\\.${scopeName}\\.limits\\.provider_calls must be at least 1`, "iu"));
+      }
+    }
   });
 });
 

@@ -179,4 +179,71 @@ describe("MCP seat generation store", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("installs a daemon-attested newer generation when a crash left no local pointer", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fabric-seat-crash-convergence-"));
+    try {
+      const stateDirectory = join(root, "state");
+      const requestedProjectPath = join(root, "project");
+      await mkdir(stateDirectory, { mode: 0o700 });
+      await mkdir(requestedProjectPath);
+      const projectPath = await realpath(requestedProjectPath);
+      const key = projectKey(projectPath);
+      const common = {
+        schemaVersion: 1 as const,
+        projectKey: key,
+        projectPath,
+        projectSessionId: "session-crash",
+        sessionRevision: 1,
+        sessionGeneration: 1,
+        runId: "run-crash",
+        runRevision: 1,
+        chairAgentId: "codex",
+        chairGeneration: 1,
+        chairLeaseId: "chair:run-crash:1",
+        generation: GENERATION_TWO,
+        previousGeneration: GENERATION_ONE,
+        principalGeneration: 1,
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      };
+      await installSeatGeneration({
+        stateDirectory,
+        projectPath,
+        generation: GENERATION_TWO,
+        expectedPreviousGeneration: GENERATION_ONE,
+        allowMissingPreviousGeneration: true,
+        seats: [
+          { metadata: { ...common, seat: "codex", agentId: "codex", role: "chair" }, credential: CAPABILITY_A },
+          { metadata: { ...common, seat: "claude", agentId: "claude", role: "peer" }, credential: CAPABILITY_B },
+        ],
+      });
+
+      const codex = await resolveSeatPaths({ stateDirectory, project: projectPath, seat: "codex" });
+      const claude = await resolveSeatPaths({ stateDirectory, project: projectPath, seat: "claude" });
+      expect(codex.generation).toBe(GENERATION_TWO);
+      expect(claude.generation).toBe(GENERATION_TWO);
+      await expect(readFile(codex.credentialPath, "utf8")).resolves.toBe(CAPABILITY_A);
+      await expect(readFile(claude.credentialPath, "utf8")).resolves.toBe(CAPABILITY_B);
+
+      await expect(installSeatGeneration({
+        stateDirectory,
+        projectPath,
+        generation: GENERATION_THREE,
+        expectedPreviousGeneration: GENERATION_ONE,
+        allowMissingPreviousGeneration: true,
+        seats: [{
+          metadata: {
+            ...common,
+            generation: GENERATION_THREE,
+            seat: "codex",
+            agentId: "codex",
+            role: "chair",
+          },
+          credential: CAPABILITY_A,
+        }],
+      })).rejects.toThrow(/active MCP seat generation changed/u);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

@@ -15,7 +15,7 @@ const packageRoot = fileURLToPath(new URL("../..", import.meta.url));
 const mcpMain = fileURLToPath(new URL("../../src/mcp/main.ts", import.meta.url));
 
 describe("MCP proxy lifecycle", () => {
-  it("initializes without Fabric surfaces when the configured seat is not provisioned", async () => {
+  it("initializes with only exact-root bootstrap when the configured seat is not provisioned", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-fabric-mcp-unprovisioned-"));
     const project = join(directory, "project");
     const state = join(directory, "state");
@@ -37,7 +37,8 @@ describe("MCP proxy lifecycle", () => {
     const client = new Client({ name: "unprovisioned-test", version: "0.1.0" });
     try {
       await client.connect(transport);
-      await expect(client.listTools()).resolves.toEqual({ tools: [] });
+      const tools = await client.listTools();
+      expect(tools.tools.map(({ name }) => name)).toEqual(["fabric_bootstrap"]);
       await expect(client.listResources()).resolves.toEqual({ resources: [] });
       await expect(client.listResourceTemplates()).resolves.toEqual({ resourceTemplates: [] });
     } finally {
