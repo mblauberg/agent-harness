@@ -549,6 +549,13 @@ as one team.
 
 ## Recovery
 
+- A retained MCP proxy reconnects after a daemon restart with its current seat,
+  refreshing that seat only when authentication rejects it. Concurrent requests
+  share that reconnect attempt. Only a request carrying a stable `commandId` is
+  replayed automatically; commandless stateful requests return
+  `RECONNECT_REQUIRED` so their outcome can be reconciled before an explicit
+  retry. The same typed error and single action report an unavailable daemon or
+  seat.
 - A second daemon for the same socket or canonical database is rejected by an
   OS-backed SQLite exclusive owner lock held for the daemon lifetime. Process
   death releases the kernel lock without pathname deletion or stale-takeover
