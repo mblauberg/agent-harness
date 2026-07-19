@@ -51,10 +51,20 @@ Each `delegations[]` item contains `actor` plus a complete V2 scope. Its Fabric
 envelope inherits the parent's exact approval binding and must narrow every
 authority dimension. Partial delegations and any widening fail closed.
 
-Artifact digests use `sha256:<64 lowercase hex>`. Local paths are relative to
-the explicit workspace root; validate with `--workspace-root` and
-`--verify-hashes`. External URIs require `digest_unavailable_reason` when bytes
-cannot be bound.
+Non-Git artifact digests use `sha256:<64 lowercase hex>`. Local paths are
+relative to the explicit workspace root; validate with `--workspace-root` and
+`--verify-hashes`. External URIs require a non-empty
+`digest_unavailable_reason` when bytes cannot be bound. New Git evidence uses
+media type `application/x-git-revision`: its closed `git_revision` has exactly
+`repository`, `commit` and `tree`, omits both digest fields, and cannot also
+declare a path or URI. Verification detects the repository's native object
+format, requires full-width lowercase object IDs, requires the declared object
+itself to be a commit, and requires its available tree to equal the declared
+tree. All evidence reads use the closed Git runner: inherited repository,
+object and config routing is removed; replacements and grafts are disabled;
+missing promisor objects are never fetched. Frozen schema-v1
+`application/x-git-archive` receipts remain readable only with their SHA-256
+archive digest; binders never emit that legacy form.
 
 From the project root:
 
@@ -111,10 +121,12 @@ profile justification.
 
 After a pull request merges, a software receipt may add the closed
 `software_delivery` binding while it remains `awaiting_acceptance`. Its
-canonical artifact uses `git_revision` (`repository`, `commit`, `tree`) and a
-SHA-256 digest of `git archive --format=tar <commit>`, verified against the live
-local repository. The binding also names local, digest-verified JSON artifacts
-with contracts `github-pull-request-evidence`, `github-ci-evidence` and
+canonical artifact uses new-form `git_revision` (`repository`, `commit`,
+`tree`) with no second archive or per-file digest. Validation applies the exact
+native-object and closed-runner rules above and rejects digest fields on this
+new media type. The binding also
+names local, digest-verified JSON artifacts with contracts
+`github-pull-request-evidence`, `github-ci-evidence` and
 `code-review-evidence`. The PR binds reviewed head to merge commit; required
 `ci-status` binds the merge commit; every passing primary review is retained;
 and the merged tree must equal the reviewed head tree.

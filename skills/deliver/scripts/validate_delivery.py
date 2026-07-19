@@ -169,11 +169,13 @@ def _validate_artifacts(
         fail(not isinstance(artifact_id, str) or not artifact_id or artifact_id in by_id, f"artifact {index} id is missing or duplicate")
         path = item.get("path")
         uri = item.get("uri")
+        path_present = "path" in item
+        revision_present = "git_revision" in item
         _software_delivery_validator().validate_git_artifact(
             item, artifact_id, path, uri, workspace_root, allowed_source_paths,
             verify_hashes, _safe_path, _inside, Invalid,
         )
-        if path:
+        if path_present:
             clean_path = _safe_path(path, f"artifact {artifact_id}.path")
             fail(not any(_inside(clean_path, scope) for scope in allowed_artifact_paths), f"artifact {artifact_id} is outside authority.allowed_artifact_paths")
         fail(not item.get("media_type"), f"artifact {artifact_id} requires media_type")
@@ -189,11 +191,9 @@ def _validate_artifacts(
         if item.get("class") == "evidence":
             fail(item.get("retention") not in profile["evidence_policy"]["retention"], f"evidence artifact {artifact_id} retention violates the profile policy")
         digest = item.get("digest")
-        unavailable = item.get("digest_unavailable_reason")
-        fail(bool(digest) == bool(unavailable), f"artifact {artifact_id} requires digest xor digest_unavailable_reason")
-        if digest:
-            _digest(digest, f"artifact {artifact_id}.digest")
-        if path and verify_hashes:
+        _software_delivery_validator().validate_integrity_shape(
+            item, artifact_id, revision_present, path_present, _digest, fail)
+        if path_present and verify_hashes:
             fail(workspace_root is None, "verify_hashes requires workspace_root")
             target = workspace_root / path
             try:
