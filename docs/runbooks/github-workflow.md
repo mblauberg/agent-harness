@@ -185,8 +185,9 @@ means exactly this one context; no other check is required.
 The user review/merge gate applies only when the agent is stuck: split review
 verdicts it cannot settle with primary-source evidence, an exhausted repair
 budget, or a decision outside its granted authority. Standing user gates are
-unchanged: branch deletion, history rewrites, credential or connector setup,
-pushes to shared branches outside authorised merges, and risk-tier downgrades.
+unchanged: manual or forced branch deletion outside the repository's automatic
+merged-head cleanup, history rewrites, credential or connector setup, pushes to
+shared branches outside authorised merges, and risk-tier downgrades.
 
 Branch protection requires the head to be strictly up to date with `main`, so
 concurrent pull requests still integrate as a serialised merge train: merge
@@ -268,5 +269,10 @@ Afterwards:
    scripts/worktree remove impl-148 --human-authorised
    ```
 
-5. Branch deletion, local or remote, needs separate explicit user authority.
-   After an authorised remote deletion, run `git fetch --prune`.
+5. The user-authorised repository setting `delete_branch_on_merge=true`
+   (enabled 2026-07-19) automatically deletes a merged pull request's remote
+   head branch. This automatic merged-head cleanup needs no separate per-branch
+   authority. Manual or forced deletion outside that case, including deletion
+   of an unmerged remote branch or any local branch, remains an explicit user
+   gate. After GitHub performs the automatic remote deletion, run
+   `git fetch --prune`.
