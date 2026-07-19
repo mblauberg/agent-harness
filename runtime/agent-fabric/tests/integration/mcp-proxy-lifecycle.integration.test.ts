@@ -1,12 +1,13 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
-import { createServer } from "node:net";
+import { createConnection, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
+import Database from "better-sqlite3";
 import {
   FABRIC_OPERATIONS,
   PROTOCOL_FEATURES,
@@ -87,6 +88,73 @@ async function createTimeoutMcpFixture(options: {
   };
 }
 
+async function createDelayedDaemonProxy(upstreamSocketPath: string) {
+  const directory = await mkdtemp(join(tmpdir(), "agent-fabric-mcp-delay-"));
+  const socketPath = join(directory, "fabric.sock");
+  const sockets = new Set<Socket>();
+  let initializeHandshakes = 0;
+  let delayedMessageResponse = false;
+  const server = createServer((client) => {
+    const upstream = createConnection(upstreamSocketPath);
+    sockets.add(client);
+    sockets.add(upstream);
+    const operations = new Map<string, string>();
+    const clientLines = createInterface({ input: client, crlfDelay: Infinity });
+    const upstreamLines = createInterface({ input: upstream, crlfDelay: Infinity });
+    clientLines.on("line", (line) => {
+      const request = JSON.parse(line) as { id: string; operation: string };
+      operations.set(request.id, request.operation);
+      if (request.operation === "initialize") initializeHandshakes += 1;
+      upstream.write(`${line}\n`);
+    });
+    upstreamLines.on("line", (line) => {
+      const response = JSON.parse(line) as {
+        id: string;
+        ok: boolean;
+        result?: { limits?: ProtocolLimits };
+      };
+      const operation = operations.get(response.id);
+      operations.delete(response.id);
+      if (operation === "initialize" && response.ok && response.result?.limits !== undefined) {
+        response.result.limits = {
+          ...response.result.limits,
+          idleTimeoutMs: 200,
+          requestTimeoutMs: 30,
+        };
+      }
+      const rendered = `${JSON.stringify(response)}\n`;
+      if (operation === FABRIC_OPERATIONS.sendMessage && !delayedMessageResponse) {
+        delayedMessageResponse = true;
+        void delay(90).then(() => {
+          if (!client.destroyed) client.write(rendered);
+        });
+        return;
+      }
+      client.write(rendered);
+    });
+    const closePair = () => {
+      client.destroy();
+      upstream.destroy();
+      sockets.delete(client);
+      sockets.delete(upstream);
+    };
+    client.once("close", closePair);
+    upstream.once("close", closePair);
+    client.once("error", closePair);
+    upstream.once("error", closePair);
+  });
+  await new Promise<void>((resolve, reject) => server.listen(socketPath, resolve).once("error", reject));
+  return {
+    socketPath,
+    initializeHandshakes: () => initializeHandshakes,
+    async cleanup(): Promise<void> {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(directory, { recursive: true, force: true });
+    },
+  };
+}
+
 describe("MCP proxy lifecycle", () => {
   it("reconnects before dispatch after a review outlives the negotiated idle timeout", async () => {
     let dispatches = 0;
@@ -111,31 +179,39 @@ describe("MCP proxy lifecycle", () => {
     }
   });
 
-  it("replays an in-flight timed-out message through its durable dedupe identity", async () => {
-    let dispatches = 0;
-    const fixture = await createTimeoutMcpFixture({
-      limits: { ...PROTOCOL_LIMITS, idleTimeoutMs: 200, requestTimeoutMs: 30 },
-      dispatch: async () => {
-        dispatches += 1;
-        if (dispatches === 1) await delay(90);
-        return { messageId: "message_deduped" };
-      },
+  it("replays an in-flight timed-out message once through the real message-store transaction", async () => {
+    const fixture = await createMcpFixture("run-mcp-timeout-dedupe");
+    const delayed = await createDelayedDaemonProxy(fixture.socketPath);
+    const proxy = await spawnMcpProxy({
+      socketPath: delayed.socketPath,
+      capability: fixture.run.chairCapability,
+      label: "timeout-dedupe-chair",
     });
     try {
-      const sent = await callTool(fixture.proxy.client, "fabric_message_send", {
-        audience: { kind: "agents", agentIds: ["chair"] },
+      const sent = await callTool(proxy.client, "fabric_message_send", {
+        audience: { kind: "agents", agentIds: ["peer"] },
         kind: "response",
         body: "review complete",
         requiresAck: true,
         dedupeKey: "review-complete-02",
       });
 
-      expect(sent).toMatchObject({ isError: false, structured: { messageId: "message_deduped" } });
-      expect(dispatches).toBe(2);
+      expect(sent).toMatchObject({ isError: false, structured: { messageId: expect.any(String) } });
+      const database = new Database(fixture.databasePath, { readonly: true });
+      try {
+        expect(database.prepare(
+          "SELECT COUNT(*) AS count FROM messages WHERE run_id = ? AND sender_id = ? AND dedupe_key = ?",
+        ).get("run-mcp-timeout-dedupe", "chair", "review-complete-02")).toEqual({ count: 1 });
+      } finally {
+        database.close();
+      }
+      expect(delayed.initializeHandshakes()).toBe(2);
     } finally {
+      await proxy.close().catch(() => undefined);
+      await delayed.cleanup();
       await fixture.cleanup();
     }
-  });
+  }, 15_000);
 
   it("reconnects and returns actionable recovery for an ambiguous commandless timeout", async () => {
     let receives = 0;
@@ -157,7 +233,7 @@ describe("MCP proxy lifecycle", () => {
         isError: true,
         structured: {
           code: "RECONNECT_REQUIRED",
-          action: "Reconcile the operation outcome before retrying the Fabric request.",
+          action: "The fabric_message_receive outcome is unknown and no delivery was acknowledged. Wait at least 30000 ms (the requested visibilityTimeoutMs) before retrying fabric_message_receive.",
         },
       });
 
@@ -216,7 +292,7 @@ describe("MCP proxy lifecycle", () => {
       }
       await fixture.cleanup();
     }
-  });
+  }, 15_000);
 
   it("replays commandless requests when a disconnect was observed before dispatch", async () => {
     const fixture = await createMcpFixture("run-mcp-no-unsafe-replay");
@@ -260,7 +336,7 @@ describe("MCP proxy lifecycle", () => {
       }
       await fixture.cleanup();
     }
-  });
+  }, 15_000);
 
   it("returns one reconnect action when the daemon remains unavailable", async () => {
     const fixture = await createMcpFixture("run-mcp-daemon-unavailable");

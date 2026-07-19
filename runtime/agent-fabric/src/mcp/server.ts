@@ -139,7 +139,25 @@ function hasStableReplayIdentity(operation: FabricOperation, input: unknown): bo
     typeof input.dedupeKey === "string" && input.dedupeKey.length > 0;
 }
 
-export async function retryRecoveredProtocolCall<T>(call: () => Promise<T>): Promise<T> {
+function ambiguousRetryAction(operation: FabricOperation, input: unknown): string {
+  if (
+    operation === FABRIC_OPERATIONS.receiveMessages &&
+    isRecord(input) &&
+    typeof input.visibilityTimeoutMs === "number" &&
+    Number.isSafeInteger(input.visibilityTimeoutMs) &&
+    input.visibilityTimeoutMs > 0
+  ) {
+    return "The fabric_message_receive outcome is unknown and no delivery was acknowledged. " +
+      `Wait at least ${String(input.visibilityTimeoutMs)} ms (the requested visibilityTimeoutMs) before retrying fabric_message_receive.`;
+  }
+  return "Treat the operation outcome as unknown; reconcile its durable state before an explicit retry.";
+}
+
+export async function retryRecoveredProtocolCall<T>(
+  call: () => Promise<T>,
+  operation?: FabricOperation,
+  input?: unknown,
+): Promise<T> {
   try {
     return await call();
   } catch (retryError: unknown) {
@@ -149,7 +167,9 @@ export async function retryRecoveredProtocolCall<T>(call: () => Promise<T>): Pro
     ) {
       throw new ReconnectRequiredError(
         "Agent Fabric lost its recovered daemon connection",
-        "Reconcile the operation outcome before retrying the Fabric request.",
+        operation === undefined
+          ? "Treat the operation outcome as unknown; reconcile its durable state before an explicit retry."
+          : ambiguousRetryAction(operation, input),
       );
     }
     throw retryError;
@@ -270,10 +290,14 @@ async function configureFabricMcpServer(server: Server, options: FabricMcpServer
       if (!requestWasNeverSubmitted && !hasStableReplayIdentity(operation, input)) {
         throw new ReconnectRequiredError(
           "Agent Fabric reconnected but did not replay a request without a stable replay identity",
-          "Reconcile the operation outcome before retrying the Fabric request.",
+          ambiguousRetryAction(operation, input),
         );
       }
-      return await retryRecoveredProtocolCall(async () => await callWithAuthenticationRefresh(operation, input));
+      return await retryRecoveredProtocolCall(
+        async () => await callWithAuthenticationRefresh(operation, input),
+        operation,
+        input,
+      );
     }
   };
   const descriptors = buildMcpDescriptorSet(protocol.allowedOperations);

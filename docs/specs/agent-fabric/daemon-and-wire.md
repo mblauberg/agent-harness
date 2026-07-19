@@ -425,9 +425,9 @@ set. The complete authorised set must fit and match across projections; exceedin
 chair launch with the exact excess descriptor names. It is never truncated. Arguments/results use the negotiated 1 MiB
 frame, 32 pending-call, 16 in-flight, 30-second request and five-minute idle maxima. Idle bounds an unused connection, not
 a provider turn: a terminal idle transport reconnects and replays the next, never-submitted operation. In-flight loss
-replays only a command ID or message-send dedupe key; other ambiguous operations reconnect but return typed guidance,
-never a raw `PROTOCOL_TIMEOUT` loop. Runtime never forwards terminal control, credentials, raw transport failures or
-unvalidated output, never blindly replays side effects and keeps the shared daemon alive while authority requires it.
+replays only a command ID or message-send dedupe key; other ambiguous operations reconnect with typed guidance, never a
+raw `PROTOCOL_TIMEOUT` loop. An ambiguous receive names its visibility timeout: its outcome stays unknown, no delivery is
+acknowledged and retry waits that interval. Runtime never exposes raw transport failure, blindly replays or stops a live daemon.
 
 Deterministic acceptance adds:
 

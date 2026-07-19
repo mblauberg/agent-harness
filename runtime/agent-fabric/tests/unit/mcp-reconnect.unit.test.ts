@@ -1,15 +1,19 @@
-import { ProtocolTransportError } from "@local/agent-fabric-protocol";
+import { FABRIC_OPERATIONS, ProtocolTransportError } from "@local/agent-fabric-protocol";
 import { describe, expect, it } from "vitest";
 
 import { errorPayload, retryRecoveredProtocolCall } from "../../src/mcp/server.ts";
 
 describe("MCP recovered protocol retry", () => {
   it("turns a second timeout into actionable reconnect guidance", async () => {
-    await expect(retryRecoveredProtocolCall(async () => {
-      throw new ProtocolTransportError("PROTOCOL_TIMEOUT", "in-flight retry timed out");
-    })).rejects.toMatchObject({
+    await expect(retryRecoveredProtocolCall(
+      async () => {
+        throw new ProtocolTransportError("PROTOCOL_TIMEOUT", "in-flight retry timed out");
+      },
+      FABRIC_OPERATIONS.receiveMessages,
+      { limit: 10, visibilityTimeoutMs: 30_000 },
+    )).rejects.toMatchObject({
       code: "RECONNECT_REQUIRED",
-      action: "Reconcile the operation outcome before retrying the Fabric request.",
+      action: "The fabric_message_receive outcome is unknown and no delivery was acknowledged. Wait at least 30000 ms (the requested visibilityTimeoutMs) before retrying fabric_message_receive.",
     });
   });
 
