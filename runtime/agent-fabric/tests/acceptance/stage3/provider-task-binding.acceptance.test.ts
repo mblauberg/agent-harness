@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 
 import {
   FABRIC_OPERATIONS,
@@ -281,6 +281,71 @@ describe("provider action task binding", () => {
       `).get(fixture.runId)).toEqual({ count: 0 });
     } finally {
       verification.close();
+    }
+  });
+
+  it("rejects every private-RPC operation carrying review-classified fields before persistence or provider effect", async () => {
+    const fixture = await createLifecycleFixture({ retainedAgents: true });
+    cleanup.push(fixture);
+    const operations = ["spawn", "send_turn", "wakeup", "release", "steer"] as const;
+    const actionIds: string[] = [];
+    const commandIds: string[] = [];
+    for (const operation of operations) {
+      const actionId = `provider-task-private-rpc:classified-${operation}`;
+      const commandId = `${actionId}:dispatch`;
+      actionIds.push(actionId);
+      commandIds.push(commandId);
+      const invalidRequest = {
+        adapterId: "fake-lifecycle",
+        actionId,
+        operation,
+        taskId: "bogus-task",
+        authorityId: "bogus-authority",
+        certifyingReview: {
+          reviewerAgentId: "bogus-reviewer",
+        },
+        routeRequest: {
+          preferredProviderFamily: "bogus-family",
+        },
+        payload: {
+          instruction: "This review-classified private request must never reach the provider.",
+          scenario: "terminal",
+        },
+        commandId,
+      } as unknown as Parameters<FabricClient["dispatchProviderAction"]>[0];
+
+      await expect(fixture.chair.dispatchProviderAction(invalidRequest)).rejects.toMatchObject({
+        code: "PROTOCOL_INVALID",
+        message: "certifying review dispatch requires the review evidence daemon owner",
+      });
+    }
+
+    const database = new Database(fixture.databasePath, { readonly: true });
+    try {
+      for (const actionId of actionIds) {
+        expect(database.prepare(`
+          SELECT COUNT(*) AS count FROM provider_actions
+           WHERE run_id=? AND adapter_id='fake-lifecycle' AND action_id=?
+        `).get(fixture.runId, actionId)).toEqual({ count: 0 });
+        expect(database.prepare(`
+          SELECT COUNT(*) AS count FROM provider_action_pair_preflights
+           WHERE adapter_id='fake-lifecycle' AND action_id=?
+        `).get(actionId)).toEqual({ count: 0 });
+      }
+      for (const commandId of commandIds) {
+        expect(database.prepare(`
+          SELECT COUNT(*) AS count FROM commands
+           WHERE run_id=? AND actor_agent_id='chair' AND command_id=?
+        `).get(fixture.runId, commandId)).toEqual({ count: 0 });
+      }
+    } finally {
+      database.close();
+    }
+    const providerJournal = JSON.parse(await readFile(fixture.providerJournalPath, "utf8")) as {
+      actions: Record<string, unknown>;
+    };
+    for (const actionId of actionIds) {
+      expect(providerJournal.actions[actionId]).toBeUndefined();
     }
   });
 });

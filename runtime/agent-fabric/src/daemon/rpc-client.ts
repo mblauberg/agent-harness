@@ -455,7 +455,7 @@ export class FabricDaemonClient {
   }
 
   async dispatchProviderAction(input: ProviderActionDispatchRequest): Promise<{ actionId: string; status: string; history: string[]; executionCount: number; effectCount: number; result?: unknown }> {
-    const result = await this.#call(input.operation === "steer" ? "steerAgent" : "dispatchProviderAction", input);
+    const result = await this.#call("dispatchProviderAction", input);
     if (!isRecord(result) || typeof result.actionId !== "string" || typeof result.status !== "string" || !Array.isArray(result.history) || !result.history.every((value) => typeof value === "string") || typeof result.executionCount !== "number" || typeof result.effectCount !== "number") {
       throw new Error("daemon returned an invalid provider action result");
     }

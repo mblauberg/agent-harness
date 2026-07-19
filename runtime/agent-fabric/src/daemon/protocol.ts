@@ -172,6 +172,10 @@ function requiredString(params: Record<string, unknown>, field: string): string 
   return value;
 }
 
+function providerProtocolInvalid(message: string): Error & { code: "PROTOCOL_INVALID" } {
+  return Object.assign(new TypeError(message), { code: "PROTOCOL_INVALID" as const });
+}
+
 function requiredNumber(params: Record<string, unknown>, field: string): number {
   const value = params[field];
   if (typeof value !== "number") {
@@ -510,23 +514,16 @@ export async function dispatchClientMethod(client: FabricClient, method: string,
         actionId: requiredString(params, "actionId"),
         providerSessionRef: requiredString(params, "providerSessionRef"),
       });
-    case "steerAgent":
-      return client.dispatchProviderAction({
-        adapterId: requiredString(params, "adapterId"),
-        actionId: requiredString(params, "actionId"),
-        operation: "steer",
-        certifyingReview: null,
-        payload: requiredRecord(params, "payload"),
-        commandId: requiredString(params, "commandId"),
-      });
     case "dispatchProviderAction": {
       const operation = params.operation;
-      if (operation !== "spawn" && operation !== "send_turn" && operation !== "wakeup" && operation !== "release" && operation !== "steer") throw new TypeError("invalid provider action operation");
+      if (operation !== "spawn" && operation !== "send_turn" && operation !== "wakeup" && operation !== "release" && operation !== "steer") {
+        throw providerProtocolInvalid("invalid provider action operation");
+      }
       if (params.certifyingReview !== null) {
-        throw new TypeError("certifying review dispatch requires the review evidence daemon owner");
+        throw providerProtocolInvalid("certifying review dispatch requires the review evidence daemon owner");
       }
       if (params.routeRequest !== undefined) {
-        throw new TypeError("provider route requests require the review evidence daemon owner");
+        throw providerProtocolInvalid("provider route requests require the review evidence daemon owner");
       }
       if (operation === "spawn") {
         return client.dispatchProviderAction({
