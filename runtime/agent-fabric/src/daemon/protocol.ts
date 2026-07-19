@@ -515,15 +515,35 @@ export async function dispatchClientMethod(client: FabricClient, method: string,
         adapterId: requiredString(params, "adapterId"),
         actionId: requiredString(params, "actionId"),
         operation: "steer",
+        certifyingReview: null,
         payload: requiredRecord(params, "payload"),
         commandId: requiredString(params, "commandId"),
       });
     case "dispatchProviderAction": {
       const operation = params.operation;
       if (operation !== "spawn" && operation !== "send_turn" && operation !== "wakeup" && operation !== "release" && operation !== "steer") throw new TypeError("invalid provider action operation");
+      if (params.certifyingReview !== null) {
+        throw new TypeError("certifying review dispatch requires the review evidence daemon owner");
+      }
+      if (params.routeRequest !== undefined) {
+        throw new TypeError("provider route requests require the review evidence daemon owner");
+      }
+      if (operation === "spawn") {
+        return client.dispatchProviderAction({
+          adapterId: requiredString(params, "adapterId"),
+          actionId: requiredString(params, "actionId"),
+          operation,
+          taskId: requiredString(params, "taskId"),
+          authorityId: requiredString(params, "authorityId"),
+          certifyingReview: null,
+          payload: requiredRecord(params, "payload"),
+          commandId: requiredString(params, "commandId"),
+        });
+      }
       return client.dispatchProviderAction({
         adapterId: requiredString(params, "adapterId"), actionId: requiredString(params, "actionId"), operation,
         ...(typeof params.authorityId === "string" ? { authorityId: params.authorityId } : {}),
+        certifyingReview: null,
         payload: requiredRecord(params, "payload"), commandId: requiredString(params, "commandId"),
       });
     }

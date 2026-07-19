@@ -157,6 +157,7 @@ describe("provider workspace-write projection", () => {
       });
 
       await value.chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "lifecycle",
         actionId: "write-resume",
         operation: "send_turn",
@@ -171,6 +172,7 @@ describe("provider workspace-write projection", () => {
 
       value.clock.advance(10_001);
       await expect(value.chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "lifecycle",
         actionId: "write-resume",
         operation: "send_turn",

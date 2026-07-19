@@ -400,6 +400,7 @@ describe("AC-009 Stage 3 unannounced provider compaction", () => {
     await expect(fixture.leader.receiveMessages({ limit: 1, visibilityTimeoutMs: 30_000 }))
       .rejects.toMatchObject({ code: "STALE_LEASE_GENERATION" });
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "compaction-custody-turn",
       operation: "send_turn",

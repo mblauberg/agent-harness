@@ -199,6 +199,7 @@ import type {
   LifecycleResult,
   ProofResult,
   ProviderActionResult,
+  ProviderActionDispatchRequest,
   ReceiptResult,
   RevocationResult,
   TaskResult,
@@ -861,14 +862,46 @@ function isBudgetResult(value: unknown): value is BudgetResult {
   );
 }
 
-type ProviderActionDispatchRequest = {
-  adapterId: string;
-  actionId: string;
-  operation: "spawn" | "send_turn" | "wakeup" | "release" | "steer";
-  authorityId?: string;
-  payload: Record<string, unknown>;
-  commandId: string;
-};
+function normalizeProviderActionDispatchRequest(
+  input: ProviderActionDispatchRequest,
+): ProviderActionDispatchRequest {
+  if (input.certifyingReview !== null) {
+    throw new ProjectFabricCoreError(
+      "PROTOCOL_INVALID",
+      "certifying review dispatch requires the review evidence daemon owner",
+    );
+  }
+  if ("routeRequest" in input) {
+    throw new ProjectFabricCoreError(
+      "PROTOCOL_INVALID",
+      "provider route requests require the review evidence daemon owner",
+    );
+  }
+  if (input.operation !== "spawn") {
+    if ("taskId" in input) {
+      throw new ProjectFabricCoreError(
+        "PROTOCOL_INVALID",
+        "top-level provider task ID is spawn-only",
+      );
+    }
+    return input;
+  }
+  if (typeof input.taskId !== "string" || input.taskId.length === 0) {
+    throw new ProjectFabricCoreError(
+      "PROTOCOL_INVALID",
+      "ephemeral provider spawn requires an exact top-level task ID",
+    );
+  }
+  const payloadTaskId = input.payload.taskId;
+  if (payloadTaskId !== undefined && payloadTaskId !== input.taskId) {
+    throw new ProjectFabricCoreError(
+      "PROTOCOL_INVALID",
+      "provider payload task ID conflicts with the canonical top-level task ID",
+    );
+  }
+  const { taskId: _payloadTaskId, ...payload } = input.payload;
+  return { ...input, payload };
+}
 
 function publicHerdrSteerResult(result: HerdrDirectSteerResult): HerdrSteerDispatchResult {
   if (result.status === "rejected" || result.status === "unavailable") return result;
@@ -5749,8 +5782,9 @@ export class Fabric {
     actorAgentId: string,
     input: ProviderActionDispatchRequest,
   ): Promise<ProviderActionResult> {
+    const canonicalInput = normalizeProviderActionDispatchRequest(input);
     return await this.#trackProviderOperation(
-      async () => await this.#dispatchProviderAction(runId, actorAgentId, input),
+      async () => await this.#dispatchProviderAction(runId, actorAgentId, canonicalInput),
     );
   }
 
@@ -5782,7 +5816,7 @@ export class Fabric {
     if (input.operation === "send_turn" && target === undefined) {
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "send_turn requires a bound provider session target");
     }
-    const taskValue = input.payload.taskId;
+    const taskValue = ephemeralSpawn ? input.taskId : input.payload.taskId;
     if (taskValue !== undefined && typeof taskValue !== "string") {
       throw new FabricError("CAPABILITY_FORBIDDEN", "provider task ID must be text");
     }

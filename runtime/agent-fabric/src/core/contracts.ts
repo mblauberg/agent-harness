@@ -4,6 +4,26 @@ import type {
   LifecycleCurrentStateV1,
 } from "@local/agent-fabric-protocol";
 
+/** The generic Fabric boundary is intentionally closed to certifying-review dispatch. */
+export type ProviderActionDispatchRequest = {
+  adapterId: string;
+  actionId: string;
+  operation: "spawn";
+  taskId: string;
+  authorityId: string;
+  certifyingReview: null;
+  payload: Record<string, unknown>;
+  commandId: string;
+} | {
+  adapterId: string;
+  actionId: string;
+  operation: "send_turn" | "wakeup" | "release" | "steer";
+  authorityId?: string;
+  certifyingReview: null;
+  payload: Record<string, unknown>;
+  commandId: string;
+};
+
 export type CurrentMcpSeatBinding = {
   seat: string;
   agentId: string;

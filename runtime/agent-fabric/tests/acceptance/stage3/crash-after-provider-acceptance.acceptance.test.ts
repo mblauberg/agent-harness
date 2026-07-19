@@ -29,7 +29,7 @@ describe("AC-011 crash after provider acceptance", () => {
         chair: { agentId: "chair", authority: { ...ROOT_AUTHORITY, disclosure: { level: "scoped", scopes: ["local", "approved-provider"] } as const } },
       });
       const chair = fabric.connect(run.chairCapability);
-      const ambiguous = await chair.dispatchProviderAction({ adapterId: "crash", actionId: "crash-action-1", operation: "steer", payload: { instruction: "once" }, commandId: "crash:dispatch" });
+      const ambiguous = await chair.dispatchProviderAction({ certifyingReview: null, adapterId: "crash", actionId: "crash-action-1", operation: "steer", payload: { instruction: "once" }, commandId: "crash:dispatch" });
       expect(ambiguous).toMatchObject({ status: "ambiguous", executionCount: 1 });
       const reconciled = await chair.reconcileProviderAction({ adapterId: "crash", actionId: "crash-action-1", commandId: "crash:reconcile" });
       expect(reconciled).toMatchObject({ status: "terminal", effectCount: 1, result: { acceptedBeforeCrash: true } });

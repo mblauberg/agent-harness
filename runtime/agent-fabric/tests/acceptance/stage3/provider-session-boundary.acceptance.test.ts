@@ -145,12 +145,14 @@ describe("provider session admission", () => {
       });
       const base = { adapterId: "turns", operation: "send_turn" as const };
       await expect(chair.dispatchProviderAction({
+        certifyingReview: null,
         ...base,
         actionId: "provider-turn-controls:tools",
         payload: { agentId: "worker", providerSessionGeneration: 1, instruction: "unsafe", allowedTools: ["Bash"] },
         commandId: "provider-turn-controls:tools",
       })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
       await expect(chair.dispatchProviderAction({
+        certifyingReview: null,
         ...base,
         actionId: "provider-turn-controls:cwd",
         payload: { agentId: "worker", providerSessionGeneration: 1, instruction: "unsafe", cwd: "src/denied" },
@@ -158,6 +160,7 @@ describe("provider session admission", () => {
       })).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
       await chair.revokeCapability({ agentId: "worker", commandId: "provider-turn-controls:revoke" });
       await expect(chair.dispatchProviderAction({
+        certifyingReview: null,
         ...base,
         actionId: "provider-turn-controls:revoked",
         payload: { agentId: "worker", providerSessionGeneration: 1, instruction: "must not dispatch" },
@@ -244,6 +247,7 @@ describe("provider session admission", () => {
       });
       const chair = fabric.connect(run.chairCapability);
       await expect(chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "first",
         actionId: "stable-action",
         operation: "steer",
@@ -252,6 +256,7 @@ describe("provider session admission", () => {
       })).resolves.toMatchObject({ status: "terminal" });
 
       await expect(chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "second",
         actionId: "stable-action",
         operation: "steer",
@@ -281,6 +286,7 @@ describe("provider session admission", () => {
       const run = await currentRun(directory, { runId: "provider-reserved", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       await chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "provider",
         actionId: "fabric-action",
         operation: "steer",
@@ -312,6 +318,7 @@ describe("provider session admission", () => {
       const run = await currentRun(directory, { runId: "provider-targetless-admission", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       await expect(chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "provider",
         actionId: "provider-targetless-admission:controls",
         operation: "steer",
@@ -342,9 +349,11 @@ describe("provider session admission", () => {
       const run = await currentRun(directory, { runId: "provider-model-free-controls", chair: { agentId: "chair", authority: authority(directory) } });
       const chair = fabric.connect(run.chairCapability);
       await expect(chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "provider", actionId: "provider-control:wakeup", operation: "wakeup", payload: {}, commandId: "provider-control:wakeup",
       })).resolves.toMatchObject({ status: "terminal" });
       await expect(chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "provider", actionId: "provider-control:release", operation: "release", payload: {}, commandId: "provider-control:release",
       })).resolves.toMatchObject({ status: "terminal" });
     } finally {
@@ -423,6 +432,7 @@ describe("provider session admission", () => {
         providerSessionRef: "session-1",
       });
       const first = chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "turns",
         actionId: "turn-1",
         operation: "send_turn",
@@ -432,6 +442,7 @@ describe("provider session admission", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
 
       await expect(chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "turns",
         actionId: "turn-2",
         operation: "send_turn",
@@ -449,6 +460,7 @@ describe("provider session admission", () => {
     const fixture = await createLifecycleFixture();
     try {
       const ambiguous = await fixture.chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "fake-lifecycle",
         actionId: "turn-reconcile-ambiguous",
         operation: "send_turn",
@@ -457,6 +469,7 @@ describe("provider session admission", () => {
       });
       expect(ambiguous.status).toBe("ambiguous");
       await expect(fixture.chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "fake-lifecycle",
         actionId: "turn-before-reconcile",
         operation: "send_turn",
@@ -470,6 +483,7 @@ describe("provider session admission", () => {
         commandId: "turn-reconcile:lookup",
       })).resolves.toMatchObject({ status: "terminal" });
       await expect(fixture.chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "fake-lifecycle",
         actionId: "turn-after-reconcile",
         operation: "send_turn",
