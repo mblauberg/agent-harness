@@ -537,6 +537,12 @@ export async function dispatchClientMethod(client: FabricClient, method: string,
           commandId: requiredString(params, "commandId"),
         });
       }
+      if (Object.hasOwn(params, "taskId")) {
+        throw providerProtocolInvalid("non-spawn provider action must not carry a top-level task ID");
+      }
+      if (Object.hasOwn(params, "authorityId") && typeof params.authorityId !== "string") {
+        throw providerProtocolInvalid("provider authority ID must be a string when present");
+      }
       return client.dispatchProviderAction({
         adapterId: requiredString(params, "adapterId"), actionId: requiredString(params, "actionId"), operation,
         ...(typeof params.authorityId === "string" ? { authorityId: params.authorityId } : {}),

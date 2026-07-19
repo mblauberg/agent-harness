@@ -18,6 +18,7 @@ import {
 } from "../../support/lifecycle-testkit.ts";
 
 const cleanup: LifecycleFixture[] = [];
+const nonSpawnOperations = ["send_turn", "wakeup", "release", "steer"] as const;
 
 afterEach(async () => {
   await Promise.all(cleanup.splice(0).map(async (fixture) => {
@@ -26,7 +27,91 @@ afterEach(async () => {
   }));
 });
 
+async function expectNoPrivateProviderActionEffects(
+  fixture: LifecycleFixture,
+  actionId: string,
+  commandId: string,
+): Promise<void> {
+  const database = new Database(fixture.databasePath, { readonly: true });
+  try {
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM provider_actions
+       WHERE run_id=? AND adapter_id='fake-lifecycle' AND action_id=?
+    `).get(fixture.runId, actionId)).toEqual({ count: 0 });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM provider_action_pair_preflights
+       WHERE adapter_id='fake-lifecycle' AND action_id=?
+    `).get(actionId)).toEqual({ count: 0 });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM commands
+       WHERE run_id=? AND actor_agent_id='chair' AND command_id=?
+    `).get(fixture.runId, commandId)).toEqual({ count: 0 });
+  } finally {
+    database.close();
+  }
+  const providerJournal = JSON.parse(await readFile(fixture.providerJournalPath, "utf8")) as {
+    actions: Record<string, unknown>;
+  };
+  expect(providerJournal.actions[actionId]).toBeUndefined();
+}
+
 describe("provider action task binding", () => {
+  it.each(nonSpawnOperations)(
+    "rejects a private-RPC %s carrying a top-level taskId before persistence or provider effect",
+    async (operation) => {
+      const fixture = await createLifecycleFixture({ retainedAgents: true });
+      cleanup.push(fixture);
+      const actionId = `provider-task-private-rpc:non-spawn-task:${operation}`;
+      const commandId = `${actionId}:dispatch`;
+
+      await expect(fixture.chair.dispatchProviderAction({
+        adapterId: "fake-lifecycle",
+        actionId,
+        operation,
+        taskId: "bogus-task",
+        certifyingReview: null,
+        payload: {
+          instruction: "A non-spawn task identity must not be silently discarded.",
+          scenario: "terminal",
+        },
+        commandId,
+      } as unknown as Parameters<FabricClient["dispatchProviderAction"]>[0])).rejects.toMatchObject({
+        code: "PROTOCOL_INVALID",
+        message: "non-spawn provider action must not carry a top-level task ID",
+      });
+
+      await expectNoPrivateProviderActionEffects(fixture, actionId, commandId);
+    },
+  );
+
+  it.each(nonSpawnOperations)(
+    "rejects a private-RPC %s carrying a malformed authorityId before persistence or provider effect",
+    async (operation) => {
+      const fixture = await createLifecycleFixture({ retainedAgents: true });
+      cleanup.push(fixture);
+      const actionId = `provider-task-private-rpc:malformed-authority:${operation}`;
+      const commandId = `${actionId}:dispatch`;
+
+      await expect(fixture.chair.dispatchProviderAction({
+        adapterId: "fake-lifecycle",
+        actionId,
+        operation,
+        authorityId: 42,
+        certifyingReview: null,
+        payload: {
+          instruction: "A malformed present authority identity must not be silently discarded.",
+          scenario: "terminal",
+        },
+        commandId,
+      } as unknown as Parameters<FabricClient["dispatchProviderAction"]>[0])).rejects.toMatchObject({
+        code: "PROTOCOL_INVALID",
+        message: "provider authority ID must be a string when present",
+      });
+
+      await expectNoPrivateProviderActionEffects(fixture, actionId, commandId);
+    },
+  );
+
   it("dispatches a codec-valid spawn whose sole task binding is the top-level taskId", async () => {
     const fixture = await createLifecycleFixture();
     cleanup.push(fixture);
@@ -284,26 +369,19 @@ describe("provider action task binding", () => {
     }
   });
 
-  it("rejects every private-RPC operation carrying review-classified fields before persistence or provider effect", async () => {
-    const fixture = await createLifecycleFixture({ retainedAgents: true });
-    cleanup.push(fixture);
-    const operations = ["spawn", "send_turn", "wakeup", "release", "steer"] as const;
-    const actionIds: string[] = [];
-    const commandIds: string[] = [];
-    for (const operation of operations) {
-      const actionId = `provider-task-private-rpc:classified-${operation}`;
+  it.each(nonSpawnOperations)(
+    "rejects a private-RPC %s carrying a routeRequest before persistence or provider effect",
+    async (operation) => {
+      const fixture = await createLifecycleFixture({ retainedAgents: true });
+      cleanup.push(fixture);
+      const actionId = `provider-task-private-rpc:route-request:${operation}`;
       const commandId = `${actionId}:dispatch`;
-      actionIds.push(actionId);
-      commandIds.push(commandId);
-      const invalidRequest = {
+
+      await expect(fixture.chair.dispatchProviderAction({
         adapterId: "fake-lifecycle",
         actionId,
         operation,
-        taskId: "bogus-task",
-        authorityId: "bogus-authority",
-        certifyingReview: {
-          reviewerAgentId: "bogus-reviewer",
-        },
+        certifyingReview: null,
         routeRequest: {
           preferredProviderFamily: "bogus-family",
         },
@@ -312,40 +390,41 @@ describe("provider action task binding", () => {
           scenario: "terminal",
         },
         commandId,
-      } as unknown as Parameters<FabricClient["dispatchProviderAction"]>[0];
+      } as unknown as Parameters<FabricClient["dispatchProviderAction"]>[0])).rejects.toMatchObject({
+        code: "PROTOCOL_INVALID",
+        message: "provider route requests require the review evidence daemon owner",
+      });
 
-      await expect(fixture.chair.dispatchProviderAction(invalidRequest)).rejects.toMatchObject({
+      await expectNoPrivateProviderActionEffects(fixture, actionId, commandId);
+    },
+  );
+
+  it.each(nonSpawnOperations)(
+    "rejects a private-RPC %s carrying certifyingReview before persistence or provider effect",
+    async (operation) => {
+      const fixture = await createLifecycleFixture({ retainedAgents: true });
+      cleanup.push(fixture);
+      const actionId = `provider-task-private-rpc:certifying-review:${operation}`;
+      const commandId = `${actionId}:dispatch`;
+
+      await expect(fixture.chair.dispatchProviderAction({
+        adapterId: "fake-lifecycle",
+        actionId,
+        operation,
+        certifyingReview: {
+          reviewerAgentId: "bogus-reviewer",
+        },
+        payload: {
+          instruction: "This certifying-review request must never reach the generic provider boundary.",
+          scenario: "terminal",
+        },
+        commandId,
+      } as unknown as Parameters<FabricClient["dispatchProviderAction"]>[0])).rejects.toMatchObject({
         code: "PROTOCOL_INVALID",
         message: "certifying review dispatch requires the review evidence daemon owner",
       });
-    }
 
-    const database = new Database(fixture.databasePath, { readonly: true });
-    try {
-      for (const actionId of actionIds) {
-        expect(database.prepare(`
-          SELECT COUNT(*) AS count FROM provider_actions
-           WHERE run_id=? AND adapter_id='fake-lifecycle' AND action_id=?
-        `).get(fixture.runId, actionId)).toEqual({ count: 0 });
-        expect(database.prepare(`
-          SELECT COUNT(*) AS count FROM provider_action_pair_preflights
-           WHERE adapter_id='fake-lifecycle' AND action_id=?
-        `).get(actionId)).toEqual({ count: 0 });
-      }
-      for (const commandId of commandIds) {
-        expect(database.prepare(`
-          SELECT COUNT(*) AS count FROM commands
-           WHERE run_id=? AND actor_agent_id='chair' AND command_id=?
-        `).get(fixture.runId, commandId)).toEqual({ count: 0 });
-      }
-    } finally {
-      database.close();
-    }
-    const providerJournal = JSON.parse(await readFile(fixture.providerJournalPath, "utf8")) as {
-      actions: Record<string, unknown>;
-    };
-    for (const actionId of actionIds) {
-      expect(providerJournal.actions[actionId]).toBeUndefined();
-    }
-  });
+      await expectNoPrivateProviderActionEffects(fixture, actionId, commandId);
+    },
+  );
 });
