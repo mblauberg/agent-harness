@@ -5,7 +5,8 @@ of its decision; supporting scoping evidence, challenge history and rejected
 alternatives remain available in Git history without forming a live
 cross-reference dependency. ADRs 0009–0010 were ratified later, on 2026-07-15;
 ADRs 0011–0012 were ratified on 2026-07-16; ADR 0013 was ratified on
-2026-07-18; ADR 0014 was ratified on 2026-07-20.
+2026-07-18; ADR 0014 was ratified on 2026-07-20; ADR 0015 was ratified on
+2026-07-21.
 
 | ADR | Title | Status |
 |---|---|---|
@@ -23,3 +24,4 @@ ADRs 0011–0012 were ratified on 2026-07-16; ADR 0013 was ratified on
 | [0012](0012-defer-bun-node-pinned-runtime.md) | Defer Bun; Node stays the pinned runtime family | Accepted |
 | [0013](0013-thin-provenant-cli.md) | Thin `provenant` CLI for command discovery | Accepted |
 | [0014](0014-comparative-skill-evals-on-suspicion.md) | Comparative skill evals run on suspicion, not by default | Accepted |
+| [0015](0015-bootstrap-paired-task-completion-evidence-bound-reply.md) | Bootstrap paired-task completion via an evidence-bound reply, not authority widening | Accepted |
