@@ -30,12 +30,12 @@ author as the only reviewer. Provenant puts structure around that:
 
 - it **scopes** work and requires user approval before implementation starts;
 - it runs **deterministic checks** before any result surfaces for review;
-- it adds **review by the _other_ model family** once the work is substantial —
+- it adds **review by the _other_ model family** once the work is substantial:
   Claude checks Codex, Codex checks Claude; and
 - it keeps **acceptance and release as separate user decisions**.
 
 A change therefore arrives already scoped, verified and read by a context that
-did not write it — so user attention goes to judgement, not to catching an
+did not write it, so user attention goes to judgement rather than to catching an
 agent's own mistakes.
 
 ## How it fits together
@@ -67,13 +67,13 @@ flowchart TB
     class OUT out
 ```
 
-- **Harness** — [`HARNESS.md`](HARNESS.md) is the constitution: authority, the
-  delivery lifecycle, and how much review pressure each risk tier owes. It stays
-  small so it can be read every session.
-- **Skills** — the <!--skills-->32<!--/skills--> Agent Skills are task-specific
+- **Harness:** [`HARNESS.md`](HARNESS.md) is the constitution. It sets
+  authority, the delivery lifecycle, and how much review pressure each risk tier
+  owes, and stays small so it can be read every session.
+- **Skills:** the <!--skills-->32<!--/skills--> Agent Skills are task-specific
   procedures, one folder with a `SKILL.md` each. Only the one-line descriptions
   sit in permanent context; a full body loads only when the task matches it.
-- **Agent Fabric** — cross-provider execution and durable coordination, so the
+- **Agent Fabric:** cross-provider execution and durable coordination, so the
   primaries can run and review each other's work. Optional bonus providers stay
   separately activated.
 
@@ -113,14 +113,14 @@ provenant check
 
 Installation links each skill into `~/.claude/skills/` and `~/.codex/skills/`,
 and links the thin `provenant` command into
-`${PROVENANT_BIN_DIR:-$HOME/.local/bin}` — it warns when that directory is not
-on `PATH` and never edits shell startup files. If the installer exits non-zero,
+`${PROVENANT_BIN_DIR:-$HOME/.local/bin}`; it warns when that directory is not
+on `PATH`, and never edits shell startup files. If the installer exits non-zero,
 follow the message it prints: exit `3` flags a command collision, an
 incompatible instruction target, or a managed skill-link conflict, and
 instruction conflicts include the bootstrap line to add.
 
-`provenant doctor` checks Fabric configuration and enabled adapters — identity
-and non-answer interfaces, not login or quota; Provenant never sets or persists
+`provenant doctor` checks Fabric configuration and enabled adapters (identity
+and non-answer interfaces, not login or quota); Provenant never sets or persists
 provider API keys. `provenant check` runs the full repository gate.
 
 <details>
@@ -216,7 +216,7 @@ flowchart TB
 Gold hexagons are user gates. Every gate can stop progression; specification
 approval and acceptance can return work for revision. `review` runs in a fresh
 context that never wrote the diff, and from the `substantial` tier up it must
-include the other model family — a receipt missing that leg cannot reach
+include the other model family; a receipt missing that leg cannot reach
 acceptance.
 
 The loop is [`deliver`](skills/deliver/SKILL.md), the kernel binding one run to one receipt;
