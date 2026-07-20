@@ -11,6 +11,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import {
   AGENT_RESULT_SHAPE_FEATURES,
+  FABRIC_OPERATIONS,
   NdjsonRpcTransport,
   OPERATION_REGISTRY,
   ProtocolRemoteError,
@@ -24,6 +25,7 @@ import {
   type FabricOperation,
   type McpResourceDescriptor,
   type McpToolDescriptor,
+  type ProtocolPrincipal,
   type ProtocolFeature,
 } from "@local/agent-fabric-protocol";
 
@@ -131,19 +133,75 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function hasStableReplayIdentity(input: unknown): boolean {
-  return isRecord(input) && typeof input.commandId === "string" && input.commandId.length > 0;
+function hasStableReplayIdentity(operation: FabricOperation, input: unknown): boolean {
+  if (!isRecord(input)) return false;
+  if (typeof input.commandId === "string" && input.commandId.length > 0) return true;
+  return operation === FABRIC_OPERATIONS.sendMessage &&
+    typeof input.dedupeKey === "string" && input.dedupeKey.length > 0;
 }
 
-export async function retryRecoveredProtocolCall<T>(call: () => Promise<T>): Promise<T> {
+function isSameAgentPrincipal(left: ProtocolPrincipal, right: ProtocolPrincipal): boolean {
+  return left.kind === "agent" && right.kind === "agent" &&
+    left.agentId === right.agentId &&
+    left.projectSessionId === right.projectSessionId &&
+    left.runId === right.runId &&
+    left.principalGeneration === right.principalGeneration;
+}
+
+function requireSameAgentPrincipal(
+  original: ProtocolPrincipal,
+  replacement: ProtocolPrincipal,
+  operation: FabricOperation,
+  input: unknown,
+): void {
+  if (isSameAgentPrincipal(original, replacement)) return;
+  throw new ReconnectRequiredError(
+    "Agent Fabric reconnected as a different authenticated principal and did not replay the request",
+    ambiguousRetryAction(operation, input),
+  );
+}
+
+function ambiguousRetryAction(operation: FabricOperation, input: unknown): string {
+  if (
+    operation === FABRIC_OPERATIONS.receiveMessages &&
+    isRecord(input) &&
+    typeof input.visibilityTimeoutMs === "number" &&
+    Number.isSafeInteger(input.visibilityTimeoutMs) &&
+    input.visibilityTimeoutMs > 0
+  ) {
+    return "The fabric_message_receive outcome is unknown and no delivery was acknowledged. " +
+      `Wait at least ${String(input.visibilityTimeoutMs)} ms (the requested visibilityTimeoutMs) before retrying fabric_message_receive.`;
+  }
+  return "Treat the operation outcome as unknown; reconcile its durable state before an explicit retry.";
+}
+
+export async function retryRecoveredProtocolCall<T>(
+  call: () => Promise<T>,
+  operation?: FabricOperation,
+  input?: unknown,
+): Promise<T> {
   try {
     return await call();
   } catch (retryError: unknown) {
-    if (retryError instanceof ProtocolTransportError && retryError.code === "PROTOCOL_DISCONNECTED") {
-      throw new ReconnectRequiredError("Agent Fabric lost its recovered daemon connection");
+    if (
+      retryError instanceof ProtocolTransportError &&
+      (retryError.code === "PROTOCOL_DISCONNECTED" || retryError.code === "PROTOCOL_TIMEOUT")
+    ) {
+      throw new ReconnectRequiredError(
+        "Agent Fabric lost its recovered daemon connection",
+        operation === undefined
+          ? "Treat the operation outcome as unknown; reconcile its durable state before an explicit retry."
+          : ambiguousRetryAction(operation, input),
+      );
     }
     throw retryError;
   }
+}
+
+export function isRecoverableProtocolInterruption(error: unknown, transportClosed: boolean): boolean {
+  return error instanceof ProtocolTransportError &&
+    (error.code === "PROTOCOL_DISCONNECTED" || error.code === "PROTOCOL_TIMEOUT") &&
+    (transportClosed || (error.code === "PROTOCOL_TIMEOUT" && error.requestState === "queued"));
 }
 
 function resourceCall(
@@ -217,6 +275,7 @@ async function configureFabricMcpServer(server: Server, options: FabricMcpServer
     await refreshInFlight;
   };
   const callWithAuthenticationRefresh = async (operation: FabricOperation, input: unknown): Promise<unknown> => {
+    const attemptedPrincipal = protocol.principal;
     try {
       return await protocol.call(operation as never, input as never);
     } catch (error: unknown) {
@@ -226,15 +285,20 @@ async function configureFabricMcpServer(server: Server, options: FabricMcpServer
         options.refreshCapability === undefined
       ) throw error;
       await refreshProtocol();
+      requireSameAgentPrincipal(attemptedPrincipal, protocol.principal, operation, input);
       return await protocol.call(operation as never, input as never);
     }
   };
   const call = async (operation: FabricOperation, input: unknown): Promise<unknown> => {
     const attemptedProtocol = protocol;
+    const attemptedPrincipal = attemptedProtocol.principal;
+    const transportWasClosedBeforeCall = attemptedProtocol.closed;
     try {
       return await callWithAuthenticationRefresh(operation, input);
     } catch (error: unknown) {
-      if (!(error instanceof ProtocolTransportError) || error.code !== "PROTOCOL_DISCONNECTED") throw error;
+      if (!isRecoverableProtocolInterruption(error, attemptedProtocol.closed)) throw error;
+      const requestWasNeverSubmitted = transportWasClosedBeforeCall ||
+        (error instanceof ProtocolTransportError && error.requestState === "queued");
       try {
         if (protocol === attemptedProtocol) {
           reconnectInFlight ??= (async () => {
@@ -252,13 +316,18 @@ async function configureFabricMcpServer(server: Server, options: FabricMcpServer
       } catch {
         throw new ReconnectRequiredError("Agent Fabric could not reconnect to the daemon");
       }
-      if (!hasStableReplayIdentity(input)) {
+      requireSameAgentPrincipal(attemptedPrincipal, protocol.principal, operation, input);
+      if (!requestWasNeverSubmitted && !hasStableReplayIdentity(operation, input)) {
         throw new ReconnectRequiredError(
-          "Agent Fabric reconnected but did not replay a request without a stable command identity",
-          "Reconcile the operation outcome before retrying the Fabric request.",
+          "Agent Fabric reconnected but did not replay a request without a stable replay identity",
+          ambiguousRetryAction(operation, input),
         );
       }
-      return await retryRecoveredProtocolCall(async () => await callWithAuthenticationRefresh(operation, input));
+      return await retryRecoveredProtocolCall(
+        async () => await callWithAuthenticationRefresh(operation, input),
+        operation,
+        input,
+      );
     }
   };
   const descriptors = buildMcpDescriptorSet(protocol.allowedOperations);
