@@ -997,6 +997,106 @@ def test_same_target_writer_during_manifest_publication_is_never_claimed_or_remo
     assert (info.st_dev, info.st_ino, live.readlink()) == writer_identity
 
 
+def test_post_publication_snapshot_failure_never_rolls_back_published_links(
+    tmp_path, monkeypatch
+):
+    module = load_manager_module("managed_installer_post_publication_snapshot")
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    module.execute("install", source, target)
+    live = target / "alpha"
+    original_identity = link_identity(live)
+    (source / "alpha" / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Use when changed.\n---\n"
+    )
+    original_write = module._write_manifest
+    original_capture = module._capture_path
+    published = False
+    failed = False
+
+    def publish(target_path, manifest):
+        nonlocal published
+        original_write(target_path, manifest)
+        published = True
+
+    def fail_first_published_snapshot(path):
+        nonlocal failed
+        if published and path == live and not failed:
+            failed = True
+            raise OSError("injected post-publication snapshot failure")
+        return original_capture(path)
+
+    monkeypatch.setattr(module, "_write_manifest", publish)
+    monkeypatch.setattr(module, "_capture_path", fail_first_published_snapshot)
+    with pytest.raises(
+        module.ManifestCommitUncertainError,
+        match="post-publication validation failed",
+    ):
+        module.execute("reconcile", source, target)
+
+    monkeypatch.setattr(module, "_capture_path", original_capture)
+    manifest = json.loads(manifest_for(target).read_text())
+    installed = manifest["managed_link_identities"]["alpha"]
+    info = live.lstat()
+    assert {
+        "device": info.st_dev,
+        "inode": info.st_ino,
+        "mode": info.st_mode,
+        "size": info.st_size,
+        "modified_ns": info.st_mtime_ns,
+        "link_target": str(live.readlink()),
+    } == installed
+    assert link_identity(live) != original_identity
+    recovery_links = [
+        path
+        for directory in target.parent.glob(".agent-harness-links.*")
+        for path in directory.iterdir()
+        if path.is_symlink()
+    ]
+    assert len(recovery_links) == 1
+    assert link_identity(recovery_links[0]) == original_identity
+    assert module.execute("check", source, target)["ok"]
+
+
+def test_post_publication_recovery_cleanup_failure_retains_committed_state(
+    tmp_path, monkeypatch
+):
+    module = load_manager_module("managed_installer_post_publication_cleanup")
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    module.execute("install", source, target)
+    live = target / "alpha"
+    original_identity = link_identity(live)
+    (source / "alpha" / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Use when changed.\n---\n"
+    )
+
+    def fail_cleanup(_workspace, _staged):
+        raise OSError("injected committed recovery cleanup failure")
+
+    monkeypatch.setattr(module.LinkRecoveryWorkspace, "discard_exact", fail_cleanup)
+    with pytest.raises(
+        module.ManifestCommitUncertainError,
+        match="exact recovery cleanup failed",
+    ):
+        module.execute("reconcile", source, target)
+
+    manifest = json.loads(manifest_for(target).read_text())
+    installed = manifest["managed_link_identities"]["alpha"]
+    info = live.lstat()
+    assert info.st_ino == installed["inode"]
+    assert info.st_ino != original_identity[1]
+    recovery_links = [
+        path
+        for directory in target.parent.glob(".agent-harness-links.*")
+        for path in directory.iterdir()
+        if path.is_symlink()
+    ]
+    assert len(recovery_links) == 1
+    assert link_identity(recovery_links[0]) == original_identity
+    assert module.execute("check", source, target)["ok"]
+
+
 def test_legacy_manifest_baselines_exact_identity_on_next_mutation(tmp_path):
     module = load_manager_module("managed_installer_legacy_identity_upgrade")
     source = named_source(tmp_path / "owner", ("alpha",))

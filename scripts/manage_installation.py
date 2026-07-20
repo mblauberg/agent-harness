@@ -98,13 +98,17 @@ class LinkRecoveryWorkspace:
             _fsync_directory(self.directory)
             _fsync_directory(self.parent)
 
-    def cleanup(self) -> None:
-        if self.directory is None or not self.directory.exists():
-            return
+    def cleanup(self) -> bool:
+        if self.directory is None:
+            return True
         try:
             self.directory.rmdir()
+        except FileNotFoundError:
+            pass
         except OSError:
-            return
+            return False
+        self.directory = None
+        return True
 
 
 def _skills(source: Path) -> dict[str, Path]:
@@ -783,6 +787,7 @@ def _execute_locked(action: str, source: Path, target: Path, renames: Path | Non
     changed: list[str] = []
     journal: list[LinkMutation] = []
     workspace = LinkRecoveryWorkspace(target.parent)
+    manifest_published = False
     try:
         if rename_operations:
             _apply_renames(manifest, rename_operations, journal, workspace)
@@ -878,6 +883,7 @@ def _execute_locked(action: str, source: Path, target: Path, renames: Path | Non
             _fsync_directory(target)
             _fsync_directory(target.parent)
         _write_manifest(target, manifest)
+        manifest_published = True
         changed_managed = link_identity.changed_managed_snapshots(target, expected_managed, _capture_path)
         if changed_managed:
             raise ManifestCommitRaceError(
@@ -885,12 +891,23 @@ def _execute_locked(action: str, source: Path, target: Path, renames: Path | Non
                 "preserved live path and retained exact manifest evidence: "
                 + ", ".join(changed_managed)
             )
+        result_items = _plan(source, target, manifest)
         _discard_committed_recoveries(journal, workspace)
+        if not workspace.cleanup():
+            raise ManifestCommitUncertainError(
+                "installation manifest committed but recovery-directory cleanup failed; "
+                "retained the recovery directory"
+            )
     except ManifestCommitUncertainError:
         # Replacement already made manifest and links mutually visible. Rolling
         # back here would create a known inconsistency.
         raise
     except (OSError, InstallError) as exc:
+        if manifest_published:
+            raise ManifestCommitUncertainError(
+                "installation manifest committed but post-publication validation failed; "
+                "preserved the manifest and live links; retained remaining recovery evidence"
+            ) from exc
         rollback_failures = _rollback_mutations(journal, workspace)
         sync_failure: OSError | None = None
         if journal or workspace.directory is not None:
@@ -911,8 +928,9 @@ def _execute_locked(action: str, source: Path, target: Path, renames: Path | Non
             raise InstallError("rollback incomplete: " + "; ".join(details)) from exc
         raise
     finally:
-        workspace.cleanup()
-    return {"schema_version": 1, "action": action, "items": _plan(source, target, manifest), "changed": changed}
+        if not manifest_published:
+            workspace.cleanup()
+    return {"schema_version": 1, "action": action, "items": result_items, "changed": changed}
 
 
 def execute(

@@ -392,10 +392,11 @@ schema-v1 identity map binds every managed name to the exact installed device,
 inode, mode, size, modification time and raw link target. Only whole-field
 absence is legacy; a present partial map is invalid. Legacy manifests baseline
 the complete map during their next successful locked mutation. Identity is
-checked before and after manifest publication. A post-publication replacement or
-directory-fsync failure reports typed uncertain committed state, preserves the
-live writer and makes subsequent check or mutation fail closed instead of
-claiming the replacement or rolling links into a known inconsistency.
+checked before and after manifest publication. Manifest publication is an
+explicit transaction boundary: every later validation, snapshot or recovery-
+cleanup failure reports typed uncertain committed state and preserves the
+published manifest, live links and remaining recovery evidence. A later check
+stays truthful instead of rolling links into a known inconsistency.
 Provider bootstraps remain small and share the same precedence sentence.
 
 ## Project Fabric Console
