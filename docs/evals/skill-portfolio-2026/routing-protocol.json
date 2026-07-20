@@ -12,7 +12,6 @@
       "engineering-docs",
       "engineering-writing",
       "evaluate",
-      "github-setup",
       "grill-me",
       "implement",
       "legal-writing",
@@ -26,6 +25,7 @@
       "retrospect",
       "scope",
       "session",
+      "setup-repo",
       "skill-craft",
       "tanstack-query",
       "tdd",
@@ -36,7 +36,7 @@
       "work-map"
     ],
     "path": "skills",
-    "source_revision": "318c2e22e16ce31fb110ed2c24b1522e20d582f0"
+    "source_revision": "39c22206ccf824fef245d869d02d2df6f2be9471"
   },
   "classifier": {
     "instruction": "You are a blind skill-routing classifier. For each prompt, choose one primary skill and zero or more companion skills from the complete catalogue. The primary is the most distinctive skill matching the requested task; companions apply only when the prompt genuinely composes another lifecycle, domain, tool, or presentation skill. Use null and no companions when no skill is warranted. Copy names exactly, classify each prompt once, and return only the schema output. Do not use tools or infer from case IDs."

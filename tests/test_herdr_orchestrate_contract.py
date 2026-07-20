@@ -45,11 +45,18 @@ def test_herdr_routing_boundaries_rebalance_the_exact_nine_cases() -> None:
 
 
 def test_herdr_reference_and_degradation_doctrines_are_contract_invariants() -> None:
-    checker = (EVALS / "check_skill_triggers.py").read_text()
+    manifest = yaml.safe_load(
+        (ROOT / "tests" / "fixtures" / "disclosure-migration.yaml").read_text()
+    )
+    required_refs = {
+        row["file"]
+        for row in manifest["orchestrate"]
+        if row["verdict"] in {"keep", "slim"}
+    }
     contract = yaml.safe_load((EVALS / "contract_cases.yaml").read_text())
     invariants = set(contract["reference_invariants"])
 
-    assert '"herdr-panes.md"' in checker
+    assert "herdr-panes.md" in required_refs
     assert {
         "herdr-panes.md",
         "HERDR-NOT-USED",
