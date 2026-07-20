@@ -11,24 +11,71 @@ without notice and support is best effort. Propose changes through
 [GitHub issues](https://github.com/mblauberg/provenant/issues); report
 vulnerabilities privately through [`SECURITY.md`](SECURITY.md).
 
-## What Provenant adds
+## Contents
 
-Over a bare agent, Provenant:
+- [Why Provenant](#why-provenant)
+- [How it fits together](#how-it-fits-together)
+- [Quick start](#quick-start)
+- [Providers](#providers)
+- [Core workflows](#core-workflows)
+- [Lifecycle](#lifecycle)
+- [What the harness guarantees](#what-the-harness-guarantees)
+- [Skill library](#skill-library)
+- [Documentation and help](#documentation-and-help)
 
-- scopes work and requires user approval before implementation starts;
-- runs deterministic checks before results surface for review;
-- adds review by the *other* model family once the work is substantial; and
-- keeps acceptance and release as separate user decisions.
+## Why Provenant
 
-It is built from three parts:
+A bare coding agent will write and "finish" a change in one pass, with its own
+author as the only reviewer. Provenant puts structure around that:
 
-- **Harness:** [`HARNESS.md`](HARNESS.md) defines authority, the delivery
-  lifecycle and how much review pressure each risk tier owes.
+- it **scopes** work and requires user approval before implementation starts;
+- it runs **deterministic checks** before any result surfaces for review;
+- it adds **review by the _other_ model family** once the work is substantial:
+  Claude checks Codex, Codex checks Claude; and
+- it keeps **acceptance and release as separate user decisions**.
+
+A change therefore arrives already scoped, verified and read by a context that
+did not write it, so user attention goes to judgement rather than to catching an
+agent's own mistakes.
+
+## How it fits together
+
+Provenant is three parts working as one pipeline:
+
+```mermaid
+flowchart TB
+    U(["User request"])
+    subgraph Harness["HARNESS.md — the constitution"]
+      direction LR
+      A["Authority<br/>access is not permission"]
+      L["Delivery lifecycle<br/>scope to review"]
+      R["Review pressure<br/>scales with risk tier"]
+    end
+    subgraph Skills["Skills library — 32 Agent Skills"]
+      SK["one SKILL.md per task<br/>only descriptions stay in context<br/>a body loads when the task matches"]
+    end
+    subgraph Fabric["Agent Fabric — cross-provider execution"]
+      direction LR
+      P1["Claude Code and Codex<br/>primary clients"]
+      P2["bonus providers<br/>Agy, Cursor, Kiro, OpenCode"]
+    end
+    U --> Harness
+    Harness --> Skills
+    Skills --> Fabric
+    Fabric --> OUT(["Scoped, verified,<br/>independently reviewed change"])
+    classDef out fill:#1f6f43,stroke:#4fd08a,color:#ffffff,stroke-width:2px
+    class OUT out
+```
+
+- **Harness:** [`HARNESS.md`](HARNESS.md) is the constitution. It sets
+  authority, the delivery lifecycle, and how much review pressure each risk tier
+  owes, and stays small so it can be read every session.
 - **Skills:** the <!--skills-->32<!--/skills--> Agent Skills are task-specific
   procedures, one folder with a `SKILL.md` each. Only the one-line descriptions
-  sit in permanent context; a body loads when the task matches.
-- **Agent Fabric:** cross-provider execution and durable coordination for
-  Claude Code and Codex. Optional bonus providers stay separately activated.
+  sit in permanent context; a full body loads only when the task matches it.
+- **Agent Fabric:** cross-provider execution and durable coordination, so the
+  primaries can run and review each other's work. Optional bonus providers stay
+  separately activated.
 
 ## Quick start
 
@@ -36,7 +83,7 @@ Requirements:
 
 - Git and Python 3.11+;
 - a subscription-authenticated Claude Code or Codex installation for each
-  primary client you install;
+  installed primary client;
 - Node.js `>=24.15.0 <25` and npm `>=11.12.1 <12` to run repository
   verification (the suite shells out to `node`); and
 - PyYAML and pytest for harness checks (`uv sync --only-group test` installs
@@ -64,45 +111,20 @@ provenant doctor
 provenant check
 ```
 
-Installation links each skill into `~/.claude/skills/` and `~/.codex/skills/`.
-It also links the thin `provenant` command into
-`${PROVENANT_BIN_DIR:-$HOME/.local/bin}` and warns when that directory is not
-on `PATH`; it never edits shell startup files. `provenant doctor` delegates to
-the Fabric doctor.
-Instruction links or files referencing both shared instructions are accepted;
-others stay untouched. Exit 3 means a command collision, incompatible
-instruction target, or managed skill-link conflict needs action;
-instruction conflicts include a bootstrap line.
-`provenant doctor` checks Fabric configuration
-and enabled adapters; `provenant check` is the full repository gate.
+Installation links each skill into `~/.claude/skills/` and `~/.codex/skills/`,
+and links the thin `provenant` command into
+`${PROVENANT_BIN_DIR:-$HOME/.local/bin}`; it warns when that directory is not
+on `PATH`, and never edits shell startup files. If the installer exits non-zero,
+follow the message it prints: exit `3` flags a command collision, incompatible
+instruction target, or managed skill-link conflict, and instruction conflicts
+include the bootstrap line to add.
 
-The checked-in profile enables Claude, Codex, Agy, Cursor, Kiro and OpenCode.
-Install and authenticate all six before `provenant doctor`. Doctor checks
-identity and non-answer interfaces, not login or quota, and Provenant does not
-set or persist provider API keys.
-
-| Client or provider | Current integration |
-|---|---|
-| Claude Code | Primary client and enabled Anthropic provider |
-| Codex | Primary client and enabled OpenAI provider |
-| Agy | Enabled optional Gemini/Claude provider |
-| Cursor | Enabled optional Grok/Composer provider |
-| Kiro | Global MCP client and enabled optional open-weight ACP provider |
-| OpenCode | Enabled optional ACP provider for its built-in account models |
-
-Provider CLI versions and digests are diagnostic observations, not admission
-locks. Provenant revalidates vendor identity, wrapper provenance and each
-bounded provider interface at point of use, so an ordinary signed CLI update
-does not require a compatibility-table edit.
-
-Before first use, the agent trusts only the exact canonical Git root (or
-non-Git directory) with `$HOME/.agents/scripts/agent-fabric workspace trust`,
-then calls `fabric_bootstrap` when no seat
-exists. If bootstrap runs first, `WORKSPACE_NOT_TRUSTED` provides the recovery
-command. The same connection exposes Fabric tools; no project files needed.
+`provenant doctor` checks Fabric configuration and enabled adapters (identity
+and non-answer interfaces, not login or quota); Provenant never sets or persists
+provider API keys. `provenant check` runs the full repository gate.
 
 <details>
-<summary>Installation details: filesystem layout, Codex config and uninstall</summary>
+<summary>Filesystem layout, Codex config and uninstall</summary>
 
 ```text
 ~/.agents/                cloned once
@@ -126,9 +148,36 @@ that file is preserved.
 <skills-dir>` reclaims the harness-owned skill links and nothing else. The
 bootstrap line and the Codex block remain until removed by hand.
 
+Before first use, the agent trusts only the exact canonical Git root (or
+non-Git directory) with `$HOME/.agents/scripts/agent-fabric workspace trust`,
+then calls `fabric_bootstrap` when no seat exists. If bootstrap runs first,
+`WORKSPACE_NOT_TRUSTED` provides the recovery command. The same connection
+exposes Fabric tools; no project files are needed.
+
 </details>
 
+## Providers
+
+The checked-in profile enables all six clients below. Install and authenticate
+each before `provenant doctor`.
+
+| Client or provider | Current integration |
+|---|---|
+| Claude Code | Primary client and enabled Anthropic provider |
+| Codex | Primary client and enabled OpenAI provider |
+| Agy | Enabled optional Gemini/Claude provider |
+| Cursor | Enabled optional Grok/Composer provider |
+| Kiro | Global MCP client and enabled optional open-weight ACP provider |
+| OpenCode | Enabled optional ACP provider for its built-in account models |
+
+Provider CLI versions and digests are diagnostic observations, not admission
+locks. Provenant revalidates vendor identity, wrapper provenance and each
+bounded provider interface at point of use, so an ordinary signed CLI update
+does not require a compatibility-table edit.
+
 ## Core workflows
+
+Each task has a front-door skill; the agent loads it when a request matches.
 
 | Need | Skill |
 |---|---|
@@ -141,6 +190,9 @@ bootstrap line and the Codex block remain until removed by hand.
 | Promote an accepted artifact | [`release`](skills/release/SKILL.md) |
 
 ## Lifecycle
+
+Every change runs the same delivery loop, and it stops at three gates only the
+user can pass.
 
 ```mermaid
 flowchart TB
@@ -165,13 +217,15 @@ Gold hexagons are user gates. Every gate can stop progression; specification
 approval and acceptance can return work for revision. `review` runs in a fresh
 context that never wrote the diff, and from the `substantial` tier up it must
 include the other model family; a receipt missing that leg cannot reach
-acceptance. The loop is [`deliver`](skills/deliver/SKILL.md), the kernel binding one run to one receipt,
-and [`implement`](skills/implement/SKILL.md) is its software front door. Full
-lifecycle: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+acceptance.
 
-## Important constraints
+The loop is [`deliver`](skills/deliver/SKILL.md), the kernel binding one run to one receipt;
+[`implement`](skills/implement/SKILL.md) is its software front door, and the
+full lifecycle lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-Coverage scales with the risk tier the work is scoped at:
+## What the harness guarantees
+
+**Review pressure scales with the risk tier the work is scoped at:**
 
 | Risk | Minimum review pressure |
 |---|---|
@@ -183,16 +237,16 @@ Coverage scales with the risk tier the work is scoped at:
 Solo `routine` work still completes, but `substantial` and above cannot reach
 acceptance with the other-primary leg missing. Bonus families (Gemini, xAI,
 others) never block on absence, quota or API failure, but at the top two tiers
-the *attempt* is owed and every skipped leg recorded. Evidence and
+the _attempt_ is owed and every skipped leg is recorded. Evidence and
 corroboration, not model votes, make a finding blocking.
 
-Durable boundaries:
+**Durable boundaries hold regardless of tier:**
 
 - access and credentials never grant authority;
-- creating branches and worktrees for implementation is pre-authorised by the
-  constitution; merge authority comes from the owning repository (this repo
-  grants it through its [GitHub runbook](docs/runbooks/github-workflow.md));
-  deletion, force-removal and unauthorised shared-branch pushes stay gated;
+- creating branches and worktrees for implementation is pre-authorised;
+  merge authority comes from the owning repository (this repo grants it through
+  its [GitHub runbook](docs/runbooks/github-workflow.md)); deletion,
+  force-removal and unauthorised shared-branch pushes stay gated;
 - no two agents write one source surface at once; and
 - specification approval, acceptance and release stay separate user decisions
   ([`HARNESS.md`](HARNESS.md)).
