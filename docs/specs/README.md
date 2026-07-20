@@ -51,3 +51,4 @@ field own current Console delivery state and user gates.
 ## Harness
 
 - [Adaptive agent harness lifecycle](harness/lifecycle.md)
+- [Progressive-disclosure refactor](harness/disclosure-refactor.md)
