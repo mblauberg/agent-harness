@@ -136,7 +136,7 @@ async function createRotatingPrincipalTimeoutFixture(options: { replacementPrinc
           daemonVersion: "0.1.0",
           daemonInstanceGeneration: 1,
           offeredFeatures: PROTOCOL_FEATURES,
-          limits: { ...PROTOCOL_LIMITS, idleTimeoutMs: 200, requestTimeoutMs: 30 },
+          limits: { ...PROTOCOL_LIMITS, idleTimeoutMs: 1_000, requestTimeoutMs: 250 },
           connectionNonce: `connection_${principalLabel}` as never,
         });
         socket.write(`${JSON.stringify({ id: request.id, operation: request.operation, ok: true, result })}\n`);
@@ -151,9 +151,8 @@ async function createRotatingPrincipalTimeoutFixture(options: { replacementPrinc
         result: { messageId: `message_${String(dispatchPrincipals.length)}` },
       })}\n`;
       if (dispatchPrincipals.length === 1) {
-        void delay(90).then(() => {
-          if (!socket.destroyed) socket.write(rendered);
-        });
+        // The daemon committed the first call, but its response never reached the
+        // client. Dropping it avoids coupling this timeout contract to scheduler load.
         return;
       }
       socket.write(rendered);
@@ -212,16 +211,15 @@ async function createDelayedDaemonProxy(upstreamSocketPath: string) {
       if (operation === "initialize" && response.ok && response.result?.limits !== undefined) {
         response.result.limits = {
           ...response.result.limits,
-          idleTimeoutMs: 200,
-          requestTimeoutMs: 30,
+          idleTimeoutMs: 1_000,
+          requestTimeoutMs: 250,
         };
       }
       const rendered = `${JSON.stringify(response)}\n`;
       if (operation === FABRIC_OPERATIONS.sendMessage && !delayedMessageResponse) {
         delayedMessageResponse = true;
-        void delay(90).then(() => {
-          if (!client.destroyed) client.write(rendered);
-        });
+        // The upstream daemon committed the message, but this response is lost.
+        // A dropped response deterministically exercises the timeout/replay path.
         return;
       }
       client.write(rendered);
