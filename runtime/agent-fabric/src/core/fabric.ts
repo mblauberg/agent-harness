@@ -162,6 +162,10 @@ import {
   type AuthenticatedAgentContext,
 } from "../project-session/contracts.js";
 import {
+  canonicaliseProviderActionDispatchRequest,
+  type ProviderActionDispatchRequest,
+} from "../application/provider-action-dispatch-request.js";
+import {
   ScopedGateStore,
   assertScopedBarrierAllowed,
   assertScopedOperationAllowed,
@@ -860,15 +864,6 @@ function isBudgetResult(value: unknown): value is BudgetResult {
     isNumberRecord(value.returned)
   );
 }
-
-type ProviderActionDispatchRequest = {
-  adapterId: string;
-  actionId: string;
-  operation: "spawn" | "send_turn" | "wakeup" | "release" | "steer";
-  authorityId?: string;
-  payload: Record<string, unknown>;
-  commandId: string;
-};
 
 function publicHerdrSteerResult(result: HerdrDirectSteerResult): HerdrSteerDispatchResult {
   if (result.status === "rejected" || result.status === "unavailable") return result;
@@ -5749,8 +5744,9 @@ export class Fabric {
     actorAgentId: string,
     input: ProviderActionDispatchRequest,
   ): Promise<ProviderActionResult> {
+    const canonicalInput = canonicaliseProviderActionDispatchRequest(input);
     return await this.#trackProviderOperation(
-      async () => await this.#dispatchProviderAction(runId, actorAgentId, input),
+      async () => await this.#dispatchProviderAction(runId, actorAgentId, canonicalInput),
     );
   }
 
@@ -5782,7 +5778,7 @@ export class Fabric {
     if (input.operation === "send_turn" && target === undefined) {
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "send_turn requires a bound provider session target");
     }
-    const taskValue = input.payload.taskId;
+    const taskValue = ephemeralSpawn ? input.taskId : input.payload.taskId;
     if (taskValue !== undefined && typeof taskValue !== "string") {
       throw new FabricError("CAPABILITY_FORBIDDEN", "provider task ID must be text");
     }

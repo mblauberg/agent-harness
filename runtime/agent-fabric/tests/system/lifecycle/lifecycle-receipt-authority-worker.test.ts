@@ -204,6 +204,7 @@ async function requestRetainedRotation(context: ConfiguredFixture, commandId: st
   await mkdir(join(context.fixture.runDirectory, "checkpoints"), { recursive: true });
   await writeFile(join(context.fixture.runDirectory, relativePath), bytes, { mode: 0o600 });
   const action = await context.chair.dispatchProviderAction({
+    certifyingReview: null,
     adapterId: "fake-lifecycle",
     actionId: `${commandId}:send-turn`,
     operation: "send_turn",

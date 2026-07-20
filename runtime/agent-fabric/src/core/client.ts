@@ -18,6 +18,7 @@ import type {
   LifecycleCheckpoint,
   LifecycleResult,
   ProofResult,
+  ProviderActionDispatchRequest,
   ProviderActionResult,
   ReceiptResult,
   TaskResult,
@@ -329,14 +330,7 @@ export class FabricClient {
     return this.#fabric.reportProviderState(this.#runId, this.#agentId, input);
   }
 
-  async dispatchProviderAction(input: {
-    adapterId: string;
-    actionId: string;
-    operation: "spawn" | "send_turn" | "wakeup" | "release" | "steer";
-    authorityId?: string;
-    payload: Record<string, unknown>;
-    commandId: string;
-  }): Promise<ProviderActionResult> {
+  async dispatchProviderAction(input: ProviderActionDispatchRequest): Promise<ProviderActionResult> {
     this.#authorise(FABRIC_OPERATIONS.dispatchProviderAction);
     return await this.#fabric.dispatchProviderAction(this.#runId, this.#agentId, input);
   }

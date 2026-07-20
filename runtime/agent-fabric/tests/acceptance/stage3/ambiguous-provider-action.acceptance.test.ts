@@ -114,12 +114,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     const actionId = "provider-review-no-turns:spawn";
 
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Hard turns capacity is mandatory.",
@@ -159,12 +160,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
 
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review-vector:spawn",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Return exact bounded usage.",
@@ -208,12 +210,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
 
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review-partial-turns:first",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Use one turn within a two-turn ceiling.",
@@ -230,12 +233,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       turns: { granted: 2, reserved: 0, consumed: 1, usageUnknown: false },
     });
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review-partial-turns:second",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Use the released turn.",
@@ -267,12 +271,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
 
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review-missing-turns:spawn",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Omit actual multi-turn usage.",
@@ -309,12 +314,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       const actionId = `provider-review-invalid-turns:${scenario}:spawn`;
 
       await expect(fixture.chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "fake-lifecycle",
         actionId,
         operation: "spawn",
         authorityId: reviewAuthority.authorityId,
+        taskId: fixture.leaderTask.taskId,
         payload: {
-          taskId: fixture.leaderTask.taskId,
           model: "fake-reviewer-v1",
           modelFamily: "fake",
           prompt: "Return invalid actual turn usage.",
@@ -359,12 +365,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     const actionId = `provider-review-invalid-usage:${scenario}:spawn`;
 
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Return an invalid usage vector.",
@@ -403,12 +410,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     const actionId = "provider-review-mandatory-usage:spawn";
 
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Do not run without mandatory usage capacity.",
@@ -443,12 +451,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
     const actionId = "provider-review-late-usage:spawn";
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Return usage through durable lookup.",
@@ -503,12 +512,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-task-race:authority",
     });
     const dispatch = fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review-task-race:spawn",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Do not start after task completion.",
@@ -575,12 +585,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-cross-adapter:authority",
     });
     const dispatch = fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Do not alias another adapter's action.",
@@ -633,12 +644,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
     const actionId = "provider-review-pair:shared";
     const request = (adapterId: string, commandId: string) => ({
+      certifyingReview: null,
       adapterId,
       actionId,
       operation: "spawn" as const,
+      taskId: fixture.leaderTask.taskId,
       authorityId: authority.authorityId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: `Run independently on ${adapterId}.`,
@@ -818,11 +830,12 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
 
     const dispatch = fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       ...actionRef,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: providerPayload.model,
         modelFamily: providerPayload.modelFamily,
         prompt: providerPayload.prompt,
@@ -910,11 +923,12 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       route_count: 0,
     });
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       ...actionRef,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: providerPayload.model,
         modelFamily: providerPayload.modelFamily,
         prompt: providerPayload.prompt,
@@ -932,11 +946,12 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     cleanup.push(async () => reopened.close());
     const reopenedChair = asLifecycleClient(reopened.connect(fixture.capabilities.chair));
     await expect(reopenedChair.dispatchProviderAction({
+      certifyingReview: null,
       ...actionRef,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: providerPayload.model,
         modelFamily: providerPayload.modelFamily,
         prompt: providerPayload.prompt,
@@ -984,8 +999,8 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       adapterId: "fake-lifecycle",
       actionId: "provider-review-pair-flight:spawn",
     } as const;
+    const providerTaskId = fixture.leaderTask.taskId;
     const providerPayload = {
-      taskId: fixture.leaderTask.taskId,
       model: "fake-reviewer-v1",
       modelFamily: "fake",
       prompt: "Join this exact semantic provider request.",
@@ -993,8 +1008,10 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     };
     const dispatch = (commandId: string, payload: typeof providerPayload) =>
       fixture.chair.dispatchProviderAction({
+        certifyingReview: null,
         ...actionRef,
         operation: "spawn",
+        taskId: providerTaskId,
         authorityId: reviewAuthority.authorityId,
         payload,
         commandId,
@@ -1075,15 +1092,19 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     activeFabric = await reopenLifecycleFabric(fixture);
     const reopenedChair = asLifecycleClient(activeFabric.connect(fixture.capabilities.chair));
     await expect(reopenedChair.dispatchProviderAction({
+      certifyingReview: null,
       ...actionRef,
       operation: "spawn",
+      taskId: providerTaskId,
       authorityId: reviewAuthority.authorityId,
       payload: providerPayload,
       commandId: "provider-review-pair-flight:restart:exact",
     })).resolves.toEqual(durable);
     await expect(reopenedChair.dispatchProviderAction({
+      certifyingReview: null,
       ...actionRef,
       operation: "spawn",
+      taskId: providerTaskId,
       authorityId: reviewAuthority.authorityId,
       payload: {
         ...providerPayload,
@@ -1113,12 +1134,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-expired-replay:authority",
     });
     const request = (commandId: string) => ({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review-expired-replay:spawn",
       operation: "spawn" as const,
+      taskId: fixture.leaderTask.taskId,
       authorityId: authority.authorityId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Replay this admitted action after delegated authority expiry.",
@@ -1167,11 +1189,12 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     } as const;
 
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       ...actionRef,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Rollback this admission cut without releasing its durable preflight.",
@@ -1220,6 +1243,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     const actionId = `provider-review-${operation}-admission-fault`;
     const client = actor === "chair" ? fixture.chair : fixture.leader;
     await expect(client.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId,
       operation,
@@ -1270,11 +1294,12 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       actionId: "provider-review-preflight-insert-fault:spawn",
     } as const;
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       ...actionRef,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Rollback this preflight insert.",
@@ -1356,12 +1381,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     }
 
     const dispatchOutcome = await fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Crash the admission transaction before provider work.",
@@ -1464,12 +1490,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
     const actionId = `provider-review-admission-race:${scenario}:spawn`;
     const dispatch = fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Do not start after admission changes.",
@@ -1560,12 +1587,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
     const actionId = "provider-review-close-race:spawn";
     const dispatch = fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Do not start while Fabric closes.",
@@ -1603,12 +1631,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-task-obligation:authority",
     });
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review-task-obligation:spawn",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Remain unresolved until lookup.",
@@ -1654,12 +1683,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-concurrent:authority",
     });
     const dispatch = async (suffix: string) => await fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: `provider-review-concurrent:${suffix}`,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Review the current implementation read-only.",
@@ -1706,12 +1736,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-queue:authority",
     });
     const dispatch = async (suffix: string) => await fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: `provider-review-queue:${suffix}`,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: `Queued review ${suffix}.`,
@@ -1785,12 +1816,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-ambiguous-cap:second-authority",
     });
     const dispatch = async (suffix: string, authorityId: string, scenario?: string) => await fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: `provider-review-ambiguous-cap:${suffix}`,
       operation: "spawn",
       authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: `Ambiguous capacity review ${suffix}.`,
@@ -1852,12 +1884,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         authorityId: string,
         scenario?: string,
       ) => await fixture.chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "fake-lifecycle",
         actionId: actionId(suffix),
         operation: "spawn",
         authorityId,
+        taskId: fixture.leaderTask.taskId,
         payload: {
-          taskId: fixture.leaderTask.taskId,
           model: "fake-reviewer-v1",
           modelFamily: "fake",
           prompt: `Close queue review ${suffix}.`,
@@ -2004,12 +2037,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
     const actionId = "provider-review-external-capacity:spawn";
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Start after external turn capacity is released.",
@@ -2054,12 +2088,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-restart-budget:authority",
     });
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review-restart-budget:ambiguous",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Review the current implementation read-only.",
@@ -2081,12 +2116,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-restart-budget:reconcile",
     })).resolves.toMatchObject({ status: "terminal", providerAnswer: "recovered provider review" });
     await expect(chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review-restart-budget:second",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "A spent turn cannot be reused.",
@@ -2114,12 +2150,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
 
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review-exhausted:spawn",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Two turns exceed this delegated review authority.",
@@ -2150,12 +2187,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
     const action = "provider-review-unknown:ambiguous";
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: action,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "An invalid terminal answer leaves usage unprovable.",
@@ -2171,12 +2209,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-unknown:reconcile",
     })).resolves.toMatchObject({ status: "quarantined" });
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review-unknown:second",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Unknown usage must fail closed.",
@@ -2210,12 +2249,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
 
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review-terminal-task:spawn",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "This terminal task must not start provider work.",
@@ -2245,12 +2285,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
     const before = await fixture.chair.getRunStatus({ runId: fixture.runId });
     const dispatchReceipt = await fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review:spawn",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Review the current implementation read-only.",
@@ -2301,12 +2342,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       lifecycleDatabase.close();
     }
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review:spawn",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Review the current implementation read-only.",
@@ -2315,12 +2357,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review:dispatch-replay",
     })).resolves.toEqual(result);
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review:spawn",
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Changed identity must not replay.",
@@ -2330,6 +2373,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     })).rejects.toMatchObject({ code: "ACTION_INPUT_CONFLICT" });
 
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "provider-review:missing-task",
       operation: "spawn",
@@ -2340,7 +2384,8 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         prompt: "Missing task must fail before provider dispatch.",
       },
       commandId: "provider-review:missing-task",
-    })).rejects.toMatchObject({ code: "PROTOCOL_INVALID" });
+    } as unknown as Parameters<FabricClient["dispatchProviderAction"]>[0]))
+      .rejects.toMatchObject({ code: "PROTOCOL_INVALID" });
   });
 
   it("recovers only a validated answer from terminal adapter evidence", async () => {
@@ -2360,12 +2405,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       commandId: "provider-review-recovery:authority",
     });
     const dispatch = async (scenario: string, authorityId = reviewAuthority.authorityId) => await fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: `provider-review-recovery:${scenario}`,
       operation: "spawn",
       authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Review the current implementation read-only.",
@@ -2433,12 +2479,13 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     });
     const actionId = "provider-review-concurrent:spawn";
     await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId,
       operation: "spawn",
       authorityId: reviewAuthority.authorityId,
+      taskId: fixture.leaderTask.taskId,
       payload: {
-        taskId: fixture.leaderTask.taskId,
         model: "fake-reviewer-v1",
         modelFamily: "fake",
         prompt: "Recover one immutable answer.",
@@ -2505,6 +2552,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     const fixture = await createLifecycleFixture();
     cleanup.push(async () => rm(fixture.directory, { recursive: true, force: true }));
     const terminal = await fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "action-terminal",
       operation: "send_turn",
@@ -2533,6 +2581,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       await rm(fixture.directory, { recursive: true, force: true });
     });
     const ambiguous = await fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "action-ambiguous-unproven",
       operation: "send_turn",
@@ -2562,6 +2611,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       await rm(fixture.directory, { recursive: true, force: true });
     });
     const ambiguous = await fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "action-ambiguous-idempotent",
       operation: "send_turn",
@@ -2591,6 +2641,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       await rm(fixture.directory, { recursive: true, force: true });
     });
     const ambiguous = await fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "action-revoked-before-replay",
       operation: "send_turn",
@@ -2613,6 +2664,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
       await rm(fixture.directory, { recursive: true, force: true });
     });
     const ambiguous = await fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: "fake-lifecycle",
       actionId: "action-expired-before-replay",
       operation: "send_turn",

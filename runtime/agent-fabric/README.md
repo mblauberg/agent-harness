@@ -23,6 +23,7 @@ Important boundaries:
 
 - `src/core/fabric.ts`: aggregate coordination façade and transaction owner
 - `src/core/client.ts`: capability-bound client façade
+- `src/application/provider-action-dispatch-request.ts`: generic provider-dispatch request contract and fail-closed canonicalisation
 - `src/application/command-journal.ts`: command dedupe and transaction owner
 - `src/core/migrations.ts`: current-baseline custody and cutover inspection
 - `src/persistence/sqlite.ts`: hardened current-database connection

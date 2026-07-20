@@ -12,7 +12,11 @@ export {
   openLocalLifecycleReceiptAuthority,
 } from "./lifecycle/local-receipt-authority.js";
 export type { LocalLifecycleReceiptAuthorityOptions } from "./lifecycle/local-receipt-authority.js";
-export type { TeamCreateInput, TeamResult } from "./core/contracts.js";
+export type {
+  ProviderActionDispatchRequest,
+  TeamCreateInput,
+  TeamResult,
+} from "./core/contracts.js";
 export {
   connectFabricDaemon,
   FabricDaemonClient,
