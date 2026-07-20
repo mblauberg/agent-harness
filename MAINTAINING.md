@@ -75,24 +75,6 @@ reconciliation path; do not rely on users deleting or replacing global links by
 hand. Preview with `scripts/manage_installation.py plan`, then reconcile with the
 rename registry. Never claim or overwrite an unmanaged target.
 
-Each target parent has one owner-only, bounded `flock` transaction covering
-manifest read through durable replacement. Existing links use exact-identity
-atomic exchange or move; an absent installation is admitted to the journal only
-when the live path still matches the exact staged link identity. The live and
-private recovery directories are fsynced before manifest replacement and again
-after any conditional rollback. A displaced link remains in private recovery
-until commit, so a pre-publication failure restores its original inode rather
-than creating a new link under the old manifest. The manifest binds every
-managed name to that exact installed identity, including names retired from the
-current catalogue. A post-publication mismatch reports typed uncertain state,
-preserves the live writer and makes later check or mutation fail closed. Only
-whole-field absence identifies a legacy schema-v1 identity map; a present map
-must cover every managed name. The next successful locked mutation baselines a
-legacy manifest. `scripts/managed_installation_manifest.py` owns this schema,
-skill digest and durable manifest replacement. Never hand-edit the lock,
-manifest or retained recovery paths; a stale process cannot retain the kernel
-lock.
-
 ## Change the delivery kernel
 
 Keep profile policy in `config/delivery-profiles.json`, surface-selected checks

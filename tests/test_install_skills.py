@@ -1,12 +1,7 @@
 from pathlib import Path
-import importlib.util
 import json
-import re
 import shutil
-import stat
 import subprocess
-import sys
-import time
 
 import pytest
 
@@ -14,34 +9,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install-skills"
 MANAGER = ROOT / "scripts" / "manage_installation.py"
-
-WORKER = r'''
-import importlib.util
-from pathlib import Path
-import sys
-import time
-
-manager_path, action, source, target, ready, release, fail = sys.argv[1:]
-spec = importlib.util.spec_from_file_location("managed_installation_worker", manager_path)
-module = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = module
-assert spec.loader
-spec.loader.exec_module(module)
-if ready != "-":
-    original = module._write_manifest
-    def controlled_write(target_path, manifest):
-        Path(ready).write_text("ready\n")
-        deadline = time.monotonic() + 10
-        while not Path(release).exists():
-            if time.monotonic() >= deadline:
-                raise TimeoutError("worker release timed out")
-            time.sleep(0.01)
-        if fail == "true":
-            raise OSError("injected manifest failure")
-        original(target_path, manifest)
-    module._write_manifest = controlled_write
-module.execute(action, Path(source), Path(target))
-'''
 
 
 def run(target: Path):
@@ -53,15 +20,6 @@ def run(target: Path):
         stderr=subprocess.PIPE,
         check=False,
     )
-
-
-def load_manager_module(name: str):
-    spec = importlib.util.spec_from_file_location(name, MANAGER)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def test_installer_links_every_skill_and_is_idempotent(tmp_path):
@@ -207,18 +165,6 @@ def manifest_for(target: Path):
     return target.parent / ".agent-harness-installation.json"
 
 
-def link_identity(path: Path):
-    info = path.lstat()
-    return (
-        info.st_dev,
-        info.st_ino,
-        info.st_mode,
-        info.st_size,
-        info.st_mtime_ns,
-        path.readlink(),
-    )
-
-
 def tiny_source(tmp_path: Path):
     source = tmp_path / "source"
     for name in ("alpha", "beta"):
@@ -226,54 +172,6 @@ def tiny_source(tmp_path: Path):
         skill.mkdir(parents=True)
         (skill / "SKILL.md").write_text(f"---\nname: {name}\ndescription: Use when testing.\n---\n")
     return source
-
-
-def named_source(root: Path, names: tuple[str, ...]):
-    source = root / "source"
-    for name in names:
-        skill = source / name
-        skill.mkdir(parents=True)
-        (skill / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: Use when testing.\n---\n"
-        )
-    return source
-
-
-def start_worker(
-    action: str,
-    source: Path,
-    target: Path,
-    *,
-    ready: Path | None = None,
-    release: Path | None = None,
-    fail: bool = False,
-):
-    return subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            WORKER,
-            str(MANAGER),
-            action,
-            str(source),
-            str(target),
-            str(ready) if ready else "-",
-            str(release) if release else "-",
-            "true" if fail else "false",
-        ],
-        cwd=ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-
-
-def wait_for(path: Path) -> None:
-    deadline = time.monotonic() + 5
-    while not path.exists():
-        if time.monotonic() >= deadline:
-            raise AssertionError(f"timed out waiting for {path}")
-        time.sleep(0.01)
 
 
 def test_plan_is_read_only_and_distinguishes_missing_and_unmanaged(tmp_path):
@@ -287,114 +185,6 @@ def test_plan_is_read_only_and_distinguishes_missing_and_unmanaged(tmp_path):
     assert {item["name"]: item["state"] for item in plan["items"]} == {"alpha": "unmanaged", "beta": "missing"}
     assert not manifest_for(target).exists()
     assert not (target / "beta").exists()
-
-
-@pytest.mark.parametrize("action", ["plan", "check"])
-def test_read_only_actions_create_no_target_manifest_lock_or_recovery(tmp_path, action):
-    source = tiny_source(tmp_path)
-    target = tmp_path / "absent-parent" / "installed"
-
-    result = manager(target, action, source)
-
-    if action == "check":
-        assert result.returncode == 3
-    else:
-        assert result.returncode == 0, result.stderr
-    assert not target.parent.exists()
-
-
-def test_mutation_lock_is_private_regular_and_rejects_symlink_collision(tmp_path):
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    victim = tmp_path / "victim"
-    victim.write_text("untouched\n")
-    lock = target.parent / ".agent-harness-installation.lock"
-    lock.symlink_to(victim)
-
-    rejected = manager(target, "install", source)
-
-    assert rejected.returncode == 3
-    assert "installation lock" in rejected.stderr
-    assert victim.read_text() == "untouched\n"
-    lock.unlink()
-    installed = manager(target, "install", source)
-    assert installed.returncode == 0, installed.stderr
-    info = lock.lstat()
-    assert stat.S_ISREG(info.st_mode)
-    assert stat.S_IMODE(info.st_mode) == 0o600
-    assert info.st_nlink == 1
-
-
-def test_mutation_lock_timeout_is_bounded(tmp_path):
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    ready = tmp_path / "lock-ready"
-    release = tmp_path / "lock-release"
-    holder_code = r'''
-import importlib.util
-from pathlib import Path
-import sys
-import time
-manager_path, target, ready, release = sys.argv[1:]
-spec = importlib.util.spec_from_file_location("lock_holder", manager_path)
-module = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = module
-assert spec.loader
-spec.loader.exec_module(module)
-with module._installation_lock(Path(target)):
-    Path(ready).write_text("ready\n")
-    deadline = time.monotonic() + 10
-    while not Path(release).exists():
-        if time.monotonic() >= deadline:
-            raise TimeoutError("release timed out")
-        time.sleep(0.01)
-'''
-    holder = subprocess.Popen(
-        [sys.executable, "-c", holder_code, str(MANAGER), str(target), str(ready), str(release)],
-        cwd=ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    wait_for(ready)
-    module = load_manager_module("managed_installer_lock_timeout")
-
-    with pytest.raises(module.InstallError, match="lock acquisition timed out"):
-        module.execute("install", source, target, lock_timeout_ms=50)
-
-    release.write_text("release\n")
-    output = holder.communicate(timeout=10)
-    assert holder.returncode == 0, output
-    assert not target.exists()
-    assert not manifest_for(target).exists()
-
-
-def test_mutation_lock_prevents_disjoint_manifest_lost_update(tmp_path):
-    source = named_source(tmp_path / "owner", ("alpha",))
-    target = tmp_path / "installed"
-    ready = tmp_path / "ready"
-    release = tmp_path / "release"
-    first = start_worker(
-        "install", source, target, ready=ready, release=release
-    )
-    wait_for(ready)
-    beta = source / "beta"
-    beta.mkdir()
-    (beta / "SKILL.md").write_text(
-        "---\nname: beta\ndescription: Use when testing.\n---\n"
-    )
-    second = start_worker("install", source, target)
-    time.sleep(0.2)
-    assert second.poll() is None, second.communicate(timeout=1)
-
-    release.write_text("release\n")
-    first_output = first.communicate(timeout=10)
-    second_output = second.communicate(timeout=10)
-
-    assert first.returncode == 0, first_output
-    assert second.returncode == 0, second_output
-    manifest = json.loads(manifest_for(target).read_text())
-    assert set(manifest["managed"]) == {"alpha", "beta"}
 
 
 def test_install_records_versioned_ownership_without_overwriting_unmanaged(tmp_path):
@@ -414,48 +204,22 @@ def test_install_records_versioned_ownership_without_overwriting_unmanaged(tmp_p
     assert (unmanaged / "keep").read_text() == "mine"
 
 
-def test_reconcile_preserves_broken_replacement_as_conflict(tmp_path):
+def test_reconcile_repairs_broken_managed_link_and_rejects_conflict(tmp_path):
     source = tiny_source(tmp_path)
     target = tmp_path / "installed"
     assert manager(target, "install", source).returncode == 0
-    replacement = target / "alpha"
-    replacement.unlink()
-    replacement.symlink_to(tmp_path / "missing")
-    before = replacement.lstat()
+    (target / "alpha").unlink()
+    (target / "alpha").symlink_to(tmp_path / "missing")
+    repaired = manager(target, "reconcile", source)
+    assert repaired.returncode == 0, repaired.stderr
+    assert (target / "alpha").resolve() == (source / "alpha").resolve()
 
+    (target / "beta").unlink()
+    (target / "beta").mkdir()
     conflict = manager(target, "reconcile", source)
-
     assert conflict.returncode == 3
-    assert "conflicting managed targets: alpha" in conflict.stderr
-    after = replacement.lstat()
-    assert (after.st_dev, after.st_ino, replacement.readlink()) == (
-        before.st_dev,
-        before.st_ino,
-        tmp_path / "missing",
-    )
-
-
-def test_reconcile_preserves_valid_different_managed_symlink_as_conflict(tmp_path):
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    assert manager(target, "install", source).returncode == 0
-    external = tmp_path / "external"
-    external.mkdir()
-    live = target / "alpha"
-    live.unlink()
-    live.symlink_to(external)
-    before = live.lstat()
-
-    result = manager(target, "reconcile", source)
-
-    assert result.returncode == 3
-    assert "conflicting managed targets: alpha" in result.stderr
-    after = live.lstat()
-    assert (after.st_dev, after.st_ino, live.readlink()) == (
-        before.st_dev,
-        before.st_ino,
-        external,
-    )
+    assert "conflicting" in conflict.stderr
+    assert (target / "beta").is_dir()
 
 
 def test_normal_install_repairs_managed_drift_and_retires_safe_old_links(tmp_path):
@@ -478,7 +242,6 @@ def test_normal_install_repairs_managed_drift_and_retires_safe_old_links(tmp_pat
     assert (target / "beta").resolve() == (source / "beta").resolve()
     assert manifest["managed"]["beta"]["source_sha256"] != "0" * 64
     assert (target / "gamma").resolve() == (source / "gamma").resolve()
-    assert not list(target.parent.glob(".agent-harness-links.*"))
 
 
 def test_uninstall_managed_removes_only_owned_exact_links(tmp_path):
@@ -658,106 +421,6 @@ def test_check_verifies_canonical_catalogue_and_ignores_ds_store(tmp_path):
     assert manager(target, "check", source).returncode == 0
 
 
-def test_check_fails_closed_for_replaced_retired_managed_link(tmp_path):
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    assert manager(target, "install", source).returncode == 0
-    shutil.rmtree(source / "alpha")
-    external = tmp_path / "external"
-    external.mkdir()
-    writer = target / "alpha"
-    writer.unlink()
-    writer.symlink_to(external)
-    before = writer.lstat()
-
-    checked = manager(target, "check", source)
-
-    assert checked.returncode == 3
-    report = json.loads(checked.stdout)
-    assert {item["name"]: item["state"] for item in report["items"]}["alpha"] == (
-        "replaced-managed"
-    )
-    after = writer.lstat()
-    assert (after.st_dev, after.st_ino, writer.readlink()) == (
-        before.st_dev,
-        before.st_ino,
-        external,
-    )
-
-
-def test_manifest_commit_failure_rolls_back_link_mutations(tmp_path, monkeypatch):
-    spec = importlib.util.spec_from_file_location("managed_installer_failure", MANAGER)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader
-    spec.loader.exec_module(module)
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-
-    def fail_commit(_target, _manifest):
-        raise OSError("injected manifest failure")
-
-    monkeypatch.setattr(module, "_write_manifest", fail_commit)
-    with pytest.raises(OSError, match="injected"):
-        module.execute("install", source, target)
-    assert not (target / "alpha").exists()
-    assert not (target / "beta").exists()
-    assert not manifest_for(target).exists()
-
-
-def test_uninstall_manifest_failure_restores_original_managed_link_identity(
-    tmp_path, monkeypatch
-):
-    module = load_manager_module("managed_installer_uninstall_identity_rollback")
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    module.execute("install", source, target)
-    live = target / "alpha"
-    before = link_identity(live)
-    manifest_before = manifest_for(target).read_bytes()
-    original_write = module._write_manifest
-
-    def fail_commit(_target, _manifest):
-        raise OSError("injected manifest failure")
-
-    monkeypatch.setattr(module, "_write_manifest", fail_commit)
-    with pytest.raises(OSError, match="injected manifest failure"):
-        module.execute("uninstall-managed", source, target)
-
-    assert link_identity(live) == before
-    assert manifest_for(target).read_bytes() == manifest_before
-    assert not list(target.parent.glob(".agent-harness-links.*"))
-    monkeypatch.setattr(module, "_write_manifest", original_write)
-    assert module.execute("check", source, target)["ok"]
-
-
-def test_reconcile_manifest_failure_restores_original_managed_link_identity(
-    tmp_path, monkeypatch
-):
-    module = load_manager_module("managed_installer_reconcile_identity_rollback")
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    module.execute("install", source, target)
-    live = target / "alpha"
-    before = link_identity(live)
-    manifest_before = manifest_for(target).read_bytes()
-    (source / "alpha" / "SKILL.md").write_text(
-        "---\nname: alpha\ndescription: Use when changed.\n---\n"
-    )
-
-    def fail_commit(_target, _manifest):
-        raise OSError("injected manifest failure")
-
-    monkeypatch.setattr(module, "_write_manifest", fail_commit)
-    with pytest.raises(OSError, match="injected manifest failure"):
-        module.execute("reconcile", source, target)
-
-    assert link_identity(live) == before
-    assert manifest_for(target).read_bytes() == manifest_before
-    assert {item["name"]: item["state"] for item in module.execute(
-        "plan", source, target
-    )["items"]}["alpha"] == "stale"
-
-
 def test_manifest_key_traversal_fails_before_uninstall_mutation(tmp_path):
     source = tiny_source(tmp_path)
     target = tmp_path / "installed"
@@ -792,504 +455,16 @@ def test_rename_reconcile_preflights_all_conflicts_before_mutation(tmp_path):
     assert "alpha" in json.loads(manifest_for(target).read_text())["managed"]
 
 
-def test_stale_reconcile_restores_different_target_writer_raced_before_exchange(
-    tmp_path, monkeypatch
-):
-    module = load_manager_module("managed_installer_pre_exchange_race")
+def test_installer_refuses_symlinked_source_content(tmp_path):
     source = tiny_source(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("not part of the source tree\n")
+    (source / "alpha" / "reference.md").symlink_to(outside)
     target = tmp_path / "installed"
-    module.execute("install", source, target)
-    stale = target / "alpha"
-    (source / "alpha" / "SKILL.md").write_text(
-        "---\nname: alpha\ndescription: Use when changed.\n---\n"
-    )
-    external = tmp_path / "external"
-    external.mkdir()
-    original_exchange = module.atomic_exchange
-    raced = False
 
-    def race(candidate, path):
-        nonlocal raced
-        if path == stale and not raced:
-            raced = True
-            stale.unlink()
-            stale.symlink_to(external)
-        original_exchange(candidate, path)
+    result = manager(target, "install", source)
 
-    monkeypatch.setattr(module, "atomic_exchange", race)
-    with pytest.raises(module.InstallError, match="restored newer path"):
-        module.execute("reconcile", source, target)
-
-    assert stale.resolve() == external
-    assert json.loads(manifest_for(target).read_text())["managed"]["alpha"]
-
-
-def test_same_target_substitution_after_exchange_preserves_and_syncs_recovery(
-    tmp_path, monkeypatch
-):
-    module = load_manager_module("managed_installer_same_target_race")
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    module.execute("install", source, target)
-    stale = target / "alpha"
-    original_identity = link_identity(stale)
-    (source / "alpha" / "SKILL.md").write_text(
-        "---\nname: alpha\ndescription: Use when changed.\n---\n"
-    )
-    original_exchange = module.atomic_exchange
-    original_fsync = module._fsync_directory
-    synced: list[Path] = []
-    raced_identity = None
-    raced = False
-
-    def race(candidate, path):
-        nonlocal raced, raced_identity
-        original_exchange(candidate, path)
-        if path == stale and not raced:
-            raced = True
-            stale.unlink()
-            stale.symlink_to(source / "alpha")
-            info = stale.lstat()
-            raced_identity = (info.st_dev, info.st_ino, stale.readlink())
-
-    def record_fsync(path):
-        synced.append(path)
-        original_fsync(path)
-
-    monkeypatch.setattr(module, "atomic_exchange", race)
-    monkeypatch.setattr(module, "_fsync_directory", record_fsync)
-    with pytest.raises(module.InstallError, match=r"preserve recovery path (.+)") as raised:
-        module.execute("reconcile", source, target)
-
-    recovery = Path(str(raised.value).split("preserve recovery path ", 1)[1])
-    info = stale.lstat()
-    assert (info.st_dev, info.st_ino, stale.readlink()) == raced_identity
-    assert stale.resolve() == (source / "alpha").resolve()
-    assert recovery.is_symlink()
-    assert link_identity(recovery) == original_identity
-    assert target in synced
-    assert recovery.parent in synced
-    assert json.loads(manifest_for(target).read_text())["managed"]["alpha"]
-
-
-def test_same_target_substitution_after_absent_install_is_not_claimed(
-    tmp_path, monkeypatch
-):
-    module = load_manager_module("managed_installer_absent_same_target_race")
-    source = named_source(tmp_path / "owner", ("alpha",))
-    target = tmp_path / "installed"
-    installed = target / "alpha"
-    original_link = module._hardlink_if_absent
-    raced_identity = None
-
-    def race(candidate, destination):
-        nonlocal raced_identity
-        original_link(candidate, destination)
-        destination.unlink()
-        destination.symlink_to(source / "alpha")
-        info = destination.lstat()
-        raced_identity = (info.st_dev, info.st_ino, destination.readlink())
-
-    monkeypatch.setattr(module, "_hardlink_if_absent", race)
-    with pytest.raises(module.InstallError, match="preserved newer path"):
-        module.execute("install", source, target)
-
-    info = installed.lstat()
-    assert (info.st_dev, info.st_ino, installed.readlink()) == raced_identity
-    assert installed.resolve() == (source / "alpha").resolve()
-    assert not manifest_for(target).exists()
-
-
-def test_uninstall_restores_writer_raced_before_atomic_removal(tmp_path, monkeypatch):
-    module = load_manager_module("managed_installer_remove_race")
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    module.execute("install", source, target)
-    live = target / "alpha"
-    external = tmp_path / "external"
-    external.mkdir()
-    original_rename = module.os.rename
-    raced_identity = None
-    raced = False
-
-    def race(path, recovery):
-        nonlocal raced, raced_identity
-        if path == live and not raced:
-            raced = True
-            live.unlink()
-            live.symlink_to(external)
-            info = live.lstat()
-            raced_identity = (info.st_dev, info.st_ino, live.readlink())
-        original_rename(path, recovery)
-
-    monkeypatch.setattr(module.os, "rename", race)
-    with pytest.raises(module.InstallError, match="restored newer path"):
-        module.execute("uninstall-managed", source, target)
-
-    info = live.lstat()
-    assert (info.st_dev, info.st_ino, live.readlink()) == raced_identity
-    assert live.resolve() == external
-    assert "alpha" in json.loads(manifest_for(target).read_text())["managed"]
-
-
-def test_writer_after_install_is_preserved_when_manifest_commit_fails(
-    tmp_path, monkeypatch
-):
-    module = load_manager_module("managed_installer_rollback_writer")
-    source = named_source(tmp_path / "owner", ("alpha",))
-    target = tmp_path / "installed"
-    external = tmp_path / "external"
-    external.mkdir()
-
-    def fail_commit(_target, _manifest):
-        installed = target / "alpha"
-        installed.unlink()
-        installed.symlink_to(external)
-        raise OSError("injected manifest failure")
-
-    monkeypatch.setattr(module, "_write_manifest", fail_commit)
-    with pytest.raises(
-        module.InstallError,
-        match=r"rollback incomplete: alpha: InstallError: .*restored newer path: alpha",
-    ):
-        module.execute("install", source, target)
-
-    assert (target / "alpha").resolve() == external
-    assert not manifest_for(target).exists()
-
-
-def test_same_target_writer_during_manifest_publication_is_never_claimed_or_removed(
-    tmp_path, monkeypatch
-):
-    module = load_manager_module("managed_installer_manifest_publication_race")
-    source = named_source(tmp_path / "owner", ("alpha",))
-    target = tmp_path / "installed"
-    live = target / "alpha"
-    original_write = module._write_manifest
-    writer_identity = None
-
-    def publish_after_writer_substitution(target_path, manifest):
-        nonlocal writer_identity
-        live.unlink()
-        live.symlink_to(source / "alpha")
-        info = live.lstat()
-        writer_identity = (info.st_dev, info.st_ino, live.readlink())
-        original_write(target_path, manifest)
-
-    monkeypatch.setattr(module, "_write_manifest", publish_after_writer_substitution)
-    with pytest.raises(module.ManifestCommitUncertainError, match="identity changed after manifest"):
-        module.execute("install", source, target)
-
-    info = live.lstat()
-    assert (info.st_dev, info.st_ino, live.readlink()) == writer_identity
-    manifest = json.loads(manifest_for(target).read_text())
-    assert "alpha" in manifest["managed"]
-
-    checked = module.execute("check", source, target)
-    assert not checked["ok"]
-    assert checked["items"] == [
-        {"name": "alpha", "scope": "required", "state": "replaced-managed"}
-    ]
-    with pytest.raises(module.InstallError, match="conflicting managed targets"):
-        module.execute("uninstall-managed", source, target)
-
-    info = live.lstat()
-    assert (info.st_dev, info.st_ino, live.readlink()) == writer_identity
-
-
-def test_post_publication_snapshot_failure_never_rolls_back_published_links(
-    tmp_path, monkeypatch
-):
-    module = load_manager_module("managed_installer_post_publication_snapshot")
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    module.execute("install", source, target)
-    live = target / "alpha"
-    original_identity = link_identity(live)
-    (source / "alpha" / "SKILL.md").write_text(
-        "---\nname: alpha\ndescription: Use when changed.\n---\n"
-    )
-    original_write = module._write_manifest
-    original_capture = module._capture_path
-    published = False
-    failed = False
-
-    def publish(target_path, manifest):
-        nonlocal published
-        original_write(target_path, manifest)
-        published = True
-
-    def fail_first_published_snapshot(path):
-        nonlocal failed
-        if published and path == live and not failed:
-            failed = True
-            raise OSError("injected post-publication snapshot failure")
-        return original_capture(path)
-
-    monkeypatch.setattr(module, "_write_manifest", publish)
-    monkeypatch.setattr(module, "_capture_path", fail_first_published_snapshot)
-    with pytest.raises(
-        module.ManifestCommitUncertainError,
-        match="post-publication validation failed",
-    ):
-        module.execute("reconcile", source, target)
-
-    monkeypatch.setattr(module, "_capture_path", original_capture)
-    manifest = json.loads(manifest_for(target).read_text())
-    installed = manifest["managed_link_identities"]["alpha"]
-    info = live.lstat()
-    assert {
-        "device": info.st_dev,
-        "inode": info.st_ino,
-        "mode": info.st_mode,
-        "size": info.st_size,
-        "modified_ns": info.st_mtime_ns,
-        "link_target": str(live.readlink()),
-    } == installed
-    assert link_identity(live) != original_identity
-    recovery_links = [
-        path
-        for directory in target.parent.glob(".agent-harness-links.*")
-        for path in directory.iterdir()
-        if path.is_symlink()
-    ]
-    assert len(recovery_links) == 1
-    assert link_identity(recovery_links[0]) == original_identity
-    assert module.execute("check", source, target)["ok"]
-
-
-def test_post_publication_recovery_cleanup_failure_retains_committed_state(
-    tmp_path, monkeypatch
-):
-    module = load_manager_module("managed_installer_post_publication_cleanup")
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    module.execute("install", source, target)
-    live = target / "alpha"
-    original_identity = link_identity(live)
-    (source / "alpha" / "SKILL.md").write_text(
-        "---\nname: alpha\ndescription: Use when changed.\n---\n"
-    )
-
-    def fail_cleanup(_workspace, _staged):
-        raise OSError("injected committed recovery cleanup failure")
-
-    monkeypatch.setattr(module.LinkRecoveryWorkspace, "discard_exact", fail_cleanup)
-    with pytest.raises(
-        module.ManifestCommitUncertainError,
-        match="exact recovery cleanup failed",
-    ):
-        module.execute("reconcile", source, target)
-
-    manifest = json.loads(manifest_for(target).read_text())
-    installed = manifest["managed_link_identities"]["alpha"]
-    info = live.lstat()
-    assert info.st_ino == installed["inode"]
-    assert info.st_ino != original_identity[1]
-    recovery_links = [
-        path
-        for directory in target.parent.glob(".agent-harness-links.*")
-        for path in directory.iterdir()
-        if path.is_symlink()
-    ]
-    assert len(recovery_links) == 1
-    assert link_identity(recovery_links[0]) == original_identity
-    assert module.execute("check", source, target)["ok"]
-
-
-def test_legacy_manifest_baselines_exact_identity_on_next_mutation(tmp_path):
-    module = load_manager_module("managed_installer_legacy_identity_upgrade")
-    source = named_source(tmp_path / "owner", ("alpha",))
-    target = tmp_path / "installed"
-    module.execute("install", source, target)
-    manifest_path = manifest_for(target)
-    legacy = json.loads(manifest_path.read_text())
-    del legacy["managed_link_identities"]
-    manifest_path.write_text(json.dumps(legacy))
-
-    module.execute("install", source, target)
-    upgraded = json.loads(manifest_path.read_text())
-    assert set(upgraded["managed_link_identities"]) == {"alpha"}
-
-    live = target / "alpha"
-    live.unlink()
-    live.symlink_to(source / "alpha")
-    checked = module.execute("check", source, target)
-    assert not checked["ok"]
-    assert checked["items"][0]["state"] == "replaced-managed"
-
-
-@pytest.mark.parametrize("action", ["check", "uninstall-managed"])
-def test_partial_identity_manifest_fails_closed_without_removing_writer(
-    tmp_path, action
-):
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    assert manager(target, "install", source).returncode == 0
-    manifest_path = manifest_for(target)
-    partial = json.loads(manifest_path.read_text())
-    del partial["managed_link_identities"]["alpha"]
-    manifest_path.write_text(json.dumps(partial))
-    writer = target / "alpha"
-    writer.unlink()
-    writer.symlink_to(source / "alpha")
-    before = writer.lstat()
-
-    rejected = manager(target, action, source)
-
-    assert rejected.returncode == 3
-    assert "managed-link identities are invalid" in rejected.stderr
-    after = writer.lstat()
-    assert (after.st_dev, after.st_ino, writer.readlink()) == (
-        before.st_dev,
-        before.st_ino,
-        source / "alpha",
-    )
-
-
-def test_two_writers_during_rollback_surface_exact_displaced_recovery(
-    tmp_path, monkeypatch
-):
-    module = load_manager_module("managed_installer_two_writer_rollback")
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    module.execute("install", source, target)
-    live = target / "alpha"
-    (source / "alpha" / "SKILL.md").write_text(
-        "---\nname: alpha\ndescription: Use when changed.\n---\n"
-    )
-    writer_one = tmp_path / "writer-one"
-    writer_two = tmp_path / "writer-two"
-    writer_one.mkdir()
-    writer_two.mkdir()
-    original_exchange = module.atomic_exchange
-    exchange_count = 0
-    writer_two_identity = None
-
-    def two_writer_race(candidate, path):
-        nonlocal exchange_count, writer_two_identity
-        exchange_count += 1
-        if exchange_count == 2:
-            path.unlink()
-            path.symlink_to(writer_one)
-        original_exchange(candidate, path)
-        if exchange_count == 2:
-            path.unlink()
-            path.symlink_to(writer_two)
-            info = path.lstat()
-            writer_two_identity = (info.st_dev, info.st_ino, path.readlink())
-
-    def fail_commit(_target, _manifest):
-        raise OSError("injected manifest failure")
-
-    monkeypatch.setattr(module, "atomic_exchange", two_writer_race)
-    monkeypatch.setattr(module, "_write_manifest", fail_commit)
-    with pytest.raises(module.InstallError) as raised:
-        module.execute("reconcile", source, target)
-
-    detail = str(raised.value)
-    recovery_match = re.search(
-        r"alpha: .*preserve recovery path (?P<path>\S+)", detail
-    )
-    assert recovery_match, detail
-    recovery = Path(recovery_match.group("path"))
-    info = live.lstat()
-    assert (info.st_dev, info.st_ino, live.readlink()) == writer_two_identity
-    assert live.resolve() == writer_two
-    assert recovery.is_symlink()
-    assert recovery.resolve(strict=False) == writer_one
-    assert "alpha" in json.loads(manifest_for(target).read_text())["managed"]
-
-
-def test_skill_directory_fsync_failure_rolls_back_and_fsyncs_rollback(
-    tmp_path, monkeypatch
-):
-    module = load_manager_module("managed_installer_skill_fsync_failure")
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    original_fsync = module._fsync_directory
-    target_calls = 0
-
-    def fail_first_target(path):
-        nonlocal target_calls
-        if path == target:
-            target_calls += 1
-            if target_calls == 1:
-                raise OSError("injected skill directory fsync failure")
-        original_fsync(path)
-
-    monkeypatch.setattr(module, "_fsync_directory", fail_first_target)
-    with pytest.raises(OSError, match="injected skill directory fsync failure"):
-        module.execute("install", source, target)
-
-    assert target_calls == 2
+    assert result.returncode == 3
+    assert "skill source contains a symlink" in result.stderr
     assert not (target / "alpha").exists()
-    assert not (target / "beta").exists()
     assert not manifest_for(target).exists()
-
-
-def test_recovery_directory_fsync_failure_rolls_back_before_manifest_and_resyncs(
-    tmp_path, monkeypatch
-):
-    module = load_manager_module("managed_installer_recovery_fsync_failure")
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    original_fsync = module._fsync_directory
-    original_write = module._write_manifest
-    target_syncs = 0
-    recovery_syncs = 0
-    manifest_writes = 0
-
-    def fail_first_recovery_sync(path):
-        nonlocal target_syncs, recovery_syncs
-        if path == target:
-            target_syncs += 1
-        if path.name.startswith(".agent-harness-links."):
-            recovery_syncs += 1
-            if recovery_syncs == 1:
-                raise OSError("injected recovery directory fsync failure")
-        original_fsync(path)
-
-    def count_manifest_write(target_path, manifest):
-        nonlocal manifest_writes
-        manifest_writes += 1
-        original_write(target_path, manifest)
-
-    monkeypatch.setattr(module, "_fsync_directory", fail_first_recovery_sync)
-    monkeypatch.setattr(module, "_write_manifest", count_manifest_write)
-    with pytest.raises(OSError, match="injected recovery directory fsync failure"):
-        module.execute("install", source, target)
-
-    assert manifest_writes == 0
-    assert target_syncs == 2
-    assert recovery_syncs == 2
-    assert not (target / "alpha").exists()
-    assert not (target / "beta").exists()
-    assert not manifest_for(target).exists()
-
-
-def test_manifest_parent_fsync_failure_keeps_manifest_and_links_aligned(
-    tmp_path, monkeypatch
-):
-    module = load_manager_module("managed_installer_manifest_fsync_failure")
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-    original_fsync = module._fsync_directory
-    parent_calls = 0
-
-    def fail_manifest_parent(path):
-        nonlocal parent_calls
-        if path == target.parent:
-            parent_calls += 1
-            if parent_calls == 2:
-                raise OSError("injected manifest parent fsync failure")
-        original_fsync(path)
-
-    monkeypatch.setattr(module, "_fsync_directory", fail_manifest_parent)
-    with pytest.raises(module.ManifestCommitUncertainError, match="manifest replaced"):
-        module.execute("install", source, target)
-
-    manifest = json.loads(manifest_for(target).read_text())
-    assert set(manifest["managed"]) == {"alpha", "beta"}
-    assert (target / "alpha").resolve() == (source / "alpha").resolve()
-    assert (target / "beta").resolve() == (source / "beta").resolve()

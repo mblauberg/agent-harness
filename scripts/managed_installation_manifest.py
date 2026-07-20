@@ -1,4 +1,4 @@
-"""Schema, digest and durable persistence for managed-skill manifests."""
+"""Schema and persistence for managed-skill manifests."""
 
 from __future__ import annotations
 
@@ -9,14 +9,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
-from typing import Any, Callable
-
-try:
-    import scripts.managed_link_identity as link_identity
-except ModuleNotFoundError as exc:
-    if exc.name != "scripts":
-        raise
-    import managed_link_identity as link_identity  # type: ignore[no-redef]
+from typing import Any
 
 
 MANIFEST_NAME = ".agent-harness-installation.json"
@@ -26,14 +19,6 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 class InstallError(ValueError):
     pass
-
-
-class ManifestCommitUncertainError(InstallError):
-    """The manifest pathname changed but its directory fsync failed."""
-
-
-class ManifestCommitRaceError(ManifestCommitUncertainError):
-    """The manifest was published but a bound managed identity then differed."""
 
 
 def now() -> str:
@@ -75,7 +60,6 @@ def empty_manifest(target: Path) -> dict[str, Any]:
         "target_root": str(target.resolve()),
         "updated_at": now(),
         "managed": {},
-        "managed_link_identities": {},
     }
 
 
@@ -96,13 +80,7 @@ def load_manifest(target: Path) -> dict[str, Any]:
         raise InstallError("installation manifest is invalid or not owned by agent-harness")
     if data.get("target_root") != str(target.resolve()):
         raise InstallError("installation manifest belongs to a different target root")
-    required_entry = {
-        "owner",
-        "source_target",
-        "source_sha256",
-        "installed_at",
-        "history",
-    }
+    required_entry = {"owner", "source_target", "source_sha256", "installed_at", "history"}
     for name, item in data["managed"].items():
         if not isinstance(name, str) or not SKILL_NAME.fullmatch(name):
             raise InstallError("installation manifest contains an invalid skill name")
@@ -122,32 +100,14 @@ def load_manifest(target: Path) -> dict[str, Any]:
             raise InstallError(f"installation manifest digest is invalid: {name}")
         if not isinstance(item.get("history"), list):
             raise InstallError(f"installation manifest history is invalid: {name}")
-    has_identities = "managed_link_identities" in data
-    identities = data.get("managed_link_identities", {})
-    if (
-        not isinstance(identities, dict)
-        or any(
-            not link_identity.valid_manifest_link_identity(identity)
-            for identity in identities.values()
-        )
-        or (has_identities and set(identities) != set(data["managed"]))
-    ):
-        raise InstallError("installation manifest managed-link identities are invalid")
-    # Whole-field absence identifies a legacy schema-v1 manifest. The next
-    # successful locked mutation baselines every currently managed link.
-    data["managed_link_identities"] = identities
     return data
 
 
-def write_manifest(
-    target: Path,
-    manifest: dict[str, Any],
-    sync_directory: Callable[[Path], None],
-) -> None:
+def write_manifest(target: Path, manifest: dict[str, Any]) -> None:
     path = manifest_path(target)
     path.parent.mkdir(parents=True, exist_ok=True)
     manifest["updated_at"] = now()
-    temp: Path | None = None
+    temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
             "w",
@@ -156,22 +116,16 @@ def write_manifest(
             suffix=".tmp",
             delete=False,
         ) as handle:
-            temp = Path(handle.name)
+            temporary = Path(handle.name)
             json.dump(manifest, handle, indent=2, sort_keys=True)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp, path)
-        try:
-            sync_directory(path.parent)
-        except OSError as exc:
-            raise ManifestCommitUncertainError(
-                "installation manifest replaced but parent-directory durability "
-                f"is uncertain: {path}"
-            ) from exc
+        os.replace(temporary, path)
+        temporary = None
     finally:
-        if temp and temp.exists():
-            temp.unlink()
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def entry(

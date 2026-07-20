@@ -372,31 +372,13 @@ excluded from context scans.
 only harness-owned skill links. Every normal install repairs missing or stale
 managed links and retires safe managed leftovers. A versioned manifest records
 ownership, source tree digests, the bound target and rename history beside the
-target skills directory. `scripts/managed_installation_manifest.py` owns the
-manifest schema, source digest and durable replacement. The post-install
-integrity check verifies catalogue presence and the exact identity of every
-manifest-managed name, including names retired from the current catalogue.
-Missing, noncanonical or replaced required names fail; other extra symlinks
-produce warnings. Unmanaged paths are never claimed, overwritten or
-automatically removed; changed managed targets fail for user resolution. A
-bounded owner-only lock
-serialises each mutable manifest read, link plan and durable commit. Atomic
-exchange, no-clobber hard links and exact-identity moves retain a private
-recovery path when an uncooperative writer wins a race; absent installs enter
-the journal only when the live path still matches the exact staged link
-identity. A displaced original remains there until commit. Pre-publication
-rollback restores that inode atomically and never creates a lookalike link under
-the old identity map. The live and recovery directories reach a durability
-barrier before manifest replacement and after conditional rollback. The
-schema-v1 identity map binds every managed name to the exact installed device,
-inode, mode, size, modification time and raw link target. Only whole-field
-absence is legacy; a present partial map is invalid. Legacy manifests baseline
-the complete map during their next successful locked mutation. Identity is
-checked before and after manifest publication. Manifest publication is an
-explicit transaction boundary: every later validation, snapshot or recovery-
-cleanup failure reports typed uncertain committed state and preserves the
-published manifest, live links and remaining recovery evidence. A later check
-stays truthful instead of rolling links into a known inconsistency.
+target skills directory. The post-install integrity check verifies catalogue
+presence. Missing or noncanonical required names fail; extra symlinks resolving
+outside the canonical skill tree produce warnings. Unmanaged paths are never
+claimed, overwritten or automatically removed; changed managed targets fail for
+user resolution. A staged temporary link is atomically replaced into place
+before the manifest is written; rerunning the installer reconciles any partial
+result.
 Provider bootstraps remain small and share the same precedence sentence.
 
 ## Project Fabric Console
