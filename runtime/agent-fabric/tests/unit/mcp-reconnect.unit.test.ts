@@ -1,9 +1,41 @@
-import { ProtocolTransportError } from "@local/agent-fabric-protocol";
+import { FABRIC_OPERATIONS, ProtocolTransportError } from "@local/agent-fabric-protocol";
 import { describe, expect, it } from "vitest";
 
-import { errorPayload, retryRecoveredProtocolCall } from "../../src/mcp/server.ts";
+import {
+  errorPayload,
+  isRecoverableProtocolInterruption,
+  retryRecoveredProtocolCall,
+} from "../../src/mcp/server.ts";
 
 describe("MCP recovered protocol retry", () => {
+  it("recognizes a queued saturation timeout as proven unsubmitted while the transport remains open", () => {
+    const timeout = new ProtocolTransportError(
+      "PROTOCOL_TIMEOUT",
+      "queued protocol request timed out: fabric.v1.message.send",
+      { requestState: "queued" },
+    );
+
+    expect(isRecoverableProtocolInterruption(timeout, false)).toBe(true);
+    expect(isRecoverableProtocolInterruption(new ProtocolTransportError(
+      "PROTOCOL_TIMEOUT",
+      "in-flight protocol request timed out: fabric.v1.message.send",
+      { requestState: "in-flight" },
+    ), false)).toBe(false);
+  });
+
+  it("turns a second timeout into actionable reconnect guidance", async () => {
+    await expect(retryRecoveredProtocolCall(
+      async () => {
+        throw new ProtocolTransportError("PROTOCOL_TIMEOUT", "in-flight retry timed out");
+      },
+      FABRIC_OPERATIONS.receiveMessages,
+      { limit: 10, visibilityTimeoutMs: 30_000 },
+    )).rejects.toMatchObject({
+      code: "RECONNECT_REQUIRED",
+      action: "The fabric_message_receive outcome is unknown and no delivery was acknowledged. Wait at least 30000 ms (the requested visibilityTimeoutMs) before retrying fabric_message_receive.",
+    });
+  });
+
   it("preserves a non-disconnect transport error from the retried operation", async () => {
     for (const code of [
       "PROTOCOL_RESULT_INVALID",
