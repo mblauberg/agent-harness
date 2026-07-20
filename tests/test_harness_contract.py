@@ -499,10 +499,16 @@ def test_readme_is_concise_public_facing_and_free_of_process_commentary():
     # The cap needs real headroom or it stops being a sprawl guard and becomes a
     # freeze: the previous 1000 sat 5 words above a 995-word README, so every edit,
     # including correcting a false claim, had to pay for itself by deleting prose.
-    # That is how disclosures get traded away for adjectives. 1400 is set well above
-    # the current length on purpose. If a change needs more room than this, the README
-    # has stopped being a front page and the depth belongs in docs/.
-    assert len(readme.split()) <= 1400
+    # That is how disclosures get traded away for adjectives. If a change needs more
+    # room than this, the README has stopped being a front page and the depth belongs
+    # in docs/.
+    #
+    # Raised 1400 -> 1800 on 2026-07-21 (user decision): the front page now carries
+    # two on-page Mermaid diagrams — the architecture overview and the delivery loop —
+    # so a reviewer sees the shape without leaving the page. Their source and the
+    # loop's mandatory screen-reader accDescr count toward the total, so the cap holds
+    # headroom above them rather than forcing prose out to make room for a picture.
+    assert len(readme.split()) <= 1800
     for retired_phrase in (
         "Experimental:",
         "made public for reuse",
