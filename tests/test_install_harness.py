@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import os
+import re
 import subprocess
 import tomllib
 
@@ -25,6 +26,23 @@ def run(platform: str, home: Path, *arguments: str, **extra_env):
 
 def expected_skills():
     return {path.parent.name for path in (ROOT / "skills").glob("*/SKILL.md")}
+
+
+def ambient_skill_names_and_resolver_root():
+    available = expected_skills()
+    names = set()
+    resolver_roots = set()
+    for ambient in (ROOT / "AGENTS.md", ROOT / "HARNESS.md"):
+        text = ambient.read_text()
+        for code_span in re.findall(r"`([^`]+)`", text):
+            names.update(re.findall(r"[a-z][a-z0-9-]*", code_span))
+        roots = re.findall(r"`(\$HOME/\.agents/skills/<name>/)`", text)
+        assert roots == ["$HOME/.agents/skills/<name>/"], (
+            f"{ambient.name} must state exactly one D12 resolver root"
+        )
+        resolver_roots.update(roots)
+    assert len(resolver_roots) == 1
+    return names & available, resolver_roots.pop()
 
 
 def test_installs_claude_skills_and_global_instructions_idempotently(tmp_path):
@@ -91,6 +109,38 @@ def test_installs_codex_skills_and_global_instructions(tmp_path):
     second = run("codex", tmp_path, CODEX_HOME=str(config))
     assert second.returncode == 0, second.stderr
     assert codex_config.read_text() == configured
+
+
+def test_ambient_skill_names_resolve_on_both_installed_platform_layouts(tmp_path):
+    """AC-P3: ambient skill names resolve through each static install layout."""
+    names, resolver_template = ambient_skill_names_and_resolver_root()
+    assert names
+
+    for platform, config_name, variable in (
+        ("claude", ".claude", "CLAUDE_CONFIG_DIR"),
+        ("codex", ".codex", "CODEX_HOME"),
+    ):
+        home = tmp_path / platform
+        home.mkdir()
+        # Model the canonical checkout location named by the D12 resolver line
+        # while keeping the isolated install's actual source tree immutable.
+        (home / ".agents").symlink_to(ROOT, target_is_directory=True)
+        config = home / config_name
+        result = run(platform, home, **{variable: str(config)})
+        assert result.returncode == 0, result.stderr
+
+        resolver_root = Path(
+            resolver_template.replace("$HOME", str(home)).replace("<name>/", "")
+        )
+        assert resolver_root.resolve() == (ROOT / "skills").resolve()
+        for name in names:
+            installed = config / "skills" / name / "SKILL.md"
+            resolved = resolver_root / name / "SKILL.md"
+            assert installed.is_file(), f"{platform} did not install skills/{name}/SKILL.md"
+            assert resolved.is_file(), f"resolver root cannot find skills/{name}/SKILL.md"
+            assert installed.resolve() == resolved.resolve(), (
+                f"{platform} installed root disagrees with $HOME/.agents/skills/{name}/"
+            )
 
 
 def test_all_mcp_clients_are_an_explicit_subscription_native_opt_in(tmp_path):

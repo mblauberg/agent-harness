@@ -58,9 +58,8 @@ An authentication issue may occur in certain situations.
 
 ## Claim discipline
 
-Load the hub schema:
-`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/claim-discipline.md`,
-for the claim classes, the safer-wording table, and the implicit-completion
+Load the `natural-writing` skill for its hub schema: the claim classes, the
+safer-wording table, and the implicit-completion
 tense trap. Engineering-specific application:
 
 - **README feature lists claim only what ships today.** If a feature is
@@ -84,9 +83,8 @@ tense trap. Engineering-specific application:
 
 Use Australian English unless the project, product, API, quoted source, or
 repository convention requires another variant. This is the hub's always-on
-default; the full mechanics checklist (spelling exceptions, punctuation,
-numbers, terminology) lives in
-`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/au-english.md`.
+default; load the `natural-writing` skill for its full mechanics checklist
+(spelling exceptions, punctuation, numbers, terminology).
 No engineering-specific exception applies.
 
 ## Editing Checklist

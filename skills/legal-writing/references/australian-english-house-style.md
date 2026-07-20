@@ -1,10 +1,9 @@
 # Australian English House Style (legal overlay)
 
 Use this reference for prose-level editing. Use the verified forum adapter for
-law, procedure, forms, fees, deadlines, layout and filing method. Load the hub
-default first:
-`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/au-english.md`,
-for general spelling, punctuation, numbers, dates and terminology
+law, procedure, forms, fees, deadlines, layout and filing method. Load the
+`natural-writing` skill first for its hub default on general spelling,
+punctuation, numbers, dates and terminology
 mechanics. This file adds only the legal-specific overlay: forum labels,
 citation and defined-term conventions, document structure, tone, and the
 lint-enforced rules the hub does not know about.
@@ -48,7 +47,7 @@ extract.
 
 ## Punctuation (legal-specific enforcement)
 
-The hub `au-english.md` sets the general em-dash ban, en-dash-for-ranges
+The `natural-writing` skill's hub default sets the general em-dash ban, en-dash-for-ranges
 rule, semicolon and quotation-mark conventions. This skill's overlay:
 
 - The em-dash ban is **lint-enforced** here (`scripts/lint_legal_style.py`

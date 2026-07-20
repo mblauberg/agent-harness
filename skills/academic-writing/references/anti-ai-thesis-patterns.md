@@ -1,8 +1,7 @@
 # Anti-AI Thesis Patterns (academic overlay)
 
-Load the hub taxonomy first:
-`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/anti-ai-taxonomy.md`,
-for the tiered artefact/density/structural sweep, additive drafting,
+Load the `natural-writing` skill first for its hub taxonomy: the tiered
+artefact/density/structural sweep, additive drafting,
 defensive over-qualification, calibrated confidence, the positive-form
 integrity guard, absence tombstones, and the final scrub checklist. This
 file adds only the

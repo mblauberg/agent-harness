@@ -25,9 +25,9 @@ bibliography or replace citations without explicit authority.
    labels, cross-references, result macros, paths and technical names.
 3. This skill is a specialization of the `natural-writing` hub: it owns
    thesis register, LaTeX/citation-key preservation and the empirical-research
-   overlays, and links to the hub for the shared doctrine. Load the hub
-   default [Australian English](../natural-writing/references/au-english.md)
-   and, for prose, [academic register](references/academic-style-au.md) plus
+   overlays, and links to the hub for the shared doctrine. Load the
+   `natural-writing` skill for its Australian English default and, for prose,
+   [academic register](references/academic-style-au.md) plus
    the matching [workflow mode](references/editing-workflows.md); see that
    file's reference map for which remaining hub/overlay pair (anti-AI, condense,
    claim discipline, chapter, engineering voice or citation/LaTeX safety) a

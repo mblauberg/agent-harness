@@ -3,11 +3,9 @@
 Use this reference for any `draft`, `rewrite`, `condense`, `diagnose` or `final-scrub` task involving court
 forms, affidavits, submissions, orders, chronologies, correspondence or annexure notes.
 
-Load the hub first for the doctrine this file does not restate:
-`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/anti-ai-taxonomy.md`
-for the tiered artefact/density/structural sweep, and
-`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/condense-pass.md`
-for the shared condense procedure and integrity check. This file is the
+Load the `natural-writing` skill first for the doctrine this file does not
+restate: the tiered artefact/density/structural sweep and the shared condense
+procedure and integrity check. This file is the
 legal-specific overlay: the Legal Function Test (a distinct classification
 scheme, not the hub's observed/inferred claim schema), legal noun-stack
 examples, and the leave/interlocutory register and persuasive-strength

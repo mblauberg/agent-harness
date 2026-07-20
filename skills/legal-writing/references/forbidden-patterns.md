@@ -1,8 +1,7 @@
 # Forbidden Patterns
 
 Use this as a scrub list before filing-facing work or correspondence leaves the workspace. This file is the
-legal overlay on the hub taxonomy:
-`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/anti-ai-taxonomy.md`.
+legal overlay on the hub taxonomy owned by the `natural-writing` skill.
 It lists only the filing-facing hard bans, affidavit-specific overreach, quotation integrity, and the
 legal-register carve-outs the hub's general list would otherwise misclassify as tells (`reasonably arguable`,
 formal connectives, correct passives).

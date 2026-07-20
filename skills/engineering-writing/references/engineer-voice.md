@@ -1,8 +1,7 @@
 # Writing Like an Engineer, Not Like AI (engineering overlay)
 
-Load the hub taxonomy first:
-`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/anti-ai-taxonomy.md`,
-for the tiered artefact/density/structural sweep, noun-stacking,
+Load the `natural-writing` skill first for its hub taxonomy: the tiered
+artefact/density/structural sweep, noun-stacking,
 Markdown residue, additive drafting, defensive over-qualification, and
 calibrated confidence. This file adds only the engineering-specific
 material: internal process language in deliverables, positive habits with

@@ -46,8 +46,7 @@ passing; heuristic judgement is not a standards result.
 
 ## Findings
 
-Findings use `code-review`'s canonical
-[finding contract](../../code-review/references/finding-contract.md) — severity,
+Findings use the `code-review` skill's canonical finding contract — severity,
 provenance, mechanism, impact, fix and evidence fields. Do not restate that
 schema here; load it. This branch adds only UI-specific reporting duties on
 top of it:

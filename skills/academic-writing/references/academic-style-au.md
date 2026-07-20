@@ -3,9 +3,8 @@
 Use this reference when a thesis section needs academic register, tense and
 voice control, paragraph rhythm, or final style consistency. For Australian
 English mechanics (spelling, punctuation, hyphenation, numbers, dates), load
-the hub default at
-`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/au-english.md`
-first; this file adds only the academic-specific exceptions below.
+the `natural-writing` skill first for its hub default; this file adds only the
+academic-specific exceptions below.
 
 ## Baseline Register
 
@@ -119,7 +118,7 @@ only when it removes ambiguity.
 
 ## Final Style Checklist
 
-- Australian English mechanics applied (see the hub `au-english.md`).
+- Australian English mechanics from the `natural-writing` skill applied.
 - No em dashes or prose `---`.
 - No generic chapter throat-clearing.
 - No inflated novelty or impact language.
