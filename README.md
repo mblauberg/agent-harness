@@ -115,9 +115,9 @@ Installation links each skill into `~/.claude/skills/` and `~/.codex/skills/`,
 and links the thin `provenant` command into
 `${PROVENANT_BIN_DIR:-$HOME/.local/bin}`; it warns when that directory is not
 on `PATH`, and never edits shell startup files. If the installer exits non-zero,
-follow the message it prints: exit `3` flags a command collision, an
-incompatible instruction target, or a managed skill-link conflict, and
-instruction conflicts include the bootstrap line to add.
+follow the message it prints: exit `3` flags a command collision, incompatible
+instruction target, or managed skill-link conflict, and instruction conflicts
+include the bootstrap line to add.
 
 `provenant doctor` checks Fabric configuration and enabled adapters (identity
 and non-answer interfaces, not login or quota); Provenant never sets or persists
