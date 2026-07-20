@@ -104,6 +104,9 @@ esac
 
 mkdir -p "$platform_home"
 "$ROOT/scripts/install-skills" --target "$platform_home/skills"
+if [[ "$PLATFORM" == "claude" ]]; then
+  "$ROOT/scripts/install-workflows" --target "$platform_home/workflows"
+fi
 if [[ "$PLATFORM" == "codex" ]]; then
   "$ROOT/scripts/configure-codex-skill-overrides.py" \
     --config "$platform_home/config.toml"
