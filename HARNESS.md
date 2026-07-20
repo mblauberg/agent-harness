@@ -46,13 +46,13 @@ confidence; `clean` is valid, fluent unverified output is not.
 | Risk | Minimum review pressure |
 |---|---|
 | `routine` | chair plus objective/native checks |
-| `substantial` | fresh native review plus the other primary |
-| `crucial` | substantial coverage; attempt one distinct bonus family |
-| `terminal` | substantial coverage; attempt two distinct bonus families |
+| `substantial` | multiple targeted lenses plus strong other-primary full-scope review |
+| `crucial` | substantial coverage plus another strong distinct-family full-scope review when available |
+| `terminal` | all preceding coverage with stronger targeted and adversarial pressure |
 
-Bonus families never block on absence, quota or API failure (record skipped legs); the other
-primary is load-bearing for substantial+ review. Claims block only after primary-family
-corroboration and evidence, never majority-vote opinions.
+The chair adapts topology and concurrency; unavailable legs need recorded substitution, compensating
+evidence or omission. If the other primary is unavailable, two strong distinct-family full-scope
+reviews plus targeted lenses may substitute. Evidence, never majority voting, decides claims.
 
 ## Load depth only when triggered
 

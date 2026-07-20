@@ -28,7 +28,7 @@ name a reconciliation run.
    `../deliver/templates/RUN.template.json`, set profile `software`, and follow
    [run-contract.md](references/run-contract.md). Routine minor work may proceed
    without `RUN.json` unless the user or project policy requests one.
-2. Keep an adaptive plan. Per slice use `tdd` for observable change, `refactor`
+2. Keep an adaptive plan. Use `tdd` for observable change, `refactor`
    for approved behaviour-preserving structure and `diagnose` for unknown
    causes. Migrations may also need behaviour tests and equivalence evidence.
    Use `orchestrate` when decomposition or independent coverage helps; adapt
@@ -38,10 +38,10 @@ name a reconciliation run.
    [migration compatibility](references/migration-compatibility.md).
 3. Run deterministic checks; map each criterion to evidence. When required, run
    `evaluate` and attach its passing receipt.
-4. Invoke read-only `code-review` under the `HARNESS.md` risk ladder. Fresh
-   native and other-primary reviews load-bear; bonus families are
-   opportunistic. Record adapter and actual family.
-5. Repair blockers, then repeat verification and independent review. Stop at
+4. Invoke read-only `code-review` under the current `HARNESS.md` risk ladder.
+   Its adaptive topology and recorded substitution path load-bear. Record
+   adapter, actual family, omissions, and substitutions.
+5. Repair blockers, then repeat verification and review. Stop at
    the scaled repair budget (guardrail-not-target: 1-2 routine, up to ~5
    complex; see `references/run-contract.md`) or on scope/design drift;
    return evidence to the user or `scope`.
@@ -62,10 +62,11 @@ name a reconciliation run.
 
 ## Authority and completion
 
-- Reviewers are source-read-only except assigned run artifacts; partition
-  writers or use one serial applier.
-- Record missing legs as failed/unavailable; never filter them. Missing
-  load-bearing primary coverage blocks; missing bonus-family output does not.
+- Reviewed source stays immutable; separately authorised artifacts and Fabric
+  communication stay bounded.
+- Record missing legs as failed/unavailable; never filter them. Review coverage
+  blocks only when the current HARNESS ladder and its substitution path remain
+  unsatisfied.
 - Objective evidence outranks reviewer confidence; adjudicate conclusions,
   never vote.
 - Substantial+ starts a fresh implementation session bound to approved digests.

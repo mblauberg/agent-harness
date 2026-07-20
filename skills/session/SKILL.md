@@ -5,8 +5,8 @@ description: "Use for start, checkpoint, handoff, compaction, or end-of-session 
 
 # Session
 
-Store continuity in project's canonical owner; without write authority,
-propose a delta in chat. Project instructions may override continuity paths.
+Store continuity in the project owner; without write authority, propose a chat
+delta. Project instructions may override continuity paths.
 Fallbacks:
 state `docs/STATE.md` (about 120 lines), handoffs `docs/handoffs/`, archive
 `docs/archive/`. Instructions may override `STATE_FILE`, `HANDOFF_DIR` and
@@ -34,9 +34,9 @@ In the same update, archive a consumed handoff, mark it consumed/time-stamped
 and index it; never delete it. Update `work-map` only when the
 durable route changes; live state belongs to the work tracker.
 
-Before checkpoint load [context-hygiene.md](references/context-hygiene.md). Run
-its read-only audit when run directories, logs, handoffs or large agent-facing
-docs accumulate. Consolidate state; never paste transcripts into handoffs.
+Before checkpoint load [context-hygiene.md](references/context-hygiene.md),
+including its private-memory contract. Run its read-only audit when artifacts
+accumulate. Consolidate state; never paste transcripts into handoffs.
 
 Provider session retention is minimal: contract-required identifiers,
 generation/callback state and resumable digests only. Never retain credentials

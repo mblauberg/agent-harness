@@ -47,12 +47,13 @@ Current durable aliases (verify against runtime before execution):
 
 | Family | flagship | workhorse | scout |
 |---|---|---|---|
-| Claude | Fable 5; Opus 4.8 fallback | Sonnet 5 | Haiku 4.5 |
+| Claude | Opus | Sonnet | Haiku |
 | OpenAI GPT-5.6 | Sol | Terra | Luna |
 
-Fable leads/synthesises for Claude and Opus independently reviews; if Fable is
-unavailable, Opus leads and another fresh-context reviewer restores separation.
-Sol leads for Codex. Eligible Sol lead/orchestrator routes may use Ultra;
+Opus is Claude's default flagship and high-effort critical reviewer. Sonnet is
+the low-to-high workhorse. Fable is not a default alias or fallback: an explicit
+`crucial` or `terminal` synthesis/adjudication route may select it at low or
+medium effort, with the override recorded. Sol leads for Codex. Eligible Sol lead/orchestrator routes may use Ultra;
 runtime model capabilities decide the effective effort and every fallback is
 recorded. Claude and Codex are equal primary families.
 
@@ -93,6 +94,22 @@ checks and record `CROSS-FAMILY-NOT-RUN` instead of pretending it happened.
 In dynamic workflows, bind every stage from its task class. Route bulk
 scan/extract stages to scout and reserve flagship for synthesis/adjudication
 (`dynamic-workflows.md`).
+
+## Adaptive review topology
+
+For substantial work, normally assign at least three independent targeted
+lenses and one strong full-scope reviewer from the other primary family.
+Targeted lenses may use smaller models; their briefs must differ by failure
+surface. Crucial and terminal work normally add a second strong full-scope
+reviewer from a distinct family when available.
+
+The chair schedules these legs under a per-run configurable concurrency ceiling
+and may sequence them around deterministic checks. It need not wait for a
+particular model. A missing or late leg requires a recorded substitution,
+compensating evidence, or omitted-leg reason. If the other primary is
+unavailable, two strong full-scope reviewers from other families plus the
+targeted lenses may substitute. Overlap creates defect pressure, not votes;
+objective checks and source evidence remain authoritative.
 
 Express chains by **role → tier/family**, resolving names at runtime:
 

@@ -44,26 +44,25 @@ def load_router():
     return module
 
 
-def test_claude_lead_prefers_fable_and_reviewer_prefers_opus():
+def test_claude_flagship_and_critical_review_default_to_opus():
     lead, lead_route = resolve("--adapter", "claude", "--alias", "flagship", "--role", "lead")
     review, review_route = resolve(
         "--adapter", "claude", "--alias", "flagship", "--role", "critical-review"
     )
     assert lead.returncode == review.returncode == 0
-    assert lead_route["resolved_model"] == "fable"
-    assert review_route["resolved_model"] == "opus"
+    assert lead_route["resolved_model"] == review_route["resolved_model"] == "opus"
     assert lead_route["model_family"] == review_route["model_family"] == "anthropic"
 
 
-def test_claude_other_primary_uses_fable_not_native_reviewer_route():
+def test_claude_other_primary_uses_opus():
     result, route = resolve(
         "--adapter", "claude", "--alias", "flagship", "--role", "other-primary"
     )
     assert result.returncode == 0
-    assert route["resolved_model"] == "fable"
+    assert route["resolved_model"] == "opus"
 
 
-def test_fable_unavailable_falls_back_to_opus_and_records_substitution():
+def test_opus_unavailable_has_no_implicit_fable_fallback():
     result, route = resolve(
         "--adapter",
         "claude",
@@ -72,11 +71,103 @@ def test_fable_unavailable_falls_back_to_opus_and_records_substitution():
         "--role",
         "lead",
         "--available-model",
-        "opus",
+        "fable",
+    )
+    assert result.returncode == 1
+    assert route["status"] == "no_candidate_available"
+
+
+@pytest.mark.parametrize(
+    "model",
+    (
+        "fable", "claude-fable-5", "anthropic/claude-fable-5",
+        "claude.fable.5", "Claude Fable 5", "claude:fable:5", "fable5", "claudefable5",
+    ),
+)
+def test_explicit_fable_identifiers_require_the_bounded_risk_override(model):
+    result, route = resolve(
+        "--adapter", "claude", "--alias", "flagship", "--role", "worker",
+        "--model", model, "--effort", "high",
+    )
+    assert result.returncode == 1
+    assert route["status"] == "fable_requires_risk_tier_override"
+
+
+@pytest.mark.parametrize(
+    ("risk_tier", "role", "effort"),
+    (("crucial", "synthesis", "medium"), ("terminal", "adjudication", "low")),
+)
+def test_fable_requires_explicit_risk_tier_synthesis_or_adjudication(risk_tier, role, effort):
+    result, route = resolve(
+        "--adapter", "claude", "--alias", "flagship", "--role", role,
+        "--risk-tier", risk_tier, "--effort", effort, "--available-model", "fable",
     )
     assert result.returncode == 0
-    assert route["resolved_model"] == "opus"
-    assert route["substitution"] == "fable unavailable; used opus"
+    assert route["resolved_model"] == "fable"
+    assert route["risk_tier"] == risk_tier
+    assert route["route_source"] == "risk-tier-override"
+    assert route["policy_override"] == f"{risk_tier}-fable-synthesis-adjudication"
+    assert route["effort"] == effort
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ("--role", "synthesis", "--risk-tier", "substantial"),
+        ("--role", "worker", "--risk-tier", "crucial"),
+        ("--role", "synthesis", "--risk-tier", "crucial", "--effort", "high"),
+    ),
+)
+def test_fable_risk_override_fails_closed_outside_bounded_role_tier_and_effort(arguments):
+    result, route = resolve(
+        "--adapter", "claude", "--alias", "flagship", *arguments,
+        "--available-model", "fable",
+    )
+    assert result.returncode != 0
+    assert route["status"] in {
+        "risk_tier_override_unavailable",
+        "risk_tier_role_mismatch",
+        "risk_tier_effort_above_ceiling",
+    }
+
+
+@pytest.mark.parametrize("model", ("opus", "sonnet", "claude-opus-4-8"))
+def test_fable_risk_override_rejects_non_fable_explicit_models(model):
+    result, route = resolve(
+        "--adapter", "claude", "--alias", "flagship", "--role", "synthesis",
+        "--risk-tier", "crucial", "--model", model, "--effort", "medium",
+    )
+    assert result.returncode == 1
+    assert route["status"] == "risk_tier_model_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("roles", "synthesis"),
+        ("roles", ["synthesis"]),
+        ("models", ["fable", "opus"]),
+        ("maximum_effort", "high"),
+        ("default_effort", "high"),
+    ),
+)
+def test_fable_risk_override_configuration_is_closed_and_bounded(tmp_path, monkeypatch, capsys, field, value):
+    router = load_router()
+    catalog = json.loads((ROOT / "config" / "model-routing.json").read_text())
+    catalog["families"]["anthropic"]["risk_tier_overrides"]["crucial"][field] = value
+    catalog_path = tmp_path / "model-routing.json"
+    catalog_path.write_text(json.dumps(catalog))
+    monkeypatch.setattr(router, "CATALOG_PATH", catalog_path)
+
+    result = router.main([
+        "resolve", "--adapter", "claude", "--alias", "flagship",
+        "--role", "synthesis", "--risk-tier", "crucial",
+        "--adapter-gate", "direct-cli",
+    ])
+
+    route = json.loads(capsys.readouterr().out)
+    assert result == 2
+    assert route["status"] == "risk_tier_config_invalid"
 
 
 def test_openai_aliases_resolve_to_account_default_dispatch():

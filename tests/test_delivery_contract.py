@@ -316,6 +316,51 @@ def test_complete_delivery_delegation_inherits_approval_and_must_narrow_every_di
         )
 
 
+def test_review_delegation_separates_source_read_artifacts_and_correlated_fabric_reply():
+    module = load(AUTHORITY_MAPPER_PATH, "authority_mapping_review_delegation")
+    delivery = json.loads((AUTHORITY_FIXTURE_ROOT / "delivery-authority.json").read_text())
+    reply_operation = "fabric.v1.task.complete-with-reply"
+    delivery["allowed_fabric_operations"].append(reply_operation)
+    delivery["delegations"] = [{
+        "actor": "reviewer-1",
+        "schema_version": 2,
+        "workspace_roots": ["."],
+        "allowed_source_paths": ["input"],
+        "allowed_artifact_paths": ["output/reviews/reviewer-1"],
+        "allowed_fabric_operations": [
+            "fabric.v1.artifact.publish", "fabric.v1.task.read", reply_operation,
+        ],
+        "denied_paths": [".git"],
+        "denied_fabric_operations": ["fabric.v1.write-lease.acquire"],
+        "prohibited_actions": ["deployment", "external-release"],
+        "disclosure": "approved-providers",
+        "secrets_access": "none",
+        "secret_refs": [],
+        "deployment": False,
+        "deployment_targets": [],
+        "irreversible_actions": False,
+        "irreversible_action_ids": [],
+        "network": {"tool_egress": "none", "allowed_hosts": []},
+        "expires_at": "2026-07-19T00:00:00Z",
+        "budget": {"turns": 2},
+    }]
+    valid_operations = {
+        *delivery["allowed_fabric_operations"], *delivery["denied_fabric_operations"],
+    }
+
+    mapped = module.map_delivery_delegations(
+        delivery, valid_operations=valid_operations, valid_cost_pattern=COST_PATTERN,
+    )[0]["authority"]
+
+    assert mapped["sourcePaths"] == ["input"]
+    assert mapped["artifactPaths"] == ["output/reviews/reviewer-1"]
+    assert set(mapped["sourcePaths"]).isdisjoint(mapped["artifactPaths"])
+    assert mapped["actions"] == [
+        "fabric.v1.artifact.publish", "fabric.v1.task.complete-with-reply", "fabric.v1.task.read",
+    ]
+    assert mapped["deniedActions"] == ["fabric.v1.write-lease.acquire"]
+
+
 def test_authority_evidence_digest_must_bind_the_linked_approval_artifact():
     module = load_validator()
     candidate = fixture()

@@ -44,6 +44,12 @@ cat > "$ROOT/RUN_RECEIPT.json" <<EOF
   "task": "",
   "retention_policy": "capsule-plus-referenced-evidence",
   "terminal_reason": null,
+  "review_plan": {
+    "risk_tier": "routine",
+    "chair_family": "",
+    "concurrency_ceiling": 1,
+    "reviews": []
+  },
   "pair": {
     "mode": "solo",
     "chair_family": "",

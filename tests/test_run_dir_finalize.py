@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 INIT = ROOT / "skills" / "orchestrate" / "scripts" / "run_dir_init.sh"
@@ -27,17 +29,201 @@ def add_manifest_row(run, row):
         handle.write(row + "\n")
 
 
+def review(review_id, scope, lens, family, tier="flagship", status="complete", substitution_for="", wave=1):
+    evidence_digest = "sha256:" + __import__("hashlib").sha256((review_id + ":evidence").encode()).hexdigest()
+    route_digest = "sha256:" + __import__("hashlib").sha256((review_id + ":route").encode()).hexdigest()
+    return {
+        "id": review_id, "scope": scope, "lens": lens, "family": family,
+        "tier": tier, "status": status, "substitution_for": substitution_for,
+        "evidence": {"path": f"reviews/{review_id}.md", "digest": evidence_digest},
+        "reason": "provider unavailable" if status != "complete" else "",
+        "wave": wave,
+        "adapter": "claude" if family == "anthropic" else "codex",
+        "model": "opus" if status == "complete" else "",
+        "catalog_model": "" if status == "complete" else "",
+        "route_receipt": {"path": f"reviews/{review_id}.route.json", "digest": route_digest},
+        "reviewer_id": review_id,
+    }
+
+
+def substantial_plan(risk="substantial"):
+    return {
+        "risk_tier": risk,
+        "chair_family": "openai",
+        "concurrency_ceiling": 4,
+        "reviews": [
+            review("target-memory", "targeted", "memory", "openai", "workhorse"),
+            review("target-routing", "targeted", "routing", "openai", "workhorse"),
+            review("target-authority", "targeted", "authority", "anthropic", "workhorse"),
+            review("opus-full", "full-scope", "whole-change", "anthropic"),
+        ],
+    }
+
+
+def test_substantial_review_topology_is_machine_checked():
+    assert run_dir_finalize._validate_review_plan(substantial_plan()) == []
+    plan = substantial_plan()
+    plan["reviews"] = plan["reviews"][1:]
+    assert any("three targeted lenses" in error for error in run_dir_finalize._validate_review_plan(plan))
+    plan["reviews"].append(
+        review("target-missing", "targeted", "missing-lens", "google", status="omitted", substitution_for="targeted-lens", wave=2)
+    )
+    assert run_dir_finalize._validate_review_plan(plan) == []
+    plan["reviews"][-1]["lens"] = plan["reviews"][0]["lens"]
+    assert any("three targeted lenses" in error for error in run_dir_finalize._validate_review_plan(plan))
+
+
+def test_other_primary_unavailability_requires_two_distinct_family_substitutes():
+    plan = substantial_plan()
+    plan["reviews"][-1] = review("primary-down", "full-scope", "other-primary", "anthropic", status="unavailable")
+    plan["reviews"].extend([
+        review("sub-google", "full-scope", "whole-change-a", "google", substitution_for="other-primary", wave=2),
+        review("sub-xai", "full-scope", "whole-change-b", "xai", substitution_for="other-primary", wave=2),
+    ])
+    assert run_dir_finalize._validate_review_plan(plan) == []
+    plan["reviews"].pop()
+    assert any("two-family substitution" in error for error in run_dir_finalize._validate_review_plan(plan))
+    plan = substantial_plan()
+    plan["reviews"][-1] = review("wrong-primary-down", "full-scope", "other-primary", "google", status="unavailable")
+    plan["reviews"].extend([
+        review("sub-xai", "full-scope", "whole-change-a", "xai", substitution_for="other-primary", wave=2),
+        review("sub-mistral", "full-scope", "whole-change-b", "mistral", substitution_for="other-primary", wave=2),
+    ])
+    assert any("other-primary" in error for error in run_dir_finalize._validate_review_plan(plan))
+
+
+def test_crucial_review_topology_records_unavailable_second_family():
+    plan = substantial_plan("crucial")
+    assert any("second distinct-family" in error for error in run_dir_finalize._validate_review_plan(plan))
+    plan["reviews"].append(
+        review("second-family-down", "full-scope", "terminal-challenge", "google", status="unavailable", substitution_for="additional-distinct-family", wave=2)
+    )
+    assert run_dir_finalize._validate_review_plan(plan) == []
+
+
+def test_review_topology_rejects_invalid_concurrency_ceiling():
+    plan = substantial_plan()
+    plan["concurrency_ceiling"] = 0
+    assert any("concurrency_ceiling" in error for error in run_dir_finalize._validate_review_plan(plan))
+    plan = substantial_plan()
+    plan["concurrency_ceiling"] = 3
+    assert any("observed wave" in error for error in run_dir_finalize._validate_review_plan(plan))
+
+
+def test_review_topology_binds_account_default_route_and_review_evidence(tmp_path):
+    evidence = tmp_path / "review.md"
+    evidence.write_text("review output")
+    route = tmp_path / "route.json"
+    route.write_text(json.dumps({
+        "adapter": "codex", "resolved_model": "", "catalog_model": "gpt-5.6-sol",
+        "model_family": "openai", "model_selection": "account-default",
+        "status": "ok", "route_alias": "flagship", "reviewer_id": "account-default",
+    }))
+    row = review("account-default", "targeted", "correctness", "openai")
+    row.update({
+        "model": "", "catalog_model": "gpt-5.6-sol",
+        "evidence": {"path": evidence.name, "digest": "sha256:" + __import__("hashlib").sha256(evidence.read_bytes()).hexdigest()},
+        "route_receipt": {"path": route.name, "digest": "sha256:" + __import__("hashlib").sha256(route.read_bytes()).hexdigest()},
+    })
+    plan = {"risk_tier": "routine", "chair_family": "", "concurrency_ceiling": 1, "reviews": [row]}
+    assert run_dir_finalize._validate_review_plan(plan, tmp_path) == []
+    route_value = json.loads(route.read_text())
+    route_value["status"] = "error"
+    route.write_text(json.dumps(route_value))
+    row["route_receipt"]["digest"] = "sha256:" + __import__("hashlib").sha256(route.read_bytes()).hexdigest()
+    assert any("identity does not match" in error for error in run_dir_finalize._validate_review_plan(plan, tmp_path))
+    route_value["status"] = "ok"
+    route_value["reviewer_id"] = "different-reviewer"
+    route.write_text(json.dumps(route_value))
+    row["route_receipt"]["digest"] = "sha256:" + __import__("hashlib").sha256(route.read_bytes()).hexdigest()
+    assert any("identity does not match" in error for error in run_dir_finalize._validate_review_plan(plan, tmp_path))
+
+
+def test_review_topology_rejects_malformed_fields_and_symlink_escape(tmp_path):
+    plan = substantial_plan()
+    plan["reviews"][0]["lens"] = []
+    assert any("lens is required" in error for error in run_dir_finalize._validate_review_plan(plan))
+    run = tmp_path / "run"
+    run.mkdir()
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside")
+    (run / "review.md").symlink_to(outside)
+    route = run / "route.json"
+    route.write_text(json.dumps({
+        "status": "ok", "adapter": "codex", "resolved_model": "gpt-test",
+        "catalog_model": "", "model_family": "openai", "route_alias": "workhorse", "reviewer_id": "escaped",
+    }))
+    row = review("escaped", "targeted", "correctness", "openai", tier="workhorse")
+    row.update({
+        "model": "gpt-test", "catalog_model": "",
+        "evidence": {"path": "review.md", "digest": "sha256:" + __import__("hashlib").sha256(outside.read_bytes()).hexdigest()},
+        "route_receipt": {"path": "route.json", "digest": "sha256:" + __import__("hashlib").sha256(route.read_bytes()).hexdigest()},
+    })
+    routine = {"risk_tier": "routine", "chair_family": "", "concurrency_ceiling": 1, "reviews": [row]}
+    assert any("evidence is missing" in error for error in run_dir_finalize._validate_review_plan(routine, run))
+
+
+def test_targeted_reviews_require_distinct_reviewer_and_artifact_identity():
+    plan = substantial_plan()
+    shared_evidence = plan["reviews"][0]["evidence"]
+    shared_route = plan["reviews"][0]["route_receipt"]
+    for row in plan["reviews"][:3]:
+        row["reviewer_id"] = "same-reviewer"
+        row["evidence"] = shared_evidence
+        row["route_receipt"] = shared_route
+    errors = run_dir_finalize._validate_review_plan(plan)
+    assert any("distinct reviewer_id" in error for error in errors)
+    assert any("distinct evidence" in error for error in errors)
+    assert any("distinct route_receipt" in error for error in errors)
+    plan = substantial_plan()
+    evidence_digest = plan["reviews"][0]["evidence"]["digest"]
+    route_digest = plan["reviews"][0]["route_receipt"]["digest"]
+    for index, row in enumerate(plan["reviews"][:3]):
+        row["evidence"] = {"path": f"reviews/copy-{index}.md", "digest": evidence_digest}
+        row["route_receipt"] = {"path": f"reviews/copy-{index}.route.json", "digest": route_digest}
+    errors = run_dir_finalize._validate_review_plan(plan)
+    assert any("distinct evidence" in error for error in errors)
+    assert any("distinct route_receipt" in error for error in errors)
+
+
+@pytest.mark.parametrize(("family", "tier"), (("openai", "flagship"), ("anthropic", "flagship"), ("google", "workhorse")))
+def test_crucial_omission_must_be_distinct_family_flagship(family, tier):
+    plan = substantial_plan("crucial")
+    plan["reviews"].append(
+        review("invalid-extra", "full-scope", "terminal-challenge", family, tier=tier, status="omitted", substitution_for="additional-distinct-family", wave=0)
+    )
+    assert any("second distinct-family" in error for error in run_dir_finalize._validate_review_plan(plan))
+
+
+@pytest.mark.parametrize(("field", "value"), (("risk_tier", []), ("chair_family", [])))
+def test_review_topology_malformed_top_level_values_fail_closed(field, value):
+    plan = substantial_plan()
+    plan[field] = value
+    assert run_dir_finalize._validate_review_plan(plan)
+
+
+@pytest.mark.parametrize("field", ("scope", "tier", "status"))
+def test_review_topology_malformed_review_enums_fail_closed(field):
+    plan = substantial_plan()
+    plan["reviews"][0][field] = []
+    assert run_dir_finalize._validate_review_plan(plan)
+
+
 def test_failed_terminalisation_requires_reason(tmp_path):
     run = init_run(tmp_path)
     assert run_dir_finalize.main([str(run), "--status", "failed"]) == 1
     assert run_dir_finalize.main([str(run), "--status", "failed", "--reason", "reviewer timeout"]) == 0
 
 
-def test_failed_terminalisation_preserves_unmanifested_crash_partial(tmp_path):
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    (("failed", "worker crashed"), ("failed", "worker returned null"), ("cancelled", "worker result missing")),
+)
+def test_non_success_terminalisation_preserves_possible_worker_partial(tmp_path, status, reason):
     run = init_run(tmp_path)
     partial = run / "findings" / "partial-scan.md"
     partial.write_text("worker crashed mid-write")
-    assert run_dir_finalize.main([str(run), "--status", "failed", "--reason", "worker crashed"]) == 0
+    assert run_dir_finalize.main([str(run), "--status", status, "--reason", reason]) == 0
     assert partial.exists()
     receipt = json.loads((run / "RUN_RECEIPT.json").read_text())
     assert receipt["unclassified_paths"] == ["findings/partial-scan.md"]

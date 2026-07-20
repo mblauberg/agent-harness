@@ -24,6 +24,8 @@ Options:
   --orchestrator-family FAMILY Current orchestrator family; same-family routes fail closed.
   --alias ALIAS                Durable route alias: flagship, workhorse, scout (default: flagship).
   --role ROLE                  Route role (default: reviewer).
+  --risk-tier TIER             Optional routine, substantial, crucial, or terminal risk tier.
+  --reviewer-id ID             Stable worker/reviewer identity for receipt binding.
   --model MODEL                Optional model passed to adapter.
   --effort EFFORT              Optional effort passed to adapter.
   --out PATH                   Clean output path; defaults to mktemp.
@@ -36,7 +38,7 @@ Gemini/Agy execution belongs to Agent Fabric, not this direct-CLI helper.
 EOF
 }
 
-TOOL="" MODEL="" EFFORT="" OUT="" PROMPT="" PROMPT_FILE="" CHAIN="" ORCH_FAMILY="" MODEL_ALIAS="flagship" ROUTE_ROLE="reviewer" DOCTOR=0
+TOOL="" MODEL="" EFFORT="" OUT="" PROMPT="" PROMPT_FILE="" CHAIN="" ORCH_FAMILY="" MODEL_ALIAS="flagship" ROUTE_ROLE="reviewer" RISK_TIER="" REVIEWER_ID="" DOCTOR=0
 OUT_CREATED=false
 need_value() {
   [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 2; }
@@ -55,6 +57,8 @@ while [ $# -gt 0 ]; do
     --orchestrator-family) need_value "$@"; ORCH_FAMILY="$2"; shift 2;;
     --alias) need_value "$@"; MODEL_ALIAS="$2"; shift 2;;
     --role) need_value "$@"; ROUTE_ROLE="$2"; shift 2;;
+    --risk-tier) need_value "$@"; RISK_TIER="$2"; shift 2;;
+    --reviewer-id) need_value "$@"; REVIEWER_ID="$2"; shift 2;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done
@@ -173,6 +177,7 @@ emit_record() {
   local requested_effort="${12:-}" effort_source="${13:-}" effort_capability_source="${14:-}" cross cert
   local substitution="${15:-}" requested_model="${16:-$model}" fallback_model="${17:-}"
   local catalog_model="${18:-}" model_selection="${19:-}"
+  local risk_tier="${20:-$RISK_TIER}" policy_override="${21:-}"
   model="$(resolve_model "$tool" "$model")"
   [ -n "$endpoint" ] || endpoint="$(endpoint_provider "$tool")"
   [ -n "$identity" ] || identity="unresolved"
@@ -180,7 +185,7 @@ emit_record() {
   [ -n "$ORCH_FAMILY" ] && valid_family "$ORCH_FAMILY" && [ -n "$family" ] && [ "$ORCH_FAMILY" != "$family" ] && cross="true"
   cert="false"
   [ "$status" = "ok" ] && [ "$cross" = "true" ] && { [ "$guarantee" = "enforced" ] || [ "$guarantee" = "oauth_safe_mode" ]; } && cert="true"
-  printf '{"tool":"%s","adapter":"%s","model":"%s","requested_model":"%s","resolved_model":"%s","fallback_model":"%s","requested_effort":"%s","effort":"%s","effort_source":"%s","effort_capability_source":"%s","effort_substitution":"%s","substitution":"%s","status":"%s","exit":%s,"output_path":"%s","read_only_guarantee":"%s","orchestrator_family":"%s","provider_family":"%s","model_family":"%s","endpoint_provider":"%s","identity_source":"%s","catalog_model":"%s","model_selection":"%s","cross_family":%s,"certification_eligible":%s}\n' \
+  printf '{"tool":"%s","adapter":"%s","model":"%s","requested_model":"%s","resolved_model":"%s","fallback_model":"%s","requested_effort":"%s","effort":"%s","effort_source":"%s","effort_capability_source":"%s","effort_substitution":"%s","substitution":"%s","status":"%s","exit":%s,"output_path":"%s","read_only_guarantee":"%s","orchestrator_family":"%s","provider_family":"%s","model_family":"%s","endpoint_provider":"%s","identity_source":"%s","catalog_model":"%s","model_selection":"%s","route_alias":"%s","reviewer_id":"%s","risk_tier":"%s","policy_override":"%s","cross_family":%s,"certification_eligible":%s}\n' \
     "$(printf '%s' "$tool" | json_escape)" \
     "$(printf '%s' "$tool" | json_escape)" \
     "$(printf '%s' "$model" | json_escape)" \
@@ -204,6 +209,10 @@ emit_record() {
     "$(printf '%s' "$identity" | json_escape)" \
     "$(printf '%s' "$catalog_model" | json_escape)" \
     "$(printf '%s' "$model_selection" | json_escape)" \
+    "$(printf '%s' "$MODEL_ALIAS" | json_escape)" \
+    "$(printf '%s' "$REVIEWER_ID" | json_escape)" \
+    "$(printf '%s' "$risk_tier" | json_escape)" \
+    "$(printf '%s' "$policy_override" | json_escape)" \
     "$cross" \
     "$cert"
 }
@@ -222,7 +231,7 @@ require_cmd() {
 }
 
 run_one() {  # $1 tool $2 model $3 effort -> writes clean answer to OUT, echoes JSON, returns 0/1
-  local tool="$1" model="$2" effort="$3" tmpdir raw diag combined clean rc status opath guarantee family endpoint identity effort_substitution substitution requested_model requested_effort effort_source effort_capability_source route_json route_rc route_fields capabilities_file fallback_model primary_model catalog_model model_selection
+  local tool="$1" model="$2" effort="$3" tmpdir raw diag combined clean rc status opath guarantee family endpoint identity effort_substitution substitution requested_model requested_effort effort_source effort_capability_source route_json route_rc route_fields capabilities_file fallback_model primary_model catalog_model model_selection policy_override route_risk_tier
   model="$(resolve_model "$tool" "$model")"
   tmpdir="$(make_tmp_dir)"
   raw="$tmpdir/raw"
@@ -240,6 +249,8 @@ run_one() {  # $1 tool $2 model $3 effort -> writes clean answer to OUT, echoes 
   substitution=""
   catalog_model=""
   model_selection=""
+  policy_override=""
+  route_risk_tier="$RISK_TIER"
   requested_effort="$effort"
   effort_source=""
   effort_capability_source=""
@@ -272,10 +283,11 @@ run_one() {  # $1 tool $2 model $3 effort -> writes clean answer to OUT, echoes 
     fi
     [ -n "$effort" ] && route_cmd+=(--effort "$effort")
     [ -n "$model" ] && route_cmd+=(--model "$model")
+    [ -n "$RISK_TIER" ] && route_cmd+=(--risk-tier "$RISK_TIER")
     route_json="$("${route_cmd[@]}" 2>>"$diag")"
       route_rc=$?
-      route_fields="$(printf '%s' "$route_json" | python3 -c 'import json,sys; r=json.load(sys.stdin); print("|".join(str(r.get(k,"")) for k in ("status","resolved_model","model_family","endpoint_provider","identity_source","requested_effort","effort","effort_source","effort_capability_source","effort_substitution","substitution","fallback_model","catalog_model","model_selection")))')"
-      IFS='|' read -r status model family endpoint identity requested_effort effort effort_source effort_capability_source effort_substitution substitution fallback_model catalog_model model_selection <<<"$route_fields"
+      route_fields="$(printf '%s' "$route_json" | python3 -c 'import json,sys; r=json.load(sys.stdin); print("|".join(str(r.get(k,"")) for k in ("status","resolved_model","model_family","endpoint_provider","identity_source","requested_effort","effort","effort_source","effort_capability_source","effort_substitution","substitution","fallback_model","catalog_model","model_selection","risk_tier","policy_override")))')"
+      IFS='|' read -r status model family endpoint identity requested_effort effort effort_source effort_capability_source effort_substitution substitution fallback_model catalog_model model_selection route_risk_tier policy_override <<<"$route_fields"
       [ -n "$requested_model" ] || requested_model="$model"
       if [ "$route_rc" -ne 0 ]; then
         guarantee="none"
@@ -433,7 +445,7 @@ run_one() {  # $1 tool $2 model $3 effort -> writes clean answer to OUT, echoes 
       opath=""
     fi
   fi
-  emit_record "$tool" "$model" "$effort" "$status" "$rc" "$opath" "$guarantee" "$family" "$endpoint" "$identity" "$effort_substitution" "$requested_effort" "$effort_source" "$effort_capability_source" "$substitution" "$requested_model" "$fallback_model" "$catalog_model" "$model_selection"
+  emit_record "$tool" "$model" "$effort" "$status" "$rc" "$opath" "$guarantee" "$family" "$endpoint" "$identity" "$effort_substitution" "$requested_effort" "$effort_source" "$effort_capability_source" "$substitution" "$requested_model" "$fallback_model" "$catalog_model" "$model_selection" "$route_risk_tier" "$policy_override"
   [ "$status" = "ok" ]
 }
 

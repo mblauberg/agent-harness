@@ -38,6 +38,10 @@ DISPATCH_SCHEMA = {
     "identity_source",
     "catalog_model",
     "model_selection",
+    "route_alias",
+    "reviewer_id",
+    "risk_tier",
+    "policy_override",
     "certification_eligible",
     "cross_family",
 }
@@ -56,7 +60,7 @@ def write_executable(path, body):
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
-def run_dispatch_with_stub(stub, role="reviewer"):
+def run_dispatch_with_stub(stub, role="reviewer", extra_args=None):
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         bin_dir = tmp / "bin"
@@ -65,8 +69,7 @@ def run_dispatch_with_stub(stub, role="reviewer"):
         out = tmp / "out.txt"
         env = os.environ.copy()
         env["PATH"] = f"{bin_dir}:{env['PATH']}"
-        result = subprocess.run(
-            [
+        command = [
                 str(SCRIPT),
                 "--tool",
                 "claude",
@@ -78,7 +81,10 @@ def run_dispatch_with_stub(stub, role="reviewer"):
                 str(out),
                 "--prompt",
                 "Reply exactly OK",
-            ],
+            ]
+        command.extend(extra_args or [])
+        result = subprocess.run(
+            command,
             cwd=str(tmp),
             env=env,
             text=True,
@@ -89,7 +95,7 @@ def run_dispatch_with_stub(stub, role="reviewer"):
         return result, record, out.read_text(encoding="utf-8") if out.exists() else ""
 
 
-def test_claude_other_primary_retries_opus_when_fable_is_unavailable():
+def test_claude_other_primary_uses_opus_without_implicit_fable_route():
     stub = """\
         #!/usr/bin/env bash
         model=""
@@ -97,21 +103,54 @@ def test_claude_other_primary_retries_opus_when_fable_is_unavailable():
           if [ "$1" = "--model" ]; then model="$2"; shift 2; else shift; fi
         done
         cat >/dev/null
-        if [ "$model" = "fable" ]; then
-          echo "model fable unavailable" >&2
-          exit 1
-        fi
         [ "$model" = "opus" ] || exit 9
         echo "OPUS OK"
     """
     result, record, output = run_dispatch_with_stub(stub, role="other-primary")
     assert result.returncode == 0, result.stderr
     assert record["resolved_model"] == "opus"
-    assert record["requested_model"] == "fable"
-    assert record["fallback_model"] == "opus"
-    assert record["identity_source"] == "runtime-provider-fallback"
-    assert "fable unavailable; used opus" in record["substitution"]
+    assert record["requested_model"] == "opus"
+    assert record["fallback_model"] == ""
+    assert record["identity_source"] == "dated-catalog"
+    assert record["substitution"] == ""
     assert output.strip() == "OPUS OK"
+
+
+def test_claude_crucial_synthesis_dispatches_explicit_fable_override():
+    stub = """\
+        #!/usr/bin/env bash
+        model=""
+        while [ $# -gt 0 ]; do
+          if [ "$1" = "--model" ]; then model="$2"; shift 2; else shift; fi
+        done
+        cat >/dev/null
+        [ "$model" = "fable" ] || exit 9
+        echo "FABLE OK"
+    """
+    result, record, output = run_dispatch_with_stub(
+        stub,
+        role="synthesis",
+        extra_args=["--risk-tier", "crucial", "--model", "fable", "--effort", "medium"],
+    )
+    assert result.returncode == 0, result.stderr
+    assert record["resolved_model"] == "fable"
+    assert record["risk_tier"] == "crucial"
+    assert record["policy_override"] == "crucial-fable-synthesis-adjudication"
+    assert output.strip() == "FABLE OK"
+
+
+def test_reviewer_id_round_trips_into_dispatch_receipt():
+    stub = """\
+        #!/usr/bin/env bash
+        cat >/dev/null
+        echo "OK"
+    """
+    result, record, output = run_dispatch_with_stub(
+        stub, extra_args=["--reviewer-id", "reviewer-1"]
+    )
+    assert result.returncode == 0, result.stderr
+    assert record["reviewer_id"] == "reviewer-1"
+    assert output.strip() == "OK"
 
 
 def test_claude_fallback_runs_after_oauth_safe_mode_model_failure():

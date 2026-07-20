@@ -46,6 +46,18 @@ effect as "may reduce", not "removes".)
    models share a blind spot or the judge rewards confidence. Keep an objective anchor in the loop.
 6. Fold corrections; record unresolved disagreements in the scratchpad for a user decision.
 
+Ordinary workspace material inside the chair's approved authority envelope may
+use any approved provider-family route. Credentials, secrets, platform rules,
+and narrower task or project prohibitions still control. Record the effective
+disclosure route; private memory cannot grant or widen it.
+
+A source-read-only reviewer leaves reviewed source and working state unchanged.
+A separate bounded capability may authorise only a named, namespaced review
+artifact and correlated Fabric request/reply communication. Verify both the
+source no-write boundary and the artifact path after the run. A failed, missing,
+or null worker result does not prove that no partial write occurred; inspect and
+preserve its owned paths before reassignment or cleanup.
+
 For debate, panel, and sparse-communication patterns, use
 [Debate, panels, and cross-family judgement](#debate-panels-and-cross-family-judgement)
 below.

@@ -76,6 +76,185 @@ def _table(text: str, required: list[str]) -> list[dict[str, str]]:
     raise ValueError("required table header not found: " + ", ".join(required))
 
 
+def _validate_review_plan(raw: object, run_dir: Path | None = None) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(raw, dict) or set(raw) != {"risk_tier", "chair_family", "concurrency_ceiling", "reviews"}:
+        return ["receipt review_plan must use the closed review topology schema"]
+    risk = raw.get("risk_tier")
+    if not isinstance(risk, str) or risk not in {"routine", "substantial", "crucial", "terminal"}:
+        errors.append("receipt review_plan.risk_tier is invalid")
+    ceiling = raw.get("concurrency_ceiling")
+    if not isinstance(ceiling, int) or isinstance(ceiling, bool) or not 1 <= ceiling <= 32:
+        errors.append("receipt review_plan.concurrency_ceiling must be between 1 and 32")
+    reviews = raw.get("reviews")
+    if not isinstance(reviews, list):
+        return errors + ["receipt review_plan.reviews must be a list"]
+    keys = {
+        "id", "scope", "lens", "family", "tier", "status",
+        "substitution_for", "evidence", "reason", "wave",
+        "adapter", "model", "catalog_model", "route_receipt",
+        "reviewer_id",
+    }
+    seen: set[str] = set()
+    checked: list[dict[str, object]] = []
+    for index, review in enumerate(reviews):
+        if not isinstance(review, dict) or set(review) != keys:
+            errors.append(f"receipt review_plan.reviews[{index}] must use the closed review record schema")
+            continue
+        if not isinstance(review["id"], str) or not review["id"] or review["id"] in seen:
+            errors.append(f"receipt review_plan.reviews[{index}].id must be non-empty and unique")
+        else:
+            seen.add(review["id"])
+        if not isinstance(review["scope"], str) or review["scope"] not in {"targeted", "full-scope"}:
+            errors.append(f"receipt review_plan.reviews[{index}].scope is invalid")
+        if not isinstance(review["tier"], str) or review["tier"] not in {"scout", "workhorse", "flagship"}:
+            errors.append(f"receipt review_plan.reviews[{index}].tier is invalid")
+        if not isinstance(review["status"], str) or review["status"] not in {"complete", "failed", "unavailable", "omitted"}:
+            errors.append(f"receipt review_plan.reviews[{index}].status is invalid")
+        for field in ("lens", "family"):
+            if not isinstance(review[field], str) or not review[field]:
+                errors.append(f"receipt review_plan.reviews[{index}].{field} is required")
+        if not isinstance(review["adapter"], str) or not review["adapter"]:
+            errors.append(f"receipt review_plan.reviews[{index}].adapter is required")
+        if not isinstance(review["reviewer_id"], str) or not review["reviewer_id"]:
+            errors.append(f"receipt review_plan.reviews[{index}].reviewer_id is required")
+        if review["status"] == "complete" and not any(
+            isinstance(review[field], str) and review[field] for field in ("model", "catalog_model")
+        ):
+            errors.append(f"receipt review_plan.reviews[{index}] requires resolved or catalog model identity")
+        evidence = review["evidence"]
+        if not isinstance(evidence, dict) or set(evidence) != {"path", "digest"}:
+            errors.append(f"receipt review_plan.reviews[{index}].evidence is invalid")
+        else:
+            path = Path(evidence["path"]) if isinstance(evidence["path"], str) else Path("..")
+            digest = evidence["digest"]
+            if path.is_absolute() or ".." in path.parts or not isinstance(digest, str) or not digest.startswith("sha256:"):
+                errors.append(f"receipt review_plan.reviews[{index}].evidence is invalid")
+            elif run_dir is not None:
+                target = run_dir / path
+                if not _inside(run_dir, target) or not target.is_file() or "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                    errors.append(f"receipt review_plan.reviews[{index}].evidence is missing or does not match")
+        if isinstance(review["status"], str) and review["status"] in {"failed", "unavailable", "omitted"} and (
+            not isinstance(review["reason"], str) or not review["reason"]
+        ):
+            errors.append(f"receipt review_plan.reviews[{index}].reason is required for an incomplete leg")
+        route = review["route_receipt"]
+        if not isinstance(route, dict) or set(route) != {"path", "digest"}:
+            errors.append(f"receipt review_plan.reviews[{index}].route_receipt is invalid")
+        else:
+            route_path = Path(route["path"]) if isinstance(route["path"], str) else Path("..")
+            route_digest = route["digest"]
+            if route_path.is_absolute() or ".." in route_path.parts or not isinstance(route_digest, str) or not route_digest.startswith("sha256:"):
+                errors.append(f"receipt review_plan.reviews[{index}].route_receipt is invalid")
+            elif run_dir is not None:
+                target = run_dir / route_path
+                if not _inside(run_dir, target) or not target.is_file() or "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest() != route_digest:
+                    errors.append(f"receipt review_plan.reviews[{index}].route_receipt is missing or does not match")
+                else:
+                    try:
+                        route_value = json.loads(target.read_text())
+                    except (OSError, json.JSONDecodeError):
+                        errors.append(f"receipt review_plan.reviews[{index}].route_receipt is invalid JSON")
+                    else:
+                        if not isinstance(route_value, dict):
+                            errors.append(f"receipt review_plan.reviews[{index}].route_receipt identity does not match")
+                        elif (
+                            route_value.get("status") != "ok"
+                            or route_value.get("adapter") != review["adapter"]
+                            or route_value.get("reviewer_id") != review["reviewer_id"]
+                            or route_value.get("resolved_model", route_value.get("model", "")) != review["model"]
+                            or route_value.get("catalog_model", "") != review["catalog_model"]
+                            or route_value.get("model_family") != review["family"]
+                        ):
+                            errors.append(f"receipt review_plan.reviews[{index}].route_receipt identity does not match")
+                        if isinstance(route_value, dict):
+                            route_alias = route_value.get("route_alias", route_value.get("alias"))
+                            if review["tier"] == "flagship" and route_alias != "flagship":
+                                errors.append(f"receipt review_plan.reviews[{index}].route_receipt does not prove flagship strength")
+                            if review["scope"] == "full-scope" and (
+                                route_value.get("cross_family") is not True
+                                or route_value.get("certification_eligible") is not True
+                            ):
+                                errors.append(f"receipt review_plan.reviews[{index}].route_receipt is not certification eligible")
+        if not isinstance(review["wave"], int) or isinstance(review["wave"], bool) or review["wave"] < 0:
+            errors.append(f"receipt review_plan.reviews[{index}].wave must be a non-negative integer")
+        if all(isinstance(review[field], str) for field in (
+            "id", "scope", "lens", "family", "tier", "status", "substitution_for",
+            "reason", "adapter", "model", "catalog_model",
+            "reviewer_id",
+        )) and isinstance(review["wave"], int) and not isinstance(review["wave"], bool):
+            checked.append(review)
+        if not isinstance(review["substitution_for"], str):
+            errors.append(f"receipt review_plan.reviews[{index}].substitution_for must be a string")
+    if not isinstance(risk, str) or risk not in {"substantial", "crucial", "terminal"}:
+        return errors
+    chair_value = raw.get("chair_family")
+    if not isinstance(chair_value, str) or chair_value not in {"openai", "anthropic"}:
+        errors.append("substantial review_plan requires an openai or anthropic chair_family")
+    chair = chair_value if isinstance(chair_value, str) else ""
+    other_primary = "anthropic" if chair == "openai" else "openai"
+    targeted = [r for r in checked if r["scope"] == "targeted" and r["status"] == "complete"]
+    if len({r["reviewer_id"] for r in targeted}) != len(targeted):
+        errors.append("completed targeted reviews require distinct reviewer_id values")
+    for field in ("evidence", "route_receipt"):
+        identities = [
+            (r[field].get("path"), r[field].get("digest"))
+            for r in targeted
+            if isinstance(r[field], dict)
+            and isinstance(r[field].get("path"), str)
+            and isinstance(r[field].get("digest"), str)
+        ]
+        digests = [identity[1] for identity in identities]
+        if len(identities) != len(targeted) or len(set(digests)) != len(targeted):
+            errors.append(f"completed targeted reviews require distinct {field} artifacts")
+    targeted_omission = any(
+        r["scope"] == "targeted" and r["status"] in {"failed", "unavailable", "omitted"}
+        and r["substitution_for"] == "targeted-lens"
+        and r["lens"] not in {item["lens"] for item in targeted} for r in checked
+    )
+    target_count = len({r["lens"] for r in targeted})
+    if target_count < 2 or (target_count < 3 and not targeted_omission):
+        errors.append("substantial review_plan requires three targeted lenses or two plus a recorded targeted omission")
+    primary = [
+        r for r in checked
+        if r["scope"] == "full-scope" and r["status"] == "complete"
+        and r["tier"] == "flagship" and r["family"] == other_primary
+        and not r["substitution_for"]
+    ]
+    substitutes = [
+        r for r in checked
+        if r["scope"] == "full-scope" and r["status"] == "complete"
+        and r["tier"] == "flagship" and r["family"] not in {chair, other_primary}
+        and r["substitution_for"] == "other-primary"
+    ]
+    unavailable_primary = any(
+        r["scope"] == "full-scope" and r["status"] in {"failed", "unavailable", "omitted"}
+        and r["lens"] == "other-primary" and r["family"] == other_primary for r in checked
+    )
+    if not primary and not (unavailable_primary and len({r["family"] for r in substitutes}) >= 2):
+        errors.append("substantial review_plan requires other-primary full-scope review or its two-family substitution")
+    if risk in {"crucial", "terminal"}:
+        full_families = {
+            r["family"] for r in checked
+            if r["scope"] == "full-scope" and r["status"] == "complete" and r["tier"] == "flagship"
+        }
+        recorded_omission = any(
+            r["scope"] == "full-scope" and r["status"] in {"failed", "unavailable", "omitted"}
+            and r["substitution_for"] == "additional-distinct-family"
+            and r["family"] not in {chair, other_primary} and r["tier"] == "flagship"
+            for r in checked
+        )
+        if len(full_families) < 2 and not recorded_omission:
+            errors.append("crucial review_plan requires a second distinct-family full-scope review or recorded omission")
+    waves: dict[int, int] = {}
+    for review in checked:
+        if review["status"] != "omitted" and isinstance(review["wave"], int):
+            waves[review["wave"]] = waves.get(review["wave"], 0) + 1
+    if isinstance(ceiling, int) and any(count > ceiling for count in waves.values()):
+        errors.append("review_plan observed wave exceeds concurrency_ceiling")
+    return errors
+
+
 def validate(run_dir: Path, terminal_status: str, reason: str | None) -> tuple[list[str], list[dict[str, str]]]:
     errors: list[str] = []
     run_dir = run_dir.resolve()
@@ -257,6 +436,8 @@ def validate(run_dir: Path, terminal_status: str, reason: str | None) -> tuple[l
         errors.append("successful finalisation cannot record a terminal failure reason")
     if terminal_status == "succeeded" and not (run_dir / "SYNTHESIS.md").read_text().strip():
         errors.append("successful finalisation requires non-empty SYNTHESIS.md")
+    if terminal_status == "succeeded":
+        errors.extend(_validate_review_plan(receipt.get("review_plan"), run_dir))
 
     columns = ["id", "path", "topic", "produced_by", "date", "status", "retention", "supersedes"]
     try:

@@ -87,6 +87,22 @@ def test_execute_requires_explicit_authority_and_never_removes_unknown_or_eviden
     assert (run / "unknown.tmp").exists()
 
 
+def test_failed_worker_partial_is_preserved_when_not_manifest_owned(tmp_path):
+    module = load_module()
+    run = make_run(tmp_path)
+    partial = run / "failed-worker.partial"
+    partial.write_text("worker returned null after a possible partial write")
+    plan = module.cleanup(run / "RUN.json", workspace_root=tmp_path, now=datetime(2026, 7, 10, tzinfo=timezone.utc))
+    receipt = module.cleanup(
+        run / "RUN.json", workspace_root=tmp_path, execute=True,
+        authorised_by="human", authority_evidence="direct-instruction",
+        approved_plan_sha256=plan["plan_sha256"],
+        now=datetime(2026, 7, 10, tzinfo=timezone.utc),
+    )
+    assert receipt["unknown_files_removed"] is False
+    assert partial.exists()
+
+
 def test_escape_paths_and_duplicate_artifact_ownership_fail_closed(tmp_path):
     module = load_module()
     run = make_run(tmp_path)

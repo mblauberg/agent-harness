@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_date": "2026-07-18",
+  "catalog_date": "2026-07-21",
   "task_class_routes": {
     "mechanical": {"alias": "scout", "effort": "low", "role": "worker"},
     "legwork": {"alias": "workhorse", "effort": "medium", "role": "worker"},
@@ -10,16 +10,32 @@
   "families": {
     "anthropic": {
       "aliases": {
-        "flagship": ["fable", "opus"],
+        "flagship": ["opus"],
         "workhorse": ["sonnet"],
         "scout": ["haiku"]
       },
       "role_overrides": {
         "critical-review": {
-          "flagship": ["opus", "fable"]
+          "flagship": ["opus"]
         },
         "reviewer": {
-          "flagship": ["opus", "fable"]
+          "flagship": ["opus"]
+        }
+      },
+      "risk_tier_overrides": {
+        "crucial": {
+          "roles": ["synthesis", "adjudication"],
+          "alias": "flagship",
+          "models": ["fable"],
+          "default_effort": "medium",
+          "maximum_effort": "medium"
+        },
+        "terminal": {
+          "roles": ["synthesis", "adjudication"],
+          "alias": "flagship",
+          "models": ["fable"],
+          "default_effort": "medium",
+          "maximum_effort": "medium"
         }
       }
     },

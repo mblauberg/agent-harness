@@ -88,6 +88,47 @@ an ignored cache or delete it with a filesystem command.
 - Harness-private memory never certifies current project state. Project-owned
   docs win, and a stale or unverifiable claim is labelled stale/unknown.
 
+## Harness-private memory
+
+Admit only explicit cross-project user preferences. Reject project status and
+results, exact model or operational IDs, authority-bearing commands, secrets,
+PII, raw transcripts, and copied harness or skill doctrine from the active
+index. The current project, harness, skill, ADR, tracker, or runbook is always
+the source of truth. A duplicate memory record becomes a short owner pointer or
+an inactive superseded entry; it never copies the doctrine.
+
+Provider projections use one stable preference ID, normalized text digest,
+direct-user provenance, freshness, invalidation, and supersession metadata.
+Normalize with Unicode NFC, line-ending normalization, trim, and whitespace
+collapse only. Do not case-fold or semantically rewrite. Equivalent wording is
+judgement-bearing: a pending proposal cannot retire entries, and a named reducer
+must bind adjudication evidence before a lifecycle owner with bounded write
+authority applies supersession. Review-only workers propose deltas only.
+
+Pruning deactivates active indexes and preserves cold evidence unless separate
+deletion authority exists. Project-specific useful content remains staged until
+its canonical owner and user gate exist. Promotion manifests contain pointers,
+digests, sensitivity, target owner, status, evidence pointers, and the next user
+gate, never raw private values. Global-skill targets also point to the existing
+`skill-craft` promotion-readiness receipt, which retains the two-project bar.
+
+Validate projections, projection-set bundles, merge proposals, and promotion
+manifests with:
+
+```sh
+python3 "${AGENTS_HOME:-$HOME/.agents}/skills/session/scripts/private_memory_contract.py" \
+  ARTIFACT.json --approval-root INDEPENDENT_APPROVAL_ROOT
+```
+
+The projection-set bundle is the final cross-provider gate. It binds all
+provider projections to the current canonical-owner digests, so a stale owner
+pointer or divergent preference identity fails before lifecycle writes.
+Pass `--workspace-root REPOSITORY` for a projection-set bundle containing
+owner pointers; the validator hashes the live owner bytes under that root.
+Preference projections also require an independently controlled
+`--approval-root` outside projector artifact authority. The validator rejects
+missing, identical, ancestor, or descendant approval/artifact roots.
+
 ## Split or merge
 
 Split a live file when it mixes owners, audiences, lifecycles or change rates,

@@ -42,7 +42,8 @@ def test_constitution_names_equal_primaries_and_router_has_current_codex_family(
     assert "fallback orchestrator" not in text.lower()
     assert all(alias in text for alias in ("flagship", "workhorse", "scout"))
     assert "equal primary orchestrators" in text
-    assert "never block on absence" in text
+    assert "unavailable legs need recorded substitution" in text
+    assert "two strong distinct-family full-scope" in text
     routing = (ROOT / "skills" / "orchestrate" / "references" / "routing-and-tiers.md").read_text()
     assert "GPT-5.6" in routing
 
@@ -214,14 +215,18 @@ def test_implement_skill_uses_canonical_delivery_completion_states():
 
 def test_read_only_review_allows_scoped_artifacts_but_forbids_unscoped_scratch():
     text = " ".join((ROOT / "skills" / "code-review" / "SKILL.md").read_text().split())
+    implementation = " ".join((ROOT / "skills" / "implement" / "SKILL.md").read_text().split())
+    verification = " ".join((ROOT / "skills" / "orchestrate" / "references" / "verification.md").read_text().split())
     assert "Artifact-only authority permits named outputs under the assigned run directory" in text
     assert "does not permit arbitrary repo-root scratch" in text
+    assert "Reviewed source stays immutable" in implementation
+    assert "namespaced review artifact and correlated Fabric" in verification
 
 
 def test_code_review_uses_task_selected_multi_agent_lenses_without_voting():
     skill = (ROOT / "skills" / "code-review" / "SKILL.md").read_text()
     topology = (ROOT / "skills" / "code-review" / "references" / "multi-agent-review.md").read_text()
-    assert "2–4 blind independent agents" in skill
+    assert "at least 3 blind targeted agents" in skill
     assert "Correctness/spec alignment" in skill
     assert "anonymised claim challenge" in skill
     assert "Never rank prose or majority-vote" in skill
