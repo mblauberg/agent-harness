@@ -42,6 +42,10 @@ import {
   ProviderActionAdmissionTransactionError,
   type ProviderActionTicket,
 } from "../application/provider-action-admission.js";
+import {
+  assertProviderActionOwner,
+  ProviderActionOwnerError,
+} from "../application/provider-action-owner.js";
 import { cancelEffectFreeProjectSession } from "./effect-free-session-cancellation.js";
 
 type Row = Record<string, unknown>;
@@ -187,8 +191,11 @@ type PlannedControlAction = {
   runId: string;
   agentId: string;
   sourceActionId: string;
+  sourcePayloadHash: string;
   turnLeaseGeneration: number;
   providerSessionGeneration: number;
+  providerSessionRef: string;
+  turnId: string;
   adapterId: string;
   actionId: string;
   identityHash: string;
@@ -596,7 +603,9 @@ class ProductionOperatorActions {
     if (custodyState !== "prepared") {
       return existingOutcome ?? { status: "ambiguous", effectRef: this.#custodyEffectRef(custody) };
     }
+    if (effective.intent.kind === "control") this.#assertPersistedControlActionOwners(effective);
     const current = await this.#read(effective.intent);
+    if (effective.intent.kind === "control") this.#assertPersistedControlActionOwners(effective);
     const currentDigest = digestValue(current, "operatorEffect.currentState");
     if (currentDigest !== text(custody, "before_state_digest")) {
       const rejected: OperatorEffectOutcome = { status: "rejected", code: "state-changed", evidenceRefs: [] };
@@ -620,6 +629,7 @@ class ProductionOperatorActions {
       this.#storeCustodyOutcome(scope, effective.commandId, outcome);
       return outcome;
     } catch (error: unknown) {
+      if (error instanceof ProviderActionOwnerError) throw error;
       if (effective.intent.kind === "project-session-drain" || effective.intent.kind === "project-session-stop") {
         const rejected: OperatorEffectOutcome = { status: "rejected", code: "state-changed", evidenceRefs: [] };
         this.#database.prepare(`
@@ -898,7 +908,8 @@ class ProductionOperatorActions {
       let result: unknown;
       try {
         result = await this.#adapter.lookup(action.adapterId, action.actionId);
-      } catch {
+      } catch (error: unknown) {
+        if (error instanceof ProviderActionOwnerError) throw error;
         this.#quarantine(action);
         return { status: "ambiguous", effectRef: this.#effectRef(request, this.#controlActions(request)) };
       }
@@ -1215,8 +1226,11 @@ class ProductionOperatorActions {
         runId: turn.runId,
         agentId: turn.agentId,
         sourceActionId: turn.actionId,
+        sourcePayloadHash: turn.sourcePayloadHash,
         turnLeaseGeneration: turn.turnLeaseGeneration,
         providerSessionGeneration: payload.providerSessionGeneration,
+        providerSessionRef: payload.resumeReference,
+        turnId,
         adapterId,
         actionId,
         identityHash,
@@ -1227,6 +1241,15 @@ class ProductionOperatorActions {
     const anchor = planned[0];
     if (anchor === undefined) {
       return { status: "rejected", code: "state-changed", evidenceRefs: [] };
+    }
+    for (const plan of planned) {
+      if (plan.ticket.disposition === "admitted") {
+        assertProviderActionOwner(this.#database, {
+          runId: plan.runId,
+          adapterId: plan.adapterId,
+          actionId: plan.actionId,
+        }, "operator_control");
+      }
     }
     return (await this.#providerActionAdmission.join(
       anchor.ticket,
@@ -1256,6 +1279,7 @@ class ProductionOperatorActions {
     }
     const hasFreshAdmission = planned.some((plan) => plan.ticket.disposition === "resolving");
     if (hasFreshAdmission) {
+      const operatorCustodyId = this.#custodyId(this.#effectScope(request), request.commandId);
       const rebound = await this.#read(request.intent);
       if (digestValue(rebound, "operatorControl.preDispatchState") !== request.beforeStateDigest) {
         const failure = new ProjectFabricCoreError("STALE_REVISION", "operator control state changed after preflight");
@@ -1293,6 +1317,11 @@ class ProductionOperatorActions {
           ) {
             throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "operator provider action identity changed");
           }
+          assertProviderActionOwner(this.#database, {
+            runId: plan.runId,
+            adapterId: plan.adapterId,
+            actionId: plan.actionId,
+          }, "operator_control");
           continue;
         }
         this.#providerActionAdmission.admitUnroutedInCurrentTransaction(plan.ticket, {
@@ -1310,6 +1339,30 @@ class ProductionOperatorActions {
           historyJson: '["prepared"]',
           executionCount: 0,
           updatedAt: this.#clock(),
+        }, "operator_control", () => {
+          this.#database.prepare(`
+            INSERT INTO operator_control_provider_action_bindings(
+              custody_id,run_id,adapter_id,action_id,source_adapter_id,
+              source_action_id,source_payload_hash,operation,target_agent_id,
+              provider_session_ref,provider_session_generation,turn_lease_generation,
+              turn_id,created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          `).run(
+            operatorCustodyId,
+            plan.runId,
+            plan.adapterId,
+            plan.actionId,
+            plan.adapterId,
+            plan.sourceActionId,
+            plan.sourcePayloadHash,
+            operation,
+            plan.agentId,
+            plan.providerSessionRef,
+            plan.providerSessionGeneration,
+            plan.turnLeaseGeneration,
+            plan.turnId,
+            this.#clock(),
+          );
         });
         }
         }).immediate();
@@ -1325,6 +1378,7 @@ class ProductionOperatorActions {
 
     for (const action of this.#controlActions(request)) {
       if (action.status !== "prepared") continue;
+      assertProviderActionOwner(this.#database, action, "operator_control");
       this.#database.prepare(`
         UPDATE provider_actions
            SET status='dispatched', history_json='["prepared","dispatched"]',
@@ -1343,7 +1397,9 @@ class ProductionOperatorActions {
           payload,
         });
         this.#persistAdapterResult(action, result);
-      } catch {
+      } catch (error: unknown) {
+        if (error instanceof ProviderActionOwnerError) throw error;
+        assertProviderActionOwner(this.#database, action, "operator_control");
         this.#database.prepare(`
           UPDATE provider_actions
              SET status='ambiguous', history_json='["prepared","dispatched","ambiguous"]',
@@ -1367,24 +1423,35 @@ class ProductionOperatorActions {
   }
 
   #controlActions(request: OperatorEffectRequest): StoredControlAction[] {
-    const custodyId = this.#controlCustodyId(this.#effectScope(request), request);
+    const custodyId = this.#custodyId(this.#effectScope(request), request.commandId);
     return this.#database.prepare(`
-      SELECT run_id, action_id, adapter_id, operation, status, payload_hash, payload_json
-        FROM provider_actions
-       WHERE json_extract(payload_json, '$.operatorCustodyId')=?
-       ORDER BY run_id, action_id
+      SELECT action.run_id,action.action_id,action.adapter_id,action.operation,
+             action.status,action.payload_hash,binding.source_action_id,
+             binding.source_payload_hash,binding.target_agent_id,
+             binding.provider_session_ref,binding.provider_session_generation,
+             binding.turn_lease_generation,binding.turn_id
+        FROM operator_control_provider_action_bindings binding
+        JOIN provider_actions action
+          ON action.run_id=binding.run_id
+         AND action.adapter_id=binding.adapter_id
+         AND action.action_id=binding.action_id
+       WHERE binding.custody_id=?
+       ORDER BY action.run_id,action.action_id
     `).all(custodyId).map((value) => {
       const stored = row(value, "operator provider action");
       const status = text(stored, "status");
       const operation = text(stored, "operation");
-      const payload: unknown = JSON.parse(text(stored, "payload_json"));
-      if (!isRow(payload)) throw new Error("operator provider action payload is invalid");
       if (operation !== "interrupt" && operation !== "steer") {
         throw new Error("operator provider action operation is invalid");
       }
       if (!["prepared", "dispatched", "accepted", "terminal", "ambiguous", "quarantined"].includes(status)) {
         throw new Error("operator provider action status is invalid");
       }
+      assertProviderActionOwner(this.#database, {
+        runId: text(stored, "run_id"),
+        adapterId: text(stored, "adapter_id"),
+        actionId: text(stored, "action_id"),
+      }, "operator_control");
       return {
         runId: text(stored, "run_id"),
         actionId: text(stored, "action_id"),
@@ -1392,15 +1459,33 @@ class ProductionOperatorActions {
         operation,
         status: status as StoredControlAction["status"],
         payloadHash: text(stored, "payload_hash"),
-        sourceActionId: text(payload, "sourceActionId"),
-        sourcePayloadHash: text(payload, "sourcePayloadHash"),
-        agentId: text(payload, "agentId"),
-        resumeReference: text(payload, "resumeReference"),
-        providerSessionGeneration: integer(payload, "providerSessionGeneration"),
-        turnLeaseGeneration: integer(payload, "turnLeaseGeneration"),
-        turnId: text(payload, "turnId"),
+        sourceActionId: text(stored, "source_action_id"),
+        sourcePayloadHash: text(stored, "source_payload_hash"),
+        agentId: text(stored, "target_agent_id"),
+        resumeReference: text(stored, "provider_session_ref"),
+        providerSessionGeneration: integer(stored, "provider_session_generation"),
+        turnLeaseGeneration: integer(stored, "turn_lease_generation"),
+        turnId: text(stored, "turn_id"),
       };
     });
+  }
+
+  #assertPersistedControlActionOwners(request: OperatorEffectRequest): void {
+    const custodyId = this.#controlCustodyId(this.#effectScope(request), request);
+    const candidates = this.#database.prepare(`
+      SELECT action.run_id,action.adapter_id,action.action_id
+        FROM provider_actions action
+       WHERE json_extract(action.payload_json,'$.operatorCustodyId')=?
+       ORDER BY action.run_id,action.adapter_id,action.action_id
+    `).all(custodyId);
+    for (const value of candidates) {
+      const action = row(value, "persisted operator provider action");
+      assertProviderActionOwner(this.#database, {
+        runId: text(action, "run_id"),
+        adapterId: text(action, "adapter_id"),
+        actionId: text(action, "action_id"),
+      }, "operator_control");
+    }
   }
 
   #effectRef(request: OperatorEffectRequest, actions: readonly StoredControlAction[]): ArtifactRef {
@@ -1425,6 +1510,7 @@ class ProductionOperatorActions {
   }
 
   #persistAdapterResult(action: StoredControlAction, result: unknown): void {
+    assertProviderActionOwner(this.#database, action, "operator_control");
     if (!isRow(result) || result.actionId !== action.actionId || result.operation !== action.operation ||
       result.payloadHash !== action.payloadHash ||
       !Array.isArray(result.history) ||
@@ -1572,6 +1658,7 @@ class ProductionOperatorActions {
   }
 
   #quarantine(action: StoredControlAction): void {
+    assertProviderActionOwner(this.#database, action, "operator_control");
     this.#database.prepare(`
       UPDATE provider_actions
          SET status='quarantined', journal_revision=journal_revision+1, updated_at=?

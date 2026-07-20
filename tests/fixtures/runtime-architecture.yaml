@@ -1,9 +1,9 @@
 source_size_ceilings:
-  runtime/agent-fabric/src/core/fabric.ts: 10494
-  runtime/agent-fabric/src/project-session/launch-custody.ts: 5511
+  runtime/agent-fabric/src/core/fabric.ts: 10675
+  runtime/agent-fabric/src/project-session/launch-custody.ts: 5674
   runtime/agent-fabric-protocol/src/operation-codecs.ts: 3839
   runtime/agent-fabric/src/operator/action-store.ts: 2728
-  runtime/agent-fabric/src/operator/production-action-ports.ts: 2482
+  runtime/agent-fabric/src/operator/production-action-ports.ts: 2569
   runtime/agent-fabric/src/operator/projection-store.ts: 2054
   runtime/agent-fabric/src/operator/typed-git-service.ts: 2004
   runtime/agent-fabric-console/src/evaluation.ts: 1951
@@ -17,7 +17,7 @@ source_size_ceilings:
   runtime/agent-fabric/src/operator/git-repository-read.ts: 1244
   runtime/agent-fabric/src/results/store.ts: 1232
   runtime/agent-fabric/src/gates/store.ts: 1184
-  runtime/agent-fabric/src/integrations/herdr-fabric-ports.ts: 1038
+  runtime/agent-fabric/src/integrations/herdr-fabric-ports.ts: 1044
 
 import_allowances:
   - file: runtime/agent-fabric/src/adapters/conformance.ts

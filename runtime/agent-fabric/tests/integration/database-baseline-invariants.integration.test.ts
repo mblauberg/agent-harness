@@ -712,7 +712,6 @@ describe("current database baseline invariants", () => {
       historyJson: "[]",
       executionCount: 0,
       updatedAt: 1,
-      findingCapacityReservationDigest: reservationDigest,
     }, undefined, (ticket) => {
       database.prepare(`
         INSERT INTO review_finding_capacity_reservations(
@@ -732,6 +731,10 @@ describe("current database baseline invariants", () => {
          WHERE adapter_id='adapter' AND action_id='action'
       `).run()).toThrow("INVARIANT_review_finding_capacity_reservation_state");
     });
+    database.prepare(`
+      UPDATE provider_actions SET finding_capacity_reservation_digest=?
+       WHERE adapter_id='adapter' AND action_id='action'
+    `).run(reservationDigest);
     database.prepare(`
       UPDATE review_finding_capacity_reservations
          SET state='attached',updated_at=2

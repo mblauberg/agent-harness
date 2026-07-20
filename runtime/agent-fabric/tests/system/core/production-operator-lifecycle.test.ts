@@ -49,6 +49,7 @@ function fixture(
     lookup: async () => { throw new Error("idle control must not look up an adapter effect"); },
   },
   configureAdmission?: (coordinator: ProviderActionAdmissionCoordinator) => void,
+  admissionFault?: (label: string) => void,
 ): {
   database: Database.Database;
   ports: ReturnType<typeof createProductionOperatorActionPorts>;
@@ -98,7 +99,11 @@ function fixture(
       'chair_01', 3, 1, 'chair_01'
     );
   `);
-  const providerActionAdmission = new ProviderActionAdmissionCoordinator({ database, clock: () => now });
+  const providerActionAdmission = new ProviderActionAdmissionCoordinator({
+    database,
+    clock: () => now,
+    ...(admissionFault === undefined ? {} : { fault: admissionFault }),
+  });
   configureAdmission?.(providerActionAdmission);
   return {
     database,
@@ -674,6 +679,80 @@ describe("production operator lifecycle ports", () => {
       .toEqual({ status: "released" });
     expect(database.prepare("SELECT state FROM operator_control_fences WHERE task_id='task_01'").get())
       .toEqual({ state: "paused" });
+    expect(database.prepare(`
+      SELECT binding.run_id,binding.adapter_id,binding.source_action_id,
+             binding.source_payload_hash,binding.operation,binding.target_agent_id,
+             binding.provider_session_ref,binding.provider_session_generation,
+             binding.turn_lease_generation,binding.turn_id
+        FROM operator_control_provider_action_bindings binding
+    `).get()).toEqual({
+      run_id: "run_01",
+      adapter_id: "fake",
+      source_action_id: "participant_turn_source",
+      source_payload_hash: "d".repeat(64),
+      operation: "interrupt",
+      target_agent_id: "worker_01",
+      provider_session_ref: "provider_worker_01",
+      provider_session_generation: 3,
+      turn_lease_generation: 1,
+      turn_id: "participant_turn_01",
+    });
+    expect(() => database.prepare(`
+      UPDATE operator_control_provider_action_bindings SET turn_id='changed'
+    `).run()).toThrow("INVARIANT_operator_control_provider_action_binding_immutable");
+    expect(() => database.prepare(`
+      DELETE FROM operator_control_provider_action_bindings
+    `).run()).toThrow("INVARIANT_operator_control_provider_action_binding_immutable");
+    expect(() => database.prepare(`
+      INSERT INTO operator_control_provider_action_bindings
+      SELECT * FROM operator_control_provider_action_bindings
+    `).run()).toThrow();
+
+    const validBinding = database.prepare(`
+      SELECT * FROM operator_control_provider_action_bindings
+    `).get() as Record<string, unknown>;
+    const sourceAction = database.prepare(`
+      SELECT * FROM provider_actions WHERE adapter_id=? AND action_id=?
+    `).get(validBinding.adapter_id, validBinding.action_id) as Record<string, unknown>;
+    const crossedActionId = `${String(validBinding.action_id)}:crossed-identity`;
+    const actionColumns = Object.keys(sourceAction);
+    database.pragma("foreign_keys = OFF");
+    database.prepare(`
+      INSERT INTO provider_actions(${actionColumns.map((column) => `"${column}"`).join(",")})
+      VALUES (${actionColumns.map((column) => `@${column}`).join(",")})
+    `).run({ ...sourceAction, action_id: crossedActionId });
+    const bindingColumns = Object.keys(validBinding);
+    const insertBinding = database.prepare(`
+      INSERT INTO operator_control_provider_action_bindings(
+        ${bindingColumns.map((column) => `"${column}"`).join(",")}
+      ) VALUES (${bindingColumns.map((column) => `@${column}`).join(",")})
+    `);
+    const exactCandidate = { ...validBinding, action_id: crossedActionId };
+    const crossedIdentities = [
+      { custody_id: "missing-custody" },
+      { run_id: "missing-run" },
+      { adapter_id: "missing-adapter" },
+      { source_adapter_id: "missing-source-adapter" },
+      { source_action_id: "missing-source-action" },
+      { source_payload_hash: "e".repeat(64) },
+      { operation: "steer" },
+      { target_agent_id: "missing-agent" },
+      { provider_session_ref: "missing-session" },
+      { provider_session_generation: 4 },
+      { turn_lease_generation: 2 },
+      { turn_id: "missing-turn" },
+    ];
+    for (const crossedIdentity of crossedIdentities) {
+      expect(() => insertBinding.run({ ...exactCandidate, ...crossedIdentity }))
+        .toThrow("INVARIANT_operator_control_provider_action_binding_identity");
+    }
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM operator_control_provider_action_bindings
+    `).get()).toEqual({ count: 1 });
+    database.prepare(`
+      DELETE FROM provider_actions WHERE adapter_id=? AND action_id=?
+    `).run(validBinding.adapter_id, crossedActionId);
+    database.pragma("foreign_keys = ON");
   });
 
   it("keeps unresolved pairs retryable when a multi-agent capability check throws once", async () => {
@@ -706,14 +785,6 @@ describe("production operator lifecycle ports", () => {
       },
       lookup: async () => { throw new Error("rejected preflight must not perform lookup"); },
     }, (coordinator) => {
-      const preflight = coordinator.preflight.bind(coordinator);
-      let exposeOneAdmittedTicket = true;
-      coordinator.preflight = ((request: Parameters<typeof preflight>[0]) => {
-        const ticket = preflight(request);
-        if (!exposeOneAdmittedTicket) return ticket;
-        exposeOneAdmittedTicket = false;
-        return { ...ticket, disposition: "admitted" };
-      }) as typeof coordinator.preflight;
       const release = coordinator.release.bind(coordinator);
       coordinator.release = ((ticket, failure) => {
         releasedDispositions.push(ticket.disposition);
@@ -813,6 +884,63 @@ describe("production operator lifecycle ports", () => {
          AND action_id GLOB 'operator-*'
        GROUP BY state
     `).all()).toEqual([{ state: "admitted", count: 2 }]);
+  });
+
+  it("rolls back an operator action and its owner binding atomically before provider effect", async () => {
+    let dispatches = 0;
+    const { database, ports } = fixture({
+      capabilities: async () => ({ actionJournal: true, operations: ["interrupt", "lookup_action"] }),
+      dispatch: async () => {
+        dispatches += 1;
+        throw new Error("provider effect must not run after owner-binding rollback");
+      },
+      lookup: async () => { throw new Error("owner-binding rollback must not look up"); },
+    }, undefined, (label) => {
+      if (label === "provider-action-admission:after-dependants") {
+        throw new Error("crash after operator owner binding");
+      }
+    });
+    seedProviderAction(database, {
+      actionId: "atomic_operator_source",
+      payloadJson: '{"taskId":"task_01"}',
+      status: "accepted",
+      historyJson: '["prepared","dispatched","accepted"]',
+      effectCount: 1,
+      resultJson: '{"turnId":"atomic_operator_turn"}',
+    });
+    database.prepare(`
+      INSERT INTO provider_session_turn_leases(
+        run_id,adapter_id,agent_id,provider_session_generation,turn_lease_generation,
+        action_id,status,created_at,updated_at
+      ) VALUES ('run_01','fake','chair_01',2,1,'atomic_operator_source','active',?,?)
+    `).run(now, now);
+    const intent = {
+      kind: "control" as const,
+      action: "pause" as const,
+      target: {
+        kind: "task" as const,
+        projectSessionId: "session_01" as never,
+        coordinationRunId: "run_01" as never,
+        taskId: "task_01" as never,
+        expectedRevision: 3,
+      },
+    };
+    const before = await ports.statePort.read(intent);
+    await expect(ports.effectPort.dispatch(scopedEffectRequest(
+      "atomic_operator_binding",
+      intent,
+      stateDigest(before),
+    ))).rejects.toThrow("crash after operator owner binding");
+    expect(dispatches).toBe(0);
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM provider_actions WHERE operation='interrupt'
+    `).get()).toEqual({ count: 0 });
+    expect(database.prepare(`
+      SELECT COUNT(*) AS count FROM operator_control_provider_action_bindings
+    `).get()).toEqual({ count: 0 });
+    expect(database.prepare(`
+      SELECT state FROM provider_action_pair_preflights WHERE action_id GLOB 'operator-*'
+    `).get()).toEqual({ state: "resolving" });
   });
 
   it("does not claim pause from a terminal adapter row with the wrong operation or replay count", async () => {

@@ -398,7 +398,7 @@ export class ProviderSessionCoordinator {
         historyJson: '["prepared"]',
         executionCount: 0,
         updatedAt: now,
-      }, () => {
+      }, "generic", () => {
         this.#database.prepare(`
           INSERT INTO provider_session_turn_leases(
             run_id, agent_id, provider_session_generation, turn_lease_generation,

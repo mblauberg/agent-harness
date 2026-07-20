@@ -4,6 +4,7 @@ import { readFile, realpath, rm } from "node:fs/promises";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import type { FabricClient } from "../../../src/index.ts";
+import { classifyProviderActionOwner } from "../../../src/application/provider-action-owner.ts";
 
 import {
   asLifecycleClient,
@@ -32,6 +33,93 @@ function canonicalJson(value: unknown): string {
 
 function canonicalDigest(value: unknown): string {
   return `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
+}
+
+function bindCertifyingReviewOwner(input: Readonly<{
+  databasePath: string;
+  runId: string;
+  adapterId: string;
+  actionId: string;
+  taskId: string;
+}>): void {
+  const database = new Database(input.databasePath);
+  try {
+    database.pragma("foreign_keys = OFF");
+    const emptyFindingSet = "sha256:58afae1b74b0f7295f280a34196c2e092e4040016e64927e132f99356b48b7a2";
+    database.prepare(`
+      INSERT OR IGNORE INTO review_finding_sets(
+        finding_set_digest,finding_count,page_count,canonical_byte_length,created_at
+      ) VALUES (?,0,0,47,1)
+    `).run(emptyFindingSet);
+    const ownerDigest = database.prepare(`
+      SELECT owner_digest FROM provider_action_pair_preflights
+       WHERE adapter_id=? AND action_id=?
+    `).pluck().get(input.adapterId, input.actionId);
+    const reservationDigest = canonicalDigest({
+      kind: "provider-owner-boundary-fixture",
+      adapterId: input.adapterId,
+      actionId: input.actionId,
+    });
+    database.prepare(`
+      INSERT INTO review_finding_capacity_reservations(
+        adapter_id,action_id,run_id,target_generation,slot,owner_digest,
+        finding_window_mode,prior_open_finding_set_digest,maximum_new_findings,
+        maximum_new_finding_bytes,reservation_digest,state,created_at,updated_at
+      ) VALUES (?,?,?,1,'native',?,'normal',?,32,65536,?,'attached',1,1)
+    `).run(
+      input.adapterId,
+      input.actionId,
+      input.runId,
+      ownerDigest,
+      emptyFindingSet,
+      reservationDigest,
+    );
+    database.prepare(`
+      UPDATE provider_actions SET finding_capacity_reservation_digest=?
+       WHERE adapter_id=? AND action_id=?
+    `).run(reservationDigest, input.adapterId, input.actionId);
+
+    const routeColumns = database.prepare(`
+      SELECT name,"notnull" FROM pragma_table_info('provider_action_routes') ORDER BY cid
+    `).all() as Array<{ name: string; notnull: number }>;
+    const nullable = new Set([
+      "requested_effort", "resolved_effort_value", "bundle_search_index_digest",
+      "risk_read_map_digest", "mandatory_read_set_digest",
+    ]);
+    const integerColumns = new Set([
+      "target_generation", "slot_head_generation", "attempt_generation", "reviewed_artifact_revision",
+      "chair_binding_generation", "capability_snapshot_generation", "effective_configuration_revision",
+      "route_policy_revision", "harness_revision", "context_policy_revision",
+      "discovery_surface_evidence_revision", "created_at",
+    ]);
+    const certifyingStrings = new Set([
+      "reviewed_artifact_id", "publication_lineage_digest", "bundle_digest",
+      "manifest_root_digest", "coverage_digest", "profile_digest",
+      "profile_schema_digest", "final_prompt_digest",
+    ]);
+    const values = routeColumns.map(({ name, notnull }) => {
+      if (name === "adapter_id" || name === "requested_adapter_id" || name === "resolved_adapter_id") {
+        return input.adapterId;
+      }
+      if (name === "action_id") return input.actionId;
+      if (name === "run_id") return input.runId;
+      if (name === "task_id") return input.taskId;
+      if (name === "certifying_review") return 1;
+      if (name === "slot") return "native";
+      if (name === "resolved_effort_kind") return "inapplicable";
+      if (name.endsWith("_json")) return "{}";
+      if (integerColumns.has(name)) return 1;
+      if (certifyingStrings.has(name)) return `${name}:fixture`;
+      if (nullable.has(name) || notnull === 0) return null;
+      return `${name}:fixture`;
+    });
+    database.prepare(`
+      INSERT INTO provider_action_routes(${routeColumns.map(({ name }) => `"${name}"`).join(",")})
+      VALUES (${routeColumns.map(() => "?").join(",")})
+    `).run(...values);
+  } finally {
+    database.close();
+  }
 }
 
 async function waitForProviderAction(
@@ -570,7 +658,7 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
         idempotencyProven: true,
         resultJson: "{}",
         updatedAt: now,
-      });
+      }, undefined, undefined, "herdr");
     } finally {
       seed.close();
     }
@@ -620,7 +708,10 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
 
   it("keeps the same action ID independent across two live adapters and restart", async () => {
     const fixture = await createLifecycleFixture({ secondaryAdapter: true });
-    cleanup.push(async () => rm(fixture.directory, { recursive: true, force: true }));
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
     const authority = await fixture.chair.delegateAuthority({
       parentAuthorityId: fixture.chairAuthorityId,
       authority: {
@@ -1783,8 +1874,18 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
 
     await spawnBarrier.release();
-    await expect(waitForProviderAction(fixture.chair, "provider-review-queue:one"))
-      .resolves.toMatchObject({ status: "terminal", executionCount: 1, effectCount: 1 });
+    const firstSettled = await waitForProviderAction(fixture.chair, "provider-review-queue:one");
+    const ownerDatabase = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(classifyProviderActionOwner(ownerDatabase, {
+        runId: fixture.runId,
+        adapterId: "fake-lifecycle",
+        actionId: "provider-review-queue:one",
+      })).toBe("generic");
+    } finally {
+      ownerDatabase.close();
+    }
+    expect(firstSettled).toMatchObject({ status: "terminal", executionCount: 1, effectCount: 1 });
     await expect(waitForProviderAction(fixture.chair, "provider-review-queue:two"))
       .resolves.toMatchObject({ status: "terminal", executionCount: 1, effectCount: 1 });
   });
@@ -2572,6 +2673,310 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     cleanup.push(async () => reopened.close());
     const chair = asLifecycleClient(reopened.connect(fixture.capabilities.chair));
     expect(await readProviderAction(chair, "action-terminal")).toEqual(terminal);
+  });
+
+  it("keeps certifying-review and generic restart recovery with their canonical owners", async () => {
+    const fixture = await createLifecycleFixture({ secondaryAdapter: true });
+    cleanup.push(async () => rm(fixture.directory, { recursive: true, force: true }));
+    const secondaryAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader/child"],
+        budget: { turns: 4, provider_calls: 4, concurrent_turns: 1 },
+      },
+      commandId: "restart-owner:secondary-authority",
+    });
+    const secondaryRegistration = await fixture.chair.registerAgent({
+      agentId: "restart-owner-secondary",
+      authorityId: secondaryAuthority.authorityId,
+      providerSessionRef: "fake-session:restart-owner-secondary:g1",
+      adapterId: "fake-lifecycle-secondary",
+    });
+    const secondaryClient = asLifecycleClient(fixture.fabric.connect(secondaryRegistration.capability));
+    const secondaryTaskReady = await fixture.chair.createTask({
+      taskId: "restart-owner-secondary-task",
+      authorityId: secondaryAuthority.authorityId,
+      eligibleAgentIds: ["restart-owner-secondary"],
+      objective: "retain a generic pending provider action across restart",
+      baseRevision: "stage3-base",
+      commandId: "restart-owner:secondary-task-create",
+    });
+    const secondaryTask = await secondaryClient.claimTask({
+      taskId: secondaryTaskReady.taskId,
+      expectedRevision: secondaryTaskReady.revision,
+      commandId: "restart-owner:secondary-task-claim",
+    });
+    const actions = [
+      {
+        adapterId: "fake-lifecycle",
+        actionId: "restart-owner:certifying",
+        taskId: fixture.leaderTask.taskId,
+      },
+      {
+        adapterId: "fake-lifecycle-secondary",
+        actionId: "restart-owner:generic",
+        taskId: secondaryTask.taskId,
+      },
+    ] as const;
+    for (const { adapterId, actionId, taskId } of actions) {
+      await expect(fixture.chair.dispatchProviderAction({
+        certifyingReview: null,
+        adapterId,
+        actionId,
+        operation: "send_turn",
+        payload: { scenario: "ambiguous-unproven", taskId },
+        commandId: `${actionId}:dispatch`,
+      })).resolves.toMatchObject({ status: "ambiguous", executionCount: 1, effectCount: 1 });
+    }
+    await fixture.fabric.close();
+
+    bindCertifyingReviewOwner({
+      databasePath: fixture.databasePath,
+      runId: fixture.runId,
+      adapterId: actions[0].adapterId,
+      actionId: actions[0].actionId,
+      taskId: fixture.leaderTask.taskId,
+    });
+    const database = new Database(fixture.databasePath);
+    expect(classifyProviderActionOwner(database, {
+      runId: fixture.runId,
+      adapterId: "fake-lifecycle",
+      actionId: actions[0].actionId,
+    })).toBe("certifying_review");
+    const before = database.prepare(`
+      SELECT adapter_id,action_id,status,execution_count,effect_count FROM provider_actions
+       WHERE (adapter_id=? AND action_id=?) OR (adapter_id=? AND action_id=?)
+       ORDER BY adapter_id,action_id
+    `).all(
+      actions[0].adapterId,
+      actions[0].actionId,
+      actions[1].adapterId,
+      actions[1].actionId,
+    );
+    database.close();
+
+    const restarted = await reopenLifecycleFabric(fixture);
+    cleanup.push(async () => restarted.close());
+    await expect(restarted.recoverStartupState()).resolves.toMatchObject({ actionsReconciled: 0, actionsQuarantined: 2 });
+    const restartedChair = asLifecycleClient(restarted.connect(fixture.capabilities.chair));
+    await expect(restartedChair.reconcileProviderAction({
+      adapterId: actions[0].adapterId,
+      actionId: actions[0].actionId,
+      commandId: "restart-owner:certifying:generic-reconcile",
+    })).rejects.toMatchObject({
+      name: "ProviderActionOwnerError",
+      expectedOwner: "generic",
+      actualOwner: "certifying_review",
+    });
+    await expect(restartedChair.dispatchProviderAction({
+      certifyingReview: null,
+      adapterId: actions[0].adapterId,
+      actionId: actions[0].actionId,
+      operation: "send_turn",
+      payload: { scenario: "ambiguous-unproven", taskId: fixture.leaderTask.taskId },
+      commandId: "restart-owner:certifying:generic-dispatch",
+    })).rejects.toMatchObject({
+      name: "ProviderActionOwnerError",
+      expectedOwner: "generic",
+      actualOwner: "certifying_review",
+    });
+    const observed = new Database(fixture.databasePath, { readonly: true });
+    try {
+      const after = observed.prepare(`
+        SELECT adapter_id,action_id,status,execution_count,effect_count FROM provider_actions
+         WHERE (adapter_id=? AND action_id=?) OR (adapter_id=? AND action_id=?)
+         ORDER BY adapter_id,action_id
+      `).all(
+        actions[0].adapterId,
+        actions[0].actionId,
+        actions[1].adapterId,
+        actions[1].actionId,
+      ) as Array<{ adapter_id: string; action_id: string; status: string; execution_count: number; effect_count: number }>;
+      expect(after.map(({ execution_count, effect_count }) => ({ execution_count, effect_count })))
+        .toEqual((before as typeof after).map(({ execution_count, effect_count }) => ({ execution_count, effect_count })));
+      expect(after.every(({ status }) => status === "quarantined")).toBe(true);
+      const commands = observed.prepare(`
+        SELECT command_id FROM commands
+         WHERE command_id LIKE 'certifying-review-recovery:%' OR command_id LIKE 'startup-recovery:%'
+         ORDER BY command_id
+      `).pluck().all() as string[];
+      expect(commands).toHaveLength(2);
+      expect(commands.find((command) => command.startsWith("certifying-review-recovery:"))).toContain(actions[0].actionId);
+      expect(commands.find((command) => command.startsWith("startup-recovery:"))).toContain(actions[1].actionId);
+      expect(commands.find((command) => command.startsWith("startup-recovery:"))).not.toContain(actions[0].actionId);
+      expect(observed.prepare(`
+        SELECT COUNT(*) AS count FROM commands
+         WHERE command_id IN ('restart-owner:certifying:generic-reconcile','restart-owner:certifying:generic-dispatch')
+      `).get()).toEqual({ count: 0 });
+    } finally {
+      observed.close();
+    }
+  });
+
+  it("revalidates ownership after command replay and before acknowledging re-entry", async () => {
+    let armReentry = false;
+    let fixtureIdentity: Readonly<{ databasePath: string; runId: string; taskId: string }> | undefined;
+    const actionId = "provider-owner-reentry:certifying";
+    const commandId = "provider-owner-reentry:dispatch";
+    const fixture = await createLifecycleFixture({
+      fault: (label) => {
+        if (
+          label !== "provider-action-owner:before-reentry-acknowledgement" ||
+          !armReentry || fixtureIdentity === undefined
+        ) return;
+        armReentry = false;
+        bindCertifyingReviewOwner({
+          databasePath: fixtureIdentity.databasePath,
+          runId: fixtureIdentity.runId,
+          adapterId: "fake-lifecycle",
+          actionId,
+          taskId: fixtureIdentity.taskId,
+        });
+      },
+    });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    fixtureIdentity = {
+      databasePath: fixture.databasePath,
+      runId: fixture.runId,
+      taskId: fixture.leaderTask.taskId,
+    };
+    const request = {
+      certifyingReview: null,
+      adapterId: "fake-lifecycle",
+      actionId,
+      operation: "send_turn" as const,
+      payload: { scenario: "ambiguous-unproven", taskId: fixture.leaderTask.taskId },
+      commandId,
+    };
+    await expect(fixture.chair.dispatchProviderAction(request)).resolves.toMatchObject({
+      status: "ambiguous",
+      executionCount: 1,
+      effectCount: 1,
+    });
+    armReentry = true;
+    await expect(fixture.chair.dispatchProviderAction(request)).rejects.toMatchObject({
+      name: "ProviderActionOwnerError",
+      expectedOwner: "generic",
+      actualOwner: "certifying_review",
+    });
+    const database = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(database.prepare(`
+        SELECT status,execution_count,effect_count FROM provider_actions
+         WHERE adapter_id='fake-lifecycle' AND action_id=?
+      `).get(actionId)).toEqual({ status: "ambiguous", execution_count: 1, effect_count: 1 });
+      expect(database.prepare(`
+        SELECT COUNT(*) AS count FROM commands WHERE command_id=?
+      `).get(commandId)).toEqual({ count: 1 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it.each([
+    ["provider-action-owner:before-deferred-enqueue", "prepared", 0],
+    ["provider-action-owner:before-deferred-claim", "prepared", 0],
+    ["provider-action-owner:before-deferred-completion", "dispatched", 1],
+  ] as const)("fails closed at %s without a deferred provider effect or acknowledgement mutation", async (
+    boundary,
+    expectedStatus,
+    expectedExecutionCount,
+  ) => {
+    let activeActionId: string | undefined;
+    let boundaryFired = false;
+    let fixtureIdentity: Readonly<{
+      databasePath: string;
+      runId: string;
+      taskId: string;
+    }> | undefined;
+    const fixture = await createLifecycleFixture({
+      maximumConcurrentProviderTurns: 16,
+      fault: (label) => {
+        if (
+          label !== boundary || boundaryFired ||
+          activeActionId === undefined || fixtureIdentity === undefined
+        ) return;
+        boundaryFired = true;
+        bindCertifyingReviewOwner({
+          databasePath: fixtureIdentity.databasePath,
+          runId: fixtureIdentity.runId,
+          adapterId: "fake-lifecycle",
+          actionId: activeActionId,
+          taskId: fixtureIdentity.taskId,
+        });
+      },
+    });
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    fixtureIdentity = {
+      databasePath: fixture.databasePath,
+      runId: fixture.runId,
+      taskId: fixture.leaderTask.taskId,
+    };
+    const authority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        budget: { turns: 2, provider_calls: 2, concurrent_turns: 1 },
+      },
+      commandId: `${boundary}:authority`,
+    });
+    activeActionId = `${boundary}:action`;
+    const commandId = `${boundary}:dispatch`;
+    const dispatch = fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
+      adapterId: "fake-lifecycle",
+      actionId: activeActionId,
+      operation: "spawn",
+      taskId: fixture.leaderTask.taskId,
+      authorityId: authority.authorityId,
+      payload: {
+        model: "fake-reviewer-v1",
+        modelFamily: "fake",
+        prompt: `Exercise ${boundary}.`,
+        cwd: "src/leader",
+        scenario: "terminal-exact-usage",
+        maxTurns: 1,
+      },
+      commandId,
+    });
+    await expect(dispatch).rejects.toMatchObject({
+      name: "ProviderActionOwnerError",
+      expectedOwner: "generic",
+      actualOwner: "certifying_review",
+    });
+    const database = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(database.prepare(`
+        SELECT status,execution_count,effect_count FROM provider_actions
+         WHERE adapter_id='fake-lifecycle' AND action_id=?
+      `).get(activeActionId)).toEqual({
+        status: expectedStatus,
+        execution_count: expectedExecutionCount,
+        effect_count: 0,
+      });
+      expect(database.prepare(`
+        SELECT json_extract(result_json,'$.status') AS status
+          FROM commands WHERE command_id=?
+      `).get(commandId)).toEqual({ status: "prepared" });
+    } finally {
+      database.close();
+    }
+    await expect(readFile(fixture.providerJournalPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    if (boundary === "provider-action-owner:before-deferred-claim") {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 150));
+      await expect(fixture.fabric.recoverStartupState()).resolves.toMatchObject({ actionsReconciled: 1 });
+      const specialisedRecovery = await waitForProviderAction(fixture.chair, activeActionId);
+      expect(specialisedRecovery.status).not.toBe("prepared");
+      expect(specialisedRecovery.executionCount).toBe(1);
+    }
   });
 
   it("quarantines ambiguity without replay when downstream idempotency is unproven", async () => {
