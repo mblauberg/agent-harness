@@ -1,6 +1,6 @@
 # Writing Process
 
-Use this reference for the order of work: analyse the audience, choose the document type, structure before prose, then revise in passes. Most weak engineering documents fail here, not at the sentence level. A well-structured plain draft beats a beautifully worded one aimed at the wrong reader. This file also owns wrong-home repair and the engineering-specific application of the hub's condense pass (see `${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/condense-pass.md`).
+Use this reference for the order of work: analyse the audience, choose the document type, structure before prose, then revise in passes. Most weak engineering documents fail here, not at the sentence level. A well-structured plain draft beats a beautifully worded one aimed at the wrong reader. This file also owns wrong-home repair and the engineering-specific application of the condense pass from the `natural-writing` skill.
 
 ## 1. Audience and purpose first
 
@@ -46,7 +46,7 @@ Do not edit for everything at once. Separate passes catch more and drift less:
 2. **Accuracy pass**: are numbers, identifiers, versions, commands, and claims correct and supported? Is uncertainty marked? Are observations separated from interpretations?
 3. **Clarity and concision pass**: is each sentence carrying its weight? Cut needless words without dropping conditions, caveats, exact values, or obligations. Keep related words together.
 4. **Anti-AI / voice pass**: sweep the tells and confirm the positive habits. See `engineer-voice.md` and the hub taxonomy.
-5. **Australian English pass**: spelling, dates, terminology, punctuation. See the hub default `au-english.md`.
+5. **Australian English pass**: spelling, dates, terminology, punctuation. See the `natural-writing` skill's hub default.
 
 For a light task, passes 3 to 5 may be enough; for a deliverable, run all five.
 
@@ -60,9 +60,8 @@ For each paragraph (each sentence in short-form text), name its one job in a phr
 
 ## 7. Condense pass
 
-Load the hub procedure:
-`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/condense-pass.md`,
-for the measure/lock/reverse-outline/de-duplicate/cut/narrow steps, the
+Load the `natural-writing` skill for the hub procedure: the
+measure/lock/reverse-outline/de-duplicate/cut/narrow steps, the
 stop rule, condense integrity, and the report-the-delta requirement. A
 first-draft or machine-drafted engineering document often loses 20 to 50 per
 cent; there is no percentage target, and a tight document may already be

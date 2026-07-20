@@ -55,8 +55,8 @@ accepts the weaker guarantee.
   retirement get skipped, and append-only stores then degrade. Periodically mark stale or contradicted
   rows `retired`/`superseded`, and validate that manifest paths still exist. Budget time for this.
 - **Close the run:** graduate durable conclusions, retain the manifest/synthesis/gate and failed-leg
-  receipts, then remove only raw payload created by this run and no longer referenced. Use `session`'s
-  [context-hygiene contract](../../session/references/context-hygiene.md); never delete unknown or
+  receipts, then remove only raw payload created by this run and no longer referenced. Use the
+  `session` skill's context-hygiene contract; never delete unknown or
   pre-existing untracked files.
 
 ## Cross-session handoff

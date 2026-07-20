@@ -1,8 +1,7 @@
 # Claim Discipline And Evidence (academic overlay)
 
-Load the hub schema first:
-`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/claim-discipline.md`,
-for the claim classes, the safer-wording table, the implicit-completion
+Load the `natural-writing` skill first for its hub schema: the claim classes,
+the safer-wording table, the implicit-completion
 tense trap, and the rule that a comparative claim must carry its number.
 This file adds only the empirical-research specifics the hub does not cover: LaTeX result
 references, small-sample statistics, and reproducibility terminology.

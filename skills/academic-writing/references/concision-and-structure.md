@@ -1,8 +1,7 @@
 # Concision And Structure (academic overlay)
 
-Load the hub procedure first:
-`${AGENTS_HOME:-$HOME/.agents}/skills/natural-writing/references/condense-pass.md`,
-for the condense procedure, the stop rule, the paragraph test, condense
+Load the `natural-writing` skill first for the hub condense procedure, the
+stop rule, the paragraph test, condense
 integrity, sentence repair, positive form, and emphatic position. This file
 adds only the LaTeX-specific details the hub does not cover.
 

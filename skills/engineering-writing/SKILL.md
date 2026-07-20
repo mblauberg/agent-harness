@@ -30,13 +30,12 @@ Australian English default, the anti-AI taxonomy and the condense pass. See
 5. Revise in separate structure, accuracy, clarity/concision, voice and
    Australian-English passes. Load only the needed section from
    [process](references/process.md), [style standard](references/style-standard.md),
-   [engineer voice](references/engineer-voice.md) or the hub
-   [Australian English default](../natural-writing/references/au-english.md);
+   [engineer voice](references/engineer-voice.md) or the `natural-writing`
+   skill's Australian English default;
    use [sentence mechanics](references/strunk-mechanics.md) or
    [sources](references/sources.md) only for a specific problem. Load the hub
-   [anti-AI taxonomy](../natural-writing/references/anti-ai-taxonomy.md) and
-   [condense pass](../natural-writing/references/condense-pass.md) alongside
-   `engineer-voice.md` and `process.md` respectively.
+   anti-AI taxonomy and condense pass from the `natural-writing` skill
+   alongside `engineer-voice.md` and `process.md` respectively.
 
 Preserve technical meaning and evidence altitude. Distinguish observation from
 interpretation; attach numbers to comparatives. Verify every package, API,
