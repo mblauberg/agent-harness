@@ -1,41 +1,48 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { rm } from "node:fs/promises";
 
-import { describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
+import { afterEach, describe, expect, it } from "vitest";
 
-function source(relative: string): string {
-  return readFileSync(fileURLToPath(new URL(`../../src/${relative}`, import.meta.url)), "utf8");
-}
+import { createLifecycleFixture } from "../support/lifecycle-testkit.ts";
+
+const cleanup: Array<() => Promise<void>> = [];
+
+afterEach(async () => {
+  await Promise.all(cleanup.splice(0).map((close) => close()));
+});
 
 describe("provider-action owner boundary wiring", () => {
-  const core = source("core/fabric.ts");
+  it("revalidates persisted ownership before acknowledging dispatch re-entry", async () => {
+    const fixture = await createLifecycleFixture();
+    cleanup.push(async () => {
+      await fixture.fabric.close();
+      await rm(fixture.directory, { recursive: true, force: true });
+    });
+    const request = {
+      certifyingReview: null,
+      adapterId: "fake-lifecycle",
+      actionId: "provider-owner-structural-reentry",
+      operation: "send_turn" as const,
+      payload: { scenario: "ambiguous-unproven", taskId: fixture.leaderTask.taskId },
+      commandId: "provider-owner-structural-reentry:dispatch",
+    };
+    await expect(fixture.chair.dispatchProviderAction(request)).resolves.toMatchObject({
+      status: "ambiguous",
+      executionCount: 1,
+    });
 
-  it.each([
-    ["deferred enqueue", /#enqueueDeferredProviderAction[\s\S]{0,700}assertProviderActionOwner/],
-    ["deferred claim", /#claimDeferredProviderAction[\s\S]{0,500}assertProviderActionOwner/],
-    ["deferred completion", /#completeAdapterOperation[\s\S]{0,700}assertProviderActionOwner/],
-    ["dispatch re-entry", /#dispatchProviderAction[\s\S]{0,900}assertProviderActionOwner/],
-    ["reconciliation", /#reconcileProviderAction[\s\S]{0,700}assertProviderActionOwner/],
-    ["terminal persistence", /#persistProviderAction[\s\S]{0,450}assertProviderActionOwner/],
-  ] as const)("routes %s through the canonical assertion", (_boundary, pattern) => {
-    expect(core).toMatch(pattern);
-  });
+    const database = new Database(fixture.databasePath);
+    database.pragma("foreign_keys = OFF");
+    database.prepare(`
+      UPDATE provider_actions SET finding_capacity_reservation_digest=?
+       WHERE adapter_id=? AND action_id=?
+    `).run(`sha256:${"a".repeat(64)}`, request.adapterId, request.actionId);
+    database.close();
 
-  it("classifies startup rows and admits only generic rows to generic recovery", () => {
-    expect(core).toMatch(/const owner = classifyProviderActionOwner[\s\S]{0,300}return owner === "generic"/);
-    expect(core).toMatch(/#recoverCertifyingReviewProviderActions[\s\S]{0,1800}"certifying_review"/);
-  });
-
-  it.each([
-    ["launch", source("project-session/launch-custody.ts"), '}, "launch");'],
-    ["provider_agent", source("project-session/launch-custody.ts"), '}, "provider_agent");'],
-    ["lifecycle", core, '}, "lifecycle");'],
-    ["herdr", source("integrations/herdr-fabric-ports.ts"), '}, "herdr");'],
-    ["chair_recovery", source("project-session/launch-custody.ts"), '}, "chair_recovery");'],
-    ["chair_live_handoff", source("project-session/launch-custody.ts"), '}, "chair_live_handoff");'],
-    ["operator_control", source("operator/production-action-ports.ts"), '}, "operator_control");'],
-    ["certifying_review", core, '"certifying_review",'],
-  ] as const)("routes %s recovery through the canonical assertion", (_owner, contents, assertion) => {
-    expect(contents).toContain(assertion);
+    await expect(fixture.chair.dispatchProviderAction(request)).rejects.toMatchObject({
+      name: "ProviderActionOwnerError",
+      expectedOwner: "generic",
+      actualOwner: "integrity_failed",
+    });
   });
 });

@@ -2814,6 +2814,174 @@ describe("NFR-004/AC-011 Stage 3 durable provider actions", () => {
     }
   });
 
+  it("quarantines a malformed owner record at startup and continues recovering valid records", async () => {
+    const fixture = await createLifecycleFixture({ secondaryAdapter: true });
+    cleanup.push(async () => rm(fixture.directory, { recursive: true, force: true }));
+    const secondaryAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader/child"],
+        budget: { turns: 2, provider_calls: 2, concurrent_turns: 1 },
+      },
+      commandId: "restart-owner-quarantine:secondary-authority",
+    });
+    const secondaryRegistration = await fixture.chair.registerAgent({
+      agentId: "restart-owner-quarantine-secondary",
+      authorityId: secondaryAuthority.authorityId,
+      providerSessionRef: "fake-session:restart-owner-quarantine-secondary:g1",
+      adapterId: "fake-lifecycle-secondary",
+    });
+    const secondaryClient = asLifecycleClient(fixture.fabric.connect(secondaryRegistration.capability));
+    const secondaryTaskReady = await fixture.chair.createTask({
+      taskId: "restart-owner-quarantine-secondary-task",
+      authorityId: secondaryAuthority.authorityId,
+      eligibleAgentIds: ["restart-owner-quarantine-secondary"],
+      objective: "retain a valid pending provider action across restart",
+      baseRevision: "stage3-base",
+      commandId: "restart-owner-quarantine:secondary-task-create",
+    });
+    const secondaryTask = await secondaryClient.claimTask({
+      taskId: secondaryTaskReady.taskId,
+      expectedRevision: secondaryTaskReady.revision,
+      commandId: "restart-owner-quarantine:secondary-task-claim",
+    });
+    const reviewAuthority = await fixture.chair.delegateAuthority({
+      parentAuthorityId: fixture.chairAuthorityId,
+      authority: {
+        ...fixture.rootAuthority,
+        sourcePaths: ["src/leader"],
+        budget: { turns: 1, provider_calls: 1, concurrent_turns: 1 },
+      },
+      commandId: "restart-owner-quarantine:review-authority",
+    });
+    const actions = [
+      {
+        adapterId: "fake-lifecycle",
+        actionId: "restart-owner:malformed",
+        taskId: fixture.leaderTask.taskId,
+      },
+      {
+        adapterId: "fake-lifecycle-secondary",
+        actionId: "restart-owner:valid",
+        taskId: secondaryTask.taskId,
+      },
+    ] as const;
+    await expect(fixture.chair.dispatchProviderAction({
+      certifyingReview: null,
+      adapterId: actions[1].adapterId,
+      actionId: actions[1].actionId,
+      operation: "send_turn",
+      payload: { scenario: "ambiguous-unproven", taskId: actions[1].taskId },
+      commandId: `${actions[1].actionId}:dispatch`,
+    })).resolves.toMatchObject({ status: "ambiguous", executionCount: 1, effectCount: 1 });
+    await fixture.fabric.close();
+
+    const malformedReservationDigest = `sha256:${"f".repeat(64)}`;
+    const database = new Database(fixture.databasePath);
+    admitProviderActionFixture(database, {
+      runId: fixture.runId,
+      adapterId: actions[0].adapterId,
+      actionId: actions[0].actionId,
+      operation: "spawn",
+      identityHash: "restart-owner-malformed-identity",
+      payloadHash: "restart-owner-malformed-payload",
+      payloadJson: '{"model":"fake-reviewer-v1","maxTurns":1}',
+      status: "prepared",
+      historyJson: '["prepared"]',
+      executionCount: 0,
+      effectCount: 0,
+      taskId: actions[0].taskId,
+      budgetAuthorityId: reviewAuthority.authorityId,
+      budgetReservationJson: '{"concurrent_turns":1,"provider_calls":1,"turns":1}',
+      budgetState: "reserved",
+      budgetStartedAt: 1,
+      updatedAt: 1,
+    });
+    database.pragma("foreign_keys = OFF");
+    database.prepare(`
+      UPDATE provider_actions SET finding_capacity_reservation_digest=?,history_json='malformed'
+       WHERE adapter_id=? AND action_id=?
+    `).run(malformedReservationDigest, actions[0].adapterId, actions[0].actionId);
+    database.close();
+
+    const restarted = await reopenLifecycleFabric(fixture);
+    cleanup.push(async () => restarted.close());
+    await expect(restarted.recoverStartupState()).resolves.toMatchObject({
+      actionsReconciled: 0,
+      actionsQuarantined: 2,
+    });
+    await expect(restarted.recoverStartupState()).resolves.toMatchObject({
+      actionsReconciled: 0,
+      actionsQuarantined: 0,
+    });
+
+    const observed = new Database(fixture.databasePath, { readonly: true });
+    try {
+      expect(observed.prepare(`
+        SELECT adapter_id,action_id,status,budget_state,budget_settlement_json FROM provider_actions
+         WHERE (adapter_id=? AND action_id=?) OR (adapter_id=? AND action_id=?)
+         ORDER BY adapter_id,action_id
+      `).all(
+        actions[0].adapterId,
+        actions[0].actionId,
+        actions[1].adapterId,
+        actions[1].actionId,
+      )).toStrictEqual([
+        {
+          adapter_id: actions[0].adapterId,
+          action_id: actions[0].actionId,
+          status: "quarantined",
+          budget_state: "usage-unknown",
+          budget_settlement_json: '{"concurrent_turns":"unknown","provider_calls":"unknown","turns":"unknown"}',
+        },
+        {
+          adapter_id: actions[1].adapterId,
+          action_id: actions[1].actionId,
+          status: "quarantined",
+          budget_state: null,
+          budget_settlement_json: null,
+        },
+      ]);
+      expect(authorityBudget(fixture.databasePath, reviewAuthority.authorityId)).toMatchObject({
+        turns: { reserved: 1, consumed: 0, usageUnknown: true },
+        provider_calls: { reserved: 1, consumed: 0, usageUnknown: true },
+        concurrent_turns: { reserved: 1, consumed: 0, usageUnknown: true },
+      });
+      expect(observed.prepare(`
+        SELECT history_json,idempotency_proven,result_json,journal_revision
+          FROM provider_actions WHERE adapter_id=? AND action_id=?
+      `).get(actions[0].adapterId, actions[0].actionId)).toStrictEqual({
+        history_json: '["quarantined"]',
+        idempotency_proven: 0,
+        result_json: null,
+        journal_revision: 2,
+      });
+      const recoveryCommands = observed.prepare(`
+        SELECT command_id FROM commands
+         WHERE command_id LIKE 'startup-recovery:restart-owner:%' ORDER BY command_id
+      `).pluck().all() as string[];
+      expect(recoveryCommands).toHaveLength(1);
+      expect(recoveryCommands[0]).toContain(actions[1].actionId);
+      expect(recoveryCommands[0]).not.toContain(actions[0].actionId);
+      const diagnostics = observed.prepare(`
+        SELECT payload_json FROM events
+         WHERE run_id=? AND type='startup-provider-action-quarantined'
+           AND json_extract(payload_json,'$.actionId')=?
+      `).pluck().all(fixture.runId, actions[0].actionId);
+      expect(diagnostics.map((diagnostic) => JSON.parse(String(diagnostic)))).toStrictEqual([
+        {
+          actionId: actions[0].actionId,
+          adapterId: actions[0].adapterId,
+          owner: "integrity_failed",
+          reason: "owner_integrity_failed",
+        },
+      ]);
+    } finally {
+      observed.close();
+    }
+  });
+
   it("revalidates ownership after command replay and before acknowledging re-entry", async () => {
     let armReentry = false;
     let fixtureIdentity: Readonly<{ databasePath: string; runId: string; taskId: string }> | undefined;

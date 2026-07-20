@@ -253,6 +253,51 @@ export function classifyProviderActionOwner(
   return candidates[0] ?? "generic";
 }
 
+export function classifyProviderActionOwnerForStartup(
+  database: Database.Database,
+  ref: ProviderActionOwnerRef,
+): Readonly<{ owner: ProviderActionOwner; reason: "owner_integrity_failed" | "owner_classification_failed" }> {
+  try {
+    return { owner: classifyProviderActionOwner(database, ref), reason: "owner_integrity_failed" };
+  } catch {
+    return { owner: "integrity_failed", reason: "owner_classification_failed" };
+  }
+}
+
+export function quarantineProviderActionOwnerAtStartup(
+  database: Database.Database,
+  ref: ProviderActionOwnerRef,
+  now: number,
+): void {
+  const binding = row(database.prepare(`
+    SELECT budget_state,budget_reservation_json FROM provider_actions
+     WHERE run_id=? AND adapter_id=? AND action_id=?
+  `).get(ref.runId, ref.adapterId, ref.actionId));
+  if (binding === undefined) throw new Error("startup provider action is unavailable");
+  let settlement: string | null = null;
+  if (binding.budget_state === "reserved") {
+    const reservation = row(JSON.parse(String(binding.budget_reservation_json)));
+    if (
+      reservation === undefined || Object.values(reservation).some(
+        (value) => typeof value !== "number" || !Number.isSafeInteger(value) || value < 1,
+      )
+    ) throw new Error("startup provider action budget reservation is invalid");
+    settlement = canonicalJson(Object.fromEntries(
+      Object.keys(reservation).sort().map((unit) => [unit, "unknown"]),
+    ));
+  }
+  database.prepare(`
+    UPDATE provider_actions
+       SET status='quarantined',history_json=CASE
+             WHEN json_valid(history_json) AND json_type(history_json)='array'
+             THEN json_insert(history_json,'$[#]','quarantined') ELSE '["quarantined"]' END,
+           idempotency_proven=0,result_json=NULL,journal_revision=journal_revision+1,updated_at=?,
+           budget_settlement_json=CASE WHEN budget_state='reserved' THEN ? ELSE budget_settlement_json END,
+           budget_state=CASE WHEN budget_state='reserved' THEN 'usage-unknown' ELSE budget_state END
+     WHERE run_id=? AND adapter_id=? AND action_id=?
+  `).run(now, settlement, ref.runId, ref.adapterId, ref.actionId);
+}
+
 export function assertProviderActionOwner(
   database: Database.Database,
   ref: ProviderActionOwnerRef,
