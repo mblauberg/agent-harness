@@ -22,6 +22,34 @@ UNMANAGED_WORKFLOW_BYTES = (
     b"export const meta = { name: 'mine' };\r\n"
     b"// User-owned workflow with no trailing newline"
 )
+EXPECTED_AMBIENT_SKILL_NAMES = frozenset(
+    {
+        "caveman",
+        "code-review",
+        "deliver",
+        "diagnose",
+        "evaluate",
+        "implement",
+        "orchestrate",
+        "release",
+        "retrospect",
+        "scope",
+        "session",
+        "tdd",
+    }
+)
+AMBIENT_NON_SKILL_CODE_NAMES = frozenset(
+    {
+        "clean",
+        "crucial",
+        "flagship",
+        "routine",
+        "scout",
+        "substantial",
+        "terminal",
+        "workhorse",
+    }
+)
 
 
 def run(platform: str, home: Path, *arguments: str, **extra_env):
@@ -53,21 +81,41 @@ def expected_skills():
     return {path.parent.name for path in (ROOT / "skills").glob("*/SKILL.md")}
 
 
+def _ambient_skill_names(texts, available):
+    code_words = set()
+    singleton_code_names = set()
+    for text in texts:
+        for code_span in re.findall(r"`([^`]+)`", text):
+            code_words.update(re.findall(r"[a-z][a-z0-9-]*", code_span))
+            if re.fullmatch(r"[a-z][a-z0-9-]*", code_span):
+                singleton_code_names.add(code_span)
+
+    unresolved = singleton_code_names - available - AMBIENT_NON_SKILL_CODE_NAMES
+    assert not unresolved, (
+        f"ambient files reference unknown skill name(s): {sorted(unresolved)}"
+    )
+    names = code_words & available
+    assert names == EXPECTED_AMBIENT_SKILL_NAMES, (
+        f"ambient skill-name contract drifted: expected "
+        f"{sorted(EXPECTED_AMBIENT_SKILL_NAMES)}, found {sorted(names)}"
+    )
+    return names
+
+
 def ambient_skill_names_and_resolver_root():
     available = expected_skills()
-    names = set()
+    texts = []
     resolver_roots = set()
     for ambient in (ROOT / "AGENTS.md", ROOT / "HARNESS.md"):
         text = ambient.read_text()
-        for code_span in re.findall(r"`([^`]+)`", text):
-            names.update(re.findall(r"[a-z][a-z0-9-]*", code_span))
+        texts.append(text)
         roots = re.findall(r"`(\$HOME/\.agents/skills/<name>/)`", text)
         assert roots == ["$HOME/.agents/skills/<name>/"], (
             f"{ambient.name} must state exactly one D12 resolver root"
         )
         resolver_roots.update(roots)
     assert len(resolver_roots) == 1
-    return names & available, resolver_roots.pop()
+    return _ambient_skill_names(texts, available), resolver_roots.pop()
 
 
 def test_installs_claude_skills_and_global_instructions_idempotently(tmp_path):
@@ -356,36 +404,60 @@ def test_workflow_installer_preserves_a_directory_link_to_canonical_sources(
     ).exists()
 
 
-def test_ambient_skill_names_resolve_on_both_installed_platform_layouts(tmp_path):
-    """AC-P3: ambient skill names resolve through each static install layout."""
-    names, resolver_template = ambient_skill_names_and_resolver_root()
-    assert names
+def test_ambient_skill_name_extraction_rejects_unknown_explicit_skill():
+    ambient = "\n".join(
+        (ROOT / name).read_text() for name in ("AGENTS.md", "HARNESS.md")
+    )
+    for unknown_reference in (
+        "Use the `phantom` skill.",
+        "Use `phantom` for context.",
+    ):
+        with pytest.raises(AssertionError, match=r"unknown skill name.*phantom"):
+            _ambient_skill_names([f"{ambient}\n{unknown_reference}\n"], expected_skills())
 
-    for platform, config_name, variable in (
+
+@pytest.mark.parametrize(
+    "platform, config_name, variable",
+    (
         ("claude", ".claude", "CLAUDE_CONFIG_DIR"),
         ("codex", ".codex", "CODEX_HOME"),
-    ):
-        home = tmp_path / platform
-        home.mkdir()
-        # Model the canonical checkout location named by the D12 resolver line
-        # while keeping the isolated install's actual source tree immutable.
-        (home / ".agents").symlink_to(ROOT, target_is_directory=True)
-        config = home / config_name
-        result = run(platform, home, **{variable: str(config)})
-        assert result.returncode == 0, result.stderr
+    ),
+)
+def test_ambient_skill_names_resolve_on_both_installed_platform_layouts(
+    tmp_path, platform, config_name, variable
+):
+    """AC-P3: ambient skill names resolve through each static install layout."""
+    names, resolver_template = ambient_skill_names_and_resolver_root()
+    assert names == EXPECTED_AMBIENT_SKILL_NAMES
 
-        resolver_root = Path(
-            resolver_template.replace("$HOME", str(home)).replace("<name>/", "")
+    home = tmp_path / platform
+    home.mkdir()
+    # Model the canonical checkout location named by the D12 resolver line
+    # while keeping the isolated install's actual source tree immutable.
+    (home / ".agents").symlink_to(ROOT, target_is_directory=True)
+    config = home / config_name
+    result = run(platform, home, **{variable: str(config)})
+    assert result.returncode == 0, result.stderr
+
+    installed_root = config / "skills"
+    installed_names = {path.name for path in installed_root.iterdir()}
+    assert installed_names == expected_skills()
+    resolver_root = Path(
+        resolver_template.replace("$HOME", str(home)).replace("<name>/", "")
+    )
+    assert resolver_root.resolve() == (ROOT / "skills").resolve()
+    installed_source_roots = {
+        (installed_root / name / "SKILL.md").resolve().parents[1] for name in names
+    }
+    assert installed_source_roots == {resolver_root.resolve()}
+    for name in names:
+        installed = installed_root / name / "SKILL.md"
+        resolved = resolver_root / name / "SKILL.md"
+        assert installed.is_file(), f"{platform} did not install skills/{name}/SKILL.md"
+        assert resolved.is_file(), f"resolver root cannot find skills/{name}/SKILL.md"
+        assert installed.resolve() == resolved.resolve(), (
+            f"{platform} installed root disagrees with $HOME/.agents/skills/{name}/"
         )
-        assert resolver_root.resolve() == (ROOT / "skills").resolve()
-        for name in names:
-            installed = config / "skills" / name / "SKILL.md"
-            resolved = resolver_root / name / "SKILL.md"
-            assert installed.is_file(), f"{platform} did not install skills/{name}/SKILL.md"
-            assert resolved.is_file(), f"resolver root cannot find skills/{name}/SKILL.md"
-            assert installed.resolve() == resolved.resolve(), (
-                f"{platform} installed root disagrees with $HOME/.agents/skills/{name}/"
-            )
 
 
 def test_all_mcp_clients_are_an_explicit_subscription_native_opt_in(tmp_path):
