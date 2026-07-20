@@ -164,7 +164,10 @@ def _state(
         )
     if _same_link(destination, Path(entry["source_target"])):
         return "stale"
-    if not destination.exists():
+    if not destination.exists() and not destination.is_symlink():
+        # Truly absent managed link: repair it. A broken symlink that resolves
+        # to neither the current nor the recorded source is foreign tampering,
+        # not a repairable managed link, so it falls through to conflicting.
         return "stale"
     return "conflicting"
 

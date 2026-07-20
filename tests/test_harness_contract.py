@@ -27,10 +27,13 @@ def test_lifecycle_skills_are_portable_and_named_for_their_directory():
 
 
 def test_claude_workflows_do_not_reference_retired_orchestration_skill():
-    offenders = []
-    for path in WORKFLOWS.glob("*.js"):
-        if "multi-agent-orchestration" in path.read_text():
-            offenders.append(path.name)
+    workflows = list(WORKFLOWS.glob("*.js"))
+    assert workflows, "no in-repo workflows found; the guard must not pass vacuously"
+    offenders = [
+        path.name
+        for path in workflows
+        if "multi-agent-orchestration" in path.read_text()
+    ]
     assert offenders == []
 
 

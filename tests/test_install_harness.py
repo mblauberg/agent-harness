@@ -234,6 +234,33 @@ def test_claude_workflow_install_rejects_an_equivalent_unmanaged_file(
     assert name not in manifest["managed"]
 
 
+def test_claude_workflow_install_rejects_a_foreign_broken_symlink_at_a_managed_path(
+    tmp_path,
+):
+    # A managed link replaced by a foreign symlink that resolves to neither the
+    # current nor the recorded source is foreign tampering, not a repairable
+    # managed link, even though a broken symlink reports exists()==False. It must
+    # conflict (exit 3) and leave every workflow target unmutated.
+    config = tmp_path / "claude-config"
+    first = run("claude", tmp_path, CLAUDE_CONFIG_DIR=str(config))
+    assert first.returncode == 0, first.stderr
+
+    name = "cross-verify.js"
+    destination = config / "workflows" / name
+    foreign_target = tmp_path / "foreign" / "missing.js"  # never created: broken
+    destination.unlink()
+    destination.symlink_to(foreign_target)
+
+    result = run("claude", tmp_path, CLAUDE_CONFIG_DIR=str(config))
+
+    assert result.returncode == 3
+    assert name in result.stderr
+    # Zero mutation: the foreign broken symlink is preserved, not relinked.
+    assert destination.is_symlink()
+    assert os.readlink(destination) == str(foreign_target)
+    assert not destination.exists()
+
+
 def test_workflow_install_does_not_publish_links_when_ownership_write_fails(tmp_path):
     config = tmp_path / "claude-config"
     target = config / "workflows"
