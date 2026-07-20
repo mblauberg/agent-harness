@@ -63,9 +63,9 @@ import {
 } from "../application/provider-action-admission.js";
 import {
   assertProviderActionOwner,
-  classifyProviderActionOwnerForStartup,
+  classifyProviderActionOwnerRowForStartup,
   ProviderActionOwnerError, quarantineProviderActionOwnerAtStartup,
-  type ProviderActionCustodyOwner,
+  type ProviderActionCustodyOwner, type ProviderActionOwnerStartupRow,
 } from "../application/provider-action-owner.js";
 import { ProviderSessionCoordinator } from "../application/provider-session-coordinator.js";
 import { FabricError } from "../errors.js";
@@ -1915,6 +1915,23 @@ export class Fabric {
     }
     return this.#ambiguousLaunchOutcome(input, "conflict", record);
   }
+  #quarantineProviderActionOwnerAtStartup(
+    recovery: ProviderActionOwnerStartupRow, now: number, payload: Readonly<{ owner: string; reason: string }>,
+  ): boolean {
+    const identity = recovery.diagnosticRef;
+    try {
+      return quarantineProviderActionOwnerAtStartup(this.#database, recovery, now, () => this.#event(
+        identity.runId, "startup-provider-action-quarantined", null,
+        { actionId: identity.actionId, adapterId: identity.adapterId, ...payload },
+      ));
+    } catch (error: unknown) {
+      this.#event(identity.runId, "startup-provider-action-quarantine-failed", null, {
+        actionId: identity.actionId, adapterId: identity.adapterId, rowId: recovery.rowId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
   async recoverStartupState(): Promise<{
     actionsReconciled: number; actionsQuarantined: number;
     leasesQuarantined: number; sessionsDegraded: number; deliveriesReleased: number;
@@ -1954,46 +1971,33 @@ export class Fabric {
     const certifyingReviewRecovery = await this.#recoverCertifyingReviewProviderActions();
     let { actionsReconciled, actionsQuarantined } = certifyingReviewRecovery;
     const pendingActions = this.#database.prepare(`
-      SELECT p.run_id, p.action_id, p.adapter_id, p.status, p.updated_at, r.chair_agent_id
-       FROM provider_actions p JOIN runs r ON r.run_id = p.run_id
+      SELECT CAST(p.rowid AS TEXT) AS provider_action_rowid,p.run_id,p.action_id,p.adapter_id,p.status,p.updated_at,r.chair_agent_id
+       FROM provider_actions p LEFT JOIN runs r ON r.run_id = p.run_id
        WHERE p.status IN ('prepared', 'dispatched', 'ambiguous')
        ORDER BY p.updated_at, p.action_id
-    `).all().filter((value) => {
-      const action = rowOrNotFound(value, "startup provider action");
-      const ref = { runId: stringField(action, "run_id"), adapterId: stringField(action, "adapter_id"),
-        actionId: stringField(action, "action_id") };
-      try {
-        const { owner, reason } = classifyProviderActionOwnerForStartup(this.#database, ref);
-        if (owner === "integrity_failed") {
-          this.#database.transaction(() => {
-            quarantineProviderActionOwnerAtStartup(this.#database, ref, now);
-            this.#event(ref.runId, "startup-provider-action-quarantined", null, { actionId: ref.actionId, adapterId: ref.adapterId, owner, reason });
-          }).immediate();
-          actionsQuarantined += 1;
-        }
-        return owner === "generic";
-      } catch (error: unknown) {
-        this.#event(ref.runId, "startup-provider-action-quarantine-failed", null, { actionId: ref.actionId,
-          adapterId: ref.adapterId, reason: error instanceof Error ? error.message : String(error) });
-        return false;
+    `).all().flatMap((value) => {
+      const recovery = classifyProviderActionOwnerRowForStartup(this.#database, value);
+      if (recovery.owner === "integrity_failed") {
+        if (this.#quarantineProviderActionOwnerAtStartup(
+          recovery, now, { owner: recovery.owner, reason: recovery.reason },
+        )) actionsQuarantined += 1;
       }
+      return recovery.owner === "generic" && recovery.ref !== null ? [recovery] : [];
     });
-    for (const value of pendingActions) {
-      const action = rowOrNotFound(value, "startup provider action");
-      const runId = stringField(action, "run_id"), actionId = stringField(action, "action_id");
+    for (const recovery of pendingActions) {
+      const { action, ref } = recovery;
+      if (ref === null) throw new Error("generic startup provider action identity is unavailable");
       try {
-        const result = await this.reconcileProviderAction(runId, stringField(action, "chair_agent_id"), {
-          adapterId: stringField(action, "adapter_id"),
-          actionId,
-          commandId: `startup-recovery:${actionId}:${stringField(action, "status")}:${numberField(action, "updated_at")}`,
+        const result = await this.reconcileProviderAction(ref.runId, stringField(action, "chair_agent_id"), {
+          adapterId: ref.adapterId, actionId: ref.actionId,
+          commandId: `startup-recovery:${ref.actionId}:${stringField(action, "status")}:${numberField(action, "updated_at")}`,
         });
         if (result.status === "quarantined") actionsQuarantined += 1; else actionsReconciled += 1;
       } catch (error: unknown) {
-        if (error instanceof ProviderActionOwnerError) throw error;
-        this.#database.prepare("UPDATE provider_actions SET status = 'quarantined', updated_at = ? WHERE run_id = ? AND adapter_id = ? AND action_id = ?")
-          .run(now, runId, stringField(action, "adapter_id"), actionId);
-        this.#event(runId, "startup-provider-action-quarantined", null, { actionId, adapterId: stringField(action, "adapter_id"), reason: error instanceof Error ? error.message : String(error) });
-        actionsQuarantined += 1;
+        if (this.#quarantineProviderActionOwnerAtStartup(recovery, now, {
+          owner: error instanceof ProviderActionOwnerError ? error.actualOwner : recovery.owner,
+          reason: error instanceof Error ? error.message : String(error),
+        })) actionsQuarantined += 1;
       }
     }
     let sessionsDegraded = 0;
@@ -2150,33 +2154,29 @@ export class Fabric {
     let actionsReconciled = 0;
     let actionsQuarantined = 0;
     const pending = this.#database.prepare(`
-      SELECT p.run_id,p.adapter_id,p.action_id,p.status,p.updated_at,r.chair_agent_id
-        FROM provider_actions p JOIN runs r ON r.run_id=p.run_id
+      SELECT CAST(p.rowid AS TEXT) AS provider_action_rowid,p.run_id,p.adapter_id,p.action_id,p.status,p.updated_at,r.chair_agent_id
+        FROM provider_actions p LEFT JOIN runs r ON r.run_id=p.run_id
        WHERE p.status IN ('prepared','dispatched','ambiguous')
        ORDER BY p.updated_at,p.action_id
-    `).all().filter((value) => {
-      const action = rowOrNotFound(value, "certifying review provider action");
-      return classifyProviderActionOwnerForStartup(this.#database, {
-        runId: stringField(action, "run_id"),
-        adapterId: stringField(action, "adapter_id"),
-        actionId: stringField(action, "action_id"),
-      }).owner === "certifying_review";
+    `).all().flatMap((value) => {
+      const recovery = classifyProviderActionOwnerRowForStartup(this.#database, value);
+      return recovery.owner === "certifying_review" && recovery.ref !== null ? [recovery] : [];
     });
-    for (const value of pending) {
-      const action = rowOrNotFound(value, "certifying review provider action");
-      const actionId = stringField(action, "action_id");
-      const result = await this.#reconcileProviderAction(
-        stringField(action, "run_id"),
-        stringField(action, "chair_agent_id"),
-        {
-          adapterId: stringField(action, "adapter_id"),
-          actionId,
-          commandId: `certifying-review-recovery:${actionId}:${stringField(action, "status")}:${numberField(action, "updated_at")}`,
-        },
-        "certifying_review",
-      );
-      if (result.status === "quarantined") actionsQuarantined += 1;
-      else actionsReconciled += 1;
+    for (const recovery of pending) {
+      const { action, ref } = recovery;
+      if (ref === null) throw new Error("certifying review startup provider action identity is unavailable");
+      try {
+        const result = await this.#reconcileProviderAction(ref.runId, stringField(action, "chair_agent_id"), {
+          adapterId: ref.adapterId, actionId: ref.actionId,
+          commandId: `certifying-review-recovery:${ref.actionId}:${stringField(action, "status")}:${numberField(action, "updated_at")}`,
+        }, "certifying_review");
+        if (result.status === "quarantined") actionsQuarantined += 1; else actionsReconciled += 1;
+      } catch (error: unknown) {
+        if (this.#quarantineProviderActionOwnerAtStartup(recovery, this.#clock(), {
+          owner: error instanceof ProviderActionOwnerError ? error.actualOwner : recovery.owner,
+          reason: error instanceof Error ? error.message : String(error),
+        })) actionsQuarantined += 1;
+      }
     }
     return { actionsReconciled, actionsQuarantined };
   }

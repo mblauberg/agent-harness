@@ -347,6 +347,63 @@ describe("canonical provider-action owner classification", () => {
     },
   );
 
+  it.each([
+    {
+      owner: "lifecycle",
+      arrange: (database: Database.Database) => {
+        insertAction(database);
+        database.prepare(`
+          INSERT INTO lifecycle_rotation_custodies(
+            run_id,provider_action_adapter_id,provider_action_id,agent_id,
+            replacement_contract_digest,staged_capability_hash,target_principal_generation
+          ) VALUES (?,?,?,?,?,?,?)
+        `).run(ref.runId, ref.adapterId, ref.actionId, "agent-1", "contract-1", "cap-1", 2);
+        database.prepare(`
+          INSERT INTO provider_agent_custody(
+            run_id,adapter_id,action_id,operation,actor_agent_id,target_agent_id,
+            bridge_contract_digest,capability_hash,principal_generation,requested_provider_session_ref
+          ) VALUES (?,?,?,?,?,?,?,?,?,NULL)
+        `).run(ref.runId, ref.adapterId, ref.actionId, "spawn", "agent-1", "agent-1", "contract-1", "cap-1", 2);
+      },
+      mutate: (database: Database.Database) => database.prepare(`
+        UPDATE provider_agent_custody SET capability_hash='persisted-corruption'
+         WHERE run_id=? AND adapter_id=? AND action_id=?
+      `).run(ref.runId, ref.adapterId, ref.actionId),
+    },
+    {
+      owner: "operator_control",
+      arrange: (database: Database.Database) => {
+        insertAction(database);
+        bindOperatorControl(database);
+      },
+      mutate: (database: Database.Database) => database.prepare(`
+        UPDATE operator_control_provider_action_bindings SET source_payload_hash='persisted-corruption'
+         WHERE run_id=? AND adapter_id=? AND action_id=?
+      `).run(ref.runId, ref.adapterId, ref.actionId),
+    },
+    {
+      owner: "certifying_review",
+      arrange: (database: Database.Database) => {
+        const reservationDigest = `sha256:${"9".repeat(64)}`;
+        insertAction(database, { reservationDigest });
+        database.prepare(`INSERT INTO review_finding_capacity_reservations VALUES (?,?,?,?,?,?)`)
+          .run(ref.runId, ref.adapterId, ref.actionId, 7, "native", reservationDigest);
+        database.prepare(`INSERT INTO provider_action_routes VALUES (?,?,?,?,?,?)`)
+          .run(ref.runId, ref.adapterId, ref.actionId, 1, 7, "native");
+      },
+      mutate: (database: Database.Database) => database.prepare(`
+        UPDATE provider_action_routes SET slot='persisted-corruption'
+         WHERE run_id=? AND adapter_id=? AND action_id=?
+      `).run(ref.runId, ref.adapterId, ref.actionId),
+    },
+  ] as const)("reaches the persisted $owner joins when persisted owner fields mutate", ({ owner, arrange, mutate }) => {
+    const database = openClassifierDatabase();
+    arrange(database);
+    expect(classifyProviderActionOwner(database, ref)).toBe(owner);
+    mutate(database);
+    expect(classifyProviderActionOwner(database, ref)).toBe("integrity_failed");
+  });
+
   it("classifies an unbound ordinary provider action as generic", () => {
     const database = openClassifierDatabase();
     insertAction(database);
