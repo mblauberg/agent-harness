@@ -4,97 +4,45 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import tempfile
 import sys
 from typing import Any
 
+try:
+    import scripts.managed_installation_manifest as manifest_io
+except ModuleNotFoundError as exc:
+    if exc.name != "scripts":
+        raise
+    import managed_installation_manifest as manifest_io  # type: ignore[no-redef]
+
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST_NAME = ".agent-harness-installation.json"
-SKILL_NAME = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-SHA256 = re.compile(r"^[0-9a-f]{64}$")
-
-
-class InstallError(ValueError):
-    pass
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def _sha_skill(path: Path) -> str:
-    digest = hashlib.sha256()
-    for child in sorted(path.rglob("*")):
-        if any(part in {"__pycache__", ".DS_Store"} for part in child.relative_to(path).parts) or child.suffix == ".pyc":
-            continue
-        if child.is_symlink():
-            raise InstallError(f"skill source contains a symlink: {child.relative_to(path)}")
-        if not child.is_file():
-            continue
-        digest.update(child.relative_to(path).as_posix().encode())
-        digest.update(b"\0")
-        digest.update(b"x" if child.stat().st_mode & 0o111 else b"-")
-        digest.update(b"\0")
-        digest.update(child.read_bytes())
-        digest.update(b"\0")
-    return digest.hexdigest()
+SKILL_NAME = manifest_io.SKILL_NAME
+InstallError = manifest_io.InstallError
+_now = manifest_io.now
+_sha_skill = manifest_io.sha_skill
+_load_manifest = manifest_io.load_manifest
+_entry = manifest_io.entry
 
 
 def _skills(source: Path) -> dict[str, Path]:
     if not source.is_dir():
         raise InstallError("source must be an existing skill directory")
-    skills = {path.parent.name: path.parent.resolve() for path in sorted(source.glob("*/SKILL.md"))}
+    for child in sorted(source.rglob("*")):
+        if child.is_symlink():
+            raise InstallError(
+                f"skill source contains a symlink: {child.relative_to(source)}"
+            )
+    skills = {
+        path.parent.name: path.parent.resolve()
+        for path in sorted(source.glob("*/SKILL.md"))
+    }
     if any(not SKILL_NAME.fullmatch(name) for name in skills):
         raise InstallError("source contains an invalid skill name")
     return skills
-
-
-def _manifest_path(target: Path) -> Path:
-    return target.parent / MANIFEST_NAME
-
-
-def _empty_manifest(target: Path) -> dict[str, Any]:
-    return {
-        "schema_version": 1,
-        "owner": "agent-harness",
-        "target_root": str(target.resolve()),
-        "updated_at": _now(),
-        "managed": {},
-    }
-
-
-def _load_manifest(target: Path) -> dict[str, Any]:
-    path = _manifest_path(target)
-    if not path.exists():
-        return _empty_manifest(target)
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise InstallError(f"installation manifest is unreadable: {exc}") from exc
-    if not isinstance(data, dict) or data.get("schema_version") != 1 or data.get("owner") != "agent-harness" or not isinstance(data.get("managed"), dict):
-        raise InstallError("installation manifest is invalid or not owned by agent-harness")
-    if data.get("target_root") != str(target.resolve()):
-        raise InstallError("installation manifest belongs to a different target root")
-    required_entry = {"owner", "source_target", "source_sha256", "installed_at", "history"}
-    for name, entry in data["managed"].items():
-        if not isinstance(name, str) or not SKILL_NAME.fullmatch(name):
-            raise InstallError("installation manifest contains an invalid skill name")
-        if not isinstance(entry, dict) or set(entry) != required_entry or entry.get("owner") != "agent-harness":
-            raise InstallError(f"installation manifest entry is invalid: {name}")
-        if not isinstance(entry.get("source_target"), str) or not Path(entry["source_target"]).is_absolute():
-            raise InstallError(f"installation manifest source target is invalid: {name}")
-        if not isinstance(entry.get("source_sha256"), str) or not SHA256.fullmatch(entry["source_sha256"]):
-            raise InstallError(f"installation manifest digest is invalid: {name}")
-        if not isinstance(entry.get("history"), list):
-            raise InstallError(f"installation manifest history is invalid: {name}")
-    return data
 
 
 def _same_link(destination: Path, source: Path) -> bool:
@@ -102,14 +50,38 @@ def _same_link(destination: Path, source: Path) -> bool:
         return False
     try:
         return destination.resolve(strict=False) == source.resolve()
-    except OSError:
+    except (OSError, RuntimeError):
         return False
 
 
-def _plan(source: Path, target: Path, manifest: dict[str, Any]) -> list[dict[str, str]]:
+def _replace_link(destination: Path, source: Path) -> None:
+    """Publish one staged link; the temporary path stays on the target filesystem."""
+    temporary: Path | None = None
+    try:
+        descriptor, raw_path = tempfile.mkstemp(
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+        )
+        os.close(descriptor)
+        temporary = Path(raw_path)
+        temporary.unlink()
+        temporary.symlink_to(source)
+        os.replace(temporary, destination)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _plan(
+    source: Path,
+    target: Path,
+    manifest: dict[str, Any],
+) -> list[dict[str, str]]:
     skills = _skills(source)
     managed = manifest["managed"]
-    items = []
+    items: list[dict[str, str]] = []
     for name, source_path in skills.items():
         destination = target / name
         entry = managed.get(name)
@@ -136,7 +108,11 @@ def _plan(source: Path, target: Path, manifest: dict[str, Any]) -> list[dict[str
     return items
 
 
-def _integrity(source: Path, target: Path) -> list[dict[str, str]]:
+def _integrity(
+    source: Path,
+    target: Path,
+    manifest: dict[str, Any],
+) -> list[dict[str, str]]:
     """Report the installed catalogue without claiming ownership of foreign entries."""
     skills = _skills(source)
     items: list[dict[str, str]] = []
@@ -170,31 +146,7 @@ def _integrity(source: Path, target: Path) -> list[dict[str, str]]:
 
 
 def _write_manifest(target: Path, manifest: dict[str, Any]) -> None:
-    path = _manifest_path(target)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    manifest["updated_at"] = _now()
-    temp: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile("w", dir=path.parent, prefix=".installation.", suffix=".tmp", delete=False) as handle:
-            temp = Path(handle.name)
-            json.dump(manifest, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp, path)
-    finally:
-        if temp and temp.exists():
-            temp.unlink()
-
-
-def _entry(name: str, source: Path, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
-    return {
-        "owner": "agent-harness",
-        "source_target": str(source),
-        "source_sha256": _sha_skill(source),
-        "installed_at": _now(),
-        "history": history or [],
-    }
+    manifest_io.write_manifest(target, manifest)
 
 
 def _load_renames(path: Path | None) -> list[dict[str, str]]:
@@ -206,21 +158,27 @@ def _load_renames(path: Path | None) -> list[dict[str, str]]:
         raise InstallError(f"rename registry is unreadable: {exc}") from exc
     renames = data.get("renames") if isinstance(data, dict) and data.get("schema_version") == 1 else None
     if not isinstance(renames, list) or any(
-        not isinstance(item, dict) or set(item) != {"from", "to"}
-        or not SKILL_NAME.fullmatch(str(item["from"])) or not SKILL_NAME.fullmatch(str(item["to"]))
+        not isinstance(item, dict)
+        or set(item) != {"from", "to"}
+        or not SKILL_NAME.fullmatch(str(item["from"]))
+        or not SKILL_NAME.fullmatch(str(item["to"]))
         for item in renames
     ):
         raise InstallError("rename registry is invalid")
     return renames
 
 
-def _prepare_renames(source: Path, target: Path, manifest: dict[str, Any], renames: list[dict[str, str]]) -> list[dict[str, Any]]:
+def _prepare_renames(
+    source: Path,
+    target: Path,
+    manifest: dict[str, Any],
+    renames: list[dict[str, str]],
+) -> list[dict[str, Any]]:
     skills = _skills(source)
     managed = manifest["managed"]
     operations: list[dict[str, Any]] = []
-    # Several sources may converge on one target (a many-to-one skill merge):
-    # only the first such rename creates the shared link, the rest just retire
-    # their old link, and every source's history merges into the one target entry.
+    # Several sources may converge on one target: only the first such rename
+    # creates the shared link, while all source history remains on the target.
     creating: set[str] = set()
     target_history: dict[str, list[dict[str, str]]] = {}
     for rename in renames:
@@ -258,54 +216,39 @@ def _prepare_renames(source: Path, target: Path, manifest: dict[str, Any], renam
     return operations
 
 
-def _apply_renames(manifest: dict[str, Any], operations: list[dict[str, Any]]) -> None:
-    applied: list[dict[str, Any]] = []
-    try:
-        for operation in operations:
-            if operation["create_new"]:
-                operation["new_destination"].symlink_to(operation["new_source"])
-            try:
-                if operation["old_destination"].is_symlink():
-                    operation["old_destination"].unlink()
-            except OSError:
-                if operation["create_new"]:
-                    operation["new_destination"].unlink(missing_ok=True)
-                raise
-            applied.append(operation)
-    except OSError as exc:
-        for operation in reversed(applied):
-            if operation["create_new"] and operation["new_destination"].is_symlink():
-                operation["new_destination"].unlink()
-            if not operation["old_destination"].exists() and not operation["old_destination"].is_symlink():
-                operation["old_destination"].symlink_to(operation["old_source"])
-        raise InstallError(f"rename application failed and was rolled back: {exc}") from exc
+def _apply_renames(
+    manifest: dict[str, Any],
+    operations: list[dict[str, Any]],
+) -> None:
+    for operation in operations:
+        if operation["create_new"]:
+            _replace_link(operation["new_destination"], operation["new_source"])
+        if operation["old_destination"].is_symlink():
+            operation["old_destination"].unlink()
     for operation in operations:
         if operation["manage_new"]:
             manifest["managed"][operation["new"]] = operation["entry"]
         manifest["managed"].pop(operation["old"], None)
 
 
-def _snapshot_links(target: Path, names: set[str]) -> dict[str, str | None]:
-    return {name: os.readlink(target / name) if (target / name).is_symlink() else None for name in names}
-
-
-def _restore_links(target: Path, snapshot: dict[str, str | None]) -> None:
-    for name, raw in snapshot.items():
-        destination = target / name
-        if destination.is_symlink():
-            destination.unlink()
-        if raw is not None:
-            destination.symlink_to(raw)
-
-
-def execute(action: str, source: Path, target: Path, renames: Path | None = None) -> dict[str, Any]:
+def execute(
+    action: str,
+    source: Path,
+    target: Path,
+    renames: Path | None = None,
+) -> dict[str, Any]:
+    if action not in {"plan", "check", "install", "reconcile", "uninstall-managed"}:
+        raise InstallError(f"unsupported action: {action}")
+    source = Path(source)
+    if source.is_symlink():
+        raise InstallError("skill source contains a symlink: source")
     source = source.resolve()
-    target = target.resolve()
+    target = Path(target).resolve()
     manifest = _load_manifest(target)
     if action == "plan":
         return {"schema_version": 1, "action": action, "items": _plan(source, target, manifest), "changed": []}
     if action == "check":
-        items = _integrity(source, target)
+        items = _integrity(source, target, manifest)
         return {
             "schema_version": 1,
             "action": action,
@@ -322,50 +265,39 @@ def execute(action: str, source: Path, target: Path, renames: Path | None = None
     conflicts = [item["name"] for item in items if item["state"] == "conflicting" and item["name"] not in renamed_old]
     if conflicts:
         raise InstallError("conflicting managed targets: " + ", ".join(conflicts))
-    tracked = set(manifest["managed"]) | {item["name"] for item in items}
-    tracked |= {operation["new"] for operation in rename_operations}
-    snapshot = _snapshot_links(target, tracked)
     changed: list[str] = [operation["new"] for operation in rename_operations]
-    try:
-        if rename_operations:
-            _apply_renames(manifest, rename_operations)
-            items = _plan(source, target, manifest)
-        if action in {"install", "reconcile"}:
-            skills = _skills(source)
-            for item in items:
-                name, state = item["name"], item["state"]
-                if state in {"missing", "stale"}:
-                    destination = target / name
-                    if destination.is_symlink():
-                        destination.unlink()
-                    destination.symlink_to(skills[name])
-                    history = list(manifest["managed"].get(name, {}).get("history", []))
-                    manifest["managed"][name] = _entry(name, skills[name], history)
-                    changed.append(name)
-                elif state == "retired-managed":
-                    (target / name).unlink()
-                    del manifest["managed"][name]
-                    changed.append(name)
-                elif state == "retired-missing":
-                    del manifest["managed"][name]
-                    changed.append(name)
-        elif action == "uninstall-managed":
-            for name, entry in list(manifest["managed"].items()):
+    if rename_operations:
+        _apply_renames(manifest, rename_operations)
+        items = _plan(source, target, manifest)
+    if action in {"install", "reconcile"}:
+        skills = _skills(source)
+        for item in items:
+            name, state = item["name"], item["state"]
+            if state in {"missing", "stale"}:
                 destination = target / name
-                if _same_link(destination, Path(entry.get("source_target", "/missing"))):
-                    destination.unlink()
-                    del manifest["managed"][name]
-                    changed.append(name)
-                elif destination.exists() or destination.is_symlink():
-                    raise InstallError(f"conflicting managed target changed outside harness: {name}")
-                else:
-                    del manifest["managed"][name]
-        else:
-            raise InstallError(f"unsupported action: {action}")
-        _write_manifest(target, manifest)
-    except (OSError, InstallError):
-        _restore_links(target, snapshot)
-        raise
+                _replace_link(destination, skills[name])
+                history = list(manifest["managed"].get(name, {}).get("history", []))
+                manifest["managed"][name] = _entry(name, skills[name], history)
+                changed.append(name)
+            elif state == "retired-managed":
+                (target / name).unlink()
+                del manifest["managed"][name]
+                changed.append(name)
+            elif state == "retired-missing":
+                del manifest["managed"][name]
+                changed.append(name)
+    elif action == "uninstall-managed":
+        for name, entry in list(manifest["managed"].items()):
+            destination = target / name
+            if _same_link(destination, Path(entry.get("source_target", "/missing"))):
+                destination.unlink()
+                del manifest["managed"][name]
+                changed.append(name)
+            elif destination.exists() or destination.is_symlink():
+                raise InstallError(f"conflicting managed target changed outside harness: {name}")
+            else:
+                del manifest["managed"][name]
+    _write_manifest(target, manifest)
     return {"schema_version": 1, "action": action, "items": _plan(source, target, manifest), "changed": changed}
 
 
