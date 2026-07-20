@@ -12,9 +12,16 @@ MANIFEST = ROOT / "tests" / "fixtures" / "disclosure-migration.yaml"
 SPEC = ROOT / "docs" / "specs" / "harness" / "disclosure-refactor.md"
 
 
+# A skill segment is either a static skill name or a dynamic placeholder that
+# resolves at runtime (${SKILL}, $skill, $1, {skill}, %s). The classifier fails
+# closed on every placeholder. A shell glob such as skills/*/references/
+# enumerates every skill uniformly and names no specific skill's internals, so it
+# is deliberately not matched here and stays allowed (tooling and prose use it).
 SKILL_SEGMENT = (
-    r"(?:[a-z0-9]+(?:-[a-z0-9]+)*|\$[a-z_][a-z0-9_]*|\$\{[^}/\n]+\})"
+    r"(?:[a-z0-9]+(?:-[a-z0-9]+)*"
+    r"|\$\{[^}/\n]+\}|\$[a-z0-9_]+|\{[^}/\n]+\}|%[0-9]*[a-z])"
 )
+STATIC_SKILL_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*", re.IGNORECASE)
 PATH_TOKEN = r"[^\s`'\"()\[\]<>]+"
 
 REFERENCE_CANDIDATES = (
@@ -70,7 +77,7 @@ def _cross_skill_reference_violations(relative, text):
                 if match is None:
                     continue
                 skill = match.groupdict().get("skill")
-                is_dynamic = skill is not None and skill.startswith("$")
+                is_dynamic = skill is not None and STATIC_SKILL_NAME.fullmatch(skill) is None
                 is_cross_skill = owner is None if skill is None else skill.casefold() != owner
                 if is_dynamic or is_cross_skill:
                     violation = f"{relative}: {raw_path}"
@@ -147,6 +154,9 @@ def test_cross_skill_reference_paths_are_private_to_the_owning_skill():
         ("scripts/check-harness", "skills/implement/references/", True),
         ("workflows/implement-run.js", "skills/${SKILL}/references/private.md", True),
         ("workflows/implement-run.js", "skills/$SKILL/references/private.md", True),
+        ("workflows/implement-run.js", "skills/{skill}/references/private.md", True),
+        ("workflows/implement-run.js", "skills/%s/references/private.md", True),
+        ("workflows/implement-run.js", "skills/$1/references/private.md", True),
         ("workflows/implement-run.js", "references/run-contract.md", True),
         ("skills/implement/SKILL.md", "skills/IMPLEMENT/references/run-contract.md", False),
         ("skills/implement/SKILL.md", "references/run-contract.md", False),
