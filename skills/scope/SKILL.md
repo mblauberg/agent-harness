@@ -60,6 +60,10 @@ project files. In project-write mode, land only approved artifacts:
 | Work items | project tracker |
 | Durable context | project context/state owners |
 
+Land scope visuals where they render — a Mermaid diagram or table in the tracker
+or a doc, not chat or scratchpad — whenever a flow, state or dependency reads
+faster than prose (see `docs/runbooks/github-workflow.md`).
+
 Write clear, observable, verifiable acceptance criteria. Given/When/Then helps
 behavioural cases but is not mandatory for research, documents or operations.
 Preserve project Markdown/YAML/JSON schema. Pin only decision-critical external

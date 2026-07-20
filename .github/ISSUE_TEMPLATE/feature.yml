@@ -70,6 +70,18 @@ body:
     validations:
       required: false
 
+  - type: textarea
+    id: visual
+    attributes:
+      label: Visual (optional)
+      description: >-
+        Add a Mermaid diagram or table wherever it makes the problem, the flow
+        that broke, or the surfaces involved faster to grasp than prose — GitHub
+        renders Mermaid. Skip it only when prose is already clear; a diagram that
+        does not save the reader time is noise.
+    validations:
+      required: false
+
   - type: checkboxes
     id: hygiene
     attributes:
