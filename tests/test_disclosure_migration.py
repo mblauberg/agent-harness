@@ -1,4 +1,5 @@
 from pathlib import Path
+import posixpath
 import runpy
 import re
 
@@ -8,19 +9,46 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "tests" / "fixtures" / "disclosure-migration.yaml"
+SPEC = ROOT / "docs" / "specs" / "harness" / "disclosure-refactor.md"
 
+
+# A skill segment is either a static skill name or a dynamic placeholder that
+# resolves at runtime (${SKILL}, $skill, $1, {skill}, %s). The classifier fails
+# closed on every placeholder. A shell glob such as skills/*/references/
+# enumerates every skill uniformly and names no specific skill's internals, so it
+# is deliberately not matched here and stays allowed (tooling and prose use it).
+SKILL_SEGMENT = (
+    r"(?:[a-z0-9]+(?:-[a-z0-9]+)*"
+    r"|\$\{[^}/\n]+\}|\$[a-z0-9_]+|\{[^}/\n]+\}|%[0-9]*[a-z])"
+)
+STATIC_SKILL_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*", re.IGNORECASE)
+PATH_TOKEN = r"[^\s`'\"()\[\]<>]+"
+
+REFERENCE_CANDIDATES = (
+    re.compile(
+        rf"(?P<path>(?<![a-z0-9_-])skills/{PATH_TOKEN})",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"(?P<path>(?:\.\./)+{PATH_TOKEN})",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"(?P<path>(?<![a-z0-9_./-])references?/{PATH_TOKEN})",
+        re.IGNORECASE,
+    ),
+)
 
 REFERENCE_PATHS = (
     re.compile(
-        r"(?P<path>(?:\$\{[^}\n]+\}/)?skills/"
-        r"(?P<skill>[a-z0-9]+(?:-[a-z0-9]+)*)/references?/"
-        r"[^\s`'\"()\[\]{}<>]+)"
+        rf"(?P<path>skills/(?P<skill>{SKILL_SEGMENT})/references?(?:/{PATH_TOKEN})?)",
+        re.IGNORECASE,
     ),
     re.compile(
-        r"(?P<path>(?:\.\./)+"
-        r"(?P<skill>[a-z0-9]+(?:-[a-z0-9]+)*)/references?/"
-        r"[^\s`'\"()\[\]{}<>]+)"
+        rf"(?P<path>(?:\.\./)+(?P<skill>{SKILL_SEGMENT})/references?(?:/{PATH_TOKEN})?)",
+        re.IGNORECASE,
     ),
+    re.compile(rf"(?P<path>references?(?:/{PATH_TOKEN})?)", re.IGNORECASE),
 )
 
 
@@ -36,6 +64,66 @@ def _in_tree_contract_files():
     yield ROOT / "HARNESS.md"
 
 
+def _cross_skill_reference_violations(relative, text):
+    owner = relative.parts[1] if relative.parts[:1] == ("skills",) else None
+    violations = []
+    seen = set()
+    for candidate_pattern in REFERENCE_CANDIDATES:
+        for candidate in candidate_pattern.finditer(text):
+            raw_path = candidate.group("path")
+            normalized = posixpath.normpath(raw_path)
+            for pattern in REFERENCE_PATHS:
+                match = pattern.fullmatch(normalized)
+                if match is None:
+                    continue
+                skill = match.groupdict().get("skill")
+                is_dynamic = skill is not None and STATIC_SKILL_NAME.fullmatch(skill) is None
+                is_cross_skill = owner is None if skill is None else skill.casefold() != owner
+                if is_dynamic or is_cross_skill:
+                    violation = f"{relative}: {raw_path}"
+                    if violation not in seen:
+                        seen.add(violation)
+                        violations.append(violation)
+                break
+    return violations
+
+
+def _markdown_table_rows(header):
+    lines = SPEC.read_text(encoding="utf-8").splitlines()
+    start = next(index for index, line in enumerate(lines) if line.startswith(header))
+    rows = []
+    for line in lines[start + 2 :]:
+        if not line.startswith("|"):
+            break
+        rows.append(tuple(cell.strip() for cell in line.strip().strip("|").split("|")))
+    return rows
+
+
+def _approved_manifest_rows():
+    ambient = [
+        {"section": section, "disposition": disposition, "destination": destination}
+        for section, disposition, destination in _markdown_table_rows("| Source section |")
+    ]
+
+    orchestrate = []
+    for filename, disposition, notes in _markdown_table_rows("| File | Verdict |"):
+        if disposition == "keep":
+            verdict = "keep"
+        elif disposition.startswith("slim (") and disposition.endswith(")"):
+            verdict = "slim"
+            notes = f"{disposition.removeprefix('slim (')[:-1]}; {notes}"
+        elif disposition == "merge into verification.md, then delete":
+            verdict = "merge-then-delete"
+            notes = f"{disposition}; {notes}"
+        elif disposition.startswith("archive to "):
+            verdict = "archive"
+            notes = f"{disposition}; {notes}"
+        else:
+            raise AssertionError(f"unrecognised approved orchestrate disposition: {disposition}")
+        orchestrate.append({"file": filename, "verdict": verdict, "notes": notes})
+    return ambient, orchestrate
+
+
 def test_cross_skill_reference_paths_are_private_to_the_owning_skill():
     """AC-S2: in-tree consumers name a skill, never another skill's internals."""
     violations = []
@@ -45,13 +133,48 @@ def test_cross_skill_reference_paths_are_private_to_the_owning_skill():
         except UnicodeDecodeError:
             continue
         relative = path.relative_to(ROOT)
-        owner = relative.parts[1] if relative.parts[:1] == ("skills",) else None
-        for pattern in REFERENCE_PATHS:
-            for match in pattern.finditer(text):
-                if match.group("skill") != owner:
-                    violations.append(f"{relative}: {match.group('path')}")
+        violations.extend(_cross_skill_reference_violations(relative, text))
 
     assert not violations, "cross-skill reference path(s):\n" + "\n".join(violations)
+
+
+@pytest.mark.parametrize(
+    "source, reference, expected_violation",
+    (
+        ("workflows/cross-verify.js", "Skills/implement/References/run-contract.md", True),
+        ("scripts/check-harness", "`skills/implement/references/run-contract.md`", True),
+        ("skills/orchestrate/SKILL.md", "../../implement/references/run-contract.md", True),
+        ("skills/orchestrate/SKILL.md", ".././implement/references/run-contract.md", True),
+        (
+            "workflows/cross-verify.js",
+            "skills/implement/scripts/../references/run-contract.md",
+            True,
+        ),
+        ("workflows/cross-verify.js", "skills/./implement/references/run-contract.md", True),
+        ("scripts/check-harness", "skills/implement/references/", True),
+        ("workflows/implement-run.js", "skills/${SKILL}/references/private.md", True),
+        ("workflows/implement-run.js", "skills/$SKILL/references/private.md", True),
+        ("workflows/implement-run.js", "skills/{skill}/references/private.md", True),
+        ("workflows/implement-run.js", "skills/%s/references/private.md", True),
+        ("workflows/implement-run.js", "skills/$1/references/private.md", True),
+        ("workflows/implement-run.js", "references/run-contract.md", True),
+        ("skills/implement/SKILL.md", "skills/IMPLEMENT/references/run-contract.md", False),
+        ("skills/implement/SKILL.md", "references/run-contract.md", False),
+    ),
+)
+def test_cross_skill_reference_red_team_cases(source, reference, expected_violation):
+    """D3 catches path forms that resolve cross-skill without banning own references."""
+    violations = _cross_skill_reference_violations(Path(source), reference)
+    assert bool(violations) is expected_violation
+
+
+def test_cross_skill_reference_scan_roots_are_non_vacuous():
+    relative_files = {path.relative_to(ROOT) for path in _in_tree_contract_files()}
+    assert {"skills", "scripts", "workflows"} <= {
+        relative.parts[0] for relative in relative_files
+    }
+    assert any(relative.parts[:2] == ("tests", "fixtures") for relative in relative_files)
+    assert {Path("AGENTS.md"), Path("HARNESS.md")} <= relative_files
 
 
 def test_disclosure_migration_manifest_is_complete_and_anchored():
@@ -61,6 +184,8 @@ def test_disclosure_migration_manifest_is_complete_and_anchored():
     assert manifest["schema"] == "disclosure-migration.v1"
 
     ambient = manifest["ambient"]
+    approved_ambient, approved_orchestrate = _approved_manifest_rows()
+    assert ambient == approved_ambient
     assert len(ambient) == 12
     assert all(set(row) == {"section", "disposition", "destination"} for row in ambient)
     assert all(all(isinstance(value, str) and value for value in row.values()) for row in ambient)
@@ -69,28 +194,30 @@ def test_disclosure_migration_manifest_is_complete_and_anchored():
 
     stripped = [row for row in ambient if row["disposition"].startswith("strip")]
     skill_owners = []
-    for row in stripped:
+    for row in ambient:
         destination = row["destination"]
         if "repo-surface" in destination:
             anchors = re.findall(r"[A-Za-z0-9_.-]+\.md", destination)
-            assert anchors, f"stripped repo-surface row has no named anchor: {row}"
+            assert anchors, f"repo-surface row has no named anchor: {row}"
             for anchor in anchors:
                 assert (ROOT / anchor).is_file(), f"missing repo-surface anchor {anchor}: {row}"
             continue
 
         owners = re.findall(r"`([a-z0-9]+(?:-[a-z0-9]+)*)`", destination)
-        assert len(owners) == 1, f"stripped skill row has no canonical owner: {row}"
-        owner = owners[0]
-        skill_owners.append(owner)
-        assert (ROOT / "skills" / owner / "SKILL.md").is_file(), (
-            f"missing destination skill anchor skills/{owner}/SKILL.md: {row}"
-        )
+        for owner in owners:
+            assert (ROOT / "skills" / owner / "SKILL.md").is_file(), (
+                f"missing destination skill anchor skills/{owner}/SKILL.md: {row}"
+            )
+        if row in stripped:
+            assert len(owners) == 1, f"stripped skill row has no canonical owner: {row}"
+            skill_owners.append(owners[0])
 
     assert len(skill_owners) == len(set(skill_owners)), (
         f"duplicate canonical owner(s) for stripped rows: {skill_owners}"
     )
 
     orchestrate = manifest["orchestrate"]
+    assert orchestrate == approved_orchestrate
     assert len(orchestrate) == 17
     assert all(set(row) == {"file", "verdict", "notes"} for row in orchestrate)
     assert all(all(isinstance(value, str) and value for value in row.values()) for row in orchestrate)
