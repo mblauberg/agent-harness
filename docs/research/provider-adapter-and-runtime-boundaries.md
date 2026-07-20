@@ -29,9 +29,11 @@ Normative owners: [provider actions and adapters](../specs/agent-fabric/provider
   hooks or global default changes need explicit human authority.
 - Operational spans are content-free and never substitute for authority,
   review, disclosure or artifact receipts.
-- OpenCode is an optional host/adapter and conformance programme, not a model
-  family or current load-bearing route. Login, subscription, credentials,
-  region/data policy and activation remain human gates.
+- OpenCode is an optional host/adapter, not a model family or load-bearing
+  route. OpenCode's current activation state is owned by
+  `config/agent-fabric.yaml` and `config/adapter-compatibility.yaml`. Login,
+  paid/account changes, credentials, region/data policy and any activation or
+  deactivation remain explicit human gates.
 
 ## Evidence
 
@@ -52,16 +54,19 @@ evidence and expiry. New action admission and final pre-dispatch CAS recheck the
 same snapshot and contract. Ambiguity stays with the original pair-keyed
 recovery owner.
 
-Optional OpenCode work begins disabled and read-only. It must prove pinned ACP
-framing, deny-first permissions, cancellation/timeout/duplicate/crash behavior,
-actual provider/model/fallback receipts, credential isolation and task-local
-objective evaluation before advisory activation. Open models do not satisfy a
-mandatory other-primary gate under the current constitution.
+When active, the OpenCode route remains optional and non-blocking. Any new
+capability or future reactivation begins disabled and must prove pinned ACP
+framing, deny-first permissions, cancellation/timeout/duplicate/crash
+behaviour, actual provider/model/fallback receipts, credential isolation and
+task-local objective evaluation before advisory use. Open models do not satisfy
+a mandatory other-primary gate under the current constitution.
 
 ## Unknowns
 
-- OpenCode account/provider availability and acceptable data region/policy.
-- Current official discovery surfaces for each Claude/Cursor/Agy route.
+- OpenCode account, quota and fallback availability at the point of use, plus
+  acceptable data region/policy for any changed route.
+- Current official discovery surfaces across the enabled Claude, Codex, Agy,
+  Cursor, Kiro and OpenCode routes.
 - Whether a remote/multi-machine workload justifies a gateway, service
   database or workflow engine.
 - Which optional lifecycle hooks are worth manifest-managed installation.

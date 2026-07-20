@@ -1,7 +1,42 @@
 {
   "catalogue": {
-    "characters": 7409,
-    "path": "skills"
+    "owner_count": 32,
+    "owners": [
+      "academic-writing",
+      "autopilot",
+      "caveman",
+      "code-review",
+      "d2-diagrams",
+      "deliver",
+      "diagnose",
+      "engineering-docs",
+      "engineering-writing",
+      "evaluate",
+      "github-setup",
+      "grill-me",
+      "implement",
+      "legal-writing",
+      "natural-writing",
+      "orchestrate",
+      "playwright",
+      "prototype",
+      "react-performance",
+      "refactor",
+      "release",
+      "retrospect",
+      "scope",
+      "session",
+      "skill-craft",
+      "tanstack-query",
+      "tdd",
+      "typescript-clean-code",
+      "ui-ux-design",
+      "uml-diagrams",
+      "web-stack-conventions",
+      "work-map"
+    ],
+    "path": "skills",
+    "source_revision": "318c2e22e16ce31fb110ed2c24b1522e20d582f0"
   },
   "classifier": {
     "instruction": "You are a blind skill-routing classifier. For each prompt, choose one primary skill and zero or more companion skills from the complete catalogue. The primary is the most distinctive skill matching the requested task; companions apply only when the prompt genuinely composes another lifecycle, domain, tool, or presentation skill. Use null and no companions when no skill is warranted. Copy names exactly, classify each prompt once, and return only the schema output. Do not use tools or infer from case IDs."
@@ -9,17 +44,22 @@
   "contract": "skill-routing-regression-plan",
   "dataset": {
     "cases": 18,
+    "id": "skill-portfolio-routing-holdout-20260719-v6",
     "path": "routing-holdout.yaml",
-    "split": "fresh-holdout"
+    "split": "current-catalogue-holdout"
   },
-  "evaluation_id": "skill-portfolio-routing-20260714-fabric-v5",
-  "frozen_at": "2026-07-14T01:40:53.206625Z",
-  "retention": "retain every terminal action, exact provider answer, and failed attempt",
+  "evaluation_id": "skill-portfolio-routing-20260719-fabric-v7",
+  "execution": {
+    "attempts_started": 0,
+    "blocked_reason": "FABRIC-ROUNDTRIP-UNAVAILABLE",
+    "dependencies": [
+      "https://github.com/mblauberg/provenant/issues/330"
+    ],
+    "status": "planned-unexecuted"
+  },
+  "frozen_at": "2026-07-19T01:51:57Z",
+  "retention": "retain every terminal action, exact provider answer, and failed attempt as run-owned evidence",
   "route": "generated MCP -> daemon -> task-bound ephemeral provider action",
-  "repository": {
-    "commit": "1ddfe24858b362decb1c507b87a466df26d205eb",
-    "path": "docs/evals/skill-portfolio-2026"
-  },
   "rubric": {
     "companion_threshold": 0.9,
     "companions": "all required companions present and no undeclared companion",
@@ -28,14 +68,24 @@
     "primary_threshold": 1.0
   },
   "schedule": {
-    "attempts": 6,
-    "case_rows": 108,
-    "families": [
-      "google",
-      "xai"
+    "attempts_planned": 6,
+    "case_rows_planned": 108,
+    "providers": [
+      {
+        "adapter": "agy",
+        "effort": "high",
+        "family": "google",
+        "model": "Gemini 3.1 Pro (High)"
+      },
+      {
+        "adapter": "cursor-agent",
+        "effort": "high",
+        "family": "xai",
+        "model": "cursor-grok-4.5-high"
+      }
     ],
     "repetitions": 3,
     "retry_policy": "none"
   },
-  "schema_version": 2
+  "schema_version": 3
 }
