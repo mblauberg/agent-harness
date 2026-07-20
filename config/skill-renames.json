@@ -11,6 +11,7 @@
     {"from": "skill-authoring", "to": "skill-craft"},
     {"from": "frontend-design", "to": "ui-ux-design"},
     {"from": "frontend-review", "to": "ui-ux-design"},
-    {"from": "autonomous-lab", "to": "autopilot"}
+    {"from": "autonomous-lab", "to": "autopilot"},
+    {"from": "github-setup", "to": "setup-repo"}
   ]
 }

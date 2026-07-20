@@ -16,10 +16,10 @@ def test_dead_endpoint_dispatch_surface_is_not_shipped() -> None:
 
     assert "agent-go" not in _label_names(ROOT / ".github" / "labels.yml")
     assert "agent-go" not in _label_names(
-        ROOT / "skills" / "github-setup" / "templates" / "labels.yml"
+        ROOT / "skills" / "setup-repo" / "templates" / "labels.yml"
     )
 
     runbook = (ROOT / "docs" / "runbooks" / "github-workflow.md").read_text()
-    skill = (ROOT / "skills" / "github-setup" / "SKILL.md").read_text()
+    skill = (ROOT / "skills" / "setup-repo" / "SKILL.md").read_text()
     assert "## Agent-go trigger" not in runbook
     assert "agent-go" not in skill

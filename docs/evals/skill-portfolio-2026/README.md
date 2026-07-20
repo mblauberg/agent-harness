@@ -13,7 +13,7 @@ Detailed provider events and usage remain local run-owned evidence.
 | [Current 32-owner holdout](routing-holdout.yaml) | 18 cases x 2 families x 3 trials | Not run | Outstanding; `FABRIC-ROUNDTRIP-UNAVAILABLE`. |
 
 The current holdout names the consolidated owners `ui-ux-design`, `skill-craft`
-and `autopilot`. It also tests the positive `github-setup` trigger against the
+and `autopilot`. It also tests the positive `setup-repo` trigger against the
 negative boundary for ordinary mechanics in an already-configured repository.
 The [frozen protocol](routing-protocol.json) inventories all 32 owners and
 predeclares the rubric, models, adapters, three repetitions and no-retry rule.
