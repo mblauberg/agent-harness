@@ -54,7 +54,7 @@ def test_fresh_scaffold_includes_the_security_policy_linked_by_issue_forms():
     assert "private vulnerability reporting is enabled" in normalised
     assert "working confidential contact method" in normalised
     assert "replace `<private-reporting-route>`" in normalised
-    assert "before" in instructions.lower()
+    assert "Publish only when the placeholder is gone and both routes work" in normalised
 
 
 def test_repository_process_template_is_the_invariant_completion_artifact():
