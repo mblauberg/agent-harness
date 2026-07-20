@@ -154,15 +154,20 @@ OpenCode JSONC containing comments fails closed rather than being rewritten.
 During apply, each successful changed-client write flushes its committed receipt
 before the next client begins. A client initially classified as existing is
 revalidated immediately before its receipt. Drift before any commit retains
-exit code `3`; drift after an earlier commit uses exit code `4` with the same
-`partial-state` result as a changed-client conflict. That result names the
-committed and remaining clients plus the reconcile-and-rerun recovery action.
+exit code `3`. Once any live client path may have changed, including a
+first-client atomic install followed by a durability or validation failure,
+the command uses exit code `4`. The typed `partial-state` result names fully
+completed clients as committed, keeps the affected current client and later
+clients in remaining, and provides the reconcile-and-rerun recovery action.
+Drift in an initially existing client after an earlier commit uses the same
+result.
 If stdout write or flush fails after a durable commit, the command
 stops before the next client, attempts the same typed result on stderr and exits
 `4`; the result names the committed client, remaining clients, configuration
-path and recovery action. Exit `4` remains the partial-state signal even when
-stderr is unavailable too. Rerunning `--platform all` after reconciliation is
-idempotent.
+path and recovery action. An output failure before any config mutation exits
+`3` without a shutdown-time status override. Exit `4` remains the partial-state
+signal even when stderr is unavailable too. Rerunning `--platform all` after
+reconciliation is idempotent.
 Existing files are updated with an atomic exchange: the displaced identity and
 bytes must match the composed snapshot, and the requested direct path or
 symlink must still resolve to the installed inode. On any mismatch the command

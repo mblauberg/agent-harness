@@ -123,12 +123,16 @@ following or chmod inside a fresh owner-only `0700` recovery directory;
 conflict handling never rolls back over the live client pathname. Multi-client
 apply flushes each committed receipt immediately and revalidates an initially
 existing client immediately before its receipt. Existing-client drift before
-any commit exits `3`; after an earlier commit it exits `4` with a typed
-`partial-state` result identifying the committed and remaining clients plus the
-reconcile-and-rerun recovery action. If stdout write or flush fails after a
-durable commit, apply stops before the next client, attempts a typed stderr
-result naming the committed client, remaining clients and configuration path,
-and exits `4` even if stderr is unavailable too.
+any commit exits `3`. Once a live client path may have changed, including a
+first-client install followed by a durability or validation failure, apply
+exits `4` with a typed `partial-state` result. It identifies fully completed
+clients as committed, leaves the affected current and later clients in
+remaining, and gives the reconcile-and-rerun action. If stdout write or flush
+fails after a durable commit, apply stops before the next client, attempts a
+typed stderr result naming the committed client, remaining clients and
+configuration path, and exits `4` even if stderr is unavailable too. Output
+failure before any config mutation exits `3` without a shutdown-time status
+override.
 
 Clients use lock-safe on-demand bootstrap: they attach to a compatible
 incumbent before database preflight, or elect one daemon and inspect/publish

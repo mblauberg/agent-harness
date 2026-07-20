@@ -45,6 +45,24 @@ def run_configure(tmp_path: Path, *arguments: str) -> subprocess.CompletedProces
     )
 
 
+def run_configure_with_closed_stdout(
+    tmp_path: Path, *arguments: str,
+) -> tuple[int, str]:
+    paths = all_client_paths(tmp_path)
+    read_descriptor, write_descriptor = os.pipe()
+    os.close(read_descriptor)
+    process = subprocess.Popen(
+        [str(SCRIPT), *all_client_arguments(tmp_path, paths), *arguments],
+        cwd=ROOT,
+        stdout=write_descriptor,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    os.close(write_descriptor)
+    _, error_output = process.communicate(timeout=10)
+    return process.returncode, error_output
+
+
 def all_client_paths(tmp_path: Path) -> dict[str, Path]:
     return {
         "claude": tmp_path / "claude.json",
@@ -295,6 +313,52 @@ def test_platform_all_revalidates_codex_after_writing_claude(tmp_path: Path, mon
     assert json.loads(claude_config.read_text())["mcpServers"]["agent-fabric"]["env"]["AGENT_FABRIC_SEAT"] == "claude"
 
 
+@pytest.mark.parametrize("failure", ["post-exchange-mismatch", "post-link-fsync"])
+def test_first_client_post_install_failure_reports_partial_state(
+    tmp_path: Path, monkeypatch, capsys, failure: str,
+) -> None:
+    configurer = load_configurer()
+    config = tmp_path / "claude.json"
+    if failure == "post-exchange-mismatch":
+        config.write_text('{}\n')
+        atomic_exchange = configurer.atomic_exchange
+
+        def interleaved_exchange(first: Path, second: Path) -> None:
+            replacement = tmp_path / "external.json"
+            replacement.write_text('{"external":true}\n')
+            os.replace(replacement, second)
+            atomic_exchange(first, second)
+
+        monkeypatch.setattr(configurer, "atomic_exchange", interleaved_exchange)
+    else:
+        fsync_directory = configurer._fsync_directory
+        calls = 0
+
+        def fail_first_fsync(path: Path) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError("injected post-link durability failure")
+            fsync_directory(path)
+
+        monkeypatch.setattr(configurer, "_fsync_directory", fail_first_fsync)
+
+    result = configurer.main([
+        "--platform", "claude",
+        "--agents-home", str(ROOT),
+        "--state-directory", str(tmp_path / "state"),
+        "--claude-config", str(config),
+    ])
+
+    captured = capsys.readouterr()
+    assert result == 4
+    assert "partial-state: agent-fabric MCP registration" in captured.err
+    assert "committed=none" in captured.err
+    assert "remaining=claude" in captured.err
+    assert "agent-fabric" in config.read_text()
+    assert len(list(tmp_path.glob(".claude.json.recovery.*/*"))) == 1
+
+
 def test_platform_all_revalidates_an_existing_client_after_an_earlier_commit(
     tmp_path: Path, monkeypatch, capsys,
 ) -> None:
@@ -395,14 +459,7 @@ def test_platform_all_reports_commits_and_typed_recovery_on_late_conflict(
     tmp_path: Path, monkeypatch, capsys,
 ) -> None:
     configurer = load_configurer()
-    paths = {
-        "claude": tmp_path / "claude.json",
-        "codex": tmp_path / "codex.toml",
-        "cursor": tmp_path / "cursor.json",
-        "agy": tmp_path / "agy.json",
-        "kiro": tmp_path / "kiro.json",
-        "opencode": tmp_path / "opencode.jsonc",
-    }
+    paths = all_client_paths(tmp_path)
     for client, path in paths.items():
         path.write_text('[unrelated]\nvalue = "before"\n' if client == "codex" else '{"unrelated":"before"}\n')
     write_proposal = configurer.write_proposal
@@ -414,16 +471,7 @@ def test_platform_all_reports_commits_and_typed_recovery_on_late_conflict(
             paths["opencode"].write_text(external)
 
     monkeypatch.setattr(configurer, "write_proposal", interleaved_write)
-    arguments = [
-        "--agents-home", str(ROOT),
-        "--state-directory", str(tmp_path / "state"),
-        "--claude-config", str(paths["claude"]),
-        "--codex-config", str(paths["codex"]),
-        "--cursor-config", str(paths["cursor"]),
-        "--agy-config", str(paths["agy"]),
-        "--kiro-config", str(paths["kiro"]),
-        "--opencode-config", str(paths["opencode"]),
-    ]
+    arguments = all_client_arguments(tmp_path, paths)
     result = configurer.main(arguments)
 
     captured = capsys.readouterr()
@@ -455,14 +503,7 @@ def test_committed_receipt_output_failure_reports_partial_state_and_stops(
     tmp_path: Path, monkeypatch, failure: str,
 ) -> None:
     configurer = load_configurer()
-    paths = {
-        "claude": tmp_path / "claude.json",
-        "codex": tmp_path / "codex.toml",
-        "cursor": tmp_path / "cursor.json",
-        "agy": tmp_path / "agy.json",
-        "kiro": tmp_path / "kiro.json",
-        "opencode": tmp_path / "opencode.jsonc",
-    }
+    paths = all_client_paths(tmp_path)
     paths["claude"].write_text('{}\n')
     paths["codex"].write_text('[unrelated]\nvalue = "before"\n')
     for client in ("cursor", "agy", "kiro", "opencode"):
@@ -492,16 +533,7 @@ def test_committed_receipt_output_failure_reports_partial_state_and_stops(
     monkeypatch.setattr(configurer.sys, "stdout", output)
     monkeypatch.setattr(configurer.sys, "stderr", error_output)
 
-    result = configurer.main([
-        "--agents-home", str(ROOT),
-        "--state-directory", str(tmp_path / "state"),
-        "--claude-config", str(paths["claude"]),
-        "--codex-config", str(paths["codex"]),
-        "--cursor-config", str(paths["cursor"]),
-        "--agy-config", str(paths["agy"]),
-        "--kiro-config", str(paths["kiro"]),
-        "--opencode-config", str(paths["opencode"]),
-    ])
+    result = configurer.main(all_client_arguments(tmp_path, paths))
 
     diagnostic = error_output.getvalue()
     assert result == 4
@@ -519,41 +551,14 @@ def test_committed_receipt_output_failure_reports_partial_state_and_stops(
 def test_closed_stdout_reader_exits_with_typed_partial_state_without_shutdown_override(
     tmp_path: Path,
 ) -> None:
-    paths = {
-        "claude": tmp_path / "claude.json",
-        "codex": tmp_path / "codex.toml",
-        "cursor": tmp_path / "cursor.json",
-        "agy": tmp_path / "agy.json",
-        "kiro": tmp_path / "kiro.json",
-        "opencode": tmp_path / "opencode.jsonc",
-    }
+    paths = all_client_paths(tmp_path)
     paths["claude"].write_text('{}\n')
     paths["codex"].write_text('[unrelated]\nvalue = "before"\n')
     for client in ("cursor", "agy", "kiro", "opencode"):
         paths[client].write_text('{}\n')
-    read_descriptor, write_descriptor = os.pipe()
-    os.close(read_descriptor)
-    process = subprocess.Popen(
-        [
-            str(SCRIPT),
-            "--agents-home", str(ROOT),
-            "--state-directory", str(tmp_path / "state"),
-            "--claude-config", str(paths["claude"]),
-            "--codex-config", str(paths["codex"]),
-            "--cursor-config", str(paths["cursor"]),
-            "--agy-config", str(paths["agy"]),
-            "--kiro-config", str(paths["kiro"]),
-            "--opencode-config", str(paths["opencode"]),
-        ],
-        cwd=ROOT,
-        stdout=write_descriptor,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    os.close(write_descriptor)
-    _, error_output = process.communicate(timeout=10)
+    return_code, error_output = run_configure_with_closed_stdout(tmp_path)
 
-    assert process.returncode == 4
+    assert return_code == 4
     assert "agent-fabric" in paths["claude"].read_text()
     assert paths["codex"].read_text() == '[unrelated]\nvalue = "before"\n'
     assert "partial-state: agent-fabric MCP registration" in error_output
@@ -562,6 +567,22 @@ def test_closed_stdout_reader_exits_with_typed_partial_state_without_shutdown_ov
     assert "remaining=codex,cursor,agy,kiro,opencode" in error_output
     assert f"config={paths['claude']}" in error_output
     assert "recovery=restore stdout, inspect the committed configuration, then rerun --platform all" in error_output
+    assert "Exception ignored" not in error_output
+
+
+@pytest.mark.parametrize("mode", [(), ("--check",), ("--preflight",)])
+def test_closed_stdout_before_any_commit_preserves_conflict_exit(
+    tmp_path: Path, mode: tuple[str, ...],
+) -> None:
+    configured = run_configure(tmp_path, "--platform", "claude")
+    assert configured.returncode == 0, configured.stderr
+
+    return_code, error_output = run_configure_with_closed_stdout(
+        tmp_path, "--platform", "claude", *mode,
+    )
+
+    assert return_code == 3
+    assert "conflicting: agent-fabric MCP receipt output failed" in error_output
     assert "Exception ignored" not in error_output
 
 
@@ -967,6 +988,9 @@ def test_operations_docs_define_dynamic_primary_registration_and_bounded_fixed_p
     assert "opencode mcp list" in runbook
     assert "exit code `4`" in runbook
     assert "partial-state" in runbook
+    assert "first-client atomic install" in runbook
+    assert "affected current client and later" in runbook
+    assert "shutdown-time status override" in runbook
     assert "Registry entries bind `AGENT_FABRIC_PROJECT_PATH`" not in runbook
     verification = runbook.split("## Verify registrations", 1)[1].split("\n## ", 1)[0]
     assert "opencode mcp list" in verification

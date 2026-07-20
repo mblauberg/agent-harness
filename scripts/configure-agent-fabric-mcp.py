@@ -33,6 +33,10 @@ class RegistrationConflictError(RegistrationError):
     pass
 
 
+class RegistrationPartialStateError(RegistrationConflictError):
+    """A config write failed after the live path may have changed."""
+
+
 class RegistrationOutputError(RegistrationError):
     pass
 
@@ -404,76 +408,86 @@ def write_proposal(proposal: ConfigProposal) -> None:
         raise RegistrationError("private recovery directory could not be established")
     temporary: Path | None = None
     retain_temporary = False
+    installed = False
     try:
-        with tempfile.NamedTemporaryFile(
-            "w", dir=recovery_directory, prefix=f".{target.name}.", suffix=".tmp", delete=False,
-        ) as handle:
-            temporary = Path(handle.name)
-            os.chmod(handle.fileno(), 0o600)
-            handle.write(proposal.content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        installed_identity = _identity(temporary.stat(follow_symlinks=False))
-        _assert_unchanged(proposal)
-        if proposal.snapshot.target_identity is None:
-            try:
-                os.link(temporary, target, follow_symlinks=False)
-            except FileExistsError as exc:
-                raise RegistrationConflictError(
-                    f"{label} config changed after registration was composed",
-                ) from exc
-            retain_temporary = True
-            try:
-                _fsync_directory(recovery_directory)
-                _fsync_directory(target.parent.resolve(strict=True))
-            except OSError as exc:
-                raise RegistrationConflictError(
-                    f"{label} config install durability failed; "
-                    f"preserve private recovery file {temporary}",
-                ) from exc
-            if not _requested_resolves_to_installed(proposal, installed_identity):
-                raise RegistrationConflictError(
-                    f"{label} config changed during atomic install; "
-                    f"preserve private recovery file {temporary}",
-                )
-            retain_temporary = False
-        else:
-            try:
-                atomic_exchange(temporary, target)
-            except (OSError, RegistrationError):
-                raise
-            retain_temporary = True
-            try:
-                _fsync_directory(recovery_directory)
-                _fsync_directory(target.parent.resolve(strict=True))
-            except OSError as exc:
-                raise RegistrationConflictError(
-                    f"{label} config exchange failed; "
-                    f"preserve private recovery file {temporary}",
-                ) from exc
-            if (
-                not _displaced_matches(proposal, temporary) or
-                not _requested_resolves_to_installed(proposal, installed_identity)
-            ):
-                raise RegistrationConflictError(
-                    f"{label} config changed during atomic exchange; "
-                    f"preserve displaced recovery file {temporary}",
-                )
-            retain_temporary = False
-    finally:
-        cleanup_ready = True
-        if temporary and not retain_temporary and temporary.exists():
-            try:
-                temporary.unlink()
-            except OSError:
-                cleanup_ready = False
-                print(
-                    f"warning: {label} config installed; cleanup failed; "
-                    f"preserve private recovery file {temporary}",
-                    file=sys.stderr,
-                )
-        if not retain_temporary and cleanup_ready and recovery_directory.exists():
-            _cleanup_recovery_directory(recovery_directory, target.parent)
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w", dir=recovery_directory, prefix=f".{target.name}.", suffix=".tmp", delete=False,
+            ) as handle:
+                temporary = Path(handle.name)
+                os.chmod(handle.fileno(), 0o600)
+                handle.write(proposal.content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            installed_identity = _identity(temporary.stat(follow_symlinks=False))
+            _assert_unchanged(proposal)
+            if proposal.snapshot.target_identity is None:
+                try:
+                    os.link(temporary, target, follow_symlinks=False)
+                except FileExistsError as exc:
+                    raise RegistrationConflictError(
+                        f"{label} config changed after registration was composed",
+                    ) from exc
+                installed = True
+                retain_temporary = True
+                try:
+                    _fsync_directory(recovery_directory)
+                    _fsync_directory(target.parent.resolve(strict=True))
+                except OSError as exc:
+                    raise RegistrationConflictError(
+                        f"{label} config install durability failed; "
+                        f"preserve private recovery file {temporary}",
+                    ) from exc
+                if not _requested_resolves_to_installed(proposal, installed_identity):
+                    raise RegistrationConflictError(
+                        f"{label} config changed during atomic install; "
+                        f"preserve private recovery file {temporary}",
+                    )
+                retain_temporary = False
+            else:
+                try:
+                    atomic_exchange(temporary, target)
+                except (OSError, RegistrationError):
+                    raise
+                installed = True
+                retain_temporary = True
+                try:
+                    _fsync_directory(recovery_directory)
+                    _fsync_directory(target.parent.resolve(strict=True))
+                except OSError as exc:
+                    raise RegistrationConflictError(
+                        f"{label} config exchange failed; "
+                        f"preserve private recovery file {temporary}",
+                    ) from exc
+                if (
+                    not _displaced_matches(proposal, temporary) or
+                    not _requested_resolves_to_installed(proposal, installed_identity)
+                ):
+                    raise RegistrationConflictError(
+                        f"{label} config changed during atomic exchange; "
+                        f"preserve displaced recovery file {temporary}",
+                    )
+                retain_temporary = False
+        finally:
+            cleanup_ready = True
+            if temporary and not retain_temporary and temporary.exists():
+                try:
+                    temporary.unlink()
+                except OSError:
+                    cleanup_ready = False
+                    print(
+                        f"warning: {label} config installed; cleanup failed; "
+                        f"preserve private recovery file {temporary}",
+                        file=sys.stderr,
+                    )
+            if not retain_temporary and cleanup_ready and recovery_directory.exists():
+                _cleanup_recovery_directory(recovery_directory, target.parent)
+    except RegistrationPartialStateError:
+        raise
+    except (OSError, RegistrationError) as exc:
+        if installed:
+            raise RegistrationPartialStateError(str(exc)) from exc
+        raise
 
 
 def _report(proposal: ConfigProposal, verb: str) -> None:
@@ -483,6 +497,7 @@ def _report(proposal: ConfigProposal, verb: str) -> None:
             flush=True,
         )
     except (OSError, ValueError) as exc:
+        _neutralize_failed_stream("stdout")
         raise RegistrationOutputError(f"agent-fabric MCP receipt output failed: {exc}") from exc
 
 
@@ -507,7 +522,7 @@ def _report_partial_state(
 ) -> None:
     diagnostic = (
         "partial-state: agent-fabric MCP registration "
-        f"cause={cause} committed={','.join(committed)} "
+        f"cause={cause} committed={','.join(committed) or 'none'} "
         f"remaining={','.join(remaining) or 'none'} config={config} "
         f"error={str(error).replace(chr(10), ' ')}; recovery={recovery}"
     )
@@ -600,7 +615,6 @@ def main(argv: list[str] | None = None) -> int:
                     except RegistrationOutputError as exc:
                         if not committed:
                             raise
-                        _neutralize_failed_stream("stdout")
                         _report_partial_state(
                             cause="receipt-output",
                             committed=committed,
@@ -631,6 +645,19 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 try:
                     write_proposal(proposal)
+                except RegistrationPartialStateError as exc:
+                    _report_partial_state(
+                        cause="config-conflict",
+                        committed=committed,
+                        remaining=[candidate.client for candidate in proposals[index:]],
+                        config=proposal.snapshot.target_path,
+                        error=exc,
+                        recovery=(
+                            "reconcile the reported configuration and any recovery file, "
+                            "then rerun --platform all"
+                        ),
+                    )
+                    return 4
                 except (OSError, RegistrationError) as exc:
                     if not committed:
                         raise
@@ -650,7 +677,6 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     _report(proposal, "configured")
                 except RegistrationOutputError as exc:
-                    _neutralize_failed_stream("stdout")
                     _report_partial_state(
                         cause="receipt-output",
                         committed=committed,
