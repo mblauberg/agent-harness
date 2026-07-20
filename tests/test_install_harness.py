@@ -185,13 +185,36 @@ def test_preserves_existing_instructions_and_prints_merge_line(tmp_path):
     config = tmp_path / "claude-config"
     config.mkdir()
     instructions = config / "CLAUDE.md"
-    instructions.write_text("# My existing instructions\n")
+    original = "# My existing instructions\n"
+    instructions.write_text(original)
 
     result = run("claude", tmp_path, CLAUDE_CONFIG_DIR=str(config))
     assert result.returncode == 3
-    assert instructions.read_text() == "# My existing instructions\n"
+    # Unmanaged instructions are preserved byte-for-byte; the merge line names
+    # both ambient files (AC-P2 existing-unmanaged arm).
+    assert instructions.read_text() == original
     assert "instructions preserved=" in result.stderr
     assert str(ROOT / "AGENTS.md") in result.stderr
+    assert str(ROOT / "HARNESS.md") in result.stderr
+    assert {path.name for path in (config / "skills").iterdir()} == expected_skills()
+
+
+def test_preserves_existing_codex_instructions_and_prints_merge_line(tmp_path):
+    # AC-P2: the codex platform layout ($CODEX_HOME/AGENTS.md) must fail closed
+    # over an existing unmanaged instructions file exactly like claude does —
+    # exit 3, byte-identical preservation, merge line naming both ambient files.
+    config = tmp_path / "codex-home"
+    config.mkdir()
+    instructions = config / "AGENTS.md"
+    original = "# My existing codex instructions\n"
+    instructions.write_text(original)
+
+    result = run("codex", tmp_path, CODEX_HOME=str(config))
+    assert result.returncode == 3
+    assert instructions.read_text() == original
+    assert "instructions preserved=" in result.stderr
+    assert str(ROOT / "AGENTS.md") in result.stderr
+    assert str(ROOT / "HARNESS.md") in result.stderr
     assert {path.name for path in (config / "skills").iterdir()} == expected_skills()
 
 

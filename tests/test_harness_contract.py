@@ -56,14 +56,17 @@ def test_first_use_fabric_trust_is_exact_and_does_not_provision():
     assert "trust a project root or provision" not in runbook
 
 
-def test_first_use_fabric_trust_uses_the_global_home_launcher():
+def test_first_use_fabric_trust_uses_a_path_resolved_invocation():
+    # D4: ambient files carry no location-bearing launcher path; the Fabric-trust
+    # bullet uses the PATH-resolved `provenant fabric workspace trust`. The
+    # repo-scoped runbook may still spell the explicit home launcher.
     agents = " ".join((ROOT / "AGENTS.md").read_text().split())
     runbook = " ".join(
         (ROOT / "docs" / "runbooks" / "agent-fabric-operations.md").read_text().split()
     )
-    command = '$HOME/.agents/scripts/agent-fabric workspace trust'
-    assert command in agents
-    assert f'{command} "$project_root"' in runbook
+    assert "provenant fabric workspace trust" in agents
+    assert "$HOME/.agents/scripts/agent-fabric" not in agents
+    assert '$HOME/.agents/scripts/agent-fabric workspace trust "$project_root"' in runbook
     assert '`scripts/agent-fabric workspace trust "$project_root"`' not in runbook
 
 
@@ -88,7 +91,11 @@ def test_subagent_dispatch_contract_requires_task_class_bound_route_and_receipt(
     for field in ("task class", "tier", "model", "effort", "route receipt"):
         assert field in contract.lower()
     assert "task class" in skill.lower()
-    assert "Codex subscription-native workers bind effort only" in harness
+    # HARNESS keeps only the routing invariant (route by task class, bind effort +
+    # receipt); the Codex subscription-native effort-binding detail lives in the
+    # orchestrate reference below (D2 routing depth -> orchestrate).
+    assert "Route every dispatch by task class" in harness
+    assert "effort" in harness and "receipt" in harness
     assert (
         "For subscription-native Codex workers, omit the literal transport `model` "
         "and bind the resolved `effort`."
@@ -98,10 +105,14 @@ def test_subagent_dispatch_contract_requires_task_class_bound_route_and_receipt(
 def test_constitution_is_a_compact_core_with_progressive_disclosure():
     text = (ROOT / "HARNESS.md").read_text()
     assert len(text.split()) <= 700
-    assert "paired-primary.md" in text
-    assert "config/risk-policy.json" in text
-    assert "skills/release/" in text
-    assert "skills/evaluate/" in text
+    # Progressive disclosure is by skill NAME, never by a reference-file path (D3),
+    # and the constitution carries no repo-relative config/ path (D4).
+    assert "skills/orchestrate/references" not in text
+    assert "paired-primary.md" not in text
+    assert "config/risk-policy.json" not in text
+    assert "Load depth only when triggered" in text
+    for skill in ("`orchestrate`", "`implement`", "`deliver`", "`session`", "`release`", "`evaluate`"):
+        assert skill in text
 
 
 def test_release_and_evaluate_complete_the_delivery_spine():
