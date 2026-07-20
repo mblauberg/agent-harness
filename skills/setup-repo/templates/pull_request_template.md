@@ -11,9 +11,12 @@
      "Approve merge of <head SHA> to main." Name any user or external
      gate that stays open after merge. -->
 
-<!-- Change map: add a Mermaid diagram here ONLY when several actors,
-     dependencies or state transitions changed and prose alone would be
-     hard to review. Routine or single-file PRs get no diagram. -->
+<!-- Change map: add a Mermaid diagram whenever it makes the change faster to
+     review than prose — changed actors or flows, state transitions, before/after
+     structure, or cross-component dependencies. GitHub renders it here. Prefer a
+     visual wherever it saves reviewer attention; skip only when the diff is
+     simple enough that prose is already clear. Keep it small and captioned —
+     never decorative. -->
 
 ## Risk and rollback
 

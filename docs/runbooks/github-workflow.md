@@ -49,9 +49,14 @@ issues are disabled.
 6. Set `Done` only after the issue has no remaining gate and its terminal
    reason or integrated pull request is recorded.
 
-Use a text or Mermaid diagram only when several actors, dependencies or state
-transitions would otherwise be difficult to review. Simple issues and pull
-requests do not need one.
+Reach for a Mermaid diagram whenever it makes a change faster to understand than
+prose — GitHub renders Mermaid in issues, pull requests and comments. Flows and
+roundtrips, before/after refactors, state machines, decision trees for open
+decisions, and cross-issue dependencies are strong candidates; a table is the
+right visual for tabular data. Prefer one wherever it saves reviewer attention,
+not only when prose would be hard. Skip it only when the change is simple enough
+that prose is already clear at a glance. Keep every diagram small, legible and
+captioned — a diagram that does not save the reader time is noise, so cut it.
 
 ## Mechanics
 

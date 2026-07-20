@@ -40,6 +40,20 @@ body:
       required: true
 
   - type: textarea
+    id: visual
+    attributes:
+      label: Visual (optional)
+      description: >-
+        Add a Mermaid diagram or table wherever it makes the problem, flow, state
+        or dependencies faster to grasp than prose — GitHub renders Mermaid.
+        Strong candidates: multi-step flows and roundtrips, state machines,
+        decision trees for open decisions, cross-issue dependencies. Skip it only
+        when prose is already clear; a diagram that does not save the reader time
+        is noise.
+    validations:
+      required: false
+
+  - type: textarea
     id: dependencies
     attributes:
       label: Dependencies
