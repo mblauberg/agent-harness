@@ -1,9 +1,28 @@
 import { FABRIC_OPERATIONS, ProtocolTransportError } from "@local/agent-fabric-protocol";
 import { describe, expect, it } from "vitest";
 
-import { errorPayload, retryRecoveredProtocolCall } from "../../src/mcp/server.ts";
+import {
+  errorPayload,
+  isRecoverableProtocolInterruption,
+  retryRecoveredProtocolCall,
+} from "../../src/mcp/server.ts";
 
 describe("MCP recovered protocol retry", () => {
+  it("recognizes a queued saturation timeout as proven unsubmitted while the transport remains open", () => {
+    const timeout = new ProtocolTransportError(
+      "PROTOCOL_TIMEOUT",
+      "queued protocol request timed out: fabric.v1.message.send",
+      { requestState: "queued" },
+    );
+
+    expect(isRecoverableProtocolInterruption(timeout, false)).toBe(true);
+    expect(isRecoverableProtocolInterruption(new ProtocolTransportError(
+      "PROTOCOL_TIMEOUT",
+      "in-flight protocol request timed out: fabric.v1.message.send",
+      { requestState: "in-flight" },
+    ), false)).toBe(false);
+  });
+
   it("turns a second timeout into actionable reconnect guidance", async () => {
     await expect(retryRecoveredProtocolCall(
       async () => {

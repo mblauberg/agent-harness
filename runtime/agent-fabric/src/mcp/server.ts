@@ -198,6 +198,12 @@ export async function retryRecoveredProtocolCall<T>(
   }
 }
 
+export function isRecoverableProtocolInterruption(error: unknown, transportClosed: boolean): boolean {
+  return error instanceof ProtocolTransportError &&
+    (error.code === "PROTOCOL_DISCONNECTED" || error.code === "PROTOCOL_TIMEOUT") &&
+    (transportClosed || (error.code === "PROTOCOL_TIMEOUT" && error.requestState === "queued"));
+}
+
 function resourceCall(
   uri: string,
   resources: readonly McpResourceDescriptor[],
@@ -286,15 +292,13 @@ async function configureFabricMcpServer(server: Server, options: FabricMcpServer
   const call = async (operation: FabricOperation, input: unknown): Promise<unknown> => {
     const attemptedProtocol = protocol;
     const attemptedPrincipal = attemptedProtocol.principal;
-    const requestWasNeverSubmitted = attemptedProtocol.closed;
+    const transportWasClosedBeforeCall = attemptedProtocol.closed;
     try {
       return await callWithAuthenticationRefresh(operation, input);
     } catch (error: unknown) {
-      if (
-        !(error instanceof ProtocolTransportError) ||
-        (error.code !== "PROTOCOL_DISCONNECTED" && error.code !== "PROTOCOL_TIMEOUT") ||
-        !attemptedProtocol.closed
-      ) throw error;
+      if (!isRecoverableProtocolInterruption(error, attemptedProtocol.closed)) throw error;
+      const requestWasNeverSubmitted = transportWasClosedBeforeCall ||
+        (error instanceof ProtocolTransportError && error.requestState === "queued");
       try {
         if (protocol === attemptedProtocol) {
           reconnectInFlight ??= (async () => {

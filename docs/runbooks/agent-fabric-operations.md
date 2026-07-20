@@ -561,7 +561,10 @@ as one team.
   rejects it. The negotiated five-minute idle limit bounds an unused transport,
   not the duration of a provider turn or review: the next Fabric call reconnects
   transparently when the old transport had already closed, because that call was
-  never submitted. Concurrent requests share that reconnect attempt. An
+  never submitted. A request that times out locally while still queued beyond
+  the negotiated in-flight limit is likewise proved unsubmitted and reconnects
+  for one bounded replay under the same exact principal. Concurrent requests
+  share that reconnect attempt. An
   in-flight request is replayed only with a durable identity: a stable
   `commandId`, or `dedupeKey` for `fabric_message_send`. An ambiguous
   commandless in-flight request reconnects but returns `RECONNECT_REQUIRED` with
