@@ -18,10 +18,12 @@ import {
   type VerifiedProtocolCredential,
 } from "@local/agent-fabric-protocol";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { describe, expect, it } from "vitest";
 
 import { startFabricDaemon } from "../../src/index.ts";
+import { createFabricMcpServer } from "../../src/mcp/server.ts";
 import { createDaemonFixture } from "../support/daemon-testkit.ts";
 import {
   callTool,
@@ -35,6 +37,7 @@ const packageRoot = fileURLToPath(new URL("../..", import.meta.url));
 const mcpMain = fileURLToPath(new URL("../../src/mcp/main.ts", import.meta.url));
 
 const timeoutCapability = `afc_${"a".repeat(43)}`;
+const rotatedTimeoutCapability = `afc_${"b".repeat(43)}`;
 const timeoutCredential: VerifiedProtocolCredential = {
   principal: {
     kind: "agent",
@@ -82,6 +85,97 @@ async function createTimeoutMcpFixture(options: {
     proxy,
     async cleanup(): Promise<void> {
       await proxy.close().catch(() => undefined);
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(directory, { recursive: true, force: true });
+    },
+  };
+}
+
+async function createRotatingPrincipalTimeoutFixture(options: { replacementPrincipalGeneration?: number } = {}) {
+  const directory = await mkdtemp(join(tmpdir(), "agent-fabric-mcp-principal-rotation-"));
+  const socketPath = join(directory, "fabric.sock");
+  const dispatchPrincipals: string[] = [];
+  let originalInitializations = 0;
+  const sockets = new Set<Socket>();
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    let principalLabel: string | undefined;
+    const lines = createInterface({ input: socket, crlfDelay: Infinity });
+    lines.on("line", (line) => {
+      const request = JSON.parse(line) as { id: string; operation: string; input: unknown };
+      if (request.operation === "initialize") {
+        const input = parseProtocolInitializeRequest(request.input);
+        if (input.authentication.credential === timeoutCapability) {
+          originalInitializations += 1;
+          if (originalInitializations > 1) {
+            socket.write(`${JSON.stringify({
+              id: request.id,
+              operation: request.operation,
+              ok: false,
+              error: { code: "AUTHENTICATION_FAILED", message: "original seat rotated", retryable: false },
+            })}\n`);
+            return;
+          }
+          principalLabel = "peer-generation-1";
+        } else if (input.authentication.credential === rotatedTimeoutCapability) {
+          principalLabel = `peer-generation-${String(options.replacementPrincipalGeneration ?? 2)}`;
+        } else {
+          throw new Error("unexpected test capability");
+        }
+        const result = createProtocolInitializeResult({
+          request: input,
+          verifiedCredential: {
+            ...timeoutCredential,
+            principal: {
+              ...timeoutCredential.principal,
+              principalGeneration: principalLabel === "peer-generation-1"
+                ? 1
+                : (options.replacementPrincipalGeneration ?? 2),
+            },
+          },
+          daemonVersion: "0.1.0",
+          daemonInstanceGeneration: 1,
+          offeredFeatures: PROTOCOL_FEATURES,
+          limits: { ...PROTOCOL_LIMITS, idleTimeoutMs: 200, requestTimeoutMs: 30 },
+          connectionNonce: `connection_${principalLabel}` as never,
+        });
+        socket.write(`${JSON.stringify({ id: request.id, operation: request.operation, ok: true, result })}\n`);
+        return;
+      }
+      if (principalLabel === undefined) throw new Error("operation arrived before initialization");
+      dispatchPrincipals.push(principalLabel);
+      const rendered = `${JSON.stringify({
+        id: request.id,
+        operation: request.operation,
+        ok: true,
+        result: { messageId: `message_${String(dispatchPrincipals.length)}` },
+      })}\n`;
+      if (dispatchPrincipals.length === 1) {
+        void delay(90).then(() => {
+          if (!socket.destroyed) socket.write(rendered);
+        });
+        return;
+      }
+      socket.write(rendered);
+    });
+    socket.once("close", () => sockets.delete(socket));
+  });
+  await new Promise<void>((resolve, reject) => server.listen(socketPath, resolve).once("error", reject));
+  const handle = await createFabricMcpServer({
+    socketPath,
+    capability: timeoutCapability,
+    refreshCapability: async () => rotatedTimeoutCapability,
+    clientLabel: "rotating-principal-timeout",
+  });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "rotating-principal-timeout", version: "0.1.0" });
+  await Promise.all([handle.server.connect(serverTransport), client.connect(clientTransport)]);
+  return {
+    client,
+    dispatchPrincipals,
+    async cleanup(): Promise<void> {
+      await Promise.allSettled([client.close(), handle.close()]);
+      for (const socket of sockets) socket.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await rm(directory, { recursive: true, force: true });
     },
@@ -212,6 +306,48 @@ describe("MCP proxy lifecycle", () => {
       await fixture.cleanup();
     }
   }, 15_000);
+
+  it("fails closed when seat rotation changes the principal before replaying a committed timed-out message", async () => {
+    const fixture = await createRotatingPrincipalTimeoutFixture();
+    try {
+      const sent = await callTool(fixture.client, "fabric_message_send", {
+        audience: { kind: "agents", agentIds: ["chair"] },
+        kind: "response",
+        body: "review complete",
+        requiresAck: true,
+        dedupeKey: "review-complete-principal-rotation",
+      });
+
+      expect(sent).toMatchObject({
+        isError: true,
+        structured: {
+          code: "RECONNECT_REQUIRED",
+          action: "Treat the operation outcome as unknown; reconcile its durable state before an explicit retry.",
+        },
+      });
+      expect(fixture.dispatchPrincipals).toEqual(["peer-generation-1"]);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("replays a stable dedupe identity when refreshed capability preserves the exact principal", async () => {
+    const fixture = await createRotatingPrincipalTimeoutFixture({ replacementPrincipalGeneration: 1 });
+    try {
+      const sent = await callTool(fixture.client, "fabric_message_send", {
+        audience: { kind: "agents", agentIds: ["chair"] },
+        kind: "response",
+        body: "review complete",
+        requiresAck: true,
+        dedupeKey: "review-complete-same-principal-refresh",
+      });
+
+      expect(sent).toMatchObject({ isError: false, structured: { messageId: "message_2" } });
+      expect(fixture.dispatchPrincipals).toEqual(["peer-generation-1", "peer-generation-1"]);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
 
   it("reconnects and returns actionable recovery for an ambiguous commandless timeout", async () => {
     let receives = 0;
