@@ -1,7 +1,6 @@
 schema_version: 1
-dataset_id: skill-portfolio-routing-holdout-20260719-v6
-split: current-catalogue-holdout
-catalogue_owner_count: 32
+dataset_id: skill-portfolio-routing-holdout-20260714-v5
+split: canonical-holdout
 cases:
   - id: m01
     category: requirements-before-build
@@ -64,7 +63,7 @@ cases:
     critical: true
     prompt: Return a read-only evidence matrix and prioritised findings for this frontend's accessibility, responsive states, hierarchy, interaction clarity, errors, and visual craft.
     expected:
-      primary_skill: ui-ux-design
+      primary_skill: frontend-review
       required_companion_skills: []
       allowed_companion_skills: [code-review, playwright, react-performance, web-stack-conventions]
   - id: m09
@@ -72,7 +71,7 @@ cases:
     critical: true
     prompt: Examine the current skill for trigger collisions, false negatives, authority drift, token overhead, unsafe helpers, and weak eval coverage. Report the audit without editing it.
     expected:
-      primary_skill: skill-craft
+      primary_skill: skill-audit
       required_companion_skills: []
       allowed_companion_skills: [code-review, evaluate, orchestrate]
   - id: m10
@@ -92,11 +91,11 @@ cases:
       required_companion_skills: []
       allowed_companion_skills: [code-review, evaluate]
   - id: m12
-    category: persistent-autonomous-mission
+    category: persistent-agent-lab
     critical: true
-    prompt: Launch a durable autonomous mission for this open-ended programme, recover across sessions and crashes, preserve human gates, and keep making progress until I explicitly write STOP.
+    prompt: Launch a durable autonomous lab for this open-ended programme, recover across sessions and crashes, preserve human gates, and keep making progress until I explicitly write STOP.
     expected:
-      primary_skill: autopilot
+      primary_skill: autonomous-lab
       required_companion_skills: []
       allowed_companion_skills: [deliver, evaluate, orchestrate, session, work-map]
   - id: m13
@@ -107,31 +106,33 @@ cases:
       trigger boundary, progressive disclosure, resources, provider metadata,
       fixtures, and fresh-context validation.
     expected:
-      primary_skill: skill-craft
+      primary_skill: skill-authoring
       required_companion_skills: []
-      allowed_companion_skills: [evaluate, implement]
+      allowed_companion_skills: [evaluate, implement, skill-audit]
   - id: m14
-    category: new-repository-github-setup
-    critical: true
+    category: explicit-project-presentation-invocation
+    critical: false
     prompt: >-
-      Set up GitHub for this new repository: scaffold its labels, branch
-      ruleset, issue forms, pull-request template, work-item runbook, and
-      Project board with valid repository-specific defaults.
+      The governing project instruction for this exact status reply is
+      $caveman. Follow that invocation: return a low-risk technical update with
+      exact test counts, the pending state, and uncertainty preserved; no full
+      or ultra mode was requested.
     expected:
-      primary_skill: github-setup
-      required_companion_skills: []
-      allowed_companion_skills: [engineering-docs]
-  - id: m15
-    category: existing-repository-github-mechanics
-    critical: true
-    prompt: >-
-      This established repository already has its GitHub setup. Triage today's
-      ordinary issues and pull requests using the repository's own runbook;
-      do not scaffold or replace labels, forms, rulesets, templates, or boards.
-    expected:
-      primary_skill: null
+      primary_skill: caveman
       required_companion_skills: []
       allowed_companion_skills: []
+  - id: m15
+    category: fabric-provider-routing
+    critical: true
+    prompt: >-
+      Use Agent Fabric rather than direct provider CLIs to send one bounded
+      read-only review packet to the other primary and an Agy/Gemini bonus
+      worker, retain their route and action receipts, then adjudicate the
+      evidence centrally.
+    expected:
+      primary_skill: orchestrate
+      required_companion_skills: []
+      allowed_companion_skills: [code-review, evaluate]
   - id: m16
     category: audit-then-approved-implementation
     critical: true
@@ -140,8 +141,8 @@ cases:
       through deterministic verification and independent review.
     expected:
       primary_skill: implement
-      required_companion_skills: [skill-craft]
-      allowed_companion_skills: [code-review, tdd]
+      required_companion_skills: [skill-audit]
+      allowed_companion_skills: [code-review, skill-authoring, tdd]
   - id: m17
     category: audit-and-heldout-evaluation
     critical: true
@@ -151,7 +152,7 @@ cases:
       trials.
     expected:
       primary_skill: evaluate
-      required_companion_skills: [skill-craft]
+      required_companion_skills: [skill-audit]
       allowed_companion_skills: [orchestrate]
   - id: m18
     category: audit-and-approved-external-export
@@ -162,5 +163,5 @@ cases:
       approved external reviewer and retain proof of that authorised send.
     expected:
       primary_skill: release
-      required_companion_skills: [skill-craft]
+      required_companion_skills: [skill-audit]
       allowed_companion_skills: []

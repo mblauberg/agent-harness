@@ -226,7 +226,7 @@ The full <!--skills-->32<!--/skills-->-skill catalogue, grouped by area:
 
 - [`Architecture`](docs/ARCHITECTURE.md): system structure and design rationale.
 - [`Specifications`](docs/specs/README.md): the component contracts.
-- [`Research`](docs/research/skill-portfolio-practices-2026.md): the skill-portfolio basis.
+- [`Research`](docs/research/README.md): evidence and owners.
 - [`Maintenance`](MAINTAINING.md): how the repository is changed and governed.
 - [`Security`](SECURITY.md): private vulnerability reporting.
 - [GitHub issues](https://github.com/mblauberg/provenant/issues): normal feedback and change proposals.

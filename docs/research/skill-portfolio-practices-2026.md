@@ -1,6 +1,7 @@
 # Agent skill portfolio: 2026 research and refactor
 
-Status: Implementation research and decision record
+Status: Dated implementation research and decision record with a current-state
+mapping
 Evidence cut-off: 11 July 2026
 Baseline: [Agentic delivery harness: 2026 research synthesis](agentic-sdlc-harness-2026.md)
 
@@ -13,11 +14,17 @@ entire pack belongs here. This review therefore adapts individual ideas only
 when they have a distinct trigger, authority boundary, output and verification
 gate.
 
-The resulting portfolio has 33 skills: the earlier 31 plus `refactor`,
-`frontend-review` and a rewritten cross-agent `caveman`, less the obsolete
-`agy-headless` provider skill. The main improvements are contract repair, clearer composition,
+The current portfolio has 32 skills, generated in the
+[repository README](../../README.md#skill-library). Since this decision's
+evidence cut-off, `frontend-design` and `frontend-review` consolidated into
+`ui-ux-design`, `autonomous-lab` became `autopilot`, and `skill-audit` and
+`skill-authoring` consolidated into `skill-craft`. The obsolete `agy-headless`
+provider skill remains retired. These later changes preserve the decision's
+small-portfolio direction while removing overlapping owners.
+
+The main improvements remain contract repair, clearer composition,
 catalogue-wide discovery limits, behavioural routing fixtures, deterministic
-safety checks and evidence-bearing review. `release` now promotes any accepted
+safety checks and evidence-bearing review. `release` promotes any accepted
 artifact through a separately authorised deploy, publish, share, send or
 activation action.
 
@@ -63,11 +70,13 @@ Two mechanisms were independently re-authored inside existing owners:
   expand/migrate/contract where applicable, expires compatibility paths only
   with usage-zero evidence, and distinguishes reversal from containment.
 
-The frontend pack was reduced instead of augmented: `frontend-design` remains
-the mutation technique inside `implement`; read-only review, React performance,
-scope and document ownership stay with their existing specialists. Its
-competing critique/audit/optimise commands, score storage and pinning machinery
-were removed. Deterministic delivery evidence was also hardened so its receipt
+At this evidence cut-off, the frontend pack was reduced instead of augmented:
+`frontend-design` remained the mutation technique inside `implement`; read-only
+review, React performance, scope and document ownership stayed with their
+existing specialists. The later `ui-ux-design` consolidation is mapped above.
+The pack's competing critique/audit/optimise commands, score storage and
+pinning machinery were removed. Deterministic delivery evidence was also
+hardened so its receipt
 digest must match the declared artifact that `--verify-hashes` checks.
 The standalone `agy-headless` skill and direct Agy helper routes were retired:
 the activated Agent Fabric Agy adapter now owns Gemini execution, authority,
@@ -77,30 +86,41 @@ answer-bearing provider layer; Autonomous Lab's parallel cross-family shell
 wrapper was removed, while `cf_dispatch.sh` remains only a preflight or
 explicitly recorded degraded fallback.
 
-| Current system inspected | Useful mechanism | Local decision |
+### 11 July historical dispositions, not current work
+
+The table records decisions at the evidence cut-off. It is not a backlog.
+Current work, dependencies and user gates live only in
+[GitHub issues and Project Status](https://github.com/mblauberg/provenant/issues).
+Where a current owner exists, the disposition links it; otherwise the proposal
+is not planned until new evidence opens a scoped issue.
+
+| System inspected | Useful mechanism | Current disposition |
 |---|---|---|
-| [GitHub Agentic Workflows `0e0d373`](https://github.com/github/gh-aw/tree/0e0d3736527cc5029115b7a49a63388da83cc1b2) | Withhold credentials from the planning runtime; validate a typed effect request before a scoped executor applies it. | P1 scoped follow-up inside `release`; do not add its workflow schema. |
-| [OpenHands SDK/docs `a7d4182`](https://github.com/OpenHands/docs/tree/a7d418214914617674139b741d9d22691390457d) | Detect normalised repeated action/result, repeated-error and alternating loop signatures. | P1 scoped follow-up for `autonomous-lab` and headless adapters; retain no full conversation store. |
-| [mini-SWE-agent `e187bcb`](https://github.com/SWE-agent/mini-swe-agent/tree/e187bcb2ff5825d85761a6f9c1f98c9fa6cfbc79) | A small linear single-agent loop is a meaningful counterfactual to harness complexity. | P1 follow-up: add a typed evaluation kind before claiming minimal-baseline and mechanism-ablation enforcement. |
-| [Goose `3c1fdd6`](https://github.com/aaif-goose/goose/tree/3c1fdd692cc8aaa5f09b9175410c09a09d4dfe49) | Minimise visible tools and declare permitted operations. | P2 experiment; do not add recipes/subrecipes or copy autonomous defaults. |
-| [Trailblaze `0e13954`](https://github.com/block/trailblaze/tree/0e13954a52126e8bbdc33d1dc97cf0d7aa77786a) | Promote a successful exploratory UI path into deterministic replay. | P2 browser/TDD pattern only after project evidence; no global device stack. |
-| [Aider `5dc9490`](https://github.com/Aider-AI/aider/tree/5dc9490bb35f9729ef2c95d00a19ccd30c26339c) | Rank repository symbols into a bounded navigation map. | P2 prototype only for measured large-repository context churn. |
+| [GitHub Agentic Workflows `0e0d373`](https://github.com/github/gh-aw/tree/0e0d3736527cc5029115b7a49a63388da83cc1b2) | Withhold credentials from the planning runtime; validate a typed effect request before a scoped executor applies it. | Implemented by the current [typed effects owner](../specs/agent-fabric/effects.md) and `release`; no separate work item. |
+| [OpenHands SDK/docs `a7d4182`](https://github.com/OpenHands/docs/tree/a7d418214914617674139b741d9d22691390457d) | Detect normalised repeated action/result, repeated-error and alternating loop signatures. | Deferred, not planned. `autopilot` owns bounded retry, budget and stop rules; no signature detector is authorised. |
+| [mini-SWE-agent `e187bcb`](https://github.com/SWE-agent/mini-swe-agent/tree/e187bcb2ff5825d85761a6f9c1f98c9fa6cfbc79) | A small linear single-agent loop is a meaningful counterfactual to harness complexity. | Deferred, not planned. `evaluate` owns any future measured baseline or mechanism-ablation study. |
+| [Goose `3c1fdd6`](https://github.com/aaif-goose/goose/tree/3c1fdd692cc8aaa5f09b9175410c09a09d4dfe49) | Minimise visible tools and declare permitted operations. | Implemented as progressive capability-correct projection in the [Fabric scope and invariants](../specs/agent-fabric/scope-and-invariants.md); recipes/subrecipes remain rejected. |
+| [Trailblaze `0e13954`](https://github.com/block/trailblaze/tree/0e13954a52126e8bbdc33d1dc97cf0d7aa77786a) | Promote a successful exploratory UI path into deterministic replay. | Deferred, not planned. If Console evidence activates it, [issue #141](https://github.com/mblauberg/provenant/issues/141) owns the bounded UI work. |
+| [Aider `5dc9490`](https://github.com/Aider-AI/aider/tree/5dc9490bb35f9729ef2c95d00a19ccd30c26339c) | Rank repository symbols into a bounded navigation map. | Deferred, not planned. [Issue #328](https://github.com/mblauberg/provenant/issues/328) owns current structural reviewability work without adopting a repository-map service. |
 | [OpenAI Symphony `4cbe3a9`](https://github.com/openai/symphony/tree/4cbe3a9699a73b862466c0b157ceca0c1985d6d7) | Reconcile durable work state before dispatch under one scheduler. | Already covered by receipts, `work-map` and one-chair ownership; no new action. |
 | [GitHub Spec Kit](https://github.com/github/spec-kit) | Constitution/specification/plan/task separation. | Already covered by `HARNESS.md`, `scope`, engineering docs and `implement`; avoid a parallel lifecycle. |
 
-The remaining P1 architecture proposals are a provider-neutral pre-action
-authority guard (filesystem, network, tools, expiry and sandbox capability), a
-typed external-effect request plus least-privilege executor, and a redacted
-deterministic loop circuit breaker. They require an approved cross-adapter spec,
-negative fixtures and degradation rules; this review deliberately does not
-smuggle them in as prose-only guarantees. Enforced child depth and descendant
-budget consumption remains part of that follow-up; prose alone is not a gate.
+The provider-neutral pre-action guard and typed external-effect request proposed
+at the cut-off now belong to the [authority](../specs/agent-fabric/authority.md)
+and [typed effects](../specs/agent-fabric/effects.md) owners. The proposed
+deterministic loop-signature detector is deferred and not planned; `autopilot`
+owns the current bounded retry, child-depth and descendant-budget rules. The
+public provider-action task-binding defect is current work in
+[issue #330](https://github.com/mblauberg/provenant/issues/330), not a research
+follow-up.
 
-`api-design` and `observability` remain P2 standalone candidates, not omissions.
-Either must first recur in at least two projects and beat composition with
-existing owners in a frozen outcome-and-attention evaluation. Source-mutating
-hooks, host-permissive behavioural runners, automatic installation, fixed
-personas, provider-prefixed copies and second lifecycle schemas remain rejected.
+Standalone `api-design` and `observability` skills are not planned. Current
+Fabric observability belongs to the
+[observability specification](../specs/agent-fabric/observability.md); a new
+global skill would require fresh cross-project evidence and a scoped issue.
+Source-mutating hooks, host-permissive behavioural runners, automatic
+installation, fixed personas, provider-prefixed copies and second lifecycle
+schemas remain rejected.
 
 ## Current evidence and local consequence
 
@@ -120,17 +140,17 @@ personas, provider-prefixed copies and second lifecycle schemas remain rejected.
 |---|---|---|
 | Lifecycle | `scope`, `deliver`, `implement`, `release`, `retrospect` | Exactly one owner controls each state transition and human gate. |
 | Techniques | `grill-me`, `prototype`, `diagnose`, `tdd`, `refactor`, `code-review`, `evaluate` | A method inherits authority from the lifecycle owner and cannot declare delivery complete. |
-| Topology | `orchestrate`, `autonomous-lab` | Allocate bounded workers and recovery state; never broaden authority or certify their own output. |
+| Topology | `orchestrate`, `autopilot` | Allocate bounded workers and recovery state; never broaden authority or certify their own output. |
 | Continuity | `session`, `work-map` | Write only an authorised canonical state surface; one writer at a time. |
 | Artifact and prose | engineering, academic, legal and natural writing/document skills | Preserve the split between artifact ownership and prose transformation. Project-specific owners override global defaults. |
 | Domain/tool overlays | frontend, React, TanStack, TypeScript, web standards, Playwright and diagram skills | Add specialist evidence or operate a named tool without stealing lifecycle ownership. |
-| Harness maintenance | `skill-audit`, `skill-authoring` | Existing-skill diagnosis and new-skill creation stay separate and use the same evaluation/supply-chain gates. |
+| Harness maintenance | `skill-craft` | Keep read-only audit and authorised authoring as explicit branches of one owner; use the same evaluation and supply-chain gates. |
 | Presentation | `caveman` | Alters chat density only; it grants no source, tool, external-action or completion authority. |
 
 The highest-value routing edges are now explicit: `diagnose` versus
 `implement`, `tdd` versus `refactor`, `code-review` versus review-and-fix,
-`frontend-review` versus `frontend-design`, `session` versus `work-map`, and
-bounded `orchestrate` versus run-until-human-STOP `autonomous-lab`.
+read-only versus authorised-change branches of `ui-ux-design`, `session` versus
+`work-map`, and bounded `orchestrate` versus run-until-human-STOP `autopilot`.
 
 ## SOLID and broader engineering practice
 
@@ -190,11 +210,11 @@ quotes and errors. It suspends aggressive compression for high-stakes,
 irreversible or ordered material. Artifact prose remains with its domain owner
 unless the human explicitly requests Caveman treatment of the artifact itself.
 
-### Current-model evaluation
+### 11 July model evaluation
 
 A synthetic 16-case development set compared four arms—no style layer, a
 one-line concise control, the rewritten local skill and the legacy skill—on the
-current Claude and Codex primary routes, twice each. All invocations and failures
+then-current Claude and Codex primary routes, twice each. All invocations and failures
 were retained. An opposite-family blind judge scored correctness, completeness,
 clarity/actionability, contract fidelity and reread burden after deterministic
 format/fact checks.
@@ -221,8 +241,8 @@ The result does **not** support a universal token-saving claim:
 Conclusion: keep the rewritten skill for its explicit safety and cross-agent
 contract, and remove the legacy plugin. Do not advertise a savings percentage or
 enable it solely for economics. Adaptive default remains a human attention
-preference; generic concise output is the cheaper control on at least one
-current primary route. Re-run this evaluation after major model or host changes.
+preference; generic concise output was the cheaper control on at least one
+evaluated primary route. Re-run this evaluation after major model or host changes.
 
 ## Skill, plugin, hook and tool boundary
 
@@ -279,17 +299,37 @@ failure-reproduction prompt; one added `pdf:pdf` to a D2 vector-PDF export.
 Infrastructure failures therefore stay separate from semantic accuracy, and
 the unadjusted 43/72 denominator is retained only as a failed-run warning.
 
-The final portfolio uses one canonical 14-case holdout. Three clean trials on
-each primary family passed all 84 exact primary-plus-bounded-companion rows,
-including the `skill-audit`/`skill-authoring`/`implement` confusion boundary
-and the governing Caveman adaptive default.
-The first Anthropic route stopped before generation on a Fable quota response;
-the live router selected Opus and the entire holdout was rerun fresh. Provider
-availability remains separate from semantic accuracy. This regression is not
-human acceptance or a claim of universal production routing accuracy.
+An earlier 14-case portfolio holdout ran three clean trials on each primary
+family and passed all 84 exact primary and bounded-companion selections,
+including
+the then-separate `skill-audit`/`skill-authoring`/`implement` boundary and the
+governing Caveman adaptive default. The first Anthropic route stopped before
+generation on a Fable quota response; the live router selected Opus and reran
+the whole holdout fresh. This is retained predecessor evidence, not the current
+canonical portfolio result.
+
+The 14 July tracked appendix used an 18-case holdout. Three no-retry trials on
+Gemini 3.1 Pro High through `agy` and Grok 4.5 XHigh through `cursor-agent`
+passed all 108 exact primary and bounded-companion selections. That dataset
+names the predecessor owners `frontend-review`, `skill-audit`,
+`skill-authoring` and `autonomous-lab`, so the result is predecessor evidence,
+not proof of the current 32-owner catalogue.
+
+A replacement 18-case holdout is now frozen against all 32 current owners. It
+covers the consolidated `ui-ux-design`, `skill-craft` and `autopilot` owners
+plus the `github-setup` versus established-repository-mechanics boundary. Its
+planned three fresh no-retry trials on exact Fabric routes
+`Gemini 3.1 Pro (High)` through `agy` and `cursor-grok-4.5-high` through
+`cursor-agent` remain outstanding because the available Fabric bootstrap
+authority did not project provider-action dispatch/read. No direct provider
+CLI result was substituted. Provider availability remains separate from
+semantic accuracy, and the unexecuted plan claims no current behavioural
+result. Run it only after [issue #330](https://github.com/mblauberg/provenant/issues/330)
+resolves the public provider-action task binding and the reviewed run grants
+the required task-bound authority.
 
 The tracked [evaluation appendix](../evals/skill-portfolio-2026/README.md)
-records datasets, frozen protocols, hashes, lineage, failures and limitations;
+records datasets, frozen protocols, receipt lineage, failures and limitations;
 raw model events remain run-owned evidence rather than repository documentation.
 
 ## Deliberate non-additions

@@ -14,17 +14,18 @@ contract, terminal runtime or material benchmark changes
 This snapshot preserves the evidence and requirement inventory from two
 untracked research drafts plus the dissolved open-source harness and terminal
 options monoliths. Durable conclusions now live in topic-based research and the
-already-approved Specs 01–05. There is no Spec 06 and no `P06` requirement is a
+then-approved numeric Specs 01–05. There is no Spec 06 and no `P06` requirement is a
 standalone normative owner. The labels below are provenance keys only.
 
-Source hashes before consolidation:
-
-| Source | Lines | Unique URLs | SHA-256 |
-|---|---:|---:|---|
-| `agent-continuity-routing-evidence-2026-07.md` | 286 | 26 | `dc28b73352a9beaf1da46d3e3f833a144c837b3585d99e4020f5bb49cccc1cd7` |
-| `proposed-spec-06-agent-continuity-routing-2026.md` | 891 | 5 | `fd2b785daac557bd75a85277ffc87f8349471f05129564752ddbd0215d32e0b3` |
-| `open-source-agent-harness-patterns-2026.md` | 87 | 19 | `3468ad3a92be42a6c37a9a1e0c4bb0140b93741f52eca2400ead5e100851b99e` |
-| `project-fabric-console-tui-options-2026.md` | 81 | 13 | `32ab94cdd6096729514d2f2727124f8e04bbf5a5a0d0f8d14f23391ca28531b7` |
+Source inputs before consolidation were
+`agent-continuity-routing-evidence-2026-07.md`,
+`proposed-spec-06-agent-continuity-routing-2026.md`,
+`open-source-agent-harness-patterns-2026.md` and
+`project-fabric-console-tui-options-2026.md`. The first two were untracked
+drafts; the latter two remain available in Git history. The former standalone
+file-hash table was retired because it was not a correctness gate and could not
+recover absent source bytes. This does not affect receipt, authority or
+trust-boundary digests, which retain their normative owners.
 
 Evidence rules:
 
@@ -49,18 +50,34 @@ now owns asynchronous preparation, lifecycle custody/recovery, complete review
 bundles, dynamic terminal resizing and answer-bearing Fabric review. Provider
 CLI output remains a dated degraded-path observation and cannot certify review.
 
-The draft's owner map is also historical: current lifecycle protocol lives in
-Spec 01 section 32.20 and persistence in Spec 04 sections 9.22–9.23, not the
-earlier Spec 01 section 15 shorthand. The old `thread/compacted` claim remains
-a dated compatibility lead until reverified against the pinned current Codex
-wire. The proposed `critical` enum, automatic context controller and deep-mode
-IDs were research, not accepted current protocol.
+The draft's numeric spec owner map is also historical. Current semantic owners
+for the subjects cited here are:
+
+| Subject | Current owner |
+|---|---|
+| Lifecycle, custody and recovery | [Lifecycle and gates](../../specs/agent-fabric/lifecycle-and-gates.md) and [recovery](../../specs/agent-fabric/recovery.md) |
+| Persistence | [Persistence](../../specs/agent-fabric/persistence.md) |
+| Route and review evidence | [Evidence and review](../../specs/agent-fabric/evidence-and-review.md) and [review custody](../../specs/agent-fabric/review-custody.md) |
+| Provider actions, activation and wire | [Provider actions and adapters](../../specs/agent-fabric/provider-actions-and-adapters.md), [activation](../../specs/agent-fabric/activation.md) and [daemon and wire](../../specs/agent-fabric/daemon-and-wire.md) |
+| Harness lifecycle and skill routing | [Harness lifecycle](../../specs/harness/lifecycle.md) |
+
+Later numeric labels 01–05 and their section numbers are provenance keys, not
+live paths. The old `thread/compacted` claim remains a dated compatibility lead
+until reverified against the pinned current Codex wire. The proposed `critical`
+enum, automatic context controller and deep-mode IDs were research, not
+accepted current protocol.
+
+OpenCode activation was still open at this snapshot's cut-off. Its current
+state and remaining user gates live in the
+[provider boundary reference](../provider-adapter-and-runtime-boundaries.md)
+and checked-in adapter configuration. The later `P06-FR-032` row retains its
+dated disposition only.
 
 ## Section-to-destination map
 
 | Source material | Durable destination |
 |---|---|
-| Evidence method, volatile papers, model signals and original hashes | This snapshot |
+| Evidence method, volatile papers, model signals and source inventory | This snapshot |
 | Context observations, checkpointing, rotation, acknowledgement and child independence | [Agent continuity and checkpointing](../agent-continuity-and-checkpointing.md) and Specs 01/04 |
 | Deployed-route identity, task-local evaluation, expiry, baseline and promotion | [Evidence-based provider routing](../evidence-based-provider-routing.md) and Specs 01/02/04 |
 | One chair, topology waves, native modes, discovery surfaces and OSS orchestration patterns | [Native orchestration and discovery surfaces](../native-orchestration-and-discovery-surfaces.md) and the current Agent Fabric specifications |
@@ -73,7 +90,7 @@ Exact source-section coverage:
 
 | Source sections | Destination/disposition |
 |---|---|
-| Evidence §1 | Snapshot boundary, hashes, current-state correction and evidence rules |
+| Evidence §1 | Snapshot boundary, source inventory, current-state correction and evidence rules |
 | Evidence §2.1 | Native-orchestration and provider-boundary conclusions; live state must be reverified |
 | Evidence §2.2 | Agent continuity/checkpointing; mature custody in Specs 01/04, controller gaps remain unknown |
 | Evidence §2.3 | Evidence-based provider routing and Specs 01–04 |
@@ -90,7 +107,7 @@ Exact source-section coverage:
 | Proposal §6.6 | Existing Agent Fabric authority precedence; no second portable authority schema |
 | Proposal §6.7 | Native-orchestration boundary; versioned/cross-primary deep mode remains open |
 | Proposal §6.8 | Native discovery-surface reference; total ceiling remains open |
-| Proposal §6.9 | Provider adapter/runtime OpenCode boundary; activation remains a human gate |
+| Proposal §6.9 | Provider adapter/runtime OpenCode boundary; activation was a human gate at the snapshot cut-off |
 | Proposal §6.10 | Specs 01/04 content-free operational telemetry and provider-boundary reference |
 | Proposal §7 | Provider adapter/runtime host-configuration boundary |
 | Proposal §8 | Provider/runtime stack and terminal-runtime decision |
@@ -100,7 +117,7 @@ Exact source-section coverage:
 | Proposal §12 | Unknown/human-decision inventory; no inferred default, login, hook or subscription action |
 | Proposal §13 | Durable topic non-goals and current spec exclusions |
 | Proposal §14 | Historical advisory adjudication preserved as evidence boundary, not authority |
-| Proposal §15 | Historical immediate sequence superseded by current Specs 01–05 lineage; path reference retained only as source provenance |
+| Proposal §15 | Historical immediate sequence superseded by the then-current numeric Specs 01–05 lineage; path reference retained only as source provenance |
 
 ## Requirement disposition inventory
 

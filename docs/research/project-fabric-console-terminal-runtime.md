@@ -9,9 +9,10 @@ Implementation evidence cut-off: 13 July 2026
 
 Evidence snapshot: [July 2026 continuity and routing evidence](evidence-snapshots/agent-continuity-routing-2026-07.md)
 
-Current final verification and human programme acceptance are owned by the
-[W012/W013 reducer, issue #23](https://github.com/mblauberg/provenant/issues/23).
-This research note does not own current implementation status.
+The W012/W013 reducer and programme-acceptance work closed through
+[issue #23](https://github.com/mblauberg/provenant/issues/23) on 15 July 2026.
+The linked Console specifications own current implementation and acceptance
+status; this historical research note does not.
 
 Normative owners: [Console operator views](../specs/console/operator-interaction.md)
 and [acceptance and usability](../specs/console/acceptance.md)

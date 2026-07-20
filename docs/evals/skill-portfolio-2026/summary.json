@@ -1,11 +1,15 @@
 {
   "availability": {
-    "anthropic_sdk": "not scheduled after the lifecycle-routing adapter action terminated at provider authentication",
-    "google_effective_model": "Gemini 3.1 Pro (High)",
-    "xai_effective_model": "grok-4.5-xhigh"
+    "current_evaluation": "FABRIC-ROUNDTRIP-UNAVAILABLE",
+    "fabric_daemon": "healthy",
+    "provider_action_authority": "not projected to the supported worktree bootstrap",
+    "requested_adapters": [
+      "agy",
+      "cursor-agent"
+    ]
   },
-  "delivery_run_id": "SKAUD-20260714",
-  "evidence_cutoff": "2026-07-14",
+  "evidence_cutoff": "2026-07-19",
+  "predecessor_delivery_run_id": "SKAUD-20260714",
   "retained_nonpasses": [
     {
       "artifact_root": ".agent-run/ADDY-HARNESS-20260711/evaluation/routing-fabric-v2",
@@ -117,7 +121,23 @@
       "status": "fail"
     }
   ],
-  "routing_regression": {
+  "current_routing_regression": {
+    "attempts_started": 0,
+    "blocked_reason": "FABRIC-ROUNDTRIP-UNAVAILABLE",
+    "cases": 18,
+    "catalogue_owner_count": 32,
+    "dataset": "routing-holdout.yaml",
+    "dependencies": [
+      "https://github.com/mblauberg/provenant/issues/330"
+    ],
+    "evaluation_id": "skill-portfolio-routing-20260719-fabric-v7",
+    "planned_attempts": 6,
+    "planned_case_rows": 108,
+    "protocol": "routing-protocol.json",
+    "repetitions": 3,
+    "status": "outstanding"
+  },
+  "predecessor_routing_regression": {
     "attempts": 6,
     "case_rows": 108,
     "cases": 18,
@@ -137,7 +157,7 @@
       "path": "docs/evals/skill-portfolio-2026"
     },
     "repetitions": 3,
-    "status": "pass"
+    "status": "predecessor-pass"
   },
-  "schema_version": 2
+  "schema_version": 3
 }
