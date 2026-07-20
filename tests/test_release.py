@@ -3,6 +3,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "skills" / "release" / "scripts" / "validate_release.py"
@@ -218,6 +220,42 @@ def test_noncanonical_schema_fails_closed():
 
 def test_ready_gate_supports_authorised_send_without_shell_commands():
     assert validate_policy(valid_receipt(), "ready") == []
+
+
+@pytest.mark.parametrize("extra", [None, False, "", [], {}, {"repository": "."}])
+def test_release_artifact_identity_union_uses_closed_field_presence(extra):
+    receipt = valid_receipt()
+    receipt["artifact"]["git_revision"] = extra
+    errors = validate_policy(receipt, "ready")
+    assert "artifact fields must be exactly one digest or git_revision shape" in errors
+
+
+def test_release_git_revision_shape_rejects_digest_and_unknown_fields_even_when_empty():
+    receipt = valid_receipt()
+    receipt["artifact"] = {
+        "id": "accepted-source",
+        "git_revision": {"repository": ".", "commit": "1" * 40, "tree": "2" * 40},
+        "digest": "",
+        "acceptance_receipt": "RUN.json",
+    }
+    errors = validate_policy(receipt, "ready")
+    assert "artifact fields must be exactly one digest or git_revision shape" in errors
+
+    receipt["artifact"].pop("digest")
+    receipt["artifact"]["unexpected"] = False
+    errors = validate_policy(receipt, "ready")
+    assert "artifact fields must be exactly one digest or git_revision shape" in errors
+
+
+def test_release_git_revision_rejects_mixed_object_widths():
+    receipt = valid_receipt()
+    receipt["artifact"] = {
+        "id": "accepted-source",
+        "git_revision": {"repository": ".", "commit": "1" * 40, "tree": "2" * 64},
+        "acceptance_receipt": "RUN.json",
+    }
+    errors = validate_policy(receipt, "ready")
+    assert "artifact.git_revision must contain an exact repository, commit and tree" in errors
 
 
 def test_cli_accepts_a_canonical_nonsoftware_delivery(tmp_path):

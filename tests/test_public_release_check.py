@@ -22,6 +22,15 @@ def seed_required(root: Path) -> None:
         path.write_text("safe\n")
 
 
+def copy_release_scripts(repository: Path) -> Path:
+    source = Path(__file__).resolve().parents[1] / "scripts"
+    target = repository / "scripts"
+    target.mkdir()
+    for name in ("public_release_check.py", "git_evidence.py"):
+        shutil.copy2(source / name, target / name)
+    return target / "public_release_check.py"
+
+
 def git_at(root: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -47,9 +56,7 @@ def publication_repository(
     git_at(repository, "config", "user.name", "Release Test")
     git_at(repository, "config", "user.email", "release@example.test")
     seed_required(repository)
-    script = repository / "scripts" / "public_release_check.py"
-    script.parent.mkdir()
-    shutil.copy2(Path(__file__).resolve().parents[1] / "scripts" / script.name, script)
+    script = copy_release_scripts(repository)
     git_at(repository, "add", ".")
     git_at(repository, "commit", "-q", "-m", "base")
     return repository, script, git_at(repository, "rev-parse", "HEAD")
@@ -1334,9 +1341,7 @@ def test_publication_range_ignores_tainted_sibling_but_scans_selected_commits(tm
     git_at(repository, "config", "user.name", "Release Test")
     git_at(repository, "config", "user.email", "release@example.test")
     seed_required(repository)
-    script = repository / "scripts" / "public_release_check.py"
-    script.parent.mkdir()
-    shutil.copy2(Path(__file__).resolve().parents[1] / "scripts" / script.name, script)
+    script = copy_release_scripts(repository)
     git_at(repository, "add", ".")
     git_at(repository, "commit", "-q", "-m", "base")
     base = git_at(repository, "rev-parse", "HEAD")
