@@ -13,9 +13,9 @@ and owns authority, user communication, run state, gates and final synthesis; eq
 is not concurrent bosses. For substantial work use native subagents and the other primary;
 approved authority may permit paired-primary mode, but one chair and one stage owner remain.
 Agent Fabric owns answer-bearing provider execution and durable communication; direct CLIs
-are preflight or degraded fallback, Herdr observes or wakes. Partition concurrent writers or
-use patch-only workers with one serial applier; an author cannot certify their own surface.
-Pairing and pane depth live in the `orchestrate` skill.
+are preflight or degraded fallback, Herdr observes or wakes. Partition concurrent writers or use
+patch-only workers with one serial applier; an author or decision-maker cannot certify their own
+surface.
 
 ## Lifecycle and user gates
 
@@ -30,8 +30,8 @@ destructive or irreversible actions and external communications.
 
 ## Risk, authority, routing and memory
 
-Scope emits the minimum tier (`routine`, `substantial`, `crucial`, `terminal`) plus
-machine-readable authority for paths, actions, disclosure, secrets, deployment, expiry and
+Scope emits the minimum tier (`routine`, `substantial`, `crucial`, `terminal`) plus machine-readable
+authority for paths, actions, disclosure, secrets, deployment, irreversible actions, expiry and
 approver; delegation only narrows it, and host access, credentials or subscriptions never grant
 permission. A standing user-approved envelope covers routine version control: implementation
 branches and linked worktrees (parallel included) need no per-instance approval, one writer
@@ -52,7 +52,7 @@ confidence; `clean` is valid, fluent unverified output is not.
 
 Bonus families never block on absence, quota or API failure (record skipped legs); the other
 primary is load-bearing for substantial+ review. Claims block only after primary-family
-evidence, never majority-vote opinions.
+corroboration and evidence, never majority-vote opinions.
 
 ## Load depth only when triggered
 

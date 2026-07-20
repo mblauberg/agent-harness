@@ -91,15 +91,42 @@ def test_subagent_dispatch_contract_requires_task_class_bound_route_and_receipt(
     for field in ("task class", "tier", "model", "effort", "route receipt"):
         assert field in contract.lower()
     assert "task class" in skill.lower()
-    # HARNESS keeps only the routing invariant (route by task class, bind effort +
-    # receipt); the Codex subscription-native effort-binding detail lives in the
-    # orchestrate reference below (D2 routing depth -> orchestrate).
+    # HARNESS keeps the full routing invariant (route by task class, bind identity +
+    # effort + receipt, runtime governs); the Codex subscription-native
+    # effort-binding detail lives in the orchestrate reference below (D2 routing
+    # depth -> orchestrate). Assert the invariant as contiguous phrases so trimming
+    # a bound field (e.g. "binding identity") cannot pass.
     assert "Route every dispatch by task class" in harness
-    assert "effort" in harness and "receipt" in harness
+    assert "binding identity, effort and receipt" in harness
+    assert "runtime governs" in harness
     assert (
         "For subscription-native Codex workers, omit the literal transport `model` "
         "and bind the resolved `effort`."
     ) in codex
+
+
+def test_ambient_files_meet_the_static_disclosure_gates():
+    # AC-S1 hard gates (D1/D4/D10/D12): the whole constitution lives in the two
+    # ambient files within fixed line caps, carries no date, no repo-relative
+    # docs/config/scripts path and no skills/<x>/references path, and states its
+    # skill-resolution root exactly once via the D12 resolver line. Nothing else
+    # in the suite enforces the line caps, so this is the binding machine gate.
+    import re
+
+    agents = (ROOT / "AGENTS.md").read_text()
+    harness = (ROOT / "HARNESS.md").read_text()
+    # `wc -l` semantics: a trailing-newline file has exactly line-count newlines.
+    assert agents.count("\n") <= 35, "AGENTS.md exceeds its 35-line hard cap (D1)"
+    assert harness.count("\n") <= 60, "HARNESS.md exceeds its 60-line hard cap (D1)"
+
+    forbidden_path = re.compile(r"(?:docs|config|scripts)/[A-Za-z]|skills/[a-z-]+/references")
+    date = re.compile(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}")
+    for name, text in (("AGENTS.md", agents), ("HARNESS.md", harness)):
+        assert not forbidden_path.search(text), f"{name} has a forbidden repo-relative/references path (D4/D3)"
+        assert not date.search(text), f"{name} carries a date (D10)"
+        # The D12 resolver names the skills root; it is the sole location-bearing line.
+        assert "$HOME/.agents/skills/<name>/" in text
+        assert "~/.codex/skills/" in text
 
 
 def test_constitution_is_a_compact_core_with_progressive_disclosure():

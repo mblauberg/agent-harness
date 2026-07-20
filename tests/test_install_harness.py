@@ -181,18 +181,23 @@ def test_codex_skill_override_preserves_symlinked_config(tmp_path):
     assert {path.name for path in (config / "skills").iterdir()} == expected_skills()
 
 
+# A discriminating payload: CRLF line endings and no trailing newline. Any
+# text-mode rewrite (LF<->CRLF normalisation, appended newline) changes the
+# bytes, so a byte comparison — not read_text() — is what proves preservation.
+UNMANAGED_BYTES = b"# My existing instructions\r\nsecond line, no trailing newline"
+
+
 def test_preserves_existing_instructions_and_prints_merge_line(tmp_path):
     config = tmp_path / "claude-config"
     config.mkdir()
     instructions = config / "CLAUDE.md"
-    original = "# My existing instructions\n"
-    instructions.write_text(original)
+    instructions.write_bytes(UNMANAGED_BYTES)
 
     result = run("claude", tmp_path, CLAUDE_CONFIG_DIR=str(config))
     assert result.returncode == 3
     # Unmanaged instructions are preserved byte-for-byte; the merge line names
     # both ambient files (AC-P2 existing-unmanaged arm).
-    assert instructions.read_text() == original
+    assert instructions.read_bytes() == UNMANAGED_BYTES
     assert "instructions preserved=" in result.stderr
     assert str(ROOT / "AGENTS.md") in result.stderr
     assert str(ROOT / "HARNESS.md") in result.stderr
@@ -206,12 +211,11 @@ def test_preserves_existing_codex_instructions_and_prints_merge_line(tmp_path):
     config = tmp_path / "codex-home"
     config.mkdir()
     instructions = config / "AGENTS.md"
-    original = "# My existing codex instructions\n"
-    instructions.write_text(original)
+    instructions.write_bytes(UNMANAGED_BYTES)
 
     result = run("codex", tmp_path, CODEX_HOME=str(config))
     assert result.returncode == 3
-    assert instructions.read_text() == original
+    assert instructions.read_bytes() == UNMANAGED_BYTES
     assert "instructions preserved=" in result.stderr
     assert str(ROOT / "AGENTS.md") in result.stderr
     assert str(ROOT / "HARNESS.md") in result.stderr
