@@ -2,7 +2,10 @@
 
 ## Active
 
-No active handoffs.
+- [2026-07-20 disclosure refactor](2026-07-20-disclosure-refactor.md) — for
+  the fresh session implementing
+  [#335](https://github.com/mblauberg/provenant/issues/335) once the in-flight
+  PR train lands; remove when consumed.
 
 [GitHub Issues](https://github.com/mblauberg/provenant/issues) own the current
 owner, dependencies and user gates; Project Status owns workflow state. Read

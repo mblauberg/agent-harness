@@ -537,7 +537,13 @@ def test_current_docs_use_live_issue_and_durable_decision_owners():
     )
 
     assert "issues/141" in specs_index
-    assert "No active handoffs." in handoffs
+    # The handoffs index must keep its Active section and its durable-owner
+    # routing, but must not pin the transient empty state: committing an active
+    # handoff entry (docs custody, D15) is legitimate and must not fail this
+    # contract. Assert structure, not the "No active handoffs." literal.
+    assert "## Active" in handoffs
+    assert "[GitHub Issues](https://github.com/mblauberg/provenant/issues)" in handoffs
+    assert "Project Status owns workflow state" in handoffs
     assert not (ROOT / "docs" / "handoffs" / "consolidated-harness-cli.md").exists()
     assert (ROOT / "docs" / "adr" / "0013-thin-provenant-cli.md").is_file()
     for path in historical_specs:
