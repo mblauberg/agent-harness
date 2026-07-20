@@ -132,25 +132,12 @@ cross-family verifiers for source/test/schema confirmation.
 
 ## Runtime routing
 
-Do not hard-code a dated model ID in a skill body. Express routing as:
-
-```
-role -> family/tier/effort -> runtime-discovered model
-```
-
-Examples:
-
-- non-Claude orchestrator needing Claude verifier -> dispatcher-managed `claude` route; prefer `--bare`
-  when `ANTHROPIC_API_KEY`/`apiKeyHelper` exists, otherwise OAuth safe mode if already logged in.
-- Codex verifier -> account-default `codex exec -s read-only -c
-  model_reasoning_effort=<level>`; `catalog_model` is audit metadata, not an
-  argument.
-- Cursor scout -> `cursor-agent -p --mode ask --sandbox enabled --model <model>`.
-- Gemini-family scout -> an `orchestrate` task through the activated Agent
-  Fabric `agy` adapter; retain its route/action receipt.
-
-Use aliases only when the CLI documents them as current. For high-stakes work, record the resolved model
-or CLI version in the run manifest.
+Use [routing-and-tiers.md](routing-and-tiers.md) for the canonical role, tier,
+family, runtime-discovery, and degradation policy. This adapter remains
+load-bearing for cross-verification: resolve a different-family read-only route
+through current capability evidence and record its adapter, lineage, effective
+effort, safety guarantee, and CLI version in the run manifest.
+A best_effort route may scout but not certify cross-family verification.
 
 ## Output normalisation
 

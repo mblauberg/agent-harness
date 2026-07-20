@@ -2,9 +2,9 @@
 
 For **designing a multi-agent system you are building** — the standing product/architecture, not this
 run's fan-out. The rest of this skill is runtime doctrine (dispatch, reduce, gate); read this when you
-must pick a topology or framework and commit it to code. Context isolation, handoff schemas,
-depth/breadth caps, and panels live in `layering-and-context.md`, `routing-and-tiers.md`, and
-`debate-and-panels.md` — not repeated here.
+must pick a topology or framework and commit it to code. Current context-isolation,
+handoff, routing, worker-cap, and panel contracts are owned by the `orchestrate`
+skill and are not repeated here.
 
 ## Workflows before agents
 

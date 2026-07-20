@@ -21,15 +21,10 @@ models.
 
 ## Worker brief fields
 
-Include these when retrieval matters:
-
-```
-source-scope:      <files, URLs, tools, repos, databases allowed>
-search-strategy:  broad-first | exact-source | official-source-only | local-first
-must-check:        <specific anchors / authorities / tests>
-must-not-use:      <stale summaries, manifests as evidence, unofficial sources, etc.>
-output:            source-bound findings with paths/URLs/locators
-```
+Use the canonical [worker contract](orchestration-contract.md#worker-contract).
+For retrieval lanes, bind the allowed evidence surface, search strategy,
+must-check and must-not-use sources, and source-bound locator output inside that
+contract.
 
 ## Skill and tool descriptions
 

@@ -21,6 +21,8 @@ links and verify volatile provider or model claims at the live runtime.
   : frozen `deliver` trigger evaluation
 - [Project Fabric Console terminal runtime](project-fabric-console-terminal-runtime.md)
   : historical language/runtime decision
+- [System-design patterns: topology and framework choice](system-design-patterns.md)
+  : archived research survey; normative owner is the `orchestrate` skill
 - [July 2026 continuity and routing evidence](evidence-snapshots/agent-continuity-routing-2026-07.md)
   : descriptive provenance snapshot, not implementation authority
 
