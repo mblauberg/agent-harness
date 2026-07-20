@@ -207,6 +207,18 @@ def manifest_for(target: Path):
     return target.parent / ".agent-harness-installation.json"
 
 
+def link_identity(path: Path):
+    info = path.lstat()
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_size,
+        info.st_mtime_ns,
+        path.readlink(),
+    )
+
+
 def tiny_source(tmp_path: Path):
     source = tmp_path / "source"
     for name in ("alpha", "beta"):
@@ -402,22 +414,25 @@ def test_install_records_versioned_ownership_without_overwriting_unmanaged(tmp_p
     assert (unmanaged / "keep").read_text() == "mine"
 
 
-def test_reconcile_repairs_broken_managed_link_and_rejects_conflict(tmp_path):
+def test_reconcile_preserves_broken_replacement_as_conflict(tmp_path):
     source = tiny_source(tmp_path)
     target = tmp_path / "installed"
     assert manager(target, "install", source).returncode == 0
-    (target / "alpha").unlink()
-    (target / "alpha").symlink_to(tmp_path / "missing")
-    repaired = manager(target, "reconcile", source)
-    assert repaired.returncode == 0, repaired.stderr
-    assert (target / "alpha").resolve() == (source / "alpha").resolve()
+    replacement = target / "alpha"
+    replacement.unlink()
+    replacement.symlink_to(tmp_path / "missing")
+    before = replacement.lstat()
 
-    (target / "beta").unlink()
-    (target / "beta").mkdir()
     conflict = manager(target, "reconcile", source)
+
     assert conflict.returncode == 3
-    assert "conflicting" in conflict.stderr
-    assert (target / "beta").is_dir()
+    assert "conflicting managed targets: alpha" in conflict.stderr
+    after = replacement.lstat()
+    assert (after.st_dev, after.st_ino, replacement.readlink()) == (
+        before.st_dev,
+        before.st_ino,
+        tmp_path / "missing",
+    )
 
 
 def test_reconcile_preserves_valid_different_managed_symlink_as_conflict(tmp_path):
@@ -463,6 +478,7 @@ def test_normal_install_repairs_managed_drift_and_retires_safe_old_links(tmp_pat
     assert (target / "beta").resolve() == (source / "beta").resolve()
     assert manifest["managed"]["beta"]["source_sha256"] != "0" * 64
     assert (target / "gamma").resolve() == (source / "gamma").resolve()
+    assert not list(target.parent.glob(".agent-harness-links.*"))
 
 
 def test_uninstall_managed_removes_only_owned_exact_links(tmp_path):
@@ -642,6 +658,33 @@ def test_check_verifies_canonical_catalogue_and_ignores_ds_store(tmp_path):
     assert manager(target, "check", source).returncode == 0
 
 
+def test_check_fails_closed_for_replaced_retired_managed_link(tmp_path):
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    assert manager(target, "install", source).returncode == 0
+    shutil.rmtree(source / "alpha")
+    external = tmp_path / "external"
+    external.mkdir()
+    writer = target / "alpha"
+    writer.unlink()
+    writer.symlink_to(external)
+    before = writer.lstat()
+
+    checked = manager(target, "check", source)
+
+    assert checked.returncode == 3
+    report = json.loads(checked.stdout)
+    assert {item["name"]: item["state"] for item in report["items"]}["alpha"] == (
+        "replaced-managed"
+    )
+    after = writer.lstat()
+    assert (after.st_dev, after.st_ino, writer.readlink()) == (
+        before.st_dev,
+        before.st_ino,
+        external,
+    )
+
+
 def test_manifest_commit_failure_rolls_back_link_mutations(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location("managed_installer_failure", MANAGER)
     module = importlib.util.module_from_spec(spec)
@@ -659,6 +702,60 @@ def test_manifest_commit_failure_rolls_back_link_mutations(tmp_path, monkeypatch
     assert not (target / "alpha").exists()
     assert not (target / "beta").exists()
     assert not manifest_for(target).exists()
+
+
+def test_uninstall_manifest_failure_restores_original_managed_link_identity(
+    tmp_path, monkeypatch
+):
+    module = load_manager_module("managed_installer_uninstall_identity_rollback")
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    module.execute("install", source, target)
+    live = target / "alpha"
+    before = link_identity(live)
+    manifest_before = manifest_for(target).read_bytes()
+    original_write = module._write_manifest
+
+    def fail_commit(_target, _manifest):
+        raise OSError("injected manifest failure")
+
+    monkeypatch.setattr(module, "_write_manifest", fail_commit)
+    with pytest.raises(OSError, match="injected manifest failure"):
+        module.execute("uninstall-managed", source, target)
+
+    assert link_identity(live) == before
+    assert manifest_for(target).read_bytes() == manifest_before
+    assert not list(target.parent.glob(".agent-harness-links.*"))
+    monkeypatch.setattr(module, "_write_manifest", original_write)
+    assert module.execute("check", source, target)["ok"]
+
+
+def test_reconcile_manifest_failure_restores_original_managed_link_identity(
+    tmp_path, monkeypatch
+):
+    module = load_manager_module("managed_installer_reconcile_identity_rollback")
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    module.execute("install", source, target)
+    live = target / "alpha"
+    before = link_identity(live)
+    manifest_before = manifest_for(target).read_bytes()
+    (source / "alpha" / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Use when changed.\n---\n"
+    )
+
+    def fail_commit(_target, _manifest):
+        raise OSError("injected manifest failure")
+
+    monkeypatch.setattr(module, "_write_manifest", fail_commit)
+    with pytest.raises(OSError, match="injected manifest failure"):
+        module.execute("reconcile", source, target)
+
+    assert link_identity(live) == before
+    assert manifest_for(target).read_bytes() == manifest_before
+    assert {item["name"]: item["state"] for item in module.execute(
+        "plan", source, target
+    )["items"]}["alpha"] == "stale"
 
 
 def test_manifest_key_traversal_fails_before_uninstall_mutation(tmp_path):
@@ -703,8 +800,9 @@ def test_stale_reconcile_restores_different_target_writer_raced_before_exchange(
     target = tmp_path / "installed"
     module.execute("install", source, target)
     stale = target / "alpha"
-    stale.unlink()
-    stale.symlink_to(tmp_path / "missing")
+    (source / "alpha" / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Use when changed.\n---\n"
+    )
     external = tmp_path / "external"
     external.mkdir()
     original_exchange = module.atomic_exchange
@@ -734,8 +832,10 @@ def test_same_target_substitution_after_exchange_preserves_and_syncs_recovery(
     target = tmp_path / "installed"
     module.execute("install", source, target)
     stale = target / "alpha"
-    stale.unlink()
-    stale.symlink_to(tmp_path / "missing")
+    original_identity = link_identity(stale)
+    (source / "alpha" / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Use when changed.\n---\n"
+    )
     original_exchange = module.atomic_exchange
     original_fsync = module._fsync_directory
     synced: list[Path] = []
@@ -766,7 +866,7 @@ def test_same_target_substitution_after_exchange_preserves_and_syncs_recovery(
     assert (info.st_dev, info.st_ino, stale.readlink()) == raced_identity
     assert stale.resolve() == (source / "alpha").resolve()
     assert recovery.is_symlink()
-    assert recovery.resolve(strict=False) == (tmp_path / "missing").resolve(strict=False)
+    assert link_identity(recovery) == original_identity
     assert target in synced
     assert recovery.parent in synced
     assert json.loads(manifest_for(target).read_text())["managed"]["alpha"]
@@ -919,6 +1019,34 @@ def test_legacy_manifest_baselines_exact_identity_on_next_mutation(tmp_path):
     assert checked["items"][0]["state"] == "replaced-managed"
 
 
+@pytest.mark.parametrize("action", ["check", "uninstall-managed"])
+def test_partial_identity_manifest_fails_closed_without_removing_writer(
+    tmp_path, action
+):
+    source = tiny_source(tmp_path)
+    target = tmp_path / "installed"
+    assert manager(target, "install", source).returncode == 0
+    manifest_path = manifest_for(target)
+    partial = json.loads(manifest_path.read_text())
+    del partial["managed_link_identities"]["alpha"]
+    manifest_path.write_text(json.dumps(partial))
+    writer = target / "alpha"
+    writer.unlink()
+    writer.symlink_to(source / "alpha")
+    before = writer.lstat()
+
+    rejected = manager(target, action, source)
+
+    assert rejected.returncode == 3
+    assert "managed-link identities are invalid" in rejected.stderr
+    after = writer.lstat()
+    assert (after.st_dev, after.st_ino, writer.readlink()) == (
+        before.st_dev,
+        before.st_ino,
+        source / "alpha",
+    )
+
+
 def test_two_writers_during_rollback_surface_exact_displaced_recovery(
     tmp_path, monkeypatch
 ):
@@ -927,8 +1055,9 @@ def test_two_writers_during_rollback_surface_exact_displaced_recovery(
     target = tmp_path / "installed"
     module.execute("install", source, target)
     live = target / "alpha"
-    live.unlink()
-    live.symlink_to(tmp_path / "stale")
+    (source / "alpha" / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: Use when changed.\n---\n"
+    )
     writer_one = tmp_path / "writer-one"
     writer_two = tmp_path / "writer-two"
     writer_one.mkdir()

@@ -6,13 +6,10 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import ctypes
-from datetime import datetime, timezone
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import secrets
 import stat
 import tempfile
@@ -22,48 +19,44 @@ from typing import Any, NamedTuple
 
 try:
     import scripts.managed_link_identity as link_identity
+    import scripts.managed_installation_manifest as manifest_io
 except ModuleNotFoundError as exc:
     if exc.name != "scripts":
         raise
     import managed_link_identity as link_identity  # type: ignore[no-redef]
+    import managed_installation_manifest as manifest_io  # type: ignore[no-redef]
 
 PathIdentity = link_identity.PathIdentity
 PathSnapshot = link_identity.PathSnapshot
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST_NAME = ".agent-harness-installation.json"
 LOCK_NAME = ".agent-harness-installation.lock"
-SKILL_NAME = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-SHA256 = re.compile(r"^[0-9a-f]{64}$")
+SKILL_NAME = manifest_io.SKILL_NAME
+InstallError = manifest_io.InstallError
+ManifestCommitUncertainError = manifest_io.ManifestCommitUncertainError
+ManifestCommitRaceError = manifest_io.ManifestCommitRaceError
+_now = manifest_io.now
+_sha_skill = manifest_io.sha_skill
+_load_manifest = manifest_io.load_manifest
+_entry = manifest_io.entry
 
 
-class InstallError(ValueError):
-    pass
-
-
-class ManifestCommitUncertainError(InstallError):
-    """The manifest pathname changed but its directory fsync failed."""
-
-
-class ManifestCommitRaceError(ManifestCommitUncertainError):
-    """The manifest was published but a bound managed identity then differed."""
+class StagedLink(NamedTuple):
+    path: Path
+    snapshot: PathSnapshot
 
 
 class LinkMutation(NamedTuple):
     path: Path
     before: PathSnapshot
     installed: PathSnapshot
+    displaced: StagedLink | None
 
 
 class RollbackFailure(NamedTuple):
     name: str
     error_type: str
     detail: str
-
-
-class StagedLink(NamedTuple):
-    path: Path
-    snapshot: PathSnapshot
 
 
 class LinkRecoveryWorkspace:
@@ -114,28 +107,6 @@ class LinkRecoveryWorkspace:
             return
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def _sha_skill(path: Path) -> str:
-    digest = hashlib.sha256()
-    for child in sorted(path.rglob("*")):
-        if any(part in {"__pycache__", ".DS_Store"} for part in child.relative_to(path).parts) or child.suffix == ".pyc":
-            continue
-        if child.is_symlink():
-            raise InstallError(f"skill source contains a symlink: {child.relative_to(path)}")
-        if not child.is_file():
-            continue
-        digest.update(child.relative_to(path).as_posix().encode())
-        digest.update(b"\0")
-        digest.update(b"x" if child.stat().st_mode & 0o111 else b"-")
-        digest.update(b"\0")
-        digest.update(child.read_bytes())
-        digest.update(b"\0")
-    return digest.hexdigest()
-
-
 def _skills(source: Path) -> dict[str, Path]:
     if not source.is_dir():
         raise InstallError("source must be an existing skill directory")
@@ -143,10 +114,6 @@ def _skills(source: Path) -> dict[str, Path]:
     if any(not SKILL_NAME.fullmatch(name) for name in skills):
         raise InstallError("source contains an invalid skill name")
     return skills
-
-
-def _manifest_path(target: Path) -> Path:
-    return target.parent / MANIFEST_NAME
 
 
 def _lock_identity(value: os.stat_result) -> tuple[int, int, int]:
@@ -201,54 +168,6 @@ def _installation_lock(target: Path, timeout_ms: int = 10_000):
         if locked:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
-
-
-def _empty_manifest(target: Path) -> dict[str, Any]:
-    return {
-        "schema_version": 1,
-        "owner": "agent-harness",
-        "target_root": str(target.resolve()),
-        "updated_at": _now(),
-        "managed": {},
-        "managed_link_identities": {},
-    }
-
-
-def _load_manifest(target: Path) -> dict[str, Any]:
-    path = _manifest_path(target)
-    if not path.exists():
-        return _empty_manifest(target)
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise InstallError(f"installation manifest is unreadable: {exc}") from exc
-    if not isinstance(data, dict) or data.get("schema_version") != 1 or data.get("owner") != "agent-harness" or not isinstance(data.get("managed"), dict):
-        raise InstallError("installation manifest is invalid or not owned by agent-harness")
-    if data.get("target_root") != str(target.resolve()):
-        raise InstallError("installation manifest belongs to a different target root")
-    required_entry = {"owner", "source_target", "source_sha256", "installed_at", "history"}
-    for name, entry in data["managed"].items():
-        if not isinstance(name, str) or not SKILL_NAME.fullmatch(name):
-            raise InstallError("installation manifest contains an invalid skill name")
-        if not isinstance(entry, dict) or set(entry) != required_entry or entry.get("owner") != "agent-harness":
-            raise InstallError(f"installation manifest entry is invalid: {name}")
-        if not isinstance(entry.get("source_target"), str) or not Path(entry["source_target"]).is_absolute():
-            raise InstallError(f"installation manifest source target is invalid: {name}")
-        if not isinstance(entry.get("source_sha256"), str) or not SHA256.fullmatch(entry["source_sha256"]):
-            raise InstallError(f"installation manifest digest is invalid: {name}")
-        if not isinstance(entry.get("history"), list):
-            raise InstallError(f"installation manifest history is invalid: {name}")
-    identities = data.get("managed_link_identities", {})
-    if not isinstance(identities, dict) or any(
-        name not in data["managed"] or not link_identity.valid_manifest_link_identity(identity)
-        for name, identity in identities.items()
-    ):
-        raise InstallError("installation manifest managed-link identities are invalid")
-    # Schema-v1 manifests written before exact identity binding remain readable.
-    # The next successful mutation baselines their currently managed links while
-    # holding the installer lock.
-    data["managed_link_identities"] = identities
-    return data
 
 
 def _capture_path(path: Path) -> PathSnapshot:
@@ -353,7 +272,7 @@ def _atomic_replace_link(
     expected: PathSnapshot,
     link_target: str,
     workspace: LinkRecoveryWorkspace,
-) -> PathSnapshot:
+) -> tuple[PathSnapshot, StagedLink | None]:
     candidate = workspace.stage(link_target)
     if expected.kind == "absent":
         try:
@@ -363,7 +282,7 @@ def _atomic_replace_link(
                 raise InstallError(
                     f"managed path changed after atomic install; preserved newer path: {path.name}"
                 )
-            return installed
+            return installed, None
         finally:
             workspace.discard_exact(candidate)
     if expected.kind != "symlink":
@@ -396,12 +315,7 @@ def _atomic_replace_link(
             f"preserve recovery path {candidate.path}"
         )
     displaced_link = StagedLink(candidate.path, displaced)
-    if not workspace.discard_exact(displaced_link):
-        raise InstallError(
-            f"managed recovery changed after atomic exchange: {path.name}; "
-            f"preserve recovery path {candidate.path}"
-        )
-    return installed
+    return installed, displaced_link
 
 
 def _restore_removed_link(path: Path, displaced: StagedLink) -> bool:
@@ -418,9 +332,9 @@ def _atomic_remove_link(
     path: Path,
     expected: PathSnapshot,
     workspace: LinkRecoveryWorkspace,
-) -> PathSnapshot:
+) -> tuple[PathSnapshot, StagedLink | None]:
     if expected.kind == "absent":
-        return expected
+        return expected, None
     if expected.kind != "symlink":
         raise InstallError(f"managed mutation refuses non-link path: {path.name}")
     empty = workspace.stage()
@@ -440,12 +354,7 @@ def _atomic_remove_link(
             f"managed path changed during atomic removal: {path.name}; "
             f"preserve recovery path {empty.path}"
         )
-    if not workspace.discard_exact(displaced):
-        raise InstallError(
-            f"managed recovery changed after atomic removal: {path.name}; "
-            f"preserve recovery path {empty.path}"
-        )
-    return installed
+    return installed, displaced
 
 
 def _mutate_link(
@@ -455,12 +364,12 @@ def _mutate_link(
     journal: list[LinkMutation],
     workspace: LinkRecoveryWorkspace,
 ) -> None:
-    installed = (
+    installed, displaced = (
         _atomic_remove_link(path, expected, workspace)
         if source is None
         else _atomic_replace_link(path, expected, source, workspace)
     )
-    journal.append(LinkMutation(path, expected, installed))
+    journal.append(LinkMutation(path, expected, installed, displaced))
 
 
 def _validate_journal(journal: list[LinkMutation]) -> None:
@@ -473,6 +382,101 @@ def _validate_journal(journal: list[LinkMutation]) -> None:
         raise InstallError(
             "managed paths changed before manifest commit: " + ", ".join(sorted(changed))
         )
+    changed_recoveries = [
+        mutation.path.name
+        for mutation in journal
+        if mutation.displaced is not None
+        and _capture_path(mutation.displaced.path) != mutation.displaced.snapshot
+    ]
+    if changed_recoveries:
+        raise InstallError(
+            "managed recovery paths changed before manifest commit: "
+            + ", ".join(sorted(changed_recoveries))
+        )
+
+
+def _restore_replaced_mutation(
+    mutation: LinkMutation,
+    workspace: LinkRecoveryWorkspace,
+) -> None:
+    displaced = mutation.displaced
+    if displaced is None or displaced.snapshot != mutation.before:
+        raise InstallError("managed rollback lacks the exact displaced link")
+    if (
+        _capture_path(mutation.path) != mutation.installed
+        or _capture_path(displaced.path) != mutation.before
+    ):
+        raise InstallError(
+            f"managed rollback identity changed; preserve recovery path {displaced.path}"
+        )
+
+    atomic_exchange(displaced.path, mutation.path)
+    restored = _capture_path(mutation.path)
+    moved_installed = _capture_path(displaced.path)
+    if restored == mutation.before and moved_installed == mutation.installed:
+        if not workspace.discard_exact(StagedLink(displaced.path, moved_installed)):
+            raise InstallError(
+                "managed rollback could not discard the replaced installer link; "
+                f"preserve recovery path {displaced.path}"
+            )
+        return
+
+    if restored == mutation.before and moved_installed.kind != "absent":
+        raced = StagedLink(displaced.path, moved_installed)
+        if _restore_exchange(
+            mutation.path,
+            raced,
+            restored,
+            moved_installed,
+        ):
+            raise InstallError(
+                "managed rollback preserved a newer live path; "
+                f"preserve recovery path {displaced.path}"
+            )
+    raise InstallError(
+        f"managed rollback identity changed; preserve recovery path {displaced.path}"
+    )
+
+
+def _restore_removed_mutation(
+    mutation: LinkMutation,
+    workspace: LinkRecoveryWorkspace,
+) -> None:
+    displaced = mutation.displaced
+    if displaced is None or displaced.snapshot != mutation.before:
+        raise InstallError("managed rollback lacks the exact removed link")
+    if not _restore_removed_link(mutation.path, displaced):
+        raise InstallError(
+            "managed rollback preserved a newer live path; "
+            f"preserve recovery path {displaced.path}"
+        )
+    if not workspace.discard_exact(displaced):
+        raise InstallError(
+            "managed rollback could not discard the restored recovery link; "
+            f"preserve recovery path {displaced.path}"
+        )
+
+
+def _discard_committed_recoveries(
+    journal: list[LinkMutation],
+    workspace: LinkRecoveryWorkspace,
+) -> None:
+    for mutation in journal:
+        displaced = mutation.displaced
+        if displaced is None:
+            continue
+        try:
+            discarded = workspace.discard_exact(displaced)
+        except OSError as exc:
+            raise ManifestCommitUncertainError(
+                "installation manifest committed but exact recovery cleanup failed; "
+                f"preserve recovery path {displaced.path}"
+            ) from exc
+        if not discarded:
+            raise ManifestCommitUncertainError(
+                "installation manifest committed but recovery identity changed; "
+                f"preserve recovery path {displaced.path}"
+            )
 
 
 def _rollback_mutations(
@@ -483,16 +487,19 @@ def _rollback_mutations(
     for mutation in reversed(journal):
         try:
             if mutation.before.kind == "symlink":
-                if mutation.before.link_target is None:
-                    raise InstallError("managed rollback snapshot is invalid")
-                _atomic_replace_link(
-                    mutation.path,
-                    mutation.installed,
-                    mutation.before.link_target,
-                    workspace,
-                )
+                if mutation.installed.kind == "absent":
+                    _restore_removed_mutation(mutation, workspace)
+                else:
+                    _restore_replaced_mutation(mutation, workspace)
             elif mutation.before.kind == "absent":
-                _atomic_remove_link(mutation.path, mutation.installed, workspace)
+                _, displaced = _atomic_remove_link(
+                    mutation.path, mutation.installed, workspace
+                )
+                if displaced is not None and not workspace.discard_exact(displaced):
+                    raise InstallError(
+                        "managed rollback could not discard the new link; "
+                        f"preserve recovery path {displaced.path}"
+                    )
             else:
                 raise InstallError("managed rollback refuses non-link snapshot")
         except (OSError, InstallError) as exc:
@@ -525,12 +532,7 @@ def _plan(
         elif snapshot.kind == "absent":
             state = "stale"
         elif not _matches_managed_snapshot(manifest, name, snapshot):
-            if snapshot.kind == "symlink":
-                assert snapshot.link_target is not None
-                resolved = destination.parent / snapshot.link_target
-                state = "stale" if not resolved.exists() else "conflicting"
-            else:
-                state = "conflicting"
+            state = "conflicting"
         elif _same_link_snapshot(destination, source_path, snapshot):
             state = "managed" if entry.get("source_sha256") == _sha_skill(source_path) else "stale"
         elif snapshot.kind == "symlink":
@@ -600,10 +602,25 @@ def _integrity(
                 state = "noncanonical"
         items.append({"name": name, "scope": "required", "state": state})
 
+    for name in sorted(set(manifest["managed"]) - set(skills)):
+        snapshot = _capture_path(target / name)
+        if snapshot.kind == "absent":
+            scope, state = "extra", "retired-missing"
+        elif not _matches_managed_snapshot(manifest, name, snapshot):
+            scope, state = "required", "replaced-managed"
+        else:
+            scope, state = "extra", "retired-managed"
+        items.append({"name": name, "scope": scope, "state": state})
+
     if target.is_dir():
         for destination in sorted(target.iterdir()):
             name = destination.name
-            if name == ".DS_Store" or name in skills or not destination.is_symlink():
+            if (
+                name == ".DS_Store"
+                or name in skills
+                or name in manifest["managed"]
+                or not destination.is_symlink()
+            ):
                 continue
             try:
                 destination.resolve(strict=False).relative_to(source)
@@ -615,38 +632,7 @@ def _integrity(
 
 
 def _write_manifest(target: Path, manifest: dict[str, Any]) -> None:
-    path = _manifest_path(target)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    manifest["updated_at"] = _now()
-    temp: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile("w", dir=path.parent, prefix=".installation.", suffix=".tmp", delete=False) as handle:
-            temp = Path(handle.name)
-            json.dump(manifest, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp, path)
-        try:
-            _fsync_directory(path.parent)
-        except OSError as exc:
-            raise ManifestCommitUncertainError(
-                "installation manifest replaced but parent-directory durability "
-                f"is uncertain: {path}"
-            ) from exc
-    finally:
-        if temp and temp.exists():
-            temp.unlink()
-
-
-def _entry(name: str, source: Path, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
-    return {
-        "owner": "agent-harness",
-        "source_target": str(source),
-        "source_sha256": _sha_skill(source),
-        "installed_at": _now(),
-        "history": history or [],
-    }
+    manifest_io.write_manifest(target, manifest, _fsync_directory)
 
 
 def _load_renames(path: Path | None) -> list[dict[str, str]]:
@@ -899,6 +885,7 @@ def _execute_locked(action: str, source: Path, target: Path, renames: Path | Non
                 "preserved live path and retained exact manifest evidence: "
                 + ", ".join(changed_managed)
             )
+        _discard_committed_recoveries(journal, workspace)
     except ManifestCommitUncertainError:
         # Replacement already made manifest and links mutually visible. Rolling
         # back here would create a known inconsistency.
