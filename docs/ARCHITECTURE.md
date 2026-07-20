@@ -382,9 +382,14 @@ exchange, no-clobber hard links and exact-identity moves retain a private
 recovery path when an uncooperative writer wins a race; absent installs enter
 the journal only when the live path still matches the exact staged link
 identity. The live and recovery directories reach a durability barrier before
-manifest replacement and after conditional rollback. A post-replacement
-directory-fsync failure reports uncertain committed durability without rolling
-links back into a known manifest/link inconsistency.
+manifest replacement and after conditional rollback. The manifest's optional
+schema-v1 identity map binds managed names to the exact installed device, inode,
+mode, size, modification time and raw link target; legacy manifests baseline
+that map during their next successful locked mutation. Identity is checked both
+before and after manifest publication. A post-publication replacement or
+directory-fsync failure reports typed uncertain committed state, preserves the
+live writer and makes subsequent check or mutation fail closed instead of
+claiming the replacement or rolling links into a known inconsistency.
 Provider bootstraps remain small and share the same precedence sentence.
 
 ## Project Fabric Console

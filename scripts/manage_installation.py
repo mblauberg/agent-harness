@@ -20,6 +20,15 @@ import sys
 import time
 from typing import Any, NamedTuple
 
+try:
+    import scripts.managed_link_identity as link_identity
+except ModuleNotFoundError as exc:
+    if exc.name != "scripts":
+        raise
+    import managed_link_identity as link_identity  # type: ignore[no-redef]
+
+PathIdentity = link_identity.PathIdentity
+PathSnapshot = link_identity.PathSnapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_NAME = ".agent-harness-installation.json"
@@ -36,18 +45,8 @@ class ManifestCommitUncertainError(InstallError):
     """The manifest pathname changed but its directory fsync failed."""
 
 
-class PathIdentity(NamedTuple):
-    device: int
-    inode: int
-    mode: int
-    size: int
-    modified_ns: int
-
-
-class PathSnapshot(NamedTuple):
-    kind: str
-    identity: PathIdentity | None
-    link_target: str | None
+class ManifestCommitRaceError(ManifestCommitUncertainError):
+    """The manifest was published but a bound managed identity then differed."""
 
 
 class LinkMutation(NamedTuple):
@@ -211,6 +210,7 @@ def _empty_manifest(target: Path) -> dict[str, Any]:
         "target_root": str(target.resolve()),
         "updated_at": _now(),
         "managed": {},
+        "managed_link_identities": {},
     }
 
 
@@ -238,17 +238,17 @@ def _load_manifest(target: Path) -> dict[str, Any]:
             raise InstallError(f"installation manifest digest is invalid: {name}")
         if not isinstance(entry.get("history"), list):
             raise InstallError(f"installation manifest history is invalid: {name}")
+    identities = data.get("managed_link_identities", {})
+    if not isinstance(identities, dict) or any(
+        name not in data["managed"] or not link_identity.valid_manifest_link_identity(identity)
+        for name, identity in identities.items()
+    ):
+        raise InstallError("installation manifest managed-link identities are invalid")
+    # Schema-v1 manifests written before exact identity binding remain readable.
+    # The next successful mutation baselines their currently managed links while
+    # holding the installer lock.
+    data["managed_link_identities"] = identities
     return data
-
-
-def _path_identity(value: os.stat_result) -> PathIdentity:
-    return PathIdentity(
-        value.st_dev,
-        value.st_ino,
-        value.st_mode,
-        value.st_size,
-        value.st_mtime_ns,
-    )
 
 
 def _capture_path(path: Path) -> PathSnapshot:
@@ -256,7 +256,7 @@ def _capture_path(path: Path) -> PathSnapshot:
         before = path.lstat()
     except FileNotFoundError:
         return PathSnapshot("absent", None, None)
-    identity = _path_identity(before)
+    identity = link_identity.path_identity(before)
     if not stat.S_ISLNK(before.st_mode):
         return PathSnapshot("other", identity, None)
     try:
@@ -264,9 +264,14 @@ def _capture_path(path: Path) -> PathSnapshot:
         after = path.lstat()
     except FileNotFoundError as exc:
         raise InstallError(f"managed path changed while snapshotting: {path.name}") from exc
-    if _path_identity(after) != identity or os.readlink(path) != link_target:
+    if link_identity.path_identity(after) != identity or os.readlink(path) != link_target:
         raise InstallError(f"managed path changed while snapshotting: {path.name}")
     return PathSnapshot("symlink", identity, link_target)
+
+
+def _matches_managed_snapshot(manifest: dict[str, Any], name: str, snapshot: PathSnapshot) -> bool:
+    identity = manifest["managed_link_identities"].get(name)
+    return identity is None or link_identity.matches_manifest_link_identity(snapshot, identity)
 
 
 def _snapshot_paths(target: Path, names: set[str]) -> dict[str, PathSnapshot]:
@@ -517,6 +522,15 @@ def _plan(
         entry = managed.get(name)
         if entry is None:
             state = "missing" if snapshot.kind == "absent" else "unmanaged"
+        elif snapshot.kind == "absent":
+            state = "stale"
+        elif not _matches_managed_snapshot(manifest, name, snapshot):
+            if snapshot.kind == "symlink":
+                assert snapshot.link_target is not None
+                resolved = destination.parent / snapshot.link_target
+                state = "stale" if not resolved.exists() else "conflicting"
+            else:
+                state = "conflicting"
         elif _same_link_snapshot(destination, source_path, snapshot):
             state = "managed" if entry.get("source_sha256") == _sha_skill(source_path) else "stale"
         elif snapshot.kind == "symlink":
@@ -531,14 +545,16 @@ def _plan(
     for name in sorted(set(managed) - set(skills)):
         destination = target / name
         snapshot = snapshots[name]
-        if _same_link_snapshot(
+        if snapshot.kind == "absent":
+            state = "retired-missing"
+        elif not _matches_managed_snapshot(manifest, name, snapshot):
+            state = "conflicting"
+        elif _same_link_snapshot(
             destination,
             Path(managed[name].get("source_target", "/missing")),
             snapshot,
         ):
             state = "retired-managed"
-        elif snapshot.kind == "absent":
-            state = "retired-missing"
         else:
             state = "conflicting"
         items.append({"name": name, "state": state})
@@ -554,14 +570,24 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def _integrity(source: Path, target: Path) -> list[dict[str, str]]:
+def _integrity(
+    source: Path,
+    target: Path,
+    manifest: dict[str, Any],
+) -> list[dict[str, str]]:
     """Report the installed catalogue without claiming ownership of foreign entries."""
     skills = _skills(source)
     items: list[dict[str, str]] = []
     for name, source_path in skills.items():
         destination = target / name
         snapshot = _capture_path(destination)
-        if _same_link_snapshot(destination, source_path, snapshot):
+        if (
+            name in manifest["managed"]
+            and snapshot.kind != "absent"
+            and not _matches_managed_snapshot(manifest, name, snapshot)
+        ):
+            state = "replaced-managed"
+        elif _same_link_snapshot(destination, source_path, snapshot):
             state = "present"
         elif snapshot.kind == "absent":
             state = "missing"
@@ -664,13 +690,20 @@ def _prepare_renames(
         old_snapshot = snapshots[old]
         new_snapshot = snapshots[new]
         old_source = Path(managed[old]["source_target"])
-        if old_snapshot.kind != "absent" and not _same_link_snapshot(
-            old_destination, old_source, old_snapshot
+        if old_snapshot.kind != "absent" and (
+            not _matches_managed_snapshot(manifest, old, old_snapshot)
+            or not _same_link_snapshot(old_destination, old_source, old_snapshot)
         ):
             raise InstallError(f"conflicting managed rename source: {old}")
         new_is_correct = _same_link_snapshot(new_destination, skills[new], new_snapshot)
         if new_snapshot.kind != "absent" and not new_is_correct:
             raise InstallError(f"conflicting rename target: {new}")
+        if (
+            new in managed
+            and new_snapshot.kind != "absent"
+            and not _matches_managed_snapshot(manifest, new, new_snapshot)
+        ):
+            raise InstallError(f"conflicting managed rename target: {new}")
         if new_is_correct and new in managed and Path(managed[new]["source_target"]).resolve() != skills[new]:
             raise InstallError(f"conflicting managed rename target: {new}")
         if new not in target_history:
@@ -736,7 +769,7 @@ def _execute_locked(action: str, source: Path, target: Path, renames: Path | Non
     if action == "plan":
         return {"schema_version": 1, "action": action, "items": _plan(source, target, manifest), "changed": []}
     if action == "check":
-        items = _integrity(source, target)
+        items = _integrity(source, target, manifest)
         return {
             "schema_version": 1,
             "action": action,
@@ -815,7 +848,7 @@ def _execute_locked(action: str, source: Path, target: Path, renames: Path | Non
                     destination,
                     Path(entry.get("source_target", "/missing")),
                     snapshot,
-                ):
+                ) and _matches_managed_snapshot(manifest, name, snapshot):
                     _mutate_link(destination, snapshot, None, journal, workspace)
                     del manifest["managed"][name]
                     changed.append(name)
@@ -827,16 +860,45 @@ def _execute_locked(action: str, source: Path, target: Path, renames: Path | Non
             raise InstallError(f"unsupported action: {action}")
 
         _validate_journal(journal)
+        try:
+            expected_managed = link_identity.expected_managed_snapshots(
+                set(manifest["managed"]), snapshots, journal
+            )
+        except ValueError as exc:
+            raise InstallError(str(exc)) from exc
+        changed_managed = link_identity.changed_managed_snapshots(target, expected_managed, _capture_path)
+        if changed_managed:
+            raise InstallError(
+                "managed identities changed before manifest commit: "
+                + ", ".join(changed_managed)
+            )
+        manifest["managed_link_identities"] = {
+            name: link_identity.manifest_link_identity(snapshot)
+            for name, snapshot in expected_managed.items()
+        }
         if journal:
             # Link directory entries and any private displaced recovery must be
             # durable before the manifest can describe the new ownership set.
             _fsync_directory(target)
             workspace.sync()
             _validate_journal(journal)
+            changed_managed = link_identity.changed_managed_snapshots(target, expected_managed, _capture_path)
+            if changed_managed:
+                raise InstallError(
+                    "managed identities changed before manifest commit: "
+                    + ", ".join(changed_managed)
+                )
         elif target_created:
             _fsync_directory(target)
             _fsync_directory(target.parent)
         _write_manifest(target, manifest)
+        changed_managed = link_identity.changed_managed_snapshots(target, expected_managed, _capture_path)
+        if changed_managed:
+            raise ManifestCommitRaceError(
+                "managed identity changed after manifest publication; "
+                "preserved live path and retained exact manifest evidence: "
+                + ", ".join(changed_managed)
+            )
     except ManifestCommitUncertainError:
         # Replacement already made manifest and links mutually visible. Rolling
         # back here would create a known inconsistency.

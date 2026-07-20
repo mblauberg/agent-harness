@@ -80,8 +80,12 @@ manifest read through durable replacement. Existing links use exact-identity
 atomic exchange or move; an absent installation is admitted to the journal only
 when the live path still matches the exact staged link identity. The live and
 private recovery directories are fsynced before manifest replacement and again
-after any conditional rollback. Never hand-edit the lock, manifest or retained
-recovery paths; a stale process cannot retain the kernel lock.
+after any conditional rollback. The manifest binds every managed name to that
+exact installed identity. A post-publication mismatch reports typed uncertain
+state, preserves the live writer and makes later check or mutation fail closed.
+Legacy schema-v1 manifests gain the identity map on their next successful
+mutation under the lock. Never hand-edit the lock, manifest or retained recovery
+paths; a stale process cannot retain the kernel lock.
 
 ## Change the delivery kernel
 

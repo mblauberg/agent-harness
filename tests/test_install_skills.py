@@ -858,6 +858,67 @@ def test_writer_after_install_is_preserved_when_manifest_commit_fails(
     assert not manifest_for(target).exists()
 
 
+def test_same_target_writer_during_manifest_publication_is_never_claimed_or_removed(
+    tmp_path, monkeypatch
+):
+    module = load_manager_module("managed_installer_manifest_publication_race")
+    source = named_source(tmp_path / "owner", ("alpha",))
+    target = tmp_path / "installed"
+    live = target / "alpha"
+    original_write = module._write_manifest
+    writer_identity = None
+
+    def publish_after_writer_substitution(target_path, manifest):
+        nonlocal writer_identity
+        live.unlink()
+        live.symlink_to(source / "alpha")
+        info = live.lstat()
+        writer_identity = (info.st_dev, info.st_ino, live.readlink())
+        original_write(target_path, manifest)
+
+    monkeypatch.setattr(module, "_write_manifest", publish_after_writer_substitution)
+    with pytest.raises(module.ManifestCommitUncertainError, match="identity changed after manifest"):
+        module.execute("install", source, target)
+
+    info = live.lstat()
+    assert (info.st_dev, info.st_ino, live.readlink()) == writer_identity
+    manifest = json.loads(manifest_for(target).read_text())
+    assert "alpha" in manifest["managed"]
+
+    checked = module.execute("check", source, target)
+    assert not checked["ok"]
+    assert checked["items"] == [
+        {"name": "alpha", "scope": "required", "state": "replaced-managed"}
+    ]
+    with pytest.raises(module.InstallError, match="conflicting managed targets"):
+        module.execute("uninstall-managed", source, target)
+
+    info = live.lstat()
+    assert (info.st_dev, info.st_ino, live.readlink()) == writer_identity
+
+
+def test_legacy_manifest_baselines_exact_identity_on_next_mutation(tmp_path):
+    module = load_manager_module("managed_installer_legacy_identity_upgrade")
+    source = named_source(tmp_path / "owner", ("alpha",))
+    target = tmp_path / "installed"
+    module.execute("install", source, target)
+    manifest_path = manifest_for(target)
+    legacy = json.loads(manifest_path.read_text())
+    del legacy["managed_link_identities"]
+    manifest_path.write_text(json.dumps(legacy))
+
+    module.execute("install", source, target)
+    upgraded = json.loads(manifest_path.read_text())
+    assert set(upgraded["managed_link_identities"]) == {"alpha"}
+
+    live = target / "alpha"
+    live.unlink()
+    live.symlink_to(source / "alpha")
+    checked = module.execute("check", source, target)
+    assert not checked["ok"]
+    assert checked["items"][0]["state"] == "replaced-managed"
+
+
 def test_two_writers_during_rollback_surface_exact_displaced_recovery(
     tmp_path, monkeypatch
 ):
