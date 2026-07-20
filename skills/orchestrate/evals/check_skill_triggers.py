@@ -19,6 +19,9 @@ REF_DIR = os.path.join(SKILL_DIR, "references")
 SCRIPT_DIR = os.path.join(SKILL_DIR, "scripts")
 CASES = os.path.join(HERE, "contract_cases.yaml")
 TOPOLOGY_CASES = os.path.join(HERE, "topology_value_cases.yaml")
+MANIFEST = os.path.join(
+    SKILL_DIR, "..", "..", "tests", "fixtures", "disclosure-migration.yaml"
+)
 
 STOP = set(
     "the a an of to and or for with this that in on is be use when it as your you "
@@ -36,22 +39,45 @@ REQUIRED_SECTIONS = [
     "## Worker Contract",
     "## References",
 ]
-REQUIRED_REFS = [
-    "cli-headless.md",
-    "codex-subagents.md",
-    "debate-and-panels.md",
-    "domain-adaptation.md",
-    "dynamic-workflows.md",
-    "evaluation-and-observability.md",
-    "herdr-panes.md",
-    "layering-and-context.md",
-    "memory-scratchpad.md",
-    "paired-primary.md",
-    "retrieval-and-tool-routing.md",
-    "routing-and-tiers.md",
-    "trigger-boundary.md",
-    "verification.md",
-]
+
+
+def required_refs_from_manifest(path=MANIFEST):
+    try:
+        with open(path, encoding="utf-8") as stream:
+            raw = yaml.safe_load(stream)
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"disclosure migration manifest is unreadable: {exc}") from exc
+    if not isinstance(raw, dict) or raw.get("schema") != "disclosure-migration.v1":
+        raise ValueError("disclosure migration manifest identity is invalid")
+    rows = raw.get("orchestrate")
+    if not isinstance(rows, list) or len(rows) != 17:
+        raise ValueError("disclosure migration manifest must have 17 orchestrate rows")
+    required = set()
+    filenames = set()
+    verdicts = {"keep", "slim", "archive", "merge-then-delete"}
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"file", "verdict", "notes"}:
+            raise ValueError("disclosure migration manifest has invalid orchestrate rows")
+        if any(not isinstance(value, str) or not value for value in row.values()):
+            raise ValueError("disclosure migration manifest has invalid orchestrate rows")
+        if row["verdict"] not in verdicts:
+            raise ValueError("disclosure migration manifest has an invalid verdict")
+        if row["file"] in filenames:
+            raise ValueError("disclosure migration manifest has duplicate filenames")
+        filenames.add(row["file"])
+        if row["verdict"] in {"keep", "slim"}:
+            required.add(row["file"])
+    if not required:
+        raise ValueError("disclosure migration manifest has invalid retained references")
+    return required
+
+
+try:
+    REQUIRED_REFS = required_refs_from_manifest()
+    REQUIRED_REFS_ERROR = ""
+except ValueError as exc:
+    REQUIRED_REFS = set()
+    REQUIRED_REFS_ERROR = str(exc)
 CASE_SCHEMA_VERSION = 1
 CASE_GROUP_MINIMUMS = {
     "doctrine_invariants": 10,
@@ -233,7 +259,7 @@ def main(argv=None):
     parser.add_argument("--cases", default=CASES)
     parser.add_argument("--topology-cases", default=TOPOLOGY_CASES)
     args = parser.parse_args(argv)
-    fails = []
+    fails = [REQUIRED_REFS_ERROR] if REQUIRED_REFS_ERROR else []
     if not os.path.exists(SKILL_MD):
         print("FAIL: SKILL.md missing")
         return 1
@@ -303,7 +329,7 @@ def main(argv=None):
             fails.append(f"SKILL.md missing doctrine invariant: {inv['prompt']!r}")
 
     refblob = ""
-    for required in REQUIRED_REFS:
+    for required in sorted(REQUIRED_REFS):
         if not os.path.exists(os.path.join(REF_DIR, required)):
             fails.append(f"missing required reference file: {required}")
     if os.path.isdir(REF_DIR):

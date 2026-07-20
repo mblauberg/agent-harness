@@ -33,9 +33,8 @@ use a fresh-context reviewer and record independence explicitly.
 
 ## Durable communication
 
-Fabric carries answer-bearing task/request/reply, acknowledgement and terminal
-state. Herdr carries wakeups, fire-and-forget steering and bounded status
-messages. The run directory owns durable artifacts and lifecycle evidence.
+Follow the Fabric/Herdr transport boundary in [herdr-panes.md](herdr-panes.md).
+The run directory owns durable artifacts and lifecycle evidence.
 Never make pane scrollback the only record.
 Messages are delta-only and normally under 4 KiB: `stage | revision | artifact
 path | sha256 | requested action | blocker`. Long context belongs in immutable

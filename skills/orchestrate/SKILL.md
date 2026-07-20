@@ -80,10 +80,10 @@ Load relevant [references](references/) only:
 `trigger-boundary.md`, `routing-and-tiers.md`, `codex-subagents.md`,
 `orchestration-contract.md`, `dynamic-workflows.md`, `paired-primary.md`,
 `herdr-panes.md`, `layering-and-context.md`, `retrieval-and-tool-routing.md`,
-`verification.md`, `cli-headless.md`, `debate-and-panels.md`,
+`verification.md`, `cli-headless.md`,
 `memory-scratchpad.md`, `evaluation-and-observability.md`,
-`domain-adaptation.md`, `system-design-patterns.md`, and
-`autonomous-implementation.md`. `scripts/` and `evals/` hold helpers/guards;
+`domain-adaptation.md`, and `autonomous-implementation.md`. `scripts/` and
+`evals/` hold helpers/guards;
 `cf_dispatch.sh` is degraded fallback/preflight only.
 
 ## Adapter-absent path

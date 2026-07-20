@@ -1,10 +1,10 @@
 # System-design patterns: topology & framework choice
 
 For **designing a multi-agent system you are building** — the standing product/architecture, not this
-run's fan-out. The rest of this skill is runtime doctrine (dispatch, reduce, gate); read this when you
-must pick a topology or framework and commit it to code. Context isolation, handoff schemas,
-depth/breadth caps, and panels live in `layering-and-context.md`, `routing-and-tiers.md`, and
-`debate-and-panels.md` — not repeated here.
+run's fan-out. The `orchestrate` skill's references carry the runtime doctrine (dispatch, reduce, gate);
+read this archived note when you must pick a topology or framework and commit it to code. Current
+context-isolation, handoff, routing, worker-cap, and panel contracts are owned by the `orchestrate`
+skill and are not repeated here.
 
 ## Workflows before agents
 
@@ -39,7 +39,7 @@ the optimized version. Fix: a `forward_message` tool letting a sub-agent's final
 **directly** to the user without supervisor re-synthesis. Use it when synthesis would only lose detail or
 break required formatting. Prefer peer-handoff over supervisor when sub-agents can answer users directly.
 (At the state level, the same failure is fixed by filesystem coordination over message-passing — see
-`layering-and-context.md`.)
+the `orchestrate` skill's layering-and-context reference.)
 
 ## Token economics
 
