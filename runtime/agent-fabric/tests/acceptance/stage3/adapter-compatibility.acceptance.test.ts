@@ -49,7 +49,7 @@ describe("Section 21 Stage 3 adapter compatibility and activation gate", () => {
     }
   });
 
-  it("validates Claude, Codex and Herdr protocol schema hashes without executing providers", async () => {
+  it("validates the executed Claude entrypoint hash without executing providers", async () => {
     const verify = requirePublicFunction("verifyAdapterCompatibility");
     const fixture = await createPrimaryCompatibilityFixture();
 
@@ -63,14 +63,14 @@ describe("Section 21 Stage 3 adapter compatibility and activation gate", () => {
     ).resolves.toMatchObject({
       valid: true,
       adapterIds: ["claude-agent-sdk", "codex-app-server", "herdr"],
-      verifiedArtifactCount: 3,
+      verifiedArtifactCount: 1,
     });
   });
 
-  it("fails closed when a pinned protocol artifact changes", async () => {
+  it("fails closed when the executed Claude entrypoint changes", async () => {
     const verify = requirePublicFunction("verifyAdapterCompatibility");
     const fixture = await createPrimaryCompatibilityFixture();
-    await writeFile(fixture.artifactPaths[1] ?? "", "tampered fixture\n");
+    await writeFile(fixture.artifactPaths[0] ?? "", "tampered fixture\n");
 
     await expect(
       verify({
@@ -101,7 +101,7 @@ describe("Section 21 Stage 3 adapter compatibility and activation gate", () => {
     ).rejects.toMatchObject({ code: "ADAPTER_COMPATIBILITY_INVALID" });
   });
 
-  it("rejects enabled adapters when protocol and schema pins are null even if unresolved metadata is empty", async () => {
+  it("rejects enabled adapters without a protocol version even when schema pins are absent", async () => {
     const verify = requirePublicFunction("verifyAdapterCompatibility");
     const fixture = await createPrimaryCompatibilityFixture();
     const document: unknown = parse(await readFile(fixture.compatibilityPath, "utf8"));
@@ -113,8 +113,30 @@ describe("Section 21 Stage 3 adapter compatibility and activation gate", () => {
     adapter.unresolved_pins = [];
     implementation.wrapper_entrypoint = implementation.executable;
     contract.protocol_version = null;
-    contract.schema_source = null;
-    contract.schema_sha256 = null;
+    delete contract.schema_source;
+    delete contract.schema_sha256;
+    await writeFile(fixture.compatibilityPath, stringify(document));
+
+    await expect(
+      verify({
+        compatibilityPath: fixture.compatibilityPath,
+        schemaPath: fixture.schemaPath,
+        adapterIds: ["claude-agent-sdk"],
+        requireEnabled: true,
+      }),
+    ).rejects.toMatchObject({ code: "ADAPTER_COMPATIBILITY_INVALID" });
+  });
+
+  it("requires the executed entrypoint hash for an enabled npm adapter", async () => {
+    const verify = requirePublicFunction("verifyAdapterCompatibility");
+    const fixture = await createPrimaryCompatibilityFixture();
+    const document: unknown = parse(await readFile(fixture.compatibilityPath, "utf8"));
+    const adapters = record(record(document, "compatibility document").adapters, "adapters");
+    const adapter = record(adapters["claude-agent-sdk"], "claude adapter");
+    const implementation = record(adapter.implementation, "implementation");
+    adapter.enabled = true;
+    adapter.unresolved_pins = [];
+    delete implementation.entrypoint_sha256;
     await writeFile(fixture.compatibilityPath, stringify(document));
 
     await expect(
