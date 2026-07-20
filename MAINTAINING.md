@@ -8,9 +8,16 @@ owns branch and linked-worktree operation. Use the
 [GitHub work-item workflow](docs/runbooks/github-workflow.md) for issue intake,
 Project status, pull-request linking and user gates.
 
+Agent merges are authorised for this repository; mechanics remain in the
+GitHub work-item workflow. This is Provenant-local process, not harness
+doctrine.
+
 This repository is loaded by multiple agent platforms. A convenient
 Claude-only or Codex-only change is a regression unless the approved scope is
 platform-specific.
+
+Changes to the ambient `AGENTS.md` or `HARNESS.md` apply from the next session.
+A live session retains the prior constitution until restart.
 
 ## Change a skill
 
@@ -30,10 +37,20 @@ platform-specific.
 6. Keep `SKILL.md` roughly 500 words or less. Move depth into narrowly named
    references loaded only when needed and deterministic behaviour into scripts.
 7. Add positive, negative and boundary fixtures with exact primary and companion
-   routes, plus contract tests for machine-enforceable invariants.
-8. For material changes, freeze held-out cases and compare candidate,
+   routes, plus contract tests for machine-enforceable invariants. Trigger
+   fixtures and contract tests remain mandatory for every skill change.
+8. Under [ADR 0014](docs/adr/0014-comparative-skill-evals-on-suspicion.md),
+   frozen held-out comparative evals are conditional. Run them when a routing
+   regression is suspected or observed in use; a change rewrites
+   trigger-bearing description text across several skills, at the maintainer's
+   discretion; or the harness is being prepared for publication or another
+   operator. When run, freeze held-out cases and compare candidate,
    without-skill and previous-package arms on current primary families. Retain
-   invalid, omitted, timed-out and failed attempts with model lineage.
+   invalid, omitted, timed-out and failed attempts with model lineage. Routine
+   skill maintenance loses a heavyweight gate; the operator accepts
+   detection-in-use as the routing-regression backstop. Publication to other
+   users re-arms the full requirement; this ADR must be revisited in any
+   public-release checklist.
 9. Re-run the public-safety and full harness gates.
 
 Split a skill when its triggers, artifacts or completion gates differ
@@ -51,6 +68,10 @@ skill, deterministic script or hook, external MCP or app capability, or stable
 independently versioned plugin. Do not import popular packs wholesale. Extract
 only licensed, evidence-backed mechanisms into the nearest owner; create a skill
 only when its trigger, authority, artifact and gate remain distinct.
+
+Nothing outside a skill may name a file under that skill's `references/`
+directory. Cross-skill references use the skill name only. The harness contract
+test enforces this maintenance rule.
 
 `natural-writing` is the writing hub and single owner of the shared prose
 doctrine (tiered anti-AI taxonomy, Australian-English house style, condense pass
@@ -83,10 +104,17 @@ validator. A new domain should compose an existing base profile and a domain
 skill first. Add a base profile only when its artifacts, deterministic gates,
 judgement gates and release meaning are materially distinct.
 
-Every skill needs positive, negative and boundary trigger fixtures. Changes to
-routing descriptions also run the held-out portfolio and lifecycle dataset with
-repeated trials, recording raw numerator and denominator, model and harness
-versions.
+Trigger fixtures and contract tests remain mandatory. Under
+[ADR 0014](docs/adr/0014-comparative-skill-evals-on-suspicion.md), frozen
+held-out comparative evals are conditional. Run them when a routing regression
+is suspected or observed in use; a change rewrites trigger-bearing description
+text across several skills, at the maintainer's discretion; or the harness is
+being prepared for publication or another operator. When run, use the held-out
+portfolio and lifecycle dataset with repeated trials, recording raw numerator
+and denominator, model and harness versions. Routine skill maintenance loses a
+heavyweight gate; the operator accepts detection-in-use as the
+routing-regression backstop. Publication to other users re-arms the full
+requirement; this ADR must be revisited in any public-release checklist.
 
 ## Public and third-party hygiene
 
