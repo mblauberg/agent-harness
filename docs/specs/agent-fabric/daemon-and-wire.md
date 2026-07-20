@@ -424,12 +424,10 @@ The hard projection limits are 96 tools, 32 KiB canonical JSON per descriptor an
 set. The complete authorised set must fit and match across projections; exceeding any bound rejects MCP connection or
 chair launch with the exact excess descriptor names. It is never truncated. Arguments/results use the negotiated 1 MiB
 frame, 32 pending-call, 16 in-flight, 30-second request and five-minute idle maxima. Idle bounds an unused connection, not
-a provider turn: a terminal idle transport reconnects and replays the next, never-submitted operation. A local timeout
-while a request remains queued beyond the in-flight limit carries typed queued-state evidence and receives one bounded,
-same-principal replay; it was never submitted. In-flight loss replays only a command ID or message-send dedupe key;
-other ambiguous operations reconnect with typed guidance, never a
-raw `PROTOCOL_TIMEOUT` loop. An ambiguous receive names its visibility timeout: its outcome stays unknown, no delivery is
-acknowledged and retry waits that interval. Runtime never exposes raw transport failure, blindly replays or stops a live daemon.
+a provider turn: a terminal idle transport reconnects and replays the next, never-submitted operation. A typed local queued
+timeout is also never submitted and receives one bounded, same-principal replay. In-flight loss replays only a command ID
+or message-send dedupe key; other ambiguous operations reconnect with typed guidance, never raw `PROTOCOL_TIMEOUT`. An
+ambiguous receive stays unknown and unacknowledged; retry waits its visibility timeout. Runtime never exposes raw transport failure.
 
 Deterministic acceptance adds:
 
