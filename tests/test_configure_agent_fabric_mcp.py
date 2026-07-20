@@ -45,6 +45,30 @@ def run_configure(tmp_path: Path, *arguments: str) -> subprocess.CompletedProces
     )
 
 
+def all_client_paths(tmp_path: Path) -> dict[str, Path]:
+    return {
+        "claude": tmp_path / "claude.json",
+        "codex": tmp_path / "codex.toml",
+        "cursor": tmp_path / "cursor.json",
+        "agy": tmp_path / "agy.json",
+        "kiro": tmp_path / "kiro.json",
+        "opencode": tmp_path / "opencode.jsonc",
+    }
+
+
+def all_client_arguments(tmp_path: Path, paths: dict[str, Path]) -> list[str]:
+    return [
+        "--agents-home", str(ROOT),
+        "--state-directory", str(tmp_path / "state"),
+        "--claude-config", str(paths["claude"]),
+        "--codex-config", str(paths["codex"]),
+        "--cursor-config", str(paths["cursor"]),
+        "--agy-config", str(paths["agy"]),
+        "--kiro-config", str(paths["kiro"]),
+        "--opencode-config", str(paths["opencode"]),
+    ]
+
+
 def test_configures_all_global_clients_without_a_fixed_project_path(tmp_path: Path) -> None:
     claude_config = tmp_path / "claude.json"
     codex_config = tmp_path / "codex.toml"
@@ -269,6 +293,102 @@ def test_platform_all_revalidates_codex_after_writing_claude(tmp_path: Path, mon
     assert "Codex config changed" in captured.err
     assert codex_config.read_text() == external
     assert json.loads(claude_config.read_text())["mcpServers"]["agent-fabric"]["env"]["AGENT_FABRIC_SEAT"] == "claude"
+
+
+def test_platform_all_revalidates_an_existing_client_after_an_earlier_commit(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    configurer = load_configurer()
+    paths = all_client_paths(tmp_path)
+    arguments = all_client_arguments(tmp_path, paths)
+    assert configurer.main(arguments) == 0
+    capsys.readouterr()
+    paths["claude"].write_text('{}\n')
+    external = '[external]\nvalue = "during-claude-write"\n'
+    write_proposal = configurer.write_proposal
+
+    def interleaved_write(proposal):
+        write_proposal(proposal)
+        if proposal.client == "claude":
+            paths["codex"].write_text(external)
+
+    monkeypatch.setattr(configurer, "write_proposal", interleaved_write)
+
+    result = configurer.main(arguments)
+
+    captured = capsys.readouterr()
+    assert result == 4
+    assert captured.out.splitlines() == [
+        f"agent-fabric MCP configured platform=claude config={paths['claude']}"
+    ]
+    assert "partial-state: agent-fabric MCP registration" in captured.err
+    assert "cause=config-conflict" in captured.err
+    assert "committed=claude" in captured.err
+    assert "remaining=codex,cursor,agy,kiro,opencode" in captured.err
+    assert "Codex config changed" in captured.err
+    assert paths["codex"].read_text() == external
+
+
+def test_existing_drift_before_any_commit_uses_non_partial_conflict(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    configurer = load_configurer()
+    config = tmp_path / "claude.json"
+    arguments = [
+        "--platform", "claude",
+        "--agents-home", str(ROOT),
+        "--state-directory", str(tmp_path / "state"),
+        "--claude-config", str(config),
+    ]
+    assert configurer.main(arguments) == 0
+    capsys.readouterr()
+    external = '{"external":"after-compose"}\n'
+    claude_update = configurer.claude_update
+
+    def interleaved_compose(path, desired):
+        proposal = claude_update(path, desired)
+        config.write_text(external)
+        return proposal
+
+    monkeypatch.setattr(configurer, "claude_update", interleaved_compose)
+
+    result = configurer.main(arguments)
+
+    captured = capsys.readouterr()
+    assert result == 3
+    assert "conflicting: Claude config changed after registration was composed" in captured.err
+    assert "partial-state" not in captured.err
+    assert captured.out == ""
+    assert config.read_text() == external
+
+
+@pytest.mark.parametrize("mode", ["--check", "--preflight"])
+def test_read_only_modes_revalidate_existing_snapshots_before_success(
+    tmp_path: Path, monkeypatch, capsys, mode: str,
+) -> None:
+    configurer = load_configurer()
+    paths = all_client_paths(tmp_path)
+    arguments = all_client_arguments(tmp_path, paths)
+    assert configurer.main(arguments) == 0
+    capsys.readouterr()
+    external = '{"external":"after-claude-snapshot"}\n'
+    opencode_update = configurer.opencode_update
+
+    def interleaved_compose(path, desired):
+        proposal = opencode_update(path, desired)
+        paths["claude"].write_text(external)
+        return proposal
+
+    monkeypatch.setattr(configurer, "opencode_update", interleaved_compose)
+
+    result = configurer.main([*arguments, mode])
+
+    captured = capsys.readouterr()
+    assert result == 3
+    assert "Claude config changed after registration was composed" in captured.err
+    assert "partial-state" not in captured.err
+    assert captured.out == ""
+    assert paths["claude"].read_text() == external
 
 
 def test_platform_all_reports_commits_and_typed_recovery_on_late_conflict(

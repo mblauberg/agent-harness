@@ -582,10 +582,12 @@ def main(argv: list[str] | None = None) -> int:
                 print("missing: agent-fabric MCP registration for " + ", ".join(missing))
                 return 1
             for proposal in proposals:
+                _assert_unchanged(proposal)
                 _report(proposal, "verified")
             return 0
         elif args.preflight:
             for proposal in proposals:
+                _assert_unchanged(proposal)
                 _report(proposal, f"preflight-{proposal.status}")
             return 0
         else:
@@ -593,6 +595,7 @@ def main(argv: list[str] | None = None) -> int:
             for index, proposal in enumerate(proposals):
                 if proposal.status == "existing":
                     try:
+                        _assert_unchanged(proposal)
                         _report(proposal, "existing")
                     except RegistrationOutputError as exc:
                         if not committed:
@@ -606,6 +609,21 @@ def main(argv: list[str] | None = None) -> int:
                             error=exc,
                             recovery=(
                                 "restore stdout, inspect the committed configuration, "
+                                "then rerun --platform all"
+                            ),
+                        )
+                        return 4
+                    except (OSError, RegistrationError) as exc:
+                        if not committed:
+                            raise
+                        _report_partial_state(
+                            cause="config-conflict",
+                            committed=committed,
+                            remaining=[candidate.client for candidate in proposals[index:]],
+                            config=proposal.snapshot.target_path,
+                            error=exc,
+                            recovery=(
+                                "reconcile the reported configuration and any recovery file, "
                                 "then rerun --platform all"
                             ),
                         )
