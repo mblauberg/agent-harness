@@ -111,14 +111,14 @@ cases:
       required_companion_skills: []
       allowed_companion_skills: [evaluate, implement]
   - id: m14
-    category: new-repository-github-setup
+    category: new-repository-setup-repo
     critical: true
     prompt: >-
       Set up GitHub for this new repository: scaffold its labels, branch
       ruleset, issue forms, pull-request template, work-item runbook, and
       Project board with valid repository-specific defaults.
     expected:
-      primary_skill: github-setup
+      primary_skill: setup-repo
       required_companion_skills: []
       allowed_companion_skills: [engineering-docs]
   - id: m15
