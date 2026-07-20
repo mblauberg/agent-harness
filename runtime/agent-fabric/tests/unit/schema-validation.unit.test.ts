@@ -144,7 +144,11 @@ describe("Stage 1 versioned JSON Schemas", () => {
     if (!isJsonObject(claude) || !isJsonObject(claude.implementation)) {
       throw new TypeError("Claude implementation compatibility is invalid");
     }
-    const malformedIntegrity = {
+    expect(claude.implementation).not.toHaveProperty("lock_integrity_sha512");
+    expect(claude.contract).not.toHaveProperty("schema_sha256");
+    expect(claude.contract).not.toHaveProperty("schema_source");
+
+    const removedIntegrityPin = {
       ...compatibility,
       adapters: {
         ...adapters,
@@ -154,7 +158,7 @@ describe("Stage 1 versioned JSON Schemas", () => {
         },
       },
     };
-    expect(validateWithSchema(schema, malformedIntegrity).valid).toBe(false);
+    expect(validateWithSchema(schema, removedIntegrityPin).valid).toBe(false);
 
     const unknown = validateWithSchema(schema, {
       ...compatibility,
