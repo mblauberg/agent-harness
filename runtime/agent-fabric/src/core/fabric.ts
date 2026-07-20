@@ -61,6 +61,12 @@ import {
   ProviderActionAdmissionTransactionError,
   type ProviderActionTicket,
 } from "../application/provider-action-admission.js";
+import {
+  assertProviderActionOwner,
+  classifyProviderActionOwner,
+  ProviderActionOwnerError,
+  type ProviderActionCustodyOwner,
+} from "../application/provider-action-owner.js";
 import { ProviderSessionCoordinator } from "../application/provider-session-coordinator.js";
 import { FabricError } from "../errors.js";
 import { AdapterSupervisor } from "../adapters/supervisor.js";
@@ -95,7 +101,6 @@ import {
   GitRepositoryReadService,
   type GitHostedChecksPort,
 } from "../operator/git-repository-read.js";
-import { HERDR_CONTROL_ADAPTER_ID } from "../integrations/herdr-fabric-ports.js";
 import {
   HerdrDaemonIntegration,
   type HerdrDaemonActionRequest,
@@ -911,6 +916,7 @@ export class Fabric {
     runId: string;
     adapterId: string;
     actionId: string;
+    owner: ProviderActionCustodyOwner;
     execute: () => Promise<ProviderActionResult>;
     settle: () => void;
   }> = [];
@@ -1502,9 +1508,13 @@ export class Fabric {
     runId: string;
     adapterId: string;
     actionId: string;
+    owner?: ProviderActionCustodyOwner;
     execute: () => Promise<ProviderActionResult>;
   }): void {
     if (this.#closing) return;
+    const owner = input.owner ?? "generic";
+    this.#fault("provider-action-owner:before-deferred-enqueue");
+    assertProviderActionOwner(this.#database, input, owner);
     const key = this.#providerActionOwnershipKey(input.runId, input.adapterId, input.actionId);
     if (this.#ownedProviderActions.has(key)) return;
     let settle = (): void => undefined;
@@ -1512,7 +1522,7 @@ export class Fabric {
       settle = resolvePromise;
     });
     this.#ownedProviderActions.set(key, tracked);
-    this.#deferredProviderActions.push({ key, ...input, settle });
+    this.#deferredProviderActions.push({ key, ...input, owner, settle });
     this.#pumpDeferredProviderActions();
   }
 
@@ -1529,8 +1539,10 @@ export class Fabric {
     runId: string,
     adapterId: string,
     actionId: string,
+    owner: ProviderActionCustodyOwner,
   ): "claimed" | "blocked" | "stale" {
     return this.#database.transaction(() => {
+      assertProviderActionOwner(this.#database, { runId, adapterId, actionId }, owner);
       const action = this.#database.prepare(`
         SELECT status FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?
       `).get(runId, adapterId, actionId);
@@ -1561,13 +1573,34 @@ export class Fabric {
       while (this.#deferredProviderActions.length > 0) {
         const work = this.#deferredProviderActions[0];
         if (work === undefined) return;
-        const claim = this.#claimDeferredProviderAction(work.runId, work.adapterId, work.actionId);
+        let claim: "claimed" | "blocked" | "stale";
+        try {
+          this.#fault("provider-action-owner:before-deferred-claim");
+          claim = this.#claimDeferredProviderAction(work.runId, work.adapterId, work.actionId, work.owner);
+        } catch (error: unknown) {
+          if (this.#deferredProviderActions[0] === work) this.#deferredProviderActions.shift();
+          this.#ownedProviderActions.delete(work.key);
+          work.settle();
+          throw error;
+        }
         if (claim === "blocked") return;
         this.#deferredProviderActions.shift();
         if (claim === "stale") {
           this.#ownedProviderActions.delete(work.key);
           work.settle();
           continue;
+        }
+        try {
+          this.#fault("provider-action-owner:before-deferred-completion");
+          assertProviderActionOwner(this.#database, {
+            runId: work.runId,
+            adapterId: work.adapterId,
+            actionId: work.actionId,
+          }, work.owner);
+        } catch (error: unknown) {
+          this.#ownedProviderActions.delete(work.key);
+          work.settle();
+          throw error;
         }
         void work.execute()
           .catch(() => undefined)
@@ -1608,37 +1641,11 @@ export class Fabric {
   }
 
   #assertGenericProviderAction(runId: string, adapterId: string, actionId: string): void {
-    if (this.#database.prepare(`
-      SELECT 1 FROM project_session_launch_custody
-       WHERE coordination_run_id=? AND provider_adapter_id=? AND provider_action_id=?
-    `).get(runId, adapterId, actionId) !== undefined) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "launch provider actions mutate only through launch custody");
-    }
-    if (this.#database.prepare(`
-      SELECT 1 FROM provider_agent_custody
-       WHERE run_id=? AND adapter_id=? AND action_id=?
-    `).get(runId, adapterId, actionId) !== undefined) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "agent provider actions mutate only through provider-session custody");
-    }
-    if (this.#database.prepare(`
-      SELECT 1 FROM lifecycle_rotation_custodies
-       WHERE run_id=? AND provider_action_adapter_id=? AND provider_action_id=?
-    `).get(runId, adapterId, actionId) !== undefined) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "lifecycle provider actions mutate only through lifecycle custody");
-    }
-    if (adapterId === HERDR_CONTROL_ADAPTER_ID && this.#database.prepare(`
+    const exists = this.#database.prepare(`
       SELECT 1 FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?
-    `).get(runId, adapterId, actionId) !== undefined) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "Herdr actions mutate only through Herdr integration custody");
-    }
-    if (this.#database.prepare(`
-      SELECT 1
-        FROM provider_actions p
-        JOIN chair_bridge_recovery_custody c
-          ON c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
-       WHERE p.run_id=? AND p.adapter_id=? AND p.action_id=?
-    `).get(runId, adapterId, actionId) !== undefined) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "chair recovery provider actions mutate only through chair recovery custody");
+    `).get(runId, adapterId, actionId);
+    if (exists !== undefined) {
+      assertProviderActionOwner(this.#database, { runId, adapterId, actionId }, "generic");
     }
   }
 
@@ -1948,34 +1955,27 @@ export class Fabric {
         this.#event(stringField(lease, "run_id"), "startup-write-lease-quarantined", null, { leaseId: stringField(lease, "lease_id"), predecessorAgentId: stringField(lease, "holder_agent_id") });
       }
     })();
-    let actionsReconciled = 0;
-    let actionsQuarantined = 0;
+    const certifyingReviewRecovery = await this.#recoverCertifyingReviewProviderActions();
+    let actionsReconciled = certifyingReviewRecovery.actionsReconciled;
+    let actionsQuarantined = certifyingReviewRecovery.actionsQuarantined;
     const pendingActions = this.#database.prepare(`
       SELECT p.run_id, p.action_id, p.adapter_id, p.status, p.updated_at, r.chair_agent_id
        FROM provider_actions p JOIN runs r ON r.run_id = p.run_id
        WHERE p.status IN ('prepared', 'dispatched', 'ambiguous')
-         AND p.adapter_id<>?
-         AND json_type(p.payload_json, '$.operatorCommandId') IS NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM project_session_launch_custody c
-            WHERE c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
-         )
-         AND NOT EXISTS (
-           SELECT 1 FROM provider_agent_custody c
-            WHERE c.adapter_id=p.adapter_id AND c.action_id=p.action_id
-         )
-         AND NOT EXISTS (
-           SELECT 1 FROM lifecycle_rotation_custodies custody
-            WHERE custody.run_id=p.run_id
-              AND custody.provider_action_adapter_id=p.adapter_id
-              AND custody.provider_action_id=p.action_id
-         )
-         AND NOT EXISTS (
-           SELECT 1 FROM chair_bridge_recovery_custody c
-            WHERE c.provider_adapter_id=p.adapter_id AND c.provider_action_id=p.action_id
-         )
        ORDER BY p.updated_at, p.action_id
-    `).all(HERDR_CONTROL_ADAPTER_ID);
+    `).all().filter((value) => {
+      const action = rowOrNotFound(value, "startup provider action");
+      const ref = {
+        runId: stringField(action, "run_id"),
+        adapterId: stringField(action, "adapter_id"),
+        actionId: stringField(action, "action_id"),
+      };
+      const owner = classifyProviderActionOwner(this.#database, ref);
+      if (owner === "integrity_failed") {
+        assertProviderActionOwner(this.#database, ref, "generic");
+      }
+      return owner === "generic";
+    });
     for (const value of pendingActions) {
       const action = rowOrNotFound(value, "startup provider action");
       const runId = stringField(action, "run_id");
@@ -1989,6 +1989,7 @@ export class Fabric {
         if (result.status === "quarantined") actionsQuarantined += 1;
         else actionsReconciled += 1;
       } catch (error: unknown) {
+        if (error instanceof ProviderActionOwnerError) throw error;
         this.#database.prepare("UPDATE provider_actions SET status = 'quarantined', updated_at = ? WHERE run_id = ? AND adapter_id = ? AND action_id = ?")
           .run(now, runId, stringField(action, "adapter_id"), actionId);
         this.#event(runId, "startup-provider-action-quarantined", null, { actionId, adapterId: stringField(action, "adapter_id"), reason: error instanceof Error ? error.message : String(error) });
@@ -2140,6 +2141,44 @@ export class Fabric {
       }
     }
     return { actionsReconciled, actionsQuarantined, leasesQuarantined: expiredLeases.length, sessionsDegraded, deliveriesReleased };
+  }
+
+  async #recoverCertifyingReviewProviderActions(): Promise<{
+    actionsReconciled: number;
+    actionsQuarantined: number;
+  }> {
+    let actionsReconciled = 0;
+    let actionsQuarantined = 0;
+    const pending = this.#database.prepare(`
+      SELECT p.run_id,p.adapter_id,p.action_id,p.status,p.updated_at,r.chair_agent_id
+        FROM provider_actions p JOIN runs r ON r.run_id=p.run_id
+       WHERE p.status IN ('prepared','dispatched','ambiguous')
+       ORDER BY p.updated_at,p.action_id
+    `).all().filter((value) => {
+      const action = rowOrNotFound(value, "certifying review provider action");
+      return classifyProviderActionOwner(this.#database, {
+        runId: stringField(action, "run_id"),
+        adapterId: stringField(action, "adapter_id"),
+        actionId: stringField(action, "action_id"),
+      }) === "certifying_review";
+    });
+    for (const value of pending) {
+      const action = rowOrNotFound(value, "certifying review provider action");
+      const actionId = stringField(action, "action_id");
+      const result = await this.#reconcileProviderAction(
+        stringField(action, "run_id"),
+        stringField(action, "chair_agent_id"),
+        {
+          adapterId: stringField(action, "adapter_id"),
+          actionId,
+          commandId: `certifying-review-recovery:${actionId}:${stringField(action, "status")}:${numberField(action, "updated_at")}`,
+        },
+        "certifying_review",
+      );
+      if (result.status === "quarantined") actionsQuarantined += 1;
+      else actionsReconciled += 1;
+    }
+    return { actionsReconciled, actionsQuarantined };
   }
 
   bindCurrentMcpSeats(input: CurrentMcpSeatBindingInput): CurrentMcpSeatBindingResult {
@@ -5565,6 +5604,36 @@ export class Fabric {
       commandId: string;
     },
   ): Promise<LifecycleResult> {
+    if (input.action === "compact" || input.action === "rotate") {
+      const owned = this.#database.prepare(`
+        SELECT provider_action_adapter_id AS adapter_id,provider_action_id AS action_id
+          FROM lifecycle_rotation_custodies
+         WHERE run_id=? AND command_id=?
+      `).get(runId, input.commandId);
+      if (isRow(owned)) {
+        assertProviderActionOwner(this.#database, {
+          runId,
+          adapterId: stringField(owned, "adapter_id"),
+          actionId: stringField(owned, "action_id"),
+        }, "lifecycle");
+      }
+    } else if (input.action === "release") {
+      const release = this.#database.prepare(`
+        SELECT action.adapter_id
+          FROM provider_actions action
+          JOIN agent_adapter_bindings binding
+            ON binding.run_id=action.run_id AND binding.agent_id=?
+           AND binding.adapter_id=action.adapter_id
+         WHERE action.run_id=? AND action.action_id=?
+      `).get(input.agentId, runId, `${input.commandId}:release`);
+      if (isRow(release)) {
+        assertProviderActionOwner(this.#database, {
+          runId,
+          adapterId: stringField(release, "adapter_id"),
+          actionId: `${input.commandId}:release`,
+        }, "generic");
+      }
+    }
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isLifecycleResult);
     if (replay !== undefined) return replay;
     assertTaskOperationAdmitted(this.#database, runId, input.taskId);
@@ -5755,8 +5824,17 @@ export class Fabric {
     actorAgentId: string,
     input: ProviderActionDispatchRequest,
   ): Promise<ProviderActionResult> {
+    this.#assertGenericProviderAction(runId, input.adapterId, input.actionId);
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isProviderActionResult);
-    if (replay !== undefined) return replay;
+    if (replay !== undefined) {
+      this.#fault("provider-action-owner:before-reentry-acknowledgement");
+      assertProviderActionOwner(this.#database, {
+        runId,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+      }, "generic");
+      return replay;
+    }
     this.#assertChair(runId, actorAgentId);
     this.#assertGenericProviderAction(runId, input.adapterId, input.actionId);
     const existingAction = this.#database.prepare(`
@@ -6082,8 +6160,11 @@ export class Fabric {
           },
         });
         } catch (error: unknown) {
+          const actionExists = this.#database.prepare(`
+            SELECT 1 FROM provider_actions WHERE run_id=? AND adapter_id=? AND action_id=?
+          `).get(runId, input.adapterId, input.actionId) !== undefined;
           if (
-            providerActionTicket.disposition === "resolving" &&
+            providerActionTicket.disposition === "resolving" && !actionExists &&
             !(error instanceof ProviderActionAdmissionTransactionError)
           ) {
             this.#providerActionAdmission.release(providerActionTicket, error);
@@ -6157,7 +6238,7 @@ export class Fabric {
             historyJson: '["prepared"]',
             executionCount: 0,
             updatedAt: this.#clock(),
-          });
+          }, "generic");
         }).immediate();
       } catch (error: unknown) {
         if (
@@ -6172,8 +6253,18 @@ export class Fabric {
     const persistedProviderPayload: unknown = JSON.parse(canonicalJson(providerPayload));
     if (!isRow(persistedProviderPayload)) throw new Error("provider action payload is invalid");
     providerPayload = persistedProviderPayload;
+    assertProviderActionOwner(this.#database, {
+      runId,
+      adapterId: input.adapterId,
+      actionId: input.actionId,
+    }, "generic");
     const capabilities = await this.#requestAdapter(input.adapterId, "capabilities", {});
     assertAdapterOperation(capabilities, input.operation);
+    assertProviderActionOwner(this.#database, {
+      runId,
+      adapterId: input.adapterId,
+      actionId: input.actionId,
+    }, "generic");
     this.#database
       .prepare("UPDATE provider_actions SET status = 'dispatched', history_json = '[\"prepared\",\"dispatched\"]', execution_count = 1, updated_at = ? WHERE run_id = ? AND adapter_id = ? AND action_id = ?")
       .run(this.#clock(), runId, input.adapterId, input.actionId);
@@ -6184,7 +6275,8 @@ export class Fabric {
       this.#settleProviderTurnAndPump(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
-    } catch {
+    } catch (error: unknown) {
+      if (error instanceof ProviderActionOwnerError) throw error;
       const result: ProviderActionResult = {
         actionId: input.actionId,
         status: "ambiguous",
@@ -6206,6 +6298,11 @@ export class Fabric {
   ): Promise<ProviderActionResult> {
     return await this.#trackProviderOperation(
       async () => {
+        assertProviderActionOwner(this.#database, {
+          runId,
+          adapterId: input.adapterId,
+          actionId: input.actionId,
+        }, "generic");
         const replay = this.#commandJournal.read(
           runId,
           actorAgentId,
@@ -6215,7 +6312,6 @@ export class Fabric {
         );
         if (replay !== undefined) return replay;
         this.#assertChair(runId, actorAgentId);
-        this.#assertGenericProviderAction(runId, input.adapterId, input.actionId);
         const key = this.#providerActionOwnershipKey(runId, input.adapterId, input.actionId);
         const existing = this.#providerActionReconciliations.get(key);
         if (existing !== undefined) {
@@ -6227,7 +6323,14 @@ export class Fabric {
             input,
             isProviderActionResult,
           );
-          if (concurrentReplay !== undefined) return concurrentReplay;
+          if (concurrentReplay !== undefined) {
+            assertProviderActionOwner(this.#database, {
+              runId,
+              adapterId: input.adapterId,
+              actionId: input.actionId,
+            }, "generic");
+            return concurrentReplay;
+          }
           this.#assertChair(runId, actorAgentId);
           this.#assertGenericProviderAction(runId, input.adapterId, input.actionId);
           const current = this.getProviderAction(runId, input.adapterId, input.actionId);
@@ -6254,9 +6357,14 @@ export class Fabric {
     runId: string,
     actorAgentId: string,
     input: { adapterId: string; actionId: string; commandId: string },
+    expectedOwner: ProviderActionCustodyOwner = "generic",
   ): Promise<ProviderActionResult> {
     this.#assertChair(runId, actorAgentId);
-    this.#assertGenericProviderAction(runId, input.adapterId, input.actionId);
+    assertProviderActionOwner(this.#database, {
+      runId,
+      adapterId: input.adapterId,
+      actionId: input.actionId,
+    }, expectedOwner);
     const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isProviderActionResult);
     if (replay !== undefined) return replay;
     const stored = rowOrNotFound(
@@ -6275,7 +6383,7 @@ export class Fabric {
       };
       delete quarantined.providerAnswer;
       if (answerBearing) delete quarantined.result;
-      this.#persistProviderAction(runId, input.adapterId, input.actionId, { idempotencyProven: false }, quarantined);
+      this.#persistProviderAction(runId, input.adapterId, input.actionId, { idempotencyProven: false }, quarantined, expectedOwner);
       this.#settleProviderTurnAndPump(runId, input.adapterId, input.actionId, "quarantined");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, quarantined);
       return quarantined;
@@ -6292,6 +6400,7 @@ export class Fabric {
           runId,
           adapterId,
           actionId: input.actionId,
+          owner: expectedOwner,
           execute: async () => await this.#completeAdapterOperation({
             runId,
             adapterId,
@@ -6300,6 +6409,7 @@ export class Fabric {
             method: "spawn",
             payload: storedPayload,
             requireProviderAnswer: true,
+            owner: expectedOwner,
           }),
         });
         result = this.getProviderAction(runId, input.adapterId, input.actionId);
@@ -6310,14 +6420,20 @@ export class Fabric {
         this.#assertProviderPrincipalActive(runId, stored.target_agent_id);
       }
       const adapterId = stringField(stored, "adapter_id");
+      assertProviderActionOwner(this.#database, {
+        runId,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+      }, expectedOwner);
       this.#database
         .prepare("UPDATE provider_actions SET status = 'dispatched', history_json = '[\"prepared\",\"dispatched\"]', execution_count = 1, updated_at = ? WHERE run_id = ? AND adapter_id = ? AND action_id = ?")
         .run(this.#clock(), runId, input.adapterId, input.actionId);
       try {
         const response = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload: storedPayload });
         result = providerActionResultWithRequiredAnswer(response, answerBearing, input.actionId);
-        this.#persistProviderAction(runId, input.adapterId, input.actionId, response, result);
-      } catch {
+        this.#persistProviderAction(runId, input.adapterId, input.actionId, response, result, expectedOwner);
+      } catch (error: unknown) {
+        if (error instanceof ProviderActionOwnerError) throw error;
         result = {
           actionId: input.actionId,
           status: "ambiguous",
@@ -6325,7 +6441,7 @@ export class Fabric {
           executionCount: 1,
           effectCount: 0,
         };
-        this.#persistProviderAction(runId, input.adapterId, input.actionId, { idempotencyProven: false }, result);
+        this.#persistProviderAction(runId, input.adapterId, input.actionId, { idempotencyProven: false }, result, expectedOwner);
       }
       this.#settleProviderTurnAndPump(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
@@ -6336,6 +6452,11 @@ export class Fabric {
       stored.budget_state === "usage-unknown";
     const resolvedEffectResult = result;
     const preserveResolvedEffect = (): ProviderActionResult => {
+      assertProviderActionOwner(this.#database, {
+        runId,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+      }, expectedOwner);
       this.#settleProviderTurnAndPump(
         runId,
         input.adapterId,
@@ -6353,8 +6474,14 @@ export class Fabric {
     const adapterId = stringField(stored, "adapter_id");
     let lookup: unknown;
     try {
+      assertProviderActionOwner(this.#database, {
+        runId,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+      }, expectedOwner);
       lookup = await this.#requestAdapter(adapterId, "lookup_action", { actionId: input.actionId });
-    } catch {
+    } catch (error: unknown) {
+      if (error instanceof ProviderActionOwnerError) throw error;
       if (resolvedEffectWithUnknownUsage) return preserveResolvedEffect();
       return quarantine(result);
     }
@@ -6370,8 +6497,9 @@ export class Fabric {
     if (lookedUp.status === "terminal") {
       result = lookedUp;
       try {
-        this.#persistProviderAction(runId, input.adapterId, input.actionId, lookup, result);
-      } catch {
+        this.#persistProviderAction(runId, input.adapterId, input.actionId, lookup, result, expectedOwner);
+      } catch (error: unknown) {
+        if (error instanceof ProviderActionOwnerError) throw error;
         if (resolvedEffectWithUnknownUsage) return preserveResolvedEffect();
         return quarantine(this.getProviderAction(runId, input.adapterId, input.actionId));
       }
@@ -6381,6 +6509,11 @@ export class Fabric {
       if (typeof stored.target_agent_id === "string") {
         this.#assertProviderPrincipalActive(runId, stored.target_agent_id);
       }
+      assertProviderActionOwner(this.#database, {
+        runId,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+      }, expectedOwner);
       const replayed = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload: storedPayload });
       try {
         result = providerActionResultWithRequiredAnswer(replayed, answerBearing, input.actionId);
@@ -6388,7 +6521,7 @@ export class Fabric {
         return quarantine(result);
       }
       try {
-        this.#persistProviderAction(runId, input.adapterId, input.actionId, replayed, result);
+        this.#persistProviderAction(runId, input.adapterId, input.actionId, replayed, result, expectedOwner);
       } catch {
         return quarantine(this.getProviderAction(runId, input.adapterId, input.actionId));
       }
@@ -7685,6 +7818,9 @@ export class Fabric {
       SELECT 1 FROM provider_actions
        WHERE run_id=? AND adapter_id=? AND action_id=?
     `).get(input.runId, input.adapterId, input.actionId);
+    if (existingAction !== undefined) {
+      assertProviderActionOwner(this.#database, input, "generic");
+    }
     const existing = existingAction !== undefined && this.#providerSessions.assertActionIdentity({
       runId: input.runId,
       actionId: input.actionId,
@@ -7748,7 +7884,7 @@ export class Fabric {
             : canonicalJson(input.authorityBudget.reservation),
           budgetState: input.authorityBudget === undefined ? null : "reserved",
           budgetStartedAt: input.authorityBudget === undefined ? null : this.#clock(),
-        }, () => {
+        }, "generic", () => {
           if (input.deferredCommand !== undefined) {
             this.#commandJournal.write(
               input.runId,
@@ -7801,7 +7937,10 @@ export class Fabric {
     method: string;
     payload: Record<string, unknown>;
     requireProviderAnswer?: true;
+    owner?: ProviderActionCustodyOwner;
   }): Promise<ProviderActionResult> {
+    const owner = input.owner ?? "generic";
+    assertProviderActionOwner(this.#database, input, owner);
     try {
       const response = await this.#requestAdapter(input.adapterId, input.method, {
         ...input.payload,
@@ -7820,9 +7959,10 @@ export class Fabric {
         result: response,
         ...(providerAnswer === undefined ? {} : { providerAnswer }),
       };
-      this.#persistProviderAction(input.runId, input.adapterId, input.actionId, { idempotencyProven: true }, result);
+      this.#persistProviderAction(input.runId, input.adapterId, input.actionId, { idempotencyProven: true }, result, owner);
       return result;
     } catch (error: unknown) {
+      if (error instanceof ProviderActionOwnerError) throw error;
       const ambiguous: ProviderActionResult = {
         actionId: input.actionId,
         status: "ambiguous",
@@ -7830,7 +7970,7 @@ export class Fabric {
         executionCount: 1,
         effectCount: 0,
       };
-      this.#persistProviderAction(input.runId, input.adapterId, input.actionId, { idempotencyProven: false }, ambiguous);
+      this.#persistProviderAction(input.runId, input.adapterId, input.actionId, { idempotencyProven: false }, ambiguous, owner);
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", `adapter ${input.operation} result is ambiguous`, { cause: error });
     }
   }
@@ -8141,22 +8281,6 @@ export class Fabric {
       if (canonicalJson(reserved) !== canonicalJson(targetGenerations)) {
         throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle generation reservation changed");
       }
-      const payloadJson = canonicalJson(providerPayload);
-      this.#providerActionAdmission.admitUnroutedInCurrentTransaction(ticket, {
-        runId,
-        adapterId,
-        actionId,
-        operation: "spawn",
-        targetAgentId: agentId,
-        providerSessionGeneration: targetProviderGeneration,
-        identityHash: sha256(canonicalJson({ custodyId, providerPayload })),
-        payloadHash: sha256(payloadJson),
-        payloadJson,
-        status: "prepared",
-        historyJson: '["prepared"]',
-        executionCount: 0,
-        updatedAt: this.#clock(),
-      });
       const freezeReason = `lifecycle-rotation:${sha256(custodyId).slice(0, 32)}`;
       this.#database.prepare(`
         INSERT INTO delivery_freezes(run_id,agent_id,reason,created_at)
@@ -8197,7 +8321,23 @@ export class Fabric {
       ) !== stableSourceVectorDigest) {
         throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle accepted source vector changed before custody capture");
       }
-      this.#lifecycleRotations.createInCurrentTransaction({
+      const payloadJson = canonicalJson(providerPayload);
+      this.#providerActionAdmission.admitUnroutedInCurrentTransaction(ticket, {
+        runId,
+        adapterId,
+        actionId,
+        operation: "spawn",
+        targetAgentId: agentId,
+        providerSessionGeneration: targetProviderGeneration,
+        identityHash: sha256(canonicalJson({ custodyId, providerPayload })),
+        payloadHash: sha256(payloadJson),
+        payloadJson,
+        status: "prepared",
+        historyJson: '["prepared"]',
+        executionCount: 0,
+        updatedAt: this.#clock(),
+      }, "lifecycle", () => {
+        this.#lifecycleRotations.createInCurrentTransaction({
         projectSessionId: accepted.projectSessionId,
         runId,
         agentId,
@@ -8240,7 +8380,8 @@ export class Fabric {
         stagedCapabilityHash,
         launchAttestChallengeDigest: launchAttestationChallengeDigest,
         preconditionDigest: stableSourceVectorDigest,
-        createdAt: this.#clock(),
+          createdAt: this.#clock(),
+        });
       });
       const ownLease = this.#database.prepare(`
         INSERT INTO lifecycle_custody_write_leases(
@@ -8591,6 +8732,7 @@ export class Fabric {
       const runId = stringField(row, "run_id");
       const adapterId = stringField(row, "provider_action_adapter_id");
       const actionId = stringField(row, "provider_action_id");
+      assertProviderActionOwner(this.#database, { runId, adapterId, actionId }, "lifecycle");
       const agentId = stringField(row, "agent_id");
       const bridgeContractDigest = stringField(row, "replacement_contract_digest");
       const targetBridgeGeneration = numberField(row, "target_bridge_generation");
@@ -9047,6 +9189,7 @@ export class Fabric {
       await this.#ensureLifecycleReceiptScope(runId, agentId);
       await this.#finalizeLifecycleRotationAdopted(input, head, terminalEvidenceDigest, result);
       } catch (error: unknown) {
+        if (error instanceof ProviderActionOwnerError) throw error;
         if (typeof row.run_id === "string" && typeof row.agent_id === "string") {
           this.#event(row.run_id, "lifecycle-recovery-custody-failed", row.agent_id, {
             custodyId: typeof row.custody_id === "string" ? row.custody_id : null,
@@ -9088,6 +9231,11 @@ export class Fabric {
       commandId: string;
     };
   }>): void {
+    assertProviderActionOwner(this.#database, {
+      runId: input.runId,
+      adapterId: input.adapterId,
+      actionId: input.actionId,
+    }, "lifecycle");
     const key = `lifecycle\0${input.runId}\0${input.agentId}\0${input.custodyId}`;
     if (this.#ownedProviderActions.has(key)) return;
     const predecessor = this.#ownedProviderActions.get(
@@ -9099,6 +9247,7 @@ export class Fabric {
     })();
     this.#ownedProviderActions.set(key, continuation);
     void continuation.catch((error: unknown) => {
+      if (error instanceof ProviderActionOwnerError) return;
       this.#event(input.runId, "lifecycle-continuation-failed", input.agentId, {
         custodyId: input.custodyId,
         message: privateSafeErrorMessage(
@@ -9143,6 +9292,11 @@ export class Fabric {
       commandId: string;
     };
   }>): Promise<void> {
+    assertProviderActionOwner(this.#database, {
+      runId: input.runId,
+      adapterId: input.adapterId,
+      actionId: input.actionId,
+    }, "lifecycle");
     await this.#ensureLifecycleReceiptScope(input.runId, input.agentId);
     let head = this.#database.transaction(() => this.#lifecycleRotations.appendInCurrentTransaction({
       runId: input.runId,
@@ -9177,6 +9331,11 @@ export class Fabric {
         input.targetPrincipalGeneration, null,
         sha256Digest(canonicalJson(input.providerPayload)), this.#clock(),
       );
+      assertProviderActionOwner(this.#database, {
+        runId: input.runId,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+      }, "lifecycle");
       const dispatched = this.#database.prepare(`
         UPDATE provider_actions
            SET status='dispatched',history_json='["prepared","dispatched"]',
@@ -9193,6 +9352,11 @@ export class Fabric {
         recordedAt: this.#clock(),
       });
     }).immediate();
+    assertProviderActionOwner(this.#database, {
+      runId: input.runId,
+      adapterId: input.adapterId,
+      actionId: input.actionId,
+    }, "lifecycle");
     const result = await this.#adapterSupervisor.provisionAgent(input.adapterId, {
       schemaVersion: 1,
       runId: input.runId,
@@ -9230,6 +9394,11 @@ export class Fabric {
         challengeDigest: input.launchAttestationChallengeDigest,
       },
     });
+    assertProviderActionOwner(this.#database, {
+      runId: input.runId,
+      adapterId: input.adapterId,
+      actionId: input.actionId,
+    }, "lifecycle");
     if (result.providerSessionGeneration !== input.targetProviderGeneration) {
       const proof = {
         schemaVersion: 1,
@@ -9257,6 +9426,11 @@ export class Fabric {
     }
     const terminalEvidenceDigest = sha256Digest(canonicalJson(result));
     this.#database.transaction(() => {
+      assertProviderActionOwner(this.#database, {
+        runId: input.runId,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+      }, "lifecycle");
       const terminalized = this.#database.prepare(`
         UPDATE provider_actions
            SET status='terminal',history_json='["prepared","dispatched","accepted","terminal"]',
@@ -9321,6 +9495,11 @@ export class Fabric {
       transitionProof: { schemaVersion: 1, kind: "provider-terminal" },
     },
   ): Promise<void> {
+    assertProviderActionOwner(this.#database, {
+      runId: input.runId,
+      adapterId: input.adapterId,
+      actionId: input.actionId,
+    }, "lifecycle");
     if (terminal.disposition === "adopted" && (result === null || input.lifecycleInput === undefined || input.checkpointSha256 === undefined)) {
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "lifecycle adoption lost its immutable input");
     }
@@ -10379,7 +10558,9 @@ export class Fabric {
     actionId: string,
     raw: unknown,
     result: ProviderActionResult,
+    expectedOwner: ProviderActionCustodyOwner = "generic",
   ): void {
+    assertProviderActionOwner(this.#database, { runId, adapterId, actionId }, expectedOwner);
     const idempotencyProven = isRow(raw) && raw.idempotencyProven === true ? 1 : 0;
     const now = this.#clock();
     const budget = this.#providerBudgetSettlement(runId, adapterId, actionId, result, now);

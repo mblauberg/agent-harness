@@ -47,6 +47,10 @@ import {
   ProviderActionAdmissionCoordinator,
   type ProviderActionTicket,
 } from "../application/provider-action-admission.js";
+import {
+  assertProviderActionOwner,
+  ProviderActionOwnerError,
+} from "../application/provider-action-owner.js";
 
 type Digest = Sha256Digest;
 type ArtifactBinding = ArtifactRef;
@@ -976,6 +980,11 @@ export class LaunchCustodyService {
        WHERE operator_id=? AND operator_command_id=?
     `).get(input.operatorId, input.operatorCommandId);
     if (isRow(existing)) {
+      assertProviderActionOwner(this.#database, {
+        runId: intent.coordinationRunId,
+        adapterId: intent.providerAdapterId,
+        actionId: text(existing, "promotion_action_id"),
+      }, "chair_live_handoff");
       if (text(existing, "intent_digest") !== intentDigest) {
         throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "chair live handoff command was reused with changed intent");
       }
@@ -1069,7 +1078,7 @@ export class LaunchCustodyService {
       historyJson: '["prepared"]',
       executionCount: 0,
       updatedAt: now,
-    });
+    }, "chair_live_handoff");
     const frozenLease = this.#database.prepare(`
       UPDATE run_chair_leases SET status='frozen', updated_at=?
        WHERE project_session_id=? AND run_id=? AND lease_id=? AND generation=? AND status='active'
@@ -1115,6 +1124,11 @@ export class LaunchCustodyService {
   async dispatchPreparedChairLiveHandoff(
     handle: ChairLiveHandoffDispatchHandle,
   ): Promise<ChairLiveHandoffCommit> {
+    assertProviderActionOwner(this.#database, {
+      runId: handle.intent.coordinationRunId,
+      adapterId: handle.intent.providerAdapterId,
+      actionId: handle.promotionActionId,
+    }, "chair_live_handoff");
     const current = this.chairLiveHandoffStatus(handle.operatorId, handle.operatorCommandId);
     if (current.status !== "pending") return current;
     const custody = row(this.#database.prepare(`
@@ -1196,19 +1210,24 @@ export class LaunchCustodyService {
     operatorId: string,
     operatorCommandId: string,
   ): Promise<ChairLiveHandoffCommit> {
-    const current = this.chairLiveHandoffStatus(operatorId, operatorCommandId);
-    if (current.status !== "pending" && current.status !== "ambiguous") return current;
     const custody = row(this.#database.prepare(`
       SELECT * FROM chair_live_handoff_custody
        WHERE operator_id=? AND operator_command_id=?
     `).get(operatorId, operatorCommandId), "chair live handoff custody");
-    const state = text(custody, "state");
-    if (state === "prepared") return current;
-    const intentValue: unknown = JSON.parse(text(custody, "intent_json"));
-    if (!isRow(intentValue) || intentValue.kind !== "chair-live-handoff") {
+    const storedIntent: unknown = JSON.parse(text(custody, "intent_json"));
+    if (!isRow(storedIntent) || storedIntent.kind !== "chair-live-handoff") {
       throw new Error("stored chair live handoff intent is invalid");
     }
-    const intent = intentValue as ChairLiveHandoffIntent;
+    const intent = storedIntent as ChairLiveHandoffIntent;
+    assertProviderActionOwner(this.#database, {
+      runId: intent.coordinationRunId,
+      adapterId: intent.providerAdapterId,
+      actionId: text(custody, "promotion_action_id"),
+    }, "chair_live_handoff");
+    const current = this.chairLiveHandoffStatus(operatorId, operatorCommandId);
+    if (current.status !== "pending" && current.status !== "ambiguous") return current;
+    const state = text(custody, "state");
+    if (state === "prepared") return current;
     const handle: ChairLiveHandoffDispatchHandle = {
       schemaVersion: 1,
       custodyId: text(custody, "custody_id"),
@@ -1472,7 +1491,7 @@ export class LaunchCustodyService {
         historyJson: '["prepared"]',
         executionCount: 0,
         updatedAt: now,
-      });
+      }, "chair_recovery");
     }
     this.#fault("chair-recovery:prepare:custody");
     return {
@@ -1510,6 +1529,11 @@ export class LaunchCustodyService {
       throw new ProjectFabricCoreError("CONFLICT", "chair recovery is not prepared");
     }
     if (handle.intent.path === "rebind") {
+      assertProviderActionOwner(this.#database, {
+        runId: handle.intent.coordinationRunId,
+        adapterId: handle.intent.providerAdapterId,
+        actionId: handle.intent.providerActionId,
+      }, "chair_recovery");
       return await this.#dispatchChairRebind({ ...handle, intent: handle.intent });
     }
     if (handle.intent.path === "takeover") {
@@ -1764,9 +1788,18 @@ export class LaunchCustodyService {
 
   async reconcileChairRecovery(operatorId: string, operatorCommandId: string): Promise<ChairRecoveryCommit> {
     const custody = row(this.#database.prepare(`
-      SELECT * FROM chair_bridge_recovery_custody
-       WHERE operator_id=? AND operator_command_id=?
+      SELECT custody.*,loss.coordination_run_id
+        FROM chair_bridge_recovery_custody custody
+        JOIN chair_bridge_losses loss ON loss.loss_id=custody.loss_id
+       WHERE custody.operator_id=? AND custody.operator_command_id=?
     `).get(operatorId, operatorCommandId), "chair recovery reconciliation");
+    if (text(custody, "path") === "rebind" && typeof custody.provider_action_id === "string") {
+      assertProviderActionOwner(this.#database, {
+        runId: text(custody, "coordination_run_id"),
+        adapterId: text(custody, "provider_adapter_id"),
+        actionId: custody.provider_action_id,
+      }, "chair_recovery");
+    }
     const status = this.chairRecoveryStatus(operatorId, operatorCommandId);
     if (status.status === "committed" || status.status === "no-effect") return status;
     const path = text(custody, "path");
@@ -1992,6 +2025,13 @@ export class LaunchCustodyService {
   }
 
   #markChairRecoveryAmbiguous(handle: ChairRecoveryDispatchHandle, evidence: unknown): ChairRecoveryCommit {
+    if (handle.intent.path === "rebind") {
+      assertProviderActionOwner(this.#database, {
+        runId: handle.intent.coordinationRunId,
+        adapterId: handle.intent.providerAdapterId,
+        actionId: handle.intent.providerActionId,
+      }, "chair_recovery");
+    }
     const now = this.#clock();
     const evidenceDigest = jsonEvidenceDigest({
       recoveryId: handle.recoveryId,
@@ -2027,6 +2067,13 @@ export class LaunchCustodyService {
     }>,
     activationEvidenceDigest: Digest,
   ): ChairRecoveryCommit {
+    if (handle.intent.path === "rebind") {
+      assertProviderActionOwner(this.#database, {
+        runId: handle.intent.coordinationRunId,
+        adapterId: handle.intent.providerAdapterId,
+        actionId: handle.intent.providerActionId,
+      }, "chair_recovery");
+    }
     const now = this.#clock();
     return this.#database.transaction((): ChairRecoveryCommit => {
       const custody = row(this.#database.prepare(`
@@ -2266,9 +2313,19 @@ export class LaunchCustodyService {
     recoveryRequired: number;
   }): Promise<void> {
     const prepared = this.#database.prepare(`
-      SELECT * FROM chair_bridge_recovery_custody WHERE state='prepared' ORDER BY created_at, recovery_id
+      SELECT custody.*,loss.coordination_run_id
+        FROM chair_bridge_recovery_custody custody
+        JOIN chair_bridge_losses loss ON loss.loss_id=custody.loss_id
+       WHERE custody.state='prepared' ORDER BY custody.created_at, custody.recovery_id
     `).all().filter(isRow);
     for (const custody of prepared) {
+      if (text(custody, "path") === "rebind" && typeof custody.provider_action_id === "string") {
+        assertProviderActionOwner(this.#database, {
+          runId: text(custody, "coordination_run_id"),
+          adapterId: text(custody, "provider_adapter_id"),
+          actionId: custody.provider_action_id,
+        }, "chair_recovery");
+      }
       const now = this.#clock();
       this.#database.transaction(() => {
         if (text(custody, "path") === "rebind" && typeof custody.new_capability_hash === "string") {
@@ -2309,9 +2366,11 @@ export class LaunchCustodyService {
       result.recoveryRequired += 1;
     }
     const observable = this.#database.prepare(`
-      SELECT * FROM chair_bridge_recovery_custody
-       WHERE path='rebind' AND state IN ('dispatched','accepted','ambiguous')
-       ORDER BY created_at, recovery_id
+      SELECT custody.*,loss.coordination_run_id
+        FROM chair_bridge_recovery_custody custody
+        JOIN chair_bridge_losses loss ON loss.loss_id=custody.loss_id
+       WHERE custody.path='rebind' AND custody.state IN ('dispatched','accepted','ambiguous')
+       ORDER BY custody.created_at, custody.recovery_id
     `).all().filter(isRow);
     for (const custody of observable) {
       if (this.#adapterEffects.lookupChairRecovery === undefined || typeof custody.provider_action_id !== "string") {
@@ -2319,6 +2378,11 @@ export class LaunchCustodyService {
         result.recoveryRequired += 1;
         continue;
       }
+      assertProviderActionOwner(this.#database, {
+        runId: text(custody, "coordination_run_id"),
+        adapterId: text(custody, "provider_adapter_id"),
+        actionId: custody.provider_action_id,
+      }, "chair_recovery");
       let record: unknown;
       try {
         record = await this.#adapterEffects.lookupChairRecovery({
@@ -2396,6 +2460,11 @@ export class LaunchCustodyService {
        ORDER BY created_at, custody_id
     `).all().filter(isRow);
     for (const custody of prepared) {
+      assertProviderActionOwner(this.#database, {
+        runId: text(custody, "coordination_run_id"),
+        adapterId: text(custody, "provider_adapter_id"),
+        actionId: text(custody, "promotion_action_id"),
+      }, "chair_live_handoff");
       try {
         const intentValue: unknown = JSON.parse(text(custody, "intent_json"));
         if (!isRow(intentValue) || intentValue.kind !== "chair-live-handoff") {
@@ -2421,11 +2490,16 @@ export class LaunchCustodyService {
       }
     }
     const observable = this.#database.prepare(`
-      SELECT operator_id, operator_command_id FROM chair_live_handoff_custody
+      SELECT * FROM chair_live_handoff_custody
        WHERE state IN ('dispatched','ambiguous')
        ORDER BY created_at, custody_id
     `).all().filter(isRow);
     for (const custody of observable) {
+      assertProviderActionOwner(this.#database, {
+        runId: text(custody, "coordination_run_id"),
+        adapterId: text(custody, "provider_adapter_id"),
+        actionId: text(custody, "promotion_action_id"),
+      }, "chair_live_handoff");
       try {
         const reconciled = await this.reconcileChairLiveHandoff(
           text(custody, "operator_id"),
@@ -2592,6 +2666,11 @@ export class LaunchCustodyService {
     handle: ChairLiveHandoffDispatchHandle,
     evidence: unknown,
   ): ChairLiveHandoffCommit {
+    assertProviderActionOwner(this.#database, {
+      runId: handle.intent.coordinationRunId,
+      adapterId: handle.intent.providerAdapterId,
+      actionId: handle.promotionActionId,
+    }, "chair_live_handoff");
     const now = this.#clock();
     const evidenceDigest = jsonEvidenceDigest({
       custodyId: handle.custodyId,
@@ -2623,6 +2702,11 @@ export class LaunchCustodyService {
     handle: ChairLiveHandoffDispatchHandle,
     reason: string,
   ): ChairLiveHandoffCommit {
+    assertProviderActionOwner(this.#database, {
+      runId: handle.intent.coordinationRunId,
+      adapterId: handle.intent.providerAdapterId,
+      actionId: handle.promotionActionId,
+    }, "chair_live_handoff");
     const now = this.#clock();
     const evidenceDigest = jsonEvidenceDigest({ custodyId: handle.custodyId, kind: "chair-live-handoff-no-effect", reason });
     return this.#database.transaction((): ChairLiveHandoffCommit => {
@@ -2679,6 +2763,11 @@ export class LaunchCustodyService {
   }
 
   #commitChairLiveHandoff(handle: ChairLiveHandoffDispatchHandle): ChairLiveHandoffCommit {
+    assertProviderActionOwner(this.#database, {
+      runId: handle.intent.coordinationRunId,
+      adapterId: handle.intent.providerAdapterId,
+      actionId: handle.promotionActionId,
+    }, "chair_live_handoff");
     const now = this.#clock();
     const predecessorBridge = row(this.#database.prepare(`
       SELECT * FROM launched_chair_bridge_state
@@ -3386,6 +3475,11 @@ export class LaunchCustodyService {
        WHERE c.adapter_id=? AND c.action_id=?
     `).get(input.adapterId, input.actionId);
     if (isRow(existing)) {
+      assertProviderActionOwner(this.#database, {
+        runId: input.runId,
+        adapterId: input.adapterId,
+        actionId: input.actionId,
+      }, "provider_agent");
       if (existing.intent_digest !== intentDigest) {
         throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "agent custody action was reused with changed input");
       }
@@ -3514,32 +3608,33 @@ export class LaunchCustodyService {
       historyJson: '["prepared"]',
       executionCount: 0,
       updatedAt: this.#clock(),
-    });
-    this.#fault("agent:prepare:action");
-    this.#database.prepare(`
+    }, "provider_agent", () => {
+      this.#fault("agent:prepare:action");
+      this.#database.prepare(`
       INSERT INTO provider_agent_custody(
         run_id, action_id, operation, actor_agent_id, target_agent_id, authority_id,
         adapter_id, bridge_contract_digest, bridge_capable, capability_hash,
         capability_expires_at, principal_generation, requested_provider_session_ref,
         intent_digest, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      input.runId,
-      input.actionId,
-      input.operation,
-      input.actorAgentId,
-      input.agentId,
-      input.authorityId,
-      input.adapterId,
-      bridgeContractDigest,
-      bridgeCapable ? 1 : 0,
-      capabilityHash,
-      bridgeCapable ? expiresAt : null,
-      principalGeneration,
-      input.providerSessionRef ?? null,
-      intentDigest,
-      this.#clock(),
-    );
+      `).run(
+        input.runId,
+        input.actionId,
+        input.operation,
+        input.actorAgentId,
+        input.agentId,
+        input.authorityId,
+        input.adapterId,
+        bridgeContractDigest,
+        bridgeCapable ? 1 : 0,
+        capabilityHash,
+        bridgeCapable ? expiresAt : null,
+        principalGeneration,
+        input.providerSessionRef ?? null,
+        intentDigest,
+        this.#clock(),
+      );
+    });
     this.#fault("agent:prepare:custody");
     const bridgeValues = [
       input.runId,
@@ -3603,6 +3698,11 @@ export class LaunchCustodyService {
 
   async dispatchPreparedAgent(handle: AgentDispatchHandle): Promise<AgentCustodyResult> {
     if (this.#agentEffects === undefined) throw new Error("agent custody effects are unavailable");
+    assertProviderActionOwner(this.#database, {
+      runId: handle.runId,
+      adapterId: handle.adapterId,
+      actionId: handle.actionId,
+    }, "provider_agent");
     const key = `${handle.adapterId}\0${handle.actionId}`;
     if (this.#consumedAgentHandles.has(key)) {
       throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "agent custody handoff is one-use");
@@ -3645,6 +3745,7 @@ export class LaunchCustodyService {
       }
       return result;
     } catch (error: unknown) {
+      if (error instanceof ProviderActionOwnerError) throw error;
       const evidence = `sha256:${sha256(canonicalJson({
         code: error instanceof Error ? error.name : "agent-dispatch-error",
         message: error instanceof Error ? error.message : String(error),
@@ -3688,6 +3789,11 @@ export class LaunchCustodyService {
   }
 
   #activateAgent(handle: AgentDispatchHandle, result: AgentCustodyResult): void {
+    assertProviderActionOwner(this.#database, {
+      runId: handle.runId,
+      adapterId: handle.adapterId,
+      actionId: handle.actionId,
+    }, "provider_agent");
     const now = this.#clock();
     const action = this.#database.prepare(`
       UPDATE provider_actions
@@ -3750,6 +3856,11 @@ export class LaunchCustodyService {
   }
 
   #fenceUnprovenAgent(handle: AgentDispatchHandle, evidenceDigest: string): void {
+    assertProviderActionOwner(this.#database, {
+      runId: handle.runId,
+      adapterId: handle.adapterId,
+      actionId: handle.actionId,
+    }, "provider_agent");
     const now = this.#clock();
     const custody = this.#database.prepare(`
       SELECT capability_hash FROM provider_agent_custody WHERE adapter_id=? AND action_id=?
@@ -4156,6 +4267,50 @@ export class LaunchCustodyService {
       historyJson: '["prepared"]',
       executionCount: 0,
       updatedAt: now,
+    }, "launch", () => {
+      this.#database.prepare(`
+        INSERT INTO project_session_launch_custody(
+          project_session_id, custody_attempt_generation, coordination_run_id,
+          chair_agent_id, chair_lease_id, operator_id, operator_command_id,
+          provider_adapter_id, provider_action_id, capability_hash, capability_expires_at,
+          attestation_challenge_digest,
+          reservation_id, launch_packet_path, launch_packet_digest, authority_ref,
+          budget_ref, resource_plan_path, resource_plan_digest, expected_project_revision,
+          expected_session_revision, expected_session_generation, trust_record_digest,
+          provider_contract_digest, resource_state_digest, launch_binding_digest,
+          retry_of_provider_adapter_id, retry_of_provider_action_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        intent.projectSessionId,
+        attempt,
+        packet.runId,
+        packet.chairAgentId,
+        chairLeaseId,
+        input.operatorId,
+        input.operatorCommandId,
+        intent.providerAdapterId,
+        intent.providerActionId,
+        capabilityHash,
+        expiresAt,
+        attestationChallengeDigest,
+        reservationId,
+        intent.launchPacketRef.path,
+        intent.launchPacketRef.digest,
+        intent.authorityRef,
+        intent.budgetRef,
+        intent.resourcePlanRef.path,
+        intent.resourcePlanRef.digest,
+        intent.expectedProjectRevision,
+        intent.expectedSessionRevision,
+        intent.expectedSessionGeneration,
+        intent.trustRecordDigest,
+        intent.providerContractDigest,
+        intent.resourceStateDigest,
+        inspection.launchBindingDigest,
+        intent.retryOf?.providerAdapterId ?? null,
+        intent.retryOf?.providerActionId ?? null,
+        now,
+      );
     });
     this.#fault("launch:prepare:provider-action");
 
@@ -4180,49 +4335,6 @@ export class LaunchCustodyService {
       .run(packet.runId);
     this.#fault("launch:prepare:memberships");
 
-    this.#database.prepare(`
-      INSERT INTO project_session_launch_custody(
-        project_session_id, custody_attempt_generation, coordination_run_id,
-        chair_agent_id, chair_lease_id, operator_id, operator_command_id,
-        provider_adapter_id, provider_action_id, capability_hash, capability_expires_at,
-        attestation_challenge_digest,
-        reservation_id, launch_packet_path, launch_packet_digest, authority_ref,
-        budget_ref, resource_plan_path, resource_plan_digest, expected_project_revision,
-        expected_session_revision, expected_session_generation, trust_record_digest,
-        provider_contract_digest, resource_state_digest, launch_binding_digest,
-        retry_of_provider_adapter_id, retry_of_provider_action_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      intent.projectSessionId,
-      attempt,
-      packet.runId,
-      packet.chairAgentId,
-      chairLeaseId,
-      input.operatorId,
-      input.operatorCommandId,
-      intent.providerAdapterId,
-      intent.providerActionId,
-      capabilityHash,
-      expiresAt,
-      attestationChallengeDigest,
-      reservationId,
-      intent.launchPacketRef.path,
-      intent.launchPacketRef.digest,
-      intent.authorityRef,
-      intent.budgetRef,
-      intent.resourcePlanRef.path,
-      intent.resourcePlanRef.digest,
-      intent.expectedProjectRevision,
-      intent.expectedSessionRevision,
-      intent.expectedSessionGeneration,
-      intent.trustRecordDigest,
-      intent.providerContractDigest,
-      intent.resourceStateDigest,
-      inspection.launchBindingDigest,
-      intent.retryOf?.providerAdapterId ?? null,
-      intent.retryOf?.providerActionId ?? null,
-      now,
-    );
     this.#fault("launch:prepare:custody");
     return {
       schemaVersion: 1,
@@ -4244,6 +4356,15 @@ export class LaunchCustodyService {
   }
 
   async dispatchPrepared(handle: LaunchDispatchHandle): Promise<LaunchAdapterOutcome> {
+    const launchRun = row(this.#database.prepare(`
+      SELECT coordination_run_id FROM project_session_launch_custody
+       WHERE provider_adapter_id=? AND provider_action_id=?
+    `).get(handle.providerAdapterId, handle.providerActionId), "launch custody owner");
+    assertProviderActionOwner(this.#database, {
+      runId: text(launchRun, "coordination_run_id"),
+      adapterId: handle.providerAdapterId,
+      actionId: handle.providerActionId,
+    }, "launch");
     const key = `${handle.providerAdapterId}\0${handle.providerActionId}`;
     if (this.#consumedHandles.has(key)) {
       throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "launch handoff is one-use");
@@ -4277,6 +4398,7 @@ export class LaunchCustodyService {
         throw new Error("launch provider contract changed");
       }
     } catch (error: unknown) {
+      if (error instanceof ProviderActionOwnerError) throw error;
       const outcome = this.#ambiguousOutcome(
         custody,
         "conflict",
@@ -4288,8 +4410,14 @@ export class LaunchCustodyService {
     }
     let raw: unknown;
     try {
+      assertProviderActionOwner(this.#database, {
+        runId: text(custody, "coordination_run_id"),
+        adapterId: handle.providerAdapterId,
+        actionId: handle.providerActionId,
+      }, "launch");
       raw = await this.#adapterEffects.dispatch(handle);
     } catch (error: unknown) {
+      if (error instanceof ProviderActionOwnerError) throw error;
       raw = this.#ambiguousOutcome(
         custody,
         "adapter-error",
@@ -4308,9 +4436,14 @@ export class LaunchCustodyService {
     providerContractDigest: Digest;
   }>): Promise<unknown> {
     const custody = row(this.#database.prepare(`
-      SELECT attestation_challenge_digest FROM project_session_launch_custody
+      SELECT coordination_run_id,attestation_challenge_digest FROM project_session_launch_custody
        WHERE provider_adapter_id=? AND provider_action_id=? AND provider_contract_digest=?
     `).get(input.providerAdapterId, input.providerActionId, input.providerContractDigest), "launch custody");
+    assertProviderActionOwner(this.#database, {
+      runId: text(custody, "coordination_run_id"),
+      adapterId: input.providerAdapterId,
+      actionId: input.providerActionId,
+    }, "launch");
     return await this.#adapterEffects.lookup({
       ...input,
       attestationChallengeDigest: exactDigest(
@@ -4627,6 +4760,11 @@ export class LaunchCustodyService {
        ORDER BY c.created_at, c.action_id
     `).all().filter(isRow);
     for (const custody of prepared) {
+      assertProviderActionOwner(this.#database, {
+        runId: text(custody, "run_id"),
+        adapterId: text(custody, "adapter_id"),
+        actionId: text(custody, "action_id"),
+      }, "provider_agent");
       try {
         this.#database.transaction(() => this.#failPreparedAgent(custody))();
         result.preparedFailed += 1;
@@ -4658,6 +4796,11 @@ export class LaunchCustodyService {
          ORDER BY c.created_at, c.action_id
       `).all().filter(isRow);
       for (const custody of observable) {
+        assertProviderActionOwner(this.#database, {
+          runId: text(custody, "run_id"),
+          adapterId: text(custody, "adapter_id"),
+          actionId: text(custody, "action_id"),
+        }, "provider_agent");
         let handle: AgentDispatchHandle | undefined;
         let raw: unknown;
         try {
@@ -4731,6 +4874,11 @@ export class LaunchCustodyService {
        ORDER BY c.created_at, c.action_id
     `).all().filter(isRow);
     for (const custody of active) {
+      assertProviderActionOwner(this.#database, {
+        runId: text(custody, "run_id"),
+        adapterId: text(custody, "adapter_id"),
+        actionId: text(custody, "action_id"),
+      }, "provider_agent");
       try {
         const handle = this.#agentDispatchHandle(custody);
         const storedResult = parseOperationResult(
@@ -4801,6 +4949,11 @@ export class LaunchCustodyService {
        ORDER BY c.project_session_id, c.custody_attempt_generation
     `).all().filter(isRow);
     for (const custody of prepared) {
+      assertProviderActionOwner(this.#database, {
+        runId: text(custody, "coordination_run_id"),
+        adapterId: text(custody, "provider_adapter_id"),
+        actionId: text(custody, "provider_action_id"),
+      }, "launch");
       try {
         this.#database.transaction(() => this.#failPrepared(custody))();
         result.preparedFailed += 1;
@@ -4820,6 +4973,11 @@ export class LaunchCustodyService {
        ORDER BY c.project_session_id, c.custody_attempt_generation
     `).all().filter(isRow);
     for (const custody of observable) {
+      assertProviderActionOwner(this.#database, {
+        runId: text(custody, "coordination_run_id"),
+        adapterId: text(custody, "provider_adapter_id"),
+        actionId: text(custody, "provider_action_id"),
+      }, "launch");
       try {
         const providerAdapterId = text(custody, "provider_adapter_id");
         const providerActionId = text(custody, "provider_action_id");
@@ -5055,6 +5213,11 @@ export class LaunchCustodyService {
     const now = this.#clock();
     const adapterId = text(custody, "provider_adapter_id");
     const actionId = text(custody, "provider_action_id");
+    assertProviderActionOwner(this.#database, {
+      runId: text(custody, "coordination_run_id"),
+      adapterId,
+      actionId,
+    }, "launch");
     const serialized = canonicalJson(outcome);
     if (outcome.outcome.kind === "ambiguous") {
       this.#database.prepare(`

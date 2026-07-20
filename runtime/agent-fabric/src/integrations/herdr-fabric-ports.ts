@@ -21,6 +21,7 @@ import {
   ProviderActionAdmissionCoordinator,
   type ProviderActionTicket,
 } from "../application/provider-action-admission.js";
+import { assertProviderActionOwner } from "../application/provider-action-owner.js";
 
 export type HerdrFabricPortsOptions = Readonly<{
   database: Database.Database;
@@ -620,7 +621,7 @@ export class HerdrFabricPorts {
       historyJson: '["prepared"]',
       executionCount: 0,
       updatedAt: this.#clock(),
-    }, () => {
+    }, "herdr", () => {
       const membership = this.#database.prepare(`
         INSERT INTO project_session_memberships(
           project_session_id, coordination_run_id, member_kind, member_id, member_adapter_id,
@@ -706,10 +707,15 @@ export class HerdrFabricPorts {
 
   #readAction(actionId: ProviderActionId): HerdrActionRecord | null {
     const value = this.#database.prepare(`
-      SELECT action_id, payload_hash, status, result_json, journal_revision
+      SELECT run_id, action_id, payload_hash, status, result_json, journal_revision
         FROM provider_actions WHERE adapter_id=? AND action_id=?
     `).get(ADAPTER_ID, actionId);
     if (!isRow(value)) return null;
+    assertProviderActionOwner(this.#database, {
+      runId: text(value, "run_id"),
+      adapterId: ADAPTER_ID,
+      actionId,
+    }, "herdr");
     const status = text(value, "status");
     const base = {
       actionId: parseIdentifier<"ProviderActionId">(text(value, "action_id"), "herdrAction.actionId"),

@@ -7,6 +7,7 @@ import {
   type ProviderActionInsert,
   type ProviderActionTicket,
 } from "../../src/application/provider-action-admission.ts";
+import type { ProviderActionCustodyOwner } from "../../src/application/provider-action-owner.ts";
 
 function digest(value: string): string {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
@@ -24,6 +25,7 @@ export function admitProviderActionFixture(
     payloadJson: action.payloadJson,
   },
   beforeAdmission?: (ticket: ProviderActionTicket) => void,
+  expectedOwner: ProviderActionCustodyOwner = "generic",
 ): ProviderActionTicket {
   const coordinator = new ProviderActionAdmissionCoordinator({
     database,
@@ -50,7 +52,7 @@ export function admitProviderActionFixture(
   });
   beforeAdmission?.(ticket);
   database.transaction(() => {
-    coordinator.admitUnroutedInCurrentTransaction(ticket, action);
+    coordinator.admitUnroutedInCurrentTransaction(ticket, action, expectedOwner);
   }).immediate();
   return ticket;
 }

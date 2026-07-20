@@ -2,6 +2,10 @@ import type Database from "better-sqlite3";
 
 import { FabricError } from "../errors.js";
 import { digest, isRow } from "../project-session/store-support.js";
+import {
+  assertProviderActionOwner,
+  type ProviderActionCustodyOwner,
+} from "./provider-action-owner.js";
 
 export type ProviderActionRef = Readonly<{
   adapterId: string;
@@ -285,6 +289,7 @@ export class ProviderActionAdmissionCoordinator {
   admitUnroutedInCurrentTransaction<T>(
     ticket: ProviderActionTicket,
     action: ProviderActionInsert,
+    expectedOwner: ProviderActionCustodyOwner,
     appendDependants?: () => T,
   ): T | undefined {
     if (!this.#database.inTransaction) {
@@ -338,6 +343,12 @@ export class ProviderActionAdmissionCoordinator {
       this.#fault("provider-action-admission:after-action-insert");
       const dependantResult = appendDependants?.();
       this.#fault("provider-action-admission:after-dependants");
+      assertProviderActionOwner(this.#database, {
+        runId: action.runId,
+        adapterId: action.adapterId,
+        actionId: action.actionId,
+      }, expectedOwner);
+      this.#fault("provider-action-admission:after-owner-revalidation");
       this.admitInCurrentTransaction(ticket);
       this.#fault("provider-action-admission:after-final-cas");
       return dependantResult;

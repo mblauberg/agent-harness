@@ -5223,6 +5223,79 @@ CREATE TABLE provider_session_turn_leases (
     REFERENCES provider_actions(run_id, adapter_id, action_id)
 );
 
+CREATE TABLE operator_control_provider_action_bindings (
+  custody_id TEXT NOT NULL REFERENCES operator_effect_custody(custody_id),
+  run_id TEXT NOT NULL,
+  adapter_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  source_adapter_id TEXT NOT NULL,
+  source_action_id TEXT NOT NULL,
+  source_payload_hash TEXT NOT NULL,
+  operation TEXT NOT NULL CHECK (operation IN ('interrupt','steer')),
+  target_agent_id TEXT NOT NULL,
+  provider_session_ref TEXT NOT NULL,
+  provider_session_generation INTEGER NOT NULL CHECK (provider_session_generation >= 1),
+  turn_lease_generation INTEGER NOT NULL CHECK (turn_lease_generation >= 1),
+  turn_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (adapter_id, action_id),
+  UNIQUE (run_id, adapter_id, action_id),
+  FOREIGN KEY (run_id, adapter_id, action_id)
+    REFERENCES provider_actions(run_id, adapter_id, action_id),
+  FOREIGN KEY (run_id, source_adapter_id, source_action_id)
+    REFERENCES provider_actions(run_id, adapter_id, action_id)
+);
+
+CREATE TRIGGER operator_control_provider_action_bindings_exact_identity
+BEFORE INSERT ON operator_control_provider_action_bindings
+WHEN NOT EXISTS (
+  SELECT 1
+    FROM operator_effect_custody custody
+    JOIN runs run
+      ON run.run_id=NEW.run_id
+     AND run.project_session_id=custody.project_session_id
+    JOIN provider_actions action
+      ON action.run_id=NEW.run_id
+     AND action.adapter_id=NEW.adapter_id
+     AND action.action_id=NEW.action_id
+    JOIN provider_actions source
+      ON source.run_id=NEW.run_id
+     AND source.adapter_id=NEW.source_adapter_id
+     AND source.action_id=NEW.source_action_id
+    JOIN provider_session_turn_leases lease
+      ON lease.run_id=NEW.run_id
+     AND lease.agent_id=NEW.target_agent_id
+     AND lease.adapter_id=NEW.source_adapter_id
+     AND lease.action_id=NEW.source_action_id
+     AND lease.provider_session_generation=NEW.provider_session_generation
+     AND lease.turn_lease_generation=NEW.turn_lease_generation
+    JOIN agents agent
+      ON agent.run_id=NEW.run_id AND agent.agent_id=NEW.target_agent_id
+   WHERE custody.custody_id=NEW.custody_id
+     AND json_extract(custody.intent_json,'$.kind')='control'
+     AND json_extract(custody.intent_json,'$.action')=custody.operation
+     AND (
+       (NEW.operation='interrupt' AND custody.operation IN ('pause','cancel')) OR
+       (NEW.operation='steer' AND custody.operation='steer')
+     )
+     AND action.operation=NEW.operation
+     AND action.target_agent_id=NEW.target_agent_id
+     AND action.provider_session_generation=NEW.provider_session_generation
+     AND action.turn_lease_generation=NEW.turn_lease_generation
+     AND source.payload_hash=NEW.source_payload_hash
+     AND agent.provider_session_ref=NEW.provider_session_ref
+     AND json_extract(source.result_json,'$.turnId')=NEW.turn_id
+)
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_operator_control_provider_action_binding_identity'); END;
+
+CREATE TRIGGER operator_control_provider_action_bindings_immutable_update
+BEFORE UPDATE ON operator_control_provider_action_bindings
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_operator_control_provider_action_binding_immutable'); END;
+
+CREATE TRIGGER operator_control_provider_action_bindings_immutable_delete
+BEFORE DELETE ON operator_control_provider_action_bindings
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_operator_control_provider_action_binding_immutable'); END;
+
 CREATE TABLE provider_state (
   run_id TEXT NOT NULL,
   agent_id TEXT NOT NULL,
