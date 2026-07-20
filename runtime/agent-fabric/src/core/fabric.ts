@@ -162,6 +162,10 @@ import {
   type AuthenticatedAgentContext,
 } from "../project-session/contracts.js";
 import {
+  canonicaliseProviderActionDispatchRequest,
+  type ProviderActionDispatchRequest,
+} from "../application/provider-action-dispatch-request.js";
+import {
   ScopedGateStore,
   assertScopedBarrierAllowed,
   assertScopedOperationAllowed,
@@ -199,7 +203,6 @@ import type {
   LifecycleResult,
   ProofResult,
   ProviderActionResult,
-  ProviderActionDispatchRequest,
   ReceiptResult,
   RevocationResult,
   TaskResult,
@@ -860,47 +863,6 @@ function isBudgetResult(value: unknown): value is BudgetResult {
     isRow(value.dimensions) &&
     isNumberRecord(value.returned)
   );
-}
-
-function normalizeProviderActionDispatchRequest(
-  input: ProviderActionDispatchRequest,
-): ProviderActionDispatchRequest {
-  if (input.certifyingReview !== null) {
-    throw new ProjectFabricCoreError(
-      "PROTOCOL_INVALID",
-      "certifying review dispatch requires the review evidence daemon owner",
-    );
-  }
-  if ("routeRequest" in input) {
-    throw new ProjectFabricCoreError(
-      "PROTOCOL_INVALID",
-      "provider route requests require the review evidence daemon owner",
-    );
-  }
-  if (input.operation !== "spawn") {
-    if ("taskId" in input) {
-      throw new ProjectFabricCoreError(
-        "PROTOCOL_INVALID",
-        "top-level provider task ID is spawn-only",
-      );
-    }
-    return input;
-  }
-  if (typeof input.taskId !== "string" || input.taskId.length === 0) {
-    throw new ProjectFabricCoreError(
-      "PROTOCOL_INVALID",
-      "ephemeral provider spawn requires an exact top-level task ID",
-    );
-  }
-  const payloadTaskId = input.payload.taskId;
-  if (payloadTaskId !== undefined && payloadTaskId !== input.taskId) {
-    throw new ProjectFabricCoreError(
-      "PROTOCOL_INVALID",
-      "provider payload task ID conflicts with the canonical top-level task ID",
-    );
-  }
-  const { taskId: _payloadTaskId, ...payload } = input.payload;
-  return { ...input, payload };
 }
 
 function publicHerdrSteerResult(result: HerdrDirectSteerResult): HerdrSteerDispatchResult {
@@ -5782,7 +5744,7 @@ export class Fabric {
     actorAgentId: string,
     input: ProviderActionDispatchRequest,
   ): Promise<ProviderActionResult> {
-    const canonicalInput = normalizeProviderActionDispatchRequest(input);
+    const canonicalInput = canonicaliseProviderActionDispatchRequest(input);
     return await this.#trackProviderOperation(
       async () => await this.#dispatchProviderAction(runId, actorAgentId, canonicalInput),
     );
