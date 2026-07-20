@@ -260,13 +260,21 @@ export type ProtocolTransportErrorCode =
   | "PROTOCOL_INCOMPATIBLE"
   | "PROTOCOL_RESULT_INVALID";
 
+export type ProtocolRequestState = "queued" | "in-flight";
+
 export class ProtocolTransportError extends Error {
   readonly code: ProtocolTransportErrorCode;
+  readonly requestState: ProtocolRequestState | undefined;
 
-  constructor(code: ProtocolTransportErrorCode, message: string, options?: ErrorOptions) {
+  constructor(
+    code: ProtocolTransportErrorCode,
+    message: string,
+    options?: ErrorOptions & { requestState?: ProtocolRequestState },
+  ) {
     super(message, options);
     this.name = "ProtocolTransportError";
     this.code = code;
+    this.requestState = options?.requestState;
   }
 }
 
@@ -383,6 +391,10 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
     return this.#limits.idleTimeoutMs;
   }
 
+  get closed(): boolean {
+    return this.#closed;
+  }
+
   async call<Operation extends ProtocolOperation>(
     operation: Operation,
     input: OperationInputMap[Operation],
@@ -417,11 +429,23 @@ export class NdjsonRpcTransport implements ProtocolRpcTransport {
         if (pending.state === "queued") {
           const queueIndex = this.#queue.findIndex((entry) => entry.id === id);
           if (queueIndex >= 0) this.#queue.splice(queueIndex, 1);
-          reject(new ProtocolTransportError("PROTOCOL_TIMEOUT", `queued protocol request timed out: ${operation}`));
+          reject(new ProtocolTransportError(
+            "PROTOCOL_TIMEOUT",
+            `queued protocol request timed out: ${operation}`,
+            { requestState: "queued" },
+          ));
           return;
         }
-        reject(new ProtocolTransportError("PROTOCOL_TIMEOUT", `protocol request timed out: ${operation}`));
-        this.#fail(new ProtocolTransportError("PROTOCOL_TIMEOUT", `in-flight protocol request timed out: ${operation}`));
+        reject(new ProtocolTransportError(
+          "PROTOCOL_TIMEOUT",
+          `protocol request timed out: ${operation}`,
+          { requestState: "in-flight" },
+        ));
+        this.#fail(new ProtocolTransportError(
+          "PROTOCOL_TIMEOUT",
+          `in-flight protocol request timed out: ${operation}`,
+          { requestState: "in-flight" },
+        ));
       }, this.#limits.requestTimeoutMs);
       timer.unref();
       this.#pending.set(id, { operation, input, state: "queued", resolve, reject, timer });

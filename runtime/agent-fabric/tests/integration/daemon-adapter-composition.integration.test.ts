@@ -75,7 +75,7 @@ describe("daemon adapter composition", () => {
       });
       const chair = await connectFabricDaemon({ socketPath, capability: run.chairCapability });
       try {
-        const action = await chair.dispatchProviderAction({ adapterId: "fake", actionId: "daemon-adapter:1", operation: "steer", payload: { instruction: "bounded review" }, commandId: "daemon-adapter:dispatch:1" });
+        const action = await chair.dispatchProviderAction({ certifyingReview: null, adapterId: "fake", actionId: "daemon-adapter:1", operation: "steer", payload: { instruction: "bounded review" }, commandId: "daemon-adapter:dispatch:1" });
         expect(action).toMatchObject({ actionId: "daemon-adapter:1", status: "terminal", executionCount: 1, effectCount: 1 });
       } finally {
         await chair.close();
@@ -163,7 +163,6 @@ describe("daemon adapter composition", () => {
           taskId: "daemon-ephemeral-review",
           authorityId: reviewAuthority.authorityId,
           payload: {
-            taskId: "daemon-ephemeral-review",
             modelFamily: "fake",
             prompt: "Review the current implementation read-only.",
             cwd: "src",

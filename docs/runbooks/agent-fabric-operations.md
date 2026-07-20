@@ -107,8 +107,17 @@ or an exact, generation-matched `stopped` owner with exit `0` and no signal can
 be idle. Forced, non-zero, unknown, crashed and otherwise non-clean owners fail
 closed.
 
-Each client registry contains only the proxy command, fabric state directory,
-seat and client label:
+Each global project-dynamic client registry contains the proxy command and
+exactly three environment variables:
+
+- `AGENT_FABRIC_STATE_DIRECTORY`
+- `AGENT_FABRIC_SEAT`
+- `AGENT_FABRIC_CLIENT_LABEL`
+
+`AGENT_FABRIC_PROJECT_PATH` is not a fourth global variable. It is permitted
+only in an explicit, separately managed project-scoped compatibility entry for
+a client that cannot preserve workspace cwd; that entry must never be reused
+globally.
 
 | Client | Global registry |
 | --- | --- |
@@ -126,22 +135,39 @@ not preserve the workspace working directory need project-scoped registration.
 Subdirectories intentionally inherit the nearest ancestor project's seat.
 
 The harness installer configures only its selected primary client by default.
-Pass `--mcp-clients all` to register all six clients. Configure or verify all
-clients, including Claude Code and Codex, from the harness checkout with:
+Pass `--mcp-clients all` to register all six clients. Configure and verify all
+six clients, including Claude Code and Codex, from the harness checkout with:
 
 ```sh
 scripts/configure-agent-fabric-mcp.py --platform all
 scripts/configure-agent-fabric-mcp.py --platform all --check
+opencode mcp list
 ```
 
-The command atomically replaces only the `agent-fabric` entry in each client
-configuration and reports only that entry's status. It never prints
-capabilities or unrelated configuration. Its global entries omit
-`AGENT_FABRIC_PROJECT_PATH`; clients must preserve cwd for nearest-ancestor
-discovery. A client that cannot preserve its workspace cwd needs a separately
-managed project-scoped compatibility entry. Optional clients use the supported
-`codex` seat while retaining distinct client labels. OpenCode JSONC containing
-comments fails closed rather than being rewritten.
+The `--check` command proves the expected registry entry for all six clients;
+`opencode mcp list` additionally confirms that OpenCode can discover its
+configured server. The configurer atomically replaces only the
+`agent-fabric` entry in each client configuration and reports only that entry's
+status. It never prints capabilities or unrelated configuration. Optional
+clients use the supported `codex` seat while retaining distinct client labels.
+OpenCode JSONC containing comments fails closed rather than being rewritten.
+During apply, each successful changed-client write flushes its committed receipt
+before the next client begins. A client initially classified as existing is
+revalidated immediately before its receipt. Drift before any commit retains
+exit code `3`. Once any live client path may have changed, including a
+first-client atomic install followed by a durability or validation failure,
+the command uses exit code `4`. The typed `partial-state` result names fully
+completed clients as committed, keeps the affected current client and later
+clients in remaining, and provides the reconcile-and-rerun recovery action.
+Drift in an initially existing client after an earlier commit uses the same
+result.
+If stdout write or flush fails after a durable commit, the command
+stops before the next client, attempts the same typed result on stderr and exits
+`4`; the result names the committed client, remaining clients, configuration
+path and recovery action. An output failure before any config mutation exits
+`3` without a shutdown-time status override. Exit `4` remains the partial-state
+signal even when stderr is unavailable too. Rerunning `--platform all` after
+reconciliation is idempotent.
 Existing files are updated with an atomic exchange: the displaced identity and
 bytes must match the composed snapshot, and the requested direct path or
 symlink must still resolve to the installed inode. On any mismatch the command
@@ -446,13 +472,18 @@ codex mcp list
 cursor-agent mcp list
 kiro-cli mcp list
 agy mcp list
+opencode mcp list
 ```
 
 The current Agy CLI uses a Bubble Tea TUI for `mcp list` and fails when no TTY
 is available. In headless verification, inspect only the `agent-fabric` object
-in `~/.gemini/config/mcp_config.json` and confirm its command plus the four
-non-secret `AGENT_FABRIC_*` seat-selection variables; never print capability
-files or unrelated registry values.
+in `~/.gemini/config/mcp_config.json` and confirm its command.
+Confirm exactly three global variables: `AGENT_FABRIC_STATE_DIRECTORY`,
+`AGENT_FABRIC_SEAT` and
+`AGENT_FABRIC_CLIENT_LABEL`. Confirm `AGENT_FABRIC_PROJECT_PATH` is absent.
+That fourth variable is valid only in an explicit project-scoped compatibility
+entry for a client that cannot preserve cwd. Never print capability files or
+unrelated registry values.
 
 Resolve the active credential and metadata paths for one project seat without
 printing the capability:
@@ -470,9 +501,11 @@ project key from status prose, a copied path or an older generation.
 
 The daemon and every MCP proxy derive the same stable private socket at
 `$AGENT_FABRIC_STATE_DIRECTORY/runtime/fabric-v1.sock`. Dynamic Claude Code and
-Codex registry entries bind a seat but no project path or credential. A client
-that cannot preserve cwd may use a separately scoped `AGENT_FABRIC_PROJECT_PATH`
-entry for one project; it must never be reused as a global registration.
+Codex registry entries use the same exactly three environment variables as the
+other global dynamic clients and bind no project path or credential. A client
+that cannot preserve cwd may add `AGENT_FABRIC_PROJECT_PATH` only as the fourth
+variable in an explicit project-scoped compatibility entry for one project; it
+must never be reused as a global registration.
 
 Start a least-privilege observer after provisioning or renewal:
 
@@ -556,13 +589,27 @@ as one team.
 
 ## Recovery
 
-- A retained MCP proxy reconnects after a daemon restart with its current seat,
-  refreshing that seat only when authentication rejects it. Concurrent requests
-  share that reconnect attempt. Only a request carrying a stable `commandId` is
-  replayed automatically; commandless stateful requests return
-  `RECONNECT_REQUIRED` so their outcome can be reconciled before an explicit
-  retry. The same typed error and single action report an unavailable daemon or
-  seat.
+- A retained MCP proxy reconnects after a daemon restart or a terminal protocol
+  timeout with its current seat, refreshing that seat only when authentication
+  rejects it. The negotiated five-minute idle limit bounds an unused transport,
+  not the duration of a provider turn or review: the next Fabric call reconnects
+  transparently when the old transport had already closed, because that call was
+  never submitted. A request that times out locally while still queued beyond
+  the negotiated in-flight limit is likewise proved unsubmitted and reconnects
+  for one bounded replay under the same exact principal. Concurrent requests
+  share that reconnect attempt. An
+  in-flight request is replayed only with a durable identity: a stable
+  `commandId`, or `dedupeKey` for `fabric_message_send`. An ambiguous
+  commandless in-flight request reconnects but returns `RECONNECT_REQUIRED` with
+  an operation-aware reconciliation action before an explicit retry. For
+  `fabric_message_receive`, the outcome remains unknown, no delivery is
+  acknowledged, and the caller must wait at least its requested
+  `visibilityTimeoutMs` before retrying so any hidden claim becomes visible.
+  A second timeout or disconnect after replay returns the same typed recovery
+  class and the same operation-aware action instead of a raw
+  `PROTOCOL_TIMEOUT`. The same typed error and one action report an unavailable
+  daemon or seat; a healthy `doctor` does not repair an already terminal proxy
+  transport.
 - A second daemon for the same socket or canonical database is rejected by an
   OS-backed SQLite exclusive owner lock held for the daemon lifetime. Process
   death releases the kernel lock without pathname deletion or stale-takeover

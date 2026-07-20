@@ -87,6 +87,7 @@ export type LifecycleFixture = {
   runId: string;
   leaderTask: { taskId: string; revision: number };
   childTask: { taskId: string; revision: number };
+  restartRetainedDaemon?: () => Promise<{ fabric: Fabric; chair: FabricClient }>;
 };
 
 export function asLifecycleClient(client: FabricClient): FabricClient {
@@ -408,6 +409,7 @@ function retainedAgentClient(input: {
       ? `lifecycle:${operationInput.commandId}`
       : String(sequence);
     const action = await input.chair.dispatchProviderAction({
+      certifyingReview: null,
       adapterId: input.adapterId,
       actionId: `retained-test:${input.agentId}:${actionIdentity}`,
       operation: "send_turn",
@@ -490,27 +492,28 @@ async function createRetainedLifecycleFixture(input: {
   });
   let inProcessFabric: Fabric | undefined;
   let protocolServer: Server | undefined;
+  const daemonOptions = {
+    databasePath: input.databasePath,
+    stateDirectory,
+    runtimeDirectory,
+    socketPath,
+    workspaceRoots: [input.directory],
+    ...(input.options.maximumConcurrentProviderTurns === undefined
+      ? {}
+      : { maximumConcurrentProviderTurns: input.options.maximumConcurrentProviderTurns }),
+    adapters: {
+      "fake-lifecycle": {
+        command: [process.execPath, "--import", "tsx", fakeProvider],
+        environment: environment(input.providerJournalPath, "fake-lifecycle"),
+      },
+      "fake-lifecycle-secondary": {
+        command: [process.execPath, "--import", "tsx", fakeProvider],
+        environment: environment(input.secondaryProviderJournalPath, "fake-lifecycle-secondary"),
+      },
+    },
+  };
   const daemon = input.options.fault === undefined
-    ? await startFabricDaemon({
-        databasePath: input.databasePath,
-        stateDirectory,
-        runtimeDirectory,
-        socketPath,
-        workspaceRoots: [input.directory],
-        ...(input.options.maximumConcurrentProviderTurns === undefined
-          ? {}
-          : { maximumConcurrentProviderTurns: input.options.maximumConcurrentProviderTurns }),
-        adapters: {
-          "fake-lifecycle": {
-            command: [process.execPath, "--import", "tsx", fakeProvider],
-            environment: environment(input.providerJournalPath, "fake-lifecycle"),
-          },
-          "fake-lifecycle-secondary": {
-            command: [process.execPath, "--import", "tsx", fakeProvider],
-            environment: environment(input.secondaryProviderJournalPath, "fake-lifecycle-secondary"),
-          },
-        },
-      })
+    ? await startFabricDaemon(daemonOptions)
     : undefined;
   if (input.options.fault !== undefined) {
     await Promise.all([
@@ -718,6 +721,27 @@ async function createRetainedLifecycleFixture(input: {
       runId: run.runId,
       leaderTask: leaderTask as { taskId: string; revision: number },
       childTask: childTask as { taskId: string; revision: number },
+      ...(daemon === undefined ? {} : {
+        restartRetainedDaemon: async (): Promise<{ fabric: Fabric; chair: FabricClient }> => {
+          const restartedDaemon = await startFabricDaemon(daemonOptions);
+          const restartedChair = await connectFabricDaemon({
+            socketPath,
+            capability: run.chairCapability,
+          });
+          let restartClosed = false;
+          return {
+            chair: restartedChair as unknown as FabricClient,
+            fabric: {
+              close: async () => {
+                if (restartClosed) return;
+                restartClosed = true;
+                await restartedChair.close();
+                await restartedDaemon.stop();
+              },
+            } as unknown as Fabric,
+          };
+        },
+      }),
     };
   } catch (error: unknown) {
     await close();
@@ -896,6 +920,7 @@ export async function createRetainedLifecycleCallbackFixture(): Promise<Retained
     };
     const dispatchLifecycleCallback = async (): Promise<ProviderActionResult> => {
       return await chair!.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "fake-lifecycle",
         actionId: "retained-lifecycle:send-turn",
         operation: "send_turn",

@@ -5,7 +5,10 @@ import {
 } from "@local/agent-fabric-protocol";
 
 import type { FabricClient } from "../core/client.js";
-import type { ProviderActionResult } from "../core/contracts.js";
+import type {
+  ProviderActionDispatchRequest,
+  ProviderActionResult,
+} from "../core/contracts.js";
 import { digest } from "../project-session/store-support.js";
 
 function providerActionRequestIdentity(value: unknown): Readonly<{
@@ -23,6 +26,58 @@ function providerActionRequestIdentity(value: unknown): Readonly<{
   return {
     adapterId: Reflect.get(value, "adapterId") as string,
     actionId: Reflect.get(value, "actionId") as string,
+  };
+}
+
+function isProviderActionPayload(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonReviewProviderActionRequest(
+  request: OperationInputMap[typeof FABRIC_OPERATIONS.dispatchProviderAction],
+): ProviderActionDispatchRequest {
+  if (
+    typeof request.adapterId !== "string" ||
+    typeof request.actionId !== "string" ||
+    typeof request.commandId !== "string"
+  ) {
+    throw new TypeError("provider action request identity must be text");
+  }
+  if (!isProviderActionPayload(request.payload)) {
+    throw new TypeError("provider action payload must be an object");
+  }
+  if (request.operation === "spawn") {
+    if (typeof request.taskId !== "string" || typeof request.authorityId !== "string") {
+      throw new TypeError("provider spawn requires top-level task and authority identities");
+    }
+    return {
+      adapterId: request.adapterId,
+      actionId: request.actionId,
+      operation: request.operation,
+      taskId: request.taskId,
+      authorityId: request.authorityId,
+      certifyingReview: null,
+      payload: request.payload,
+      commandId: request.commandId,
+    };
+  }
+  if (
+    request.operation !== "send_turn" && request.operation !== "wakeup" &&
+    request.operation !== "release" && request.operation !== "steer"
+  ) {
+    throw new TypeError("invalid provider action operation");
+  }
+  if (request.authorityId !== undefined && typeof request.authorityId !== "string") {
+    throw new TypeError("provider authority identity must be text");
+  }
+  return {
+    adapterId: request.adapterId,
+    actionId: request.actionId,
+    operation: request.operation,
+    certifyingReview: null,
+    payload: request.payload,
+    commandId: request.commandId,
+    ...(request.authorityId === undefined ? {} : { authorityId: request.authorityId }),
   };
 }
 
@@ -128,7 +183,7 @@ export async function dispatchAgentProtocol(
         throw new TypeError("certifying review dispatch requires the review evidence daemon owner");
       }
       return publicNonReviewProviderAction(
-        await client.dispatchProviderAction(request as never),
+        await client.dispatchProviderAction(nonReviewProviderActionRequest(request)),
         providerActionRequestIdentity(request),
         request.operation === "spawn",
       );

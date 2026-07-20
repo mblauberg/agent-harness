@@ -392,6 +392,7 @@ describe("AFAB-001 Stage 5 orchestration safety evaluation", () => {
     const fixture = await createLifecycleFixture();
     try {
       const ambiguous = await fixture.chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "fake-lifecycle",
         actionId: "evaluation-ambiguous-unproven",
         operation: "send_turn",

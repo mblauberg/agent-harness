@@ -4,6 +4,8 @@ import type {
   LifecycleCurrentStateV1,
 } from "@local/agent-fabric-protocol";
 
+export type { ProviderActionDispatchRequest } from "../application/provider-action-dispatch-request.js";
+
 export type CurrentMcpSeatBinding = {
   seat: string;
   agentId: string;

@@ -153,6 +153,7 @@ describe("operator task admission", () => {
         commandId: "claim_ungated_sibling",
       })).resolves.toMatchObject({ state: "active", ownerAgentId: "worker" });
       await expect(chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "missing",
         actionId: "turn_while_gated",
         operation: "send_turn",
@@ -237,6 +238,7 @@ describe("operator task admission", () => {
         commandId: "lease_while_paused",
       })).rejects.toMatchObject({ code: "LIFECYCLE_PRECONDITION_FAILED" });
       await expect(chair.dispatchProviderAction({
+        certifyingReview: null,
         adapterId: "missing",
         actionId: "turn_without_task",
         operation: "send_turn",

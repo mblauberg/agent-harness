@@ -132,7 +132,7 @@ def run_portability_probe(
         "project": "lifecycle-portability-probe",
         "source": "canonical-project-artifacts",
         "authority": "local-evaluation-only",
-        "accepted_artifact_digest": "sha256:" + "0" * 64,
+        "accepted_artifact_identity": {"digest": "sha256:" + "0" * 64},
     }, sort_keys=True) + "\n")
     runner = workflow_runner or root / "skills" / "_shared" / "portable_workflow.py"
     cases = []

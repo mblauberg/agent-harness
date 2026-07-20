@@ -7,6 +7,7 @@ import type {
   CurrentMcpSeatBindingInput,
   CurrentMcpSeatBindingResult,
   EventsAfterResult,
+  ProviderActionDispatchRequest,
   TeamResult,
 } from "../core/contracts.js";
 import type { AuthorityInput, MessageInput } from "../domain/types.js";
@@ -453,15 +454,8 @@ export class FabricDaemonClient {
     return { capability: result.capability };
   }
 
-  async dispatchProviderAction(input: {
-    adapterId: string;
-    actionId: string;
-    operation: "spawn" | "send_turn" | "wakeup" | "release" | "steer";
-    authorityId?: string;
-    payload: Record<string, unknown>;
-    commandId: string;
-  }): Promise<{ actionId: string; status: string; history: string[]; executionCount: number; effectCount: number; result?: unknown }> {
-    const result = await this.#call(input.operation === "steer" ? "steerAgent" : "dispatchProviderAction", input);
+  async dispatchProviderAction(input: ProviderActionDispatchRequest): Promise<{ actionId: string; status: string; history: string[]; executionCount: number; effectCount: number; result?: unknown }> {
+    const result = await this.#call("dispatchProviderAction", input);
     if (!isRecord(result) || typeof result.actionId !== "string" || typeof result.status !== "string" || !Array.isArray(result.history) || !result.history.every((value) => typeof value === "string") || typeof result.executionCount !== "number" || typeof result.effectCount !== "number") {
       throw new Error("daemon returned an invalid provider action result");
     }
