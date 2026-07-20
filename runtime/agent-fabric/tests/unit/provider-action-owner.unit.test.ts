@@ -4,8 +4,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   assertProviderActionOwner,
   classifyProviderActionOwner,
+  classifyProviderActionOwnerForStartup,
   PROVIDER_ACTION_OWNERS,
   ProviderActionOwnerError,
+  type ProviderActionCustodyOwner,
+  type ProviderActionOwnerRef,
   type ProviderActionOwner,
 } from "../../src/application/provider-action-owner.ts";
 import { canonicalJson, sha256 } from "../../src/project-session/store-support.ts";
@@ -126,27 +129,30 @@ function insertAction(
 
 const ref = { runId: "run-1", adapterId: "adapter-1", actionId: "action-1" } as const;
 
-function bindOperatorControl(database: Database.Database): void {
+function bindOperatorControl(
+  database: Database.Database,
+  actionRef: ProviderActionOwnerRef = ref,
+): void {
   database.prepare(`UPDATE provider_actions SET payload_json=? WHERE adapter_id=? AND action_id=?`)
-    .run(JSON.stringify({ operatorCustodyId: "custody-1" }), ref.adapterId, ref.actionId);
+    .run(JSON.stringify({ operatorCustodyId: "custody-1" }), actionRef.adapterId, actionRef.actionId);
   database.prepare(`INSERT INTO operator_effect_custody VALUES (?,?,?,?,?,?,?)`)
-    .run("custody-1", "operator-1", "project-1", "session-run-1", "steer", "intent-1", '{"kind":"control","action":"steer"}');
+    .run("custody-1", "operator-1", `project-${actionRef.runId}`, `session-${actionRef.runId}`, "steer", "intent-1", '{"kind":"control","action":"steer"}');
   database.prepare(`INSERT INTO agents VALUES (?,?,?)`)
-    .run(ref.runId, "agent-1", "resume-1");
-  insertAction(database, { actionId: "source-1" });
+    .run(actionRef.runId, "agent-1", "resume-1");
+  insertAction(database, { runId: actionRef.runId, adapterId: actionRef.adapterId, actionId: "source-1" });
   database.prepare(`INSERT INTO provider_session_turn_leases VALUES (?,?,?,?,?,?)`)
-    .run(ref.runId, "agent-1", ref.adapterId, "source-1", 2, 3);
+    .run(actionRef.runId, "agent-1", actionRef.adapterId, "source-1", 2, 3);
   database.prepare(`
     UPDATE provider_actions
        SET operation='steer',target_agent_id='agent-1',
            provider_session_generation=2,turn_lease_generation=3
      WHERE adapter_id=? AND action_id=?
-  `).run(ref.adapterId, ref.actionId);
+  `).run(actionRef.adapterId, actionRef.actionId);
   database.prepare(`
     INSERT INTO operator_control_provider_action_bindings
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
-    "custody-1", ref.runId, ref.adapterId, ref.actionId, ref.adapterId,
+    "custody-1", actionRef.runId, actionRef.adapterId, actionRef.actionId, actionRef.adapterId,
     "source-1", "source-hash", "steer", "agent-1", "resume-1", 2, 3, "turn-1",
   );
 }
@@ -163,29 +169,39 @@ describe("canonical provider-action owner classification", () => {
       "certifying_review", "integrity_failed",
     ]);
   });
+
+  it("maps classifier exceptions to the startup fail-closed result", () => {
+    const database = openClassifierDatabase();
+    insertAction(database);
+    database.close();
+    expect(classifyProviderActionOwnerForStartup(database, ref)).toStrictEqual({
+      owner: "integrity_failed",
+      reason: "owner_classification_failed",
+    });
+  });
   const specialised: ReadonlyArray<Readonly<{
-    owner: ProviderActionOwner;
-    bind: (database: Database.Database) => void;
+    owner: Exclude<ProviderActionCustodyOwner, "generic">;
+    bind: (database: Database.Database, actionRef: ProviderActionOwnerRef) => void;
   }>> = [
     {
       owner: "launch",
-      bind: (database) => database.prepare(`
+      bind: (database, actionRef) => database.prepare(`
         INSERT INTO project_session_launch_custody VALUES (?,?,?)
-      `).run(ref.runId, ref.adapterId, ref.actionId),
+      `).run(actionRef.runId, actionRef.adapterId, actionRef.actionId),
     },
     {
       owner: "provider_agent",
-      bind: (database) => database.prepare(`
+      bind: (database, actionRef) => database.prepare(`
         INSERT INTO provider_agent_custody(run_id,adapter_id,action_id) VALUES (?,?,?)
-      `).run(ref.runId, ref.adapterId, ref.actionId),
+      `).run(actionRef.runId, actionRef.adapterId, actionRef.actionId),
     },
     {
       owner: "lifecycle",
-      bind: (database) => database.prepare(`
+      bind: (database, actionRef) => database.prepare(`
         INSERT INTO lifecycle_rotation_custodies(
           run_id,provider_action_adapter_id,provider_action_id
         ) VALUES (?,?,?)
-      `).run(ref.runId, ref.adapterId, ref.actionId),
+      `).run(actionRef.runId, actionRef.adapterId, actionRef.actionId),
     },
     {
       owner: "herdr",
@@ -193,17 +209,17 @@ describe("canonical provider-action owner classification", () => {
     },
     {
       owner: "chair_recovery",
-      bind: (database) => {
-        database.prepare(`INSERT INTO chair_bridge_losses VALUES (?,?)`).run("loss-1", ref.runId);
+      bind: (database, actionRef) => {
+        database.prepare(`INSERT INTO chair_bridge_losses VALUES (?,?)`).run("loss-1", actionRef.runId);
         database.prepare(`INSERT INTO chair_bridge_recovery_custody VALUES (?,?,?,?)`)
-          .run("loss-1", "rebind", ref.adapterId, ref.actionId);
+          .run("loss-1", "rebind", actionRef.adapterId, actionRef.actionId);
       },
     },
     {
       owner: "chair_live_handoff",
-      bind: (database) => database.prepare(`
+      bind: (database, actionRef) => database.prepare(`
         INSERT INTO chair_live_handoff_custody VALUES (?,?,?)
-      `).run(ref.runId, ref.adapterId, ref.actionId),
+      `).run(actionRef.runId, actionRef.adapterId, actionRef.actionId),
     },
     {
       owner: "operator_control",
@@ -211,38 +227,181 @@ describe("canonical provider-action owner classification", () => {
     },
     {
       owner: "certifying_review",
-      bind: (database) => {
+      bind: (database, actionRef) => {
         const reservationDigest = `sha256:${"e".repeat(64)}`;
         database.prepare(`UPDATE provider_actions SET finding_capacity_reservation_digest=? WHERE adapter_id=? AND action_id=?`)
-          .run(reservationDigest, ref.adapterId, ref.actionId);
+          .run(reservationDigest, actionRef.adapterId, actionRef.actionId);
         database.prepare(`INSERT INTO review_finding_capacity_reservations VALUES (?,?,?,?,?,?)`)
-          .run(ref.runId, ref.adapterId, ref.actionId, 7, "native", reservationDigest);
+          .run(actionRef.runId, actionRef.adapterId, actionRef.actionId, 7, "native", reservationDigest);
         database.prepare(`INSERT INTO provider_action_routes VALUES (?,?,?,?,?,?)`)
-          .run(ref.runId, ref.adapterId, ref.actionId, 1, 7, "native");
+          .run(actionRef.runId, actionRef.adapterId, actionRef.actionId, 1, 7, "native");
       },
     },
   ];
 
+  function canonicalRef(owner: ProviderActionOwner): ProviderActionOwnerRef {
+    return owner === "herdr" ? { ...ref, adapterId: "herdr-control-v1" } : ref;
+  }
+
   it.each(specialised)("classifies $owner only from its persisted identity", ({ owner, bind }) => {
     const database = openClassifierDatabase();
+    const actionRef = canonicalRef(owner);
     insertAction(database, owner === "herdr"
       ? { adapterId: "herdr-control-v1", operation: "herdr:agent.wake" }
       : {});
-    bind(database);
-    const actionRef = owner === "herdr" ? { ...ref, adapterId: "herdr-control-v1" } : ref;
+    bind(database, actionRef);
     expect(classifyProviderActionOwner(database, actionRef)).toBe(owner);
   });
 
   it.each(specialised)("rejects $owner at the live generic owner assertion", ({ owner, bind }) => {
     const database = openClassifierDatabase();
+    const actionRef = canonicalRef(owner);
     insertAction(database, owner === "herdr"
       ? { adapterId: "herdr-control-v1", operation: "herdr:agent.wake" }
       : {});
-    bind(database);
-    const actionRef = owner === "herdr" ? { ...ref, adapterId: "herdr-control-v1" } : ref;
+    bind(database, actionRef);
     expect(() => assertProviderActionOwner(database, actionRef, "generic")).toThrowError(
       expect.objectContaining({ expectedOwner: "generic", actualOwner: owner }),
     );
+  });
+
+  const independentAmbiguousPairs = specialised.flatMap((left, leftIndex) =>
+    specialised.slice(leftIndex + 1)
+      .filter((right) => new Set([left.owner, right.owner]).size === 2)
+      .filter((right) => !(
+        (left.owner === "provider_agent" && right.owner === "lifecycle") ||
+        (left.owner === "lifecycle" && right.owner === "provider_agent")
+      ))
+      .map((right) => ({
+        pair: `${left.owner} + ${right.owner}`,
+        left,
+        right,
+      })),
+  );
+
+  it.each(independentAmbiguousPairs)(
+    "fails closed when the independent $pair owner families both claim one canonical record",
+    ({ left, right }) => {
+      const database = openClassifierDatabase();
+      const actionRef = canonicalRef(left.owner === "herdr" || right.owner === "herdr" ? "herdr" : "generic");
+      insertAction(database, {
+        runId: actionRef.runId,
+        adapterId: actionRef.adapterId,
+        actionId: actionRef.actionId,
+        operation: actionRef.adapterId === "herdr-control-v1" ? "herdr:agent.wake" : "send_turn",
+      });
+      left.bind(database, actionRef);
+      right.bind(database, actionRef);
+      expect(classifyProviderActionOwner(database, actionRef)).toBe("integrity_failed");
+    },
+  );
+
+  const identityMutations = [
+    {
+      field: "runId",
+      mutate: (actionRef: ProviderActionOwnerRef): ProviderActionOwnerRef => ({
+        ...actionRef,
+        runId: `${actionRef.runId}-mutated`,
+      }),
+    },
+    {
+      field: "adapterId",
+      mutate: (actionRef: ProviderActionOwnerRef): ProviderActionOwnerRef => ({
+        ...actionRef,
+        adapterId: `${actionRef.adapterId}-mutated`,
+      }),
+    },
+    {
+      field: "actionId",
+      mutate: (actionRef: ProviderActionOwnerRef): ProviderActionOwnerRef => ({
+        ...actionRef,
+        actionId: `${actionRef.actionId}-mutated`,
+      }),
+    },
+  ] as const;
+  const canonicalFamilies = [
+    {
+      owner: "generic" as const,
+      bind: (_database: Database.Database, _actionRef: ProviderActionOwnerRef): void => undefined,
+    },
+    ...specialised,
+  ];
+  const singleFieldMutations = canonicalFamilies.flatMap((family) =>
+    identityMutations.map((mutation) => ({ ...family, ...mutation })),
+  );
+
+  it.each(singleFieldMutations)(
+    "fails closed for $owner when only required identity join field $field changes",
+    ({ owner, bind, mutate }) => {
+      const database = openClassifierDatabase();
+      const actionRef = canonicalRef(owner);
+      insertAction(database, {
+        runId: actionRef.runId,
+        adapterId: actionRef.adapterId,
+        actionId: actionRef.actionId,
+        operation: owner === "herdr" ? "herdr:agent.wake" : "send_turn",
+      });
+      bind(database, actionRef);
+      expect(classifyProviderActionOwner(database, actionRef)).toBe(owner);
+      expect(classifyProviderActionOwner(database, mutate(actionRef))).toBe("integrity_failed");
+    },
+  );
+
+  it.each([
+    {
+      owner: "lifecycle",
+      arrange: (database: Database.Database) => {
+        insertAction(database);
+        database.prepare(`
+          INSERT INTO lifecycle_rotation_custodies(
+            run_id,provider_action_adapter_id,provider_action_id,agent_id,
+            replacement_contract_digest,staged_capability_hash,target_principal_generation
+          ) VALUES (?,?,?,?,?,?,?)
+        `).run(ref.runId, ref.adapterId, ref.actionId, "agent-1", "contract-1", "cap-1", 2);
+        database.prepare(`
+          INSERT INTO provider_agent_custody(
+            run_id,adapter_id,action_id,operation,actor_agent_id,target_agent_id,
+            bridge_contract_digest,capability_hash,principal_generation,requested_provider_session_ref
+          ) VALUES (?,?,?,?,?,?,?,?,?,NULL)
+        `).run(ref.runId, ref.adapterId, ref.actionId, "spawn", "agent-1", "agent-1", "contract-1", "cap-1", 2);
+      },
+      mutate: (database: Database.Database) => database.prepare(`
+        UPDATE provider_agent_custody SET capability_hash='persisted-corruption'
+         WHERE run_id=? AND adapter_id=? AND action_id=?
+      `).run(ref.runId, ref.adapterId, ref.actionId),
+    },
+    {
+      owner: "operator_control",
+      arrange: (database: Database.Database) => {
+        insertAction(database);
+        bindOperatorControl(database);
+      },
+      mutate: (database: Database.Database) => database.prepare(`
+        UPDATE operator_control_provider_action_bindings SET source_payload_hash='persisted-corruption'
+         WHERE run_id=? AND adapter_id=? AND action_id=?
+      `).run(ref.runId, ref.adapterId, ref.actionId),
+    },
+    {
+      owner: "certifying_review",
+      arrange: (database: Database.Database) => {
+        const reservationDigest = `sha256:${"9".repeat(64)}`;
+        insertAction(database, { reservationDigest });
+        database.prepare(`INSERT INTO review_finding_capacity_reservations VALUES (?,?,?,?,?,?)`)
+          .run(ref.runId, ref.adapterId, ref.actionId, 7, "native", reservationDigest);
+        database.prepare(`INSERT INTO provider_action_routes VALUES (?,?,?,?,?,?)`)
+          .run(ref.runId, ref.adapterId, ref.actionId, 1, 7, "native");
+      },
+      mutate: (database: Database.Database) => database.prepare(`
+        UPDATE provider_action_routes SET slot='persisted-corruption'
+         WHERE run_id=? AND adapter_id=? AND action_id=?
+      `).run(ref.runId, ref.adapterId, ref.actionId),
+    },
+  ] as const)("reaches the persisted $owner joins when persisted owner fields mutate", ({ owner, arrange, mutate }) => {
+    const database = openClassifierDatabase();
+    arrange(database);
+    expect(classifyProviderActionOwner(database, ref)).toBe(owner);
+    mutate(database);
+    expect(classifyProviderActionOwner(database, ref)).toBe("integrity_failed");
   });
 
   it("classifies an unbound ordinary provider action as generic", () => {

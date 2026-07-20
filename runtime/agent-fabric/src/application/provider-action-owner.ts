@@ -24,6 +24,15 @@ export type ProviderActionOwnerRef = Readonly<{
   actionId: string;
 }>;
 
+export type ProviderActionOwnerStartupRow = Readonly<{
+  rowId: string;
+  action: Record<string, unknown>;
+  diagnosticRef: ProviderActionOwnerRef;
+  ref: ProviderActionOwnerRef | null;
+  owner: ProviderActionOwner;
+  reason: "owner_integrity_failed" | "owner_classification_failed";
+}>;
+
 export type ProviderActionCustodyOwner = Exclude<ProviderActionOwner, "integrity_failed">;
 
 export class ProviderActionOwnerError extends ProjectFabricCoreError {
@@ -251,6 +260,162 @@ export function classifyProviderActionOwner(
   if (certifyingReview) candidates.push("certifying_review");
   if (candidates.length > 1) return "integrity_failed";
   return candidates[0] ?? "generic";
+}
+
+export function classifyProviderActionOwnerForStartup(
+  database: Database.Database,
+  ref: ProviderActionOwnerRef,
+): Readonly<{ owner: ProviderActionOwner; reason: "owner_integrity_failed" | "owner_classification_failed" }> {
+  try {
+    return { owner: classifyProviderActionOwner(database, ref), reason: "owner_integrity_failed" };
+  } catch {
+    return { owner: "integrity_failed", reason: "owner_classification_failed" };
+  }
+}
+
+function diagnosticIdentity(value: unknown, field: string): string {
+  return typeof value === "string" ? value : `<invalid-${field}:${typeof value}>`;
+}
+
+export function classifyProviderActionOwnerRowForStartup(
+  database: Database.Database,
+  value: unknown,
+): ProviderActionOwnerStartupRow {
+  const action = row(value);
+  if (action === undefined) throw new Error("startup provider action row is invalid");
+  const rowId = action.provider_action_rowid;
+  if (typeof rowId !== "string" || !/^-?[0-9]+$/u.test(rowId)) {
+    throw new Error("startup provider action row locator is invalid");
+  }
+  const diagnosticRef = {
+    runId: diagnosticIdentity(action.run_id, "run-id"),
+    adapterId: diagnosticIdentity(action.adapter_id, "adapter-id"),
+    actionId: diagnosticIdentity(action.action_id, "action-id"),
+  };
+  if (
+    typeof action.run_id !== "string" ||
+    typeof action.adapter_id !== "string" ||
+    typeof action.action_id !== "string"
+  ) {
+    return {
+      rowId, action, diagnosticRef, ref: null, owner: "integrity_failed",
+      reason: "owner_classification_failed",
+    };
+  }
+  const ref = { runId: action.run_id, adapterId: action.adapter_id, actionId: action.action_id };
+  const classification = classifyProviderActionOwnerForStartup(database, ref);
+  return { rowId, action, diagnosticRef, ref, ...classification };
+}
+
+export function quarantineProviderActionOwnerAtStartup(
+  database: Database.Database,
+  startupRow: Pick<ProviderActionOwnerStartupRow, "rowId">,
+  now: number,
+  appendEvent: () => void,
+): boolean {
+  return database.transaction(() => {
+    const binding = row(database.prepare(`
+      SELECT budget_authority_id,budget_state,budget_reservation_json FROM provider_actions
+       WHERE rowid=CAST(? AS INTEGER) AND status IN ('prepared','dispatched','ambiguous')
+    `).get(startupRow.rowId));
+    if (binding === undefined) return false;
+    let settlement: string | null = null;
+    let reservationCorrupt = false;
+    if (binding.budget_state === "reserved") {
+      try {
+        const reservation = row(JSON.parse(String(binding.budget_reservation_json)));
+        if (reservation === undefined) reservationCorrupt = true;
+        else settlement = canonicalJson(Object.fromEntries(
+          Object.keys(reservation).sort().map((unit) => [unit, "unknown"]),
+        ));
+      } catch {
+        reservationCorrupt = true;
+      }
+    }
+    const tombstone = (): number => {
+      const triggerNames = [
+        "provider_actions_budget_binding_immutable",
+        "provider_actions_budget_state_cas",
+        "provider_actions_budget_settle",
+        "authority_budget_provider_ledger_update",
+      ];
+      const triggers = database.prepare(`
+        SELECT name,sql FROM sqlite_master WHERE type='trigger'
+         AND name IN (${triggerNames.map(() => "?").join(",")}) ORDER BY name
+      `).all(...triggerNames).map(row);
+      if (triggers.length !== triggerNames.length || triggers.some(
+        (trigger) => trigger === undefined || typeof trigger.name !== "string" || typeof trigger.sql !== "string",
+      )) throw new Error("startup provider action budget tombstone triggers are unavailable");
+      for (const trigger of triggers) {
+        if (trigger === undefined || typeof trigger.name !== "string") continue;
+        database.exec(`DROP TRIGGER "${trigger.name}"`);
+      }
+      try {
+        const changes = database.prepare(`
+          UPDATE provider_actions
+             SET status='quarantined',history_json=CASE
+                   WHEN json_valid(history_json) AND json_type(history_json)='array'
+                   THEN json_insert(history_json,'$[#]','quarantined') ELSE '["quarantined"]' END,
+                 idempotency_proven=0,result_json=NULL,journal_revision=journal_revision+1,updated_at=?,
+                 task_id=NULL,budget_authority_id=NULL,budget_reservation_json=NULL,
+                 budget_settlement_json=NULL,budget_state=NULL,budget_started_at=NULL
+           WHERE rowid=CAST(? AS INTEGER) AND status IN ('prepared','dispatched','ambiguous')
+        `).run(now, startupRow.rowId).changes;
+        if (changes === 1 && typeof binding.budget_authority_id === "string") {
+          database.prepare(`
+            UPDATE authority_budget SET
+              provider_reserved=(
+                SELECT COALESCE(SUM(reservation.value),0) FROM provider_actions action
+                JOIN json_each(CASE WHEN json_valid(action.budget_reservation_json)
+                  THEN action.budget_reservation_json ELSE '{}' END) reservation
+                  ON reservation.key=authority_budget.unit_key
+                LEFT JOIN json_each(CASE WHEN json_valid(action.budget_settlement_json)
+                  THEN action.budget_settlement_json ELSE '{}' END) settlement
+                  ON settlement.key=reservation.key
+                WHERE action.budget_authority_id=authority_budget.authority_id
+                  AND (action.budget_state='reserved' OR
+                    (action.budget_state='usage-unknown' AND settlement.type='text' AND settlement.value='unknown'))
+              ),
+              provider_consumed=(
+                SELECT COALESCE(SUM(settlement.value),0) FROM provider_actions action
+                JOIN json_each(CASE WHEN json_valid(action.budget_settlement_json)
+                  THEN action.budget_settlement_json ELSE '{}' END) settlement
+                  ON settlement.key=authority_budget.unit_key
+                WHERE action.budget_authority_id=authority_budget.authority_id
+                  AND action.budget_state IN ('settled','usage-unknown') AND settlement.type='integer'
+              ),
+              usage_unknown=1
+             WHERE authority_id=?
+          `).run(binding.budget_authority_id);
+        }
+        return changes;
+      } finally {
+        for (const trigger of triggers) {
+          if (trigger === undefined || typeof trigger.sql !== "string") continue;
+          database.exec(trigger.sql);
+        }
+      }
+    };
+    let changes: number;
+    try {
+      changes = reservationCorrupt ? tombstone() : database.prepare(`
+          UPDATE provider_actions
+             SET status='quarantined',history_json=CASE
+                   WHEN json_valid(history_json) AND json_type(history_json)='array'
+                   THEN json_insert(history_json,'$[#]','quarantined') ELSE '["quarantined"]' END,
+                 idempotency_proven=0,result_json=NULL,journal_revision=journal_revision+1,updated_at=?,
+                 budget_settlement_json=CASE WHEN budget_state='reserved' THEN ? ELSE budget_settlement_json END,
+                 budget_state=CASE WHEN budget_state='reserved' THEN 'usage-unknown' ELSE budget_state END
+           WHERE rowid=CAST(? AS INTEGER) AND status IN ('prepared','dispatched','ambiguous')
+        `).run(now, settlement, startupRow.rowId).changes;
+    } catch (error: unknown) {
+      if (reservationCorrupt || binding.budget_state !== "reserved") throw error;
+      changes = tombstone();
+    }
+    if (changes !== 1) return false;
+    appendEvent();
+    return true;
+  }).immediate();
 }
 
 export function assertProviderActionOwner(
