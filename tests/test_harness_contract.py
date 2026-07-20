@@ -9,7 +9,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOWS = Path.home() / ".claude" / "workflows"
+WORKFLOWS = ROOT / "workflows"
 
 
 def frontmatter_name(path: Path) -> str:

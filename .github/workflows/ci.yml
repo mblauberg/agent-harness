@@ -82,6 +82,7 @@ jobs:
               - 'scripts/**'
               - 'skills/**'
               - 'tests/**'
+              - 'workflows/**'
               - '.gitignore'
               - 'ACKNOWLEDGEMENTS.md'
               - 'AGENTS.md'
