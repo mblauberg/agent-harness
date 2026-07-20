@@ -45,19 +45,26 @@ function compatibilityAdapter(options: {
   adapterId: string;
   implementationPath: string;
   implementationHash: string;
+  entrypointPath?: string;
+  entrypointHash?: string;
   schemaPath: string;
   schemaHash: string;
 }): Record<string, unknown> {
+  const implementation = {
+    kind: "fixture-process",
+    installed_version: "1.0.0-fixture",
+    executable: options.implementationPath,
+    executable_sha256: options.implementationHash,
+    ...(options.entrypointPath === undefined ? {} : {
+      entrypoint: options.entrypointPath,
+      entrypoint_sha256: options.entrypointHash,
+    }),
+    provider_identity: "apple-designated",
+  };
   return {
     enabled: false,
     delivery_stage: 3,
-    implementation: {
-      kind: "fixture-process",
-      installed_version: "1.0.0-fixture",
-      executable: options.implementationPath,
-      executable_sha256: options.implementationHash,
-      provider_identity: "apple-designated",
-    },
+    implementation,
     contract: {
       adapter_version: 1,
       protocol: `${options.adapterId}-fixture`,
@@ -94,6 +101,10 @@ export async function createPrimaryCompatibilityFixture(): Promise<{
         adapterId,
         implementationPath: executablePath,
         implementationHash: sha256(executableBytes),
+        ...(adapterId === "claude-agent-sdk" ? {
+          entrypointPath: executablePath,
+          entrypointHash: sha256(executableBytes),
+        } : {}),
         schemaPath: protocolSchemaPath,
         schemaHash: sha256(schemaBytes),
       }),

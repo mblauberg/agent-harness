@@ -18,6 +18,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator, Mapping
 
+try:
+    from scripts.git_evidence import sanitized_git_environment
+except ModuleNotFoundError:  # Direct `python scripts/public_release_check.py`.
+    from git_evidence import sanitized_git_environment
+
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_LEGAL_FILES = frozenset({
@@ -162,32 +167,6 @@ class BlobEvidence:
 
 
 OID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
-
-
-def sanitized_git_environment(
-    source: Mapping[str, str] | None = None,
-) -> dict[str, str]:
-    """Build the closed child environment used only for Git evidence reads."""
-    inherited = os.environ if source is None else source
-    environment = {
-        name: inherited[name]
-        for name in ("PATH", "HOME", "TMPDIR")
-        if name in inherited
-    }
-    environment.update(
-        {
-            "LC_ALL": "C",
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_CONFIG_GLOBAL": os.devnull,
-            "GIT_CONFIG_SYSTEM": os.devnull,
-            "GIT_NO_REPLACE_OBJECTS": "1",
-            "GIT_GRAFT_FILE": os.devnull,
-            "GIT_NO_LAZY_FETCH": "1",
-            "GIT_OPTIONAL_LOCKS": "0",
-            "GIT_TERMINAL_PROMPT": "0",
-        }
-    )
-    return environment
 
 
 @dataclass(frozen=True)

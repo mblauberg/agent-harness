@@ -1,5 +1,6 @@
 from collections import Counter
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 
@@ -112,3 +113,50 @@ def test_lifecycle_adapter_absent_probe_fails_when_workflow_runner_breaks(tmp_pa
     runner.write_text("raise SystemExit(42)\n")
     with pytest.raises(subprocess.CalledProcessError):
         module.run_portability_probe(ROOT, tmp_path / "probe", workflow_runner=runner)
+
+
+def run_portable_workflow(tmp_path, identity):
+    context = tmp_path / "context.json"
+    output = tmp_path / "output.json"
+    context.write_text(json.dumps({
+        "project": "portable-test", "source": "fixture", "authority": "test-only",
+        "accepted_artifact_identity": identity,
+    }) + "\n")
+    return subprocess.run([
+        "python3", str(ROOT / "skills" / "_shared" / "portable_workflow.py"),
+        "--skill-root", str(ROOT / "skills" / "deliver"),
+        "--context", str(context), "--output", str(output),
+    ], text=True, capture_output=True)
+
+
+@pytest.mark.parametrize("identity", [
+    {"digest": "sha256:" + "1" * 64},
+    {"git_revision": {"repository": ".", "commit": "1" * 40, "tree": "2" * 40}},
+    {"git_revision": {"repository": "repo", "commit": "1" * 64, "tree": "2" * 64}},
+])
+def test_portable_workflow_accepts_closed_artifact_identity_union(tmp_path, identity):
+    result = run_portable_workflow(tmp_path, identity)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("identity", [
+    None, False, "", [], {},
+    {"digest": ""},
+    {"digest": "sha256:" + "1" * 64, "git_revision": {}},
+    {"git_revision": None},
+    {"git_revision": {"repository": ".", "commit": "1" * 40, "tree": "2" * 64}},
+    {"git_revision": {"repository": "", "commit": "1" * 40, "tree": "2" * 40}},
+    {"git_revision": {"repository": "../repo", "commit": "1" * 40, "tree": "2" * 40}},
+    {"git_revision": {"repository": "/repo", "commit": "1" * 40, "tree": "2" * 40}},
+    {"git_revision": {"repository": ".", "commit": "1" * 40, "tree": "2" * 40, "extra": True}},
+])
+def test_portable_workflow_rejects_open_or_invalid_artifact_identity(tmp_path, identity):
+    result = run_portable_workflow(tmp_path, identity)
+    assert result.returncode != 0
+
+
+def test_portable_workflow_contracts_require_artifact_identity_union():
+    for skill in AFFECTED:
+        contract = yaml.safe_load((ROOT / "skills" / skill / "portable-workflow.v1.json").read_text())
+        assert "accepted_artifact_identity" in contract["required_context_fields"]
+        assert "accepted_artifact_digest" not in contract["required_context_fields"]

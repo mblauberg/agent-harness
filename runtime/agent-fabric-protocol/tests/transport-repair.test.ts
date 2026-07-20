@@ -1,6 +1,6 @@
 import { Duplex } from "node:stream";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   FABRIC_OPERATIONS,
@@ -17,13 +17,20 @@ class ControlledLoopback extends Duplex {
   readonly #features: string[];
   readonly #maximumInFlight: number;
   readonly #maximumFrameBytes: number;
+  readonly #requestTimeoutMs: number;
   #buffer = "";
 
-  constructor(options: { features: string[]; maximumInFlight?: number; maximumFrameBytes?: number }) {
+  constructor(options: {
+    features: string[];
+    maximumInFlight?: number;
+    maximumFrameBytes?: number;
+    requestTimeoutMs?: number;
+  }) {
     super();
     this.#features = options.features;
     this.#maximumInFlight = options.maximumInFlight ?? 16;
     this.#maximumFrameBytes = options.maximumFrameBytes ?? 1_048_576;
+    this.#requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
   }
 
   override _read(): void {}
@@ -66,7 +73,7 @@ class ControlledLoopback extends Duplex {
             maximumPendingCalls: 8,
             maximumInFlightPerConnection: this.#maximumInFlight,
             idleTimeoutMs: 300000,
-            requestTimeoutMs: 30000,
+            requestTimeoutMs: this.#requestTimeoutMs,
           },
         });
       }
@@ -147,6 +154,37 @@ describe("validated NDJSON results", () => {
 });
 
 describe("negotiated in-flight limit", () => {
+  it("marks a saturated queued timeout as never submitted and keeps the transport open", async () => {
+    const stream = new ControlledLoopback({
+      features: ["project-sessions.v1"],
+      maximumInFlight: 1,
+      requestTimeoutMs: 30,
+    });
+    const transport = await NdjsonRpcTransport.connect(stream, initialize);
+    const originalSetTimeout = globalThis.setTimeout;
+    const timerSpy = vi.spyOn(globalThis, "setTimeout");
+    timerSpy.mockImplementationOnce((callback, _delay, ...args) => originalSetTimeout(callback, 300, ...args));
+    try {
+      const first = transport.call(FABRIC_OPERATIONS.projectSessionGet, getInput);
+      const queued = transport.call(FABRIC_OPERATIONS.projectSessionGet, getInput);
+
+      await expect(queued).rejects.toMatchObject({
+        code: "PROTOCOL_TIMEOUT",
+        requestState: "queued",
+      });
+      expect(transport.closed).toBe(false);
+      expect(stream.requests.filter((request) => request.operation !== "initialize")).toHaveLength(1);
+
+      const firstRequest = stream.requests.at(-1);
+      if (firstRequest === undefined) throw new Error("missing first request");
+      stream.fail(firstRequest, { code: "NOT_FOUND", message: "missing", retryable: false });
+      await first.catch(() => undefined);
+    } finally {
+      timerSpy.mockRestore();
+      await transport.close();
+    }
+  });
+
   it("does not write a second call until the first response frees capacity", async () => {
     const stream = new ControlledLoopback({ features: ["project-sessions.v1"], maximumInFlight: 1 });
     const transport = await NdjsonRpcTransport.connect(stream, initialize);

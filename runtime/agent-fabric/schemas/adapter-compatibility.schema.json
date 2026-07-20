@@ -39,7 +39,6 @@
         "installed_version": {"type": "string"},
         "source_build": {"$ref": "#/$defs/nullableString"},
         "resolved_artifact": {"type": "string"},
-        "lock_integrity_sha512": {"type": "string", "pattern": "^[A-Za-z0-9+/]{86}==$"},
         "entrypoint": {"type": "string"},
         "entrypoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "wrapper_entrypoint": {"type": "string", "minLength": 1},
@@ -133,16 +132,9 @@
               "contract": {
                 "type": "object",
                 "properties": {
-                  "protocol_version": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "integer"}]},
-                  "schema_source": {"type": "string", "minLength": 1},
-                  "schema_bundle": {"type": "string", "minLength": 1},
-                  "schema_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                  "protocol_version": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "integer"}]}
                 },
-                "required": ["protocol_version", "schema_sha256"],
-                "anyOf": [
-                  {"properties": {"schema_source": {"type": "string", "minLength": 1}}, "required": ["schema_source"]},
-                  {"properties": {"schema_bundle": {"type": "string", "minLength": 1}}, "required": ["schema_bundle"]}
-                ]
+                "required": ["protocol_version"]
               }
             }
           }
@@ -184,6 +176,33 @@
                 "type": "object",
                 "properties": {"provider_install_root": {"type": "string"}},
                 "required": ["provider_install_root"]
+              }
+            }
+          }
+        }
+        ,
+        {
+          "if": {
+            "properties": {
+              "enabled": {"const": true},
+              "unresolved_pins": {"type": "array", "maxItems": 0},
+              "implementation": {
+                "type": "object",
+                "properties": {"kind": {"const": "npm-package"}},
+                "required": ["kind"]
+              }
+            },
+            "required": ["enabled", "unresolved_pins", "implementation"]
+          },
+          "then": {
+            "properties": {
+              "implementation": {
+                "type": "object",
+                "properties": {
+                  "entrypoint": {"type": "string"},
+                  "entrypoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                },
+                "required": ["entrypoint", "entrypoint_sha256"]
               }
             }
           }
