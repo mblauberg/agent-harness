@@ -375,9 +375,10 @@ ownership, source tree digests, the bound target and rename history beside the
 target skills directory. The post-install integrity check verifies catalogue
 presence. Missing or noncanonical required names fail; extra symlinks resolving
 outside the canonical skill tree produce warnings. Unmanaged paths are never
-claimed, overwritten or automatically removed;
-changed managed targets fail for user resolution and link mutations roll back
-if the manifest commit fails.
+claimed, overwritten or automatically removed; changed managed targets fail for
+user resolution. A staged temporary link is atomically replaced into place
+before the manifest is written; rerunning the installer reconciles any partial
+result.
 Provider bootstraps remain small and share the same precedence sentence.
 
 ## Project Fabric Console

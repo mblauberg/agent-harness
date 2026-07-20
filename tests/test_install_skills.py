@@ -1,5 +1,4 @@
 from pathlib import Path
-import importlib.util
 import json
 import shutil
 import subprocess
@@ -422,25 +421,6 @@ def test_check_verifies_canonical_catalogue_and_ignores_ds_store(tmp_path):
     assert manager(target, "check", source).returncode == 0
 
 
-def test_manifest_commit_failure_rolls_back_link_mutations(tmp_path, monkeypatch):
-    spec = importlib.util.spec_from_file_location("managed_installer_failure", MANAGER)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader
-    spec.loader.exec_module(module)
-    source = tiny_source(tmp_path)
-    target = tmp_path / "installed"
-
-    def fail_commit(_target, _manifest):
-        raise OSError("injected manifest failure")
-
-    monkeypatch.setattr(module, "_write_manifest", fail_commit)
-    with pytest.raises(OSError, match="injected"):
-        module.execute("install", source, target)
-    assert not (target / "alpha").exists()
-    assert not (target / "beta").exists()
-    assert not manifest_for(target).exists()
-
-
 def test_manifest_key_traversal_fails_before_uninstall_mutation(tmp_path):
     source = tiny_source(tmp_path)
     target = tmp_path / "installed"
@@ -473,3 +453,18 @@ def test_rename_reconcile_preflights_all_conflicts_before_mutation(tmp_path):
     assert (target / "alpha").is_symlink()
     assert not (target / "gamma").exists()
     assert "alpha" in json.loads(manifest_for(target).read_text())["managed"]
+
+
+def test_installer_refuses_symlinked_source_content(tmp_path):
+    source = tiny_source(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("not part of the source tree\n")
+    (source / "alpha" / "reference.md").symlink_to(outside)
+    target = tmp_path / "installed"
+
+    result = manager(target, "install", source)
+
+    assert result.returncode == 3
+    assert "skill source contains a symlink" in result.stderr
+    assert not (target / "alpha").exists()
+    assert not manifest_for(target).exists()
