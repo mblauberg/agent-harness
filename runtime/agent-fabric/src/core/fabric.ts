@@ -909,7 +909,7 @@ export class Fabric {
   readonly #maximumConcurrentProviderTurns: number;
   readonly #ownedProviderActions = new Map<string, Promise<void>>();
   readonly #providerActionReconciliations = new Map<string, Promise<ProviderActionResult>>();
-  readonly #lifecycleProviderActions = new Map<string, Promise<ProviderActionResult>>();
+  readonly #lifecycleContinuations = new Map<string, Promise<void>>();
   readonly #activeProviderOperations = new Set<Promise<void>>();
   readonly #deferredProviderActions: Array<{
     key: string;
@@ -1462,12 +1462,12 @@ export class Fabric {
     while (
       this.#activeProviderOperations.size > 0 ||
       this.#ownedProviderActions.size > 0 ||
-      this.#lifecycleProviderActions.size > 0
+      this.#lifecycleContinuations.size > 0
     ) {
       await Promise.allSettled([
         ...this.#activeProviderOperations,
         ...this.#ownedProviderActions.values(),
-        ...this.#lifecycleProviderActions.values(),
+        ...this.#lifecycleContinuations.values(),
       ]);
       this.#abandonDeferredProviderActions();
     }
@@ -9237,7 +9237,7 @@ export class Fabric {
       actionId: input.actionId,
     }, "lifecycle");
     const key = `lifecycle\0${input.runId}\0${input.agentId}\0${input.custodyId}`;
-    if (this.#ownedProviderActions.has(key)) return;
+    if (this.#lifecycleContinuations.has(key)) return;
     const predecessor = this.#ownedProviderActions.get(
       this.#providerActionOwnershipKey(input.runId, input.adapterId, input.callerActionId),
     );
@@ -9245,7 +9245,7 @@ export class Fabric {
       if (predecessor !== undefined) await predecessor;
       if (!this.#closing) await this.#continueLifecycleRotation(input);
     })();
-    this.#ownedProviderActions.set(key, continuation);
+    this.#lifecycleContinuations.set(key, continuation);
     void continuation.catch((error: unknown) => {
       if (error instanceof ProviderActionOwnerError) return;
       this.#event(input.runId, "lifecycle-continuation-failed", input.agentId, {
@@ -9257,7 +9257,7 @@ export class Fabric {
         ),
       });
     }).finally(() => {
-      if (this.#ownedProviderActions.get(key) === continuation) this.#ownedProviderActions.delete(key);
+      if (this.#lifecycleContinuations.get(key) === continuation) this.#lifecycleContinuations.delete(key);
     });
   }
 
