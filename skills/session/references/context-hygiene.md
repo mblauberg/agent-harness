@@ -88,6 +88,25 @@ an ignored cache or delete it with a filesystem command.
 - Harness-private memory never certifies current project state. Project-owned
   docs win, and a stale or unverifiable claim is labelled stale/unknown.
 
+## Harness-private memory
+
+Use private memory only for genuine cross-project user preferences. Put
+project knowledge in its durable owner, such as a project instruction, spec,
+ADR or runbook, and keep moving status in the work tracker or state file.
+
+Keep the memory store plain and easy to edit:
+
+- write one fact per Markdown file;
+- give it small frontmatter with `name`, `description` and `metadata.type`;
+- add a one-line pointer to the file in `MEMORY.md`;
+- update a changed preference by editing the file, or replace it and note the
+  supersession while updating the index.
+
+Before writing, check that the fact contains no secret or credential, PII, or
+transient project or run status/result. If it does, omit it or put the durable,
+non-sensitive knowledge in its proper project owner. Memory changes are normal
+file edits; they need no auxiliary approval artifacts or lifecycle workflow.
+
 ## Split or merge
 
 Split a live file when it mixes owners, audiences, lifecycles or change rates,
