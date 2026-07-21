@@ -34,10 +34,13 @@ import {
   type OperatorActionStatePort,
   type OperatorLaunchCustodyPort,
   type OperatorLifecycleRecoveryCustodyPort,
+  type OperatorChairLiveHandoffCustodyPort,
 } from "../../src/operator/action-store.ts";
 import { OperatorProjectionStore } from "../../src/operator/projection-store.ts";
 import { OperatorStore } from "../../src/operator/store.ts";
 import { ScopedGateStore } from "../../src/gates/store.ts";
+import type { ProviderActionTicket } from "../../src/application/provider-action-admission.ts";
+import { sha256 } from "../../src/project-session/store-support.ts";
 import type { AuthenticatedOperatorContext } from "../../src/project-session/contracts.ts";
 
 const databases: Database.Database[] = [];
@@ -2963,6 +2966,255 @@ describe("operator lifecycle recovery action store", () => {
     expect({ abandonPreparations, dispatches }).toEqual({ abandonPreparations: 1, dispatches: 0 });
   });
 });
+
+describe("operator chair live handoff action store", () => {
+  // Direct `OperatorActionStore.reconcile` live-handoff characterisation (#354 S4c, plan §2):
+  // captured green at base, before `action-store.ts`'s chair-live-handoff adapter range
+  // (`#commitChairLiveHandoff`/`#chairLiveHandoffStatus`/`#reconcileChairLiveHandoff`/the
+  // `chair-live-handoff` `#readCurrentState` branch) moves into
+  // `operator/chair-live-handoff-actions.ts`. Must stay byte-identical after the move.
+  it("previews, commits, reads status and reconciles one exact chair live handoff without generic effects", async () => {
+    const fixture = setupProjection();
+    const intent = chairLiveHandoffIntent();
+    const chairLiveHandoffCredential: OperatorCapabilityCredential = {
+      capabilityId: identifier<"CapabilityId">("cap_session_takeover"),
+      token: "session-secret-takeover",
+    };
+    // Chair live handoff commands authenticate through a `takeover`-kind operator capability
+    // (see `launch-custody.test.ts`'s "routes live handoff preview and commit through takeover
+    // custody" fixture); `parseOperatorCapabilityGrant` only accepts a `takeover` grant paired
+    // with the chair-bridge-recovery `takeoverBinding` shape, so this inserts the row directly,
+    // mirroring that existing precedent exactly.
+    fixture.database.prepare(`
+      INSERT INTO operator_capabilities(
+        capability_id, token_hash, operator_id, project_id, project_session_id,
+        project_authority_generation, session_generation, principal_generation,
+        kind, operations_json, issued_at, expires_at, handoff_digest,
+        old_chair_generation, expected_run_id, expected_run_revision,
+        expected_session_revision, cas_target_revision
+      ) VALUES (
+        ?, ?, 'operator_01', 'project_01', 'session_01',
+        1, ?, 1, 'takeover', '["takeover","read"]', ?, ?, ?, ?,
+        ?, ?, ?, ?
+      )
+    `).run(
+      chairLiveHandoffCredential.capabilityId,
+      sha256(chairLiveHandoffCredential.token),
+      intent.expectedSessionGeneration,
+      now - 1_000,
+      now + 60_000,
+      intent.handoffRef.digest,
+      intent.expectedChairGeneration,
+      intent.coordinationRunId,
+      intent.expectedRunRevision,
+      intent.expectedSessionRevision,
+      intent.expectedBridgeRevision,
+    );
+    const takeoverContext: AuthenticatedOperatorContext = { ...fixture.context };
+    const handoffDigest = parseSha256Digest(digest, "test.chairLiveHandoffDigest");
+    let reads = 0;
+    let inspections = 0;
+    let preflights = 0;
+    let preparations = 0;
+    let dispatches = 0;
+    let generic = 0;
+    const statusPairs: string[][] = [];
+    const reconcilePairs: string[][] = [];
+    const chairLiveHandoffCustody: OperatorChairLiveHandoffCustodyPort = {
+      readChairLiveHandoffCurrentState: async () => {
+        reads += 1;
+        return { revision: intent.expectedBridgeRevision, inspectionDigest: handoffDigest };
+      },
+      inspectChairLiveHandoff: async () => {
+        inspections += 1;
+        return { intent, inspectionDigest: handoffDigest };
+      },
+      preflightChairLiveHandoff: () => {
+        preflights += 1;
+        return {
+          disposition: "resolving" as const,
+          scope: { kind: "run-action" as const, runId: intent.coordinationRunId },
+          actionRef: { adapterId: intent.providerAdapterId, actionId: "chair-promotion_01" },
+        } as unknown as ProviderActionTicket;
+      },
+      prepareChairLiveHandoffInTransaction: () => {
+        preparations += 1;
+        return {
+          schemaVersion: 1,
+          custodyId: "custody_live_handoff_01",
+          promotionActionId: "chair-promotion_01",
+          intent,
+          intentDigest: handoffDigest,
+          inspectionDigest: handoffDigest,
+          operatorId: "operator_01",
+          operatorCommandId: "commit_live_handoff_01",
+        };
+      },
+      dispatchPreparedChairLiveHandoff: async () => {
+        dispatches += 1;
+        return { status: "pending" as const, custodyId: "custody_live_handoff_01", evidenceDigest: handoffDigest };
+      },
+      chairLiveHandoffStatus: (operatorId: string, commandId: string) => {
+        statusPairs.push([operatorId, commandId]);
+        return { status: "pending" as const, custodyId: "custody_live_handoff_01", evidenceDigest: handoffDigest };
+      },
+      reconcileChairLiveHandoff: async (operatorId: string, commandId: string) => {
+        reconcilePairs.push([operatorId, commandId]);
+        return { status: "committed" as const, custodyId: "custody_live_handoff_01", evidenceDigest: handoffDigest };
+      },
+    };
+    const actions = new OperatorActionStore({
+      database: fixture.database,
+      operatorStore: fixture.operatorStore,
+      statePort: { read: async () => { throw new Error("generic state port not expected"); } },
+      effectPort: {
+        dispatch: async () => {
+          generic += 1;
+          throw new Error("provider dispatch not expected");
+        },
+        observe: async () => { throw new Error("provider observe not expected"); },
+      },
+      chairLiveHandoffCustody,
+      clock: () => now,
+    });
+
+    const previewRequest = chairLiveHandoffPreviewRequest(chairLiveHandoffCredential, intent);
+    const preview = await actions.preview(takeoverContext, previewRequest);
+    expect(preview).toMatchObject({ intent, consequenceClass: "consequential" });
+    expect({ reads, dispatches: generic }).toEqual({ reads: 1, dispatches: 0 });
+
+    const commitRequest: OperatorActionCommitRequest = {
+      command: {
+        ...previewRequest.command,
+        commandId: identifier<"CommandId">("commit_live_handoff_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_01"),
+          inputEventId: "input_commit_live_handoff_01",
+        },
+      },
+      projectId: previewRequest.projectId,
+      previewId: preview.previewId,
+      expectedPreviewRevision: preview.previewRevision,
+      previewDigest: preview.previewDigest,
+      expectedIntentDigest: preview.intentDigest,
+      confirmation: { kind: "explicit", confirmationId: "confirm_live_handoff_01" },
+    };
+    const receipt = await actions.commit(takeoverContext, commitRequest);
+    expect(await actions.commit(takeoverContext, commitRequest)).toEqual(receipt);
+    expect({ reads, inspections, preflights, preparations, dispatches, generic }).toEqual({
+      reads: 2,
+      inspections: 1,
+      preflights: 1,
+      preparations: 1,
+      dispatches: 1,
+      generic: 0,
+    });
+
+    expect(actions.status({
+      credential: chairLiveHandoffCredential,
+      projectId: identifier<"ProjectId">("project_01"),
+      commandId: receipt.commandId,
+    })).toMatchObject({ status: "pending", commandId: receipt.commandId });
+    expect(statusPairs).toEqual([["operator_01", "commit_live_handoff_01"]]);
+
+    const reconciled = await actions.reconcile(takeoverContext, {
+      command: {
+        ...commitRequest.command,
+        commandId: identifier<"CommandId">("reconcile_live_handoff_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_01"),
+          inputEventId: "input_reconcile_live_handoff_01",
+        },
+      },
+      projectId: commitRequest.projectId,
+      targetCommandId: receipt.commandId,
+      expectedStatus: "pending",
+      expectedAttemptGeneration: 1,
+      mode: "observe-only",
+    });
+    expect(reconciled).toMatchObject({ status: "committed", commandId: receipt.commandId });
+    expect(reconcilePairs).toEqual([["operator_01", "commit_live_handoff_01"]]);
+  });
+
+  it("fails closed before generic state or effect ports when chair live handoff custody is missing", async () => {
+    const fixture = setupProjection();
+    const intent = chairLiveHandoffIntent();
+    let genericReads = 0;
+    const actions = new OperatorActionStore({
+      database: fixture.database,
+      operatorStore: fixture.operatorStore,
+      statePort: {
+        read: async () => {
+          genericReads += 1;
+          throw new Error("generic state port not expected");
+        },
+      },
+      effectPort: {
+        dispatch: async () => { throw new Error("generic effect port not expected"); },
+        observe: async () => { throw new Error("generic effect port not expected"); },
+      },
+      clock: () => now,
+    });
+
+    await expect(actions.preview(
+      fixture.context,
+      chairLiveHandoffPreviewRequest(fixture.credential, intent),
+    )).rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
+    expect(genericReads).toBe(0);
+  });
+});
+
+function chairLiveHandoffIntent(): Extract<OperatorActionIntent, { kind: "chair-live-handoff" }> {
+  return {
+    kind: "chair-live-handoff",
+    schemaVersion: 1,
+    projectSessionId: "session_01",
+    coordinationRunId: "run_01",
+    handoffRef: parseArtifactRef({ path: "handoff.json", digest }, "test.chairLiveHandoffRef"),
+    predecessorAgentId: "chair_01",
+    successorAgentId: "successor_01",
+    successorAuthorityId: "authority_01",
+    successorAuthorityDigest: parseSha256Digest(digest, "test.chairLiveHandoffSuccessorAuthorityDigest"),
+    expectedSessionRevision: 2,
+    expectedSessionGeneration: 1,
+    expectedMembershipRevision: 1,
+    expectedRunRevision: 4,
+    expectedChairGeneration: 1,
+    expectedChairLeaseId: "chair:run_01:1",
+    expectedBridgeRevision: 1,
+    expectedChairBridgeGeneration: 1,
+    expectedPredecessorPrincipalGeneration: 1,
+    expectedSuccessorPrincipalGeneration: 1,
+    expectedSuccessorBridgeRevision: 1,
+    expectedSuccessorBridgeGeneration: 1,
+    providerAdapterId: "claude-agent-sdk",
+    providerContractDigest: parseSha256Digest(digest, "test.chairLiveHandoffProviderContractDigest"),
+  } as Extract<OperatorActionIntent, { kind: "chair-live-handoff" }>;
+}
+
+function chairLiveHandoffPreviewRequest(
+  credential: OperatorCapabilityCredential,
+  intent: Extract<OperatorActionIntent, { kind: "chair-live-handoff" }>,
+): OperatorActionPreviewRequest {
+  return {
+    command: {
+      credential,
+      commandId: identifier<"CommandId">("preview_live_handoff_01"),
+      expectedRevision: intent.expectedBridgeRevision,
+      actor: identifier<"OperatorId">("operator_01"),
+      provenance: {
+        kind: "console-direct-input",
+        clientId: identifier<"OperatorClientId">("console_01"),
+        inputEventId: "input_preview_live_handoff_01",
+      },
+      evidenceRefs: [],
+    },
+    projectId: identifier<"ProjectId">("project_01"),
+    intent,
+  };
+}
 
 function lifecycleRecoveryIntent(): Extract<
   Extract<OperatorActionIntent, { kind: "agent-lifecycle-recovery" }>,

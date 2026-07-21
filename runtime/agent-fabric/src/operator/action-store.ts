@@ -43,9 +43,6 @@ import type {
   ChairRecoveryInspection,
   ChairRecoveryCommit,
   ChairLiveHandoffCurrentState,
-  ChairLiveHandoffDispatchHandle,
-  ChairLiveHandoffInspection,
-  ChairLiveHandoffCommit,
 } from "../project-session/launch-custody.js";
 import { canonicalJson, integer, isRow, row, sha256, text, type Row } from "../project-session/store-support.js";
 import type { AuthenticatedOperatorCredential, OperatorStore } from "./store.js";
@@ -58,6 +55,7 @@ import {
   parseRejectedStatus,
   parseStoredPreview,
   parseStoredReceipt,
+  prepareProviderActionAfterPreflight,
   statusFromAction,
   type StoredPendingAction,
   type StoredPreviewEnvelope,
@@ -69,6 +67,10 @@ import {
   type OperatorLifecycleRecoveryCustodyPort,
   validateLifecycleRecoveryCurrentState,
 } from "../lifecycle/operator-actions.js";
+import {
+  OperatorChairLiveHandoffActionAdapter,
+  type OperatorChairLiveHandoffCustodyPort,
+} from "./chair-live-handoff-actions.js";
 
 export type OperatorActionCurrentState =
   | {
@@ -188,45 +190,6 @@ export interface OperatorChairRecoveryCustodyPort {
   releaseProviderActionPreflightAfterRollback?(ticket: ProviderActionTicket, failure: unknown): void;
 }
 
-export interface OperatorChairLiveHandoffCustodyPort {
-  readChairLiveHandoffCurrentState(intent: Extract<OperatorActionIntent, { kind: "chair-live-handoff" }>): Promise<ChairLiveHandoffCurrentState>;
-  inspectChairLiveHandoff(intent: Extract<OperatorActionIntent, { kind: "chair-live-handoff" }>): Promise<ChairLiveHandoffInspection>;
-  preflightChairLiveHandoff(input: Readonly<{
-    inspection: ChairLiveHandoffInspection;
-    operatorCommandId: string;
-    principal: AuthenticatedOperatorContext;
-  }>): ProviderActionTicket;
-  prepareChairLiveHandoffInTransaction(input: Readonly<{
-    inspection: ChairLiveHandoffInspection;
-    operatorId: string;
-    operatorCommandId: string;
-    providerActionTicket: ProviderActionTicket;
-  }>): ChairLiveHandoffDispatchHandle;
-  dispatchPreparedChairLiveHandoff(handle: ChairLiveHandoffDispatchHandle): Promise<ChairLiveHandoffCommit>;
-  chairLiveHandoffStatus(operatorId: string, operatorCommandId: string): ChairLiveHandoffCommit;
-  reconcileChairLiveHandoff(operatorId: string, operatorCommandId: string): Promise<ChairLiveHandoffCommit>;
-  releaseProviderActionPreflightAfterRollback?(ticket: ProviderActionTicket, failure: unknown): void;
-}
-
-function prepareProviderActionAfterPreflight<T>(
-  prepare: () => T,
-  custody: Readonly<{
-    releaseProviderActionPreflightAfterRollback?(ticket: ProviderActionTicket, failure: unknown): void;
-  }>,
-  ticket: ProviderActionTicket,
-): T {
-  try {
-    return prepare();
-  } catch (error: unknown) {
-    try {
-      custody.releaseProviderActionPreflightAfterRollback?.(ticket, error);
-    } catch {
-      // Preserve the original preparation error if release races or fails.
-    }
-    throw error;
-  }
-}
-
 type LifecycleRecoveryIntent = Extract<OperatorActionIntent, { kind: "agent-lifecycle-recovery" }>;
 
 export type {
@@ -235,6 +198,7 @@ export type {
   OperatorLifecycleRecoveryCustodyPort,
   OperatorLifecycleRecoveryInspection,
 } from "../lifecycle/operator-actions.js";
+export type { OperatorChairLiveHandoffCustodyPort } from "./chair-live-handoff-actions.js";
 
 export type OperatorActionStoreOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
@@ -254,7 +218,7 @@ export class OperatorActionStore {
   readonly #effectPort: OperatorActionEffectPort;
   readonly #launchCustody: OperatorLaunchCustodyPort | undefined;
   readonly #chairRecoveryCustody: OperatorChairRecoveryCustodyPort | undefined;
-  readonly #chairLiveHandoffCustody: OperatorChairLiveHandoffCustodyPort | undefined;
+  readonly #chairLiveHandoffAdapter: OperatorChairLiveHandoffActionAdapter | undefined;
   readonly #lifecycleAdapter: OperatorLifecycleActionAdapter | undefined;
   readonly #clock: () => number;
   readonly #previewTtlMs: number;
@@ -268,7 +232,6 @@ export class OperatorActionStore {
     this.#effectPort = options.effectPort;
     this.#launchCustody = options.launchCustody;
     this.#chairRecoveryCustody = options.chairRecoveryCustody;
-    this.#chairLiveHandoffCustody = options.chairLiveHandoffCustody;
     this.#clock = options.clock ?? Date.now;
     this.#previewTtlMs = options.previewTtlMs ?? 5 * 60_000;
     if (!Number.isSafeInteger(this.#previewTtlMs) || this.#previewTtlMs < 1) {
@@ -279,6 +242,13 @@ export class OperatorActionStore {
       database: this.#database,
       journal: this.#journal,
       custody: options.lifecycleRecoveryCustody,
+      clock: this.#clock,
+      actionSessionId,
+    });
+    this.#chairLiveHandoffAdapter = options.chairLiveHandoffCustody === undefined ? undefined : new OperatorChairLiveHandoffActionAdapter({
+      database: this.#database,
+      journal: this.#journal,
+      custody: options.chairLiveHandoffCustody,
       clock: this.#clock,
       actionSessionId,
     });
@@ -812,99 +782,10 @@ export class OperatorActionStore {
     payloadHash: string,
     current: OperatorActionCurrentState,
   ): Promise<OperatorActionReceipt> {
-    const custody = this.#chairLiveHandoffCustody;
-    if (custody === undefined) {
+    if (this.#chairLiveHandoffAdapter === undefined) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair live handoff custody runtime is unavailable");
     }
-    const inspection = await custody.inspectChairLiveHandoff(intent);
-    const providerActionTicket = custody.preflightChairLiveHandoff({
-      inspection,
-      operatorCommandId: request.command.commandId,
-      principal: context,
-    });
-    const provisionalState = {
-      status: "pending" as const,
-      commandId: request.command.commandId,
-      phase: "prepared" as const,
-      attemptGeneration: 1,
-    };
-    const provisionalReceipt: OperatorActionReceipt = {
-      commandId: request.command.commandId,
-      previewId: envelope.preview.previewId,
-      previewRevision: envelope.preview.previewRevision,
-      intentDigest: envelope.preview.intentDigest,
-      beforeStateDigest: envelope.preview.beforeStateDigest,
-      afterStateDigest: digestValue(provisionalState, "operatorChairLiveHandoffCommit.provisionalStateDigest"),
-      evidenceRefs: envelope.preview.evidenceRefs,
-      committedAt: toTimestamp(this.#clock(), "operatorChairLiveHandoffCommit.committedAt"),
-    };
-    const prepare = this.#database.transaction(():
-      | { kind: "replay"; receipt: OperatorActionReceipt }
-      | { kind: "prepared"; handle: ChairLiveHandoffDispatchHandle } => {
-      const concurrentReplay = this.#journal.commandReplay(context.operatorId, request.command.commandId, payloadHash);
-      if (concurrentReplay !== null) return { kind: "replay", receipt: concurrentReplay };
-      const latest = this.#journal.previewRow(request.previewId);
-      this.#journal.assertPreviewClaim(latest, request.command.commandId);
-      this.#database.prepare(`
-        UPDATE operator_previews SET preview_json=?, confirmed_command_id=? WHERE preview_id=?
-      `).run(
-        canonicalJson({ preview: envelope.preview, action: { ...provisionalState, receipt: provisionalReceipt } }),
-        request.command.commandId,
-        request.previewId,
-      );
-      this.#journal.insertCommand(
-        context,
-        request.command,
-        request.projectId,
-        actionSessionId(authenticated, intent),
-        "takeover",
-        payloadHash,
-        current,
-        provisionalState,
-        provisionalReceipt,
-        "committed",
-      );
-      return {
-        kind: "prepared",
-        handle: custody.prepareChairLiveHandoffInTransaction({
-          inspection,
-          operatorId: context.operatorId,
-          operatorCommandId: request.command.commandId,
-          providerActionTicket,
-        }),
-      };
-    });
-    const prepared = prepareProviderActionAfterPreflight(() => prepare.immediate(), custody, providerActionTicket);
-    if (prepared.kind === "replay") return prepared.receipt;
-    let outcome: ChairLiveHandoffCommit;
-    try {
-      outcome = await custody.dispatchPreparedChairLiveHandoff(prepared.handle);
-    } catch {
-      return provisionalReceipt;
-    }
-    if (outcome.status !== "committed") return provisionalReceipt;
-    const receipt: OperatorActionReceipt = {
-      ...provisionalReceipt,
-      afterStateDigest: digestValue(outcome, "operatorChairLiveHandoffCommit.afterStateDigest"),
-    };
-    const terminal: StoredTerminalAction = {
-      status: "terminal",
-      commandId: request.command.commandId,
-      receipt,
-    };
-    this.#database.transaction(() => {
-      this.#journal.updateStoredAction(envelope.preview.previewId, envelope.preview, terminal);
-      this.#database.prepare(`
-        UPDATE operator_commands SET result_json=?, after_json=?
-         WHERE operator_id=? AND command_id=? AND status='committed'
-      `).run(
-        canonicalJson(receipt),
-        canonicalJson(outcome),
-        context.operatorId,
-        request.command.commandId,
-      );
-    })();
-    return receipt;
+    return this.#chairLiveHandoffAdapter.commit(context, request, envelope, intent, authenticated, payloadHash, current);
   }
 
   async #commitLifecycleRecovery(
@@ -1047,47 +928,10 @@ export class OperatorActionStore {
     commandId: string,
     envelope: StoredPreviewEnvelope,
   ): OperatorActionStatus {
-    const custody = this.#chairLiveHandoffCustody;
-    if (custody === undefined || envelope.action === null) {
+    if (this.#chairLiveHandoffAdapter === undefined) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair live handoff custody runtime is unavailable");
     }
-    const observed = custody.chairLiveHandoffStatus(operatorId, commandId);
-    if (observed.status === "committed") {
-      const receipt: OperatorActionReceipt = {
-        ...parseStoredReceipt(envelope.action),
-        afterStateDigest: digestValue(observed, "operatorChairLiveHandoffStatus.afterStateDigest"),
-      };
-      return { status: "committed", commandId, receipt: nonLaunchReceipt(receipt) };
-    }
-    if (observed.status === "no-effect") {
-      return {
-        status: "rejected",
-        commandId,
-        intentDigest: envelope.preview.intentDigest,
-        code: "state-changed",
-        evidenceRefs: [],
-      };
-    }
-    const attemptGeneration = envelope.action.status === "pending" || envelope.action.status === "ambiguous"
-      ? envelope.action.attemptGeneration
-      : 1;
-    if (observed.status === "ambiguous") {
-      if (envelope.preview.intent.kind !== "chair-live-handoff") throw new Error("chair live handoff preview changed");
-      return {
-        status: "ambiguous",
-        commandId,
-        intentDigest: envelope.preview.intentDigest,
-        attemptGeneration,
-        effectRef: envelope.preview.intent.handoffRef,
-      };
-    }
-    return {
-      status: "pending",
-      commandId,
-      intentDigest: envelope.preview.intentDigest,
-      phase: "observing",
-      attemptGeneration,
-    };
+    return this.#chairLiveHandoffAdapter.status(operatorId, commandId, envelope);
   }
 
   #lifecycleRecoveryStatus(
@@ -1505,80 +1349,21 @@ export class OperatorActionStore {
     stored: Row,
     envelope: StoredPreviewEnvelope,
   ): Promise<OperatorActionStatus> {
-    const custody = this.#chairLiveHandoffCustody;
-    if (custody === undefined || envelope.action === null || envelope.preview.intent.kind !== "chair-live-handoff") {
+    if (
+      this.#chairLiveHandoffAdapter === undefined ||
+      envelope.action === null ||
+      envelope.preview.intent.kind !== "chair-live-handoff"
+    ) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair live handoff custody runtime is unavailable");
     }
-    const authenticated = this.#authenticateCommand(context, request.command, request.projectId, envelope.preview.intent);
-    this.#journal.assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent, actionSessionId);
+    const authenticated = this.#authenticateCommand(
+      context,
+      request.command,
+      request.projectId,
+      envelope.preview.intent,
+    );
     const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));
-    const replay = this.#journal.reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
-    if (replay !== null) return replay;
-    if (request.command.commandId === request.targetCommandId) {
-      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "reconciliation requires a distinct command ID");
-    }
-    const currentStatus = this.#chairLiveHandoffStatus(context.operatorId, request.targetCommandId, envelope);
-    if (
-      currentStatus.status !== request.expectedStatus ||
-      (currentStatus.status === "pending" || currentStatus.status === "ambiguous") &&
-        currentStatus.attemptGeneration !== request.expectedAttemptGeneration
-    ) throw new ProjectFabricCoreError("STALE_REVISION", "chair live handoff reconciliation target changed");
-    const observed = await custody.reconcileChairLiveHandoff(context.operatorId, request.targetCommandId);
-    const baseReceipt = parseStoredReceipt(envelope.action);
-    let result: OperatorActionStatus;
-    if (observed.status === "committed") {
-      const receipt: OperatorActionReceipt = {
-        ...baseReceipt,
-        afterStateDigest: digestValue(observed, "operatorChairLiveHandoffReconcile.afterStateDigest"),
-      };
-      this.#journal.updateStoredAction(envelope.preview.previewId, envelope.preview, {
-        status: "terminal",
-        commandId: request.targetCommandId,
-        receipt,
-      });
-      this.#database.prepare(`
-        UPDATE operator_commands SET result_json=?, after_json=?
-         WHERE operator_id=? AND command_id=?
-      `).run(canonicalJson(receipt), canonicalJson(observed), context.operatorId, request.targetCommandId);
-      result = {
-        status: "committed",
-        commandId: request.targetCommandId,
-        receipt: nonLaunchReceipt(receipt),
-      };
-    } else if (observed.status === "no-effect") {
-      result = {
-        status: "rejected",
-        commandId: request.targetCommandId,
-        intentDigest: envelope.preview.intentDigest,
-        code: "state-changed",
-        evidenceRefs: [],
-      };
-    } else {
-      const pending: StoredPendingAction = {
-        status: "pending",
-        commandId: request.targetCommandId,
-        phase: "observing",
-        attemptGeneration: request.expectedAttemptGeneration + 1,
-        receipt: baseReceipt,
-      };
-      this.#journal.updateStoredAction(envelope.preview.previewId, envelope.preview, pending);
-      result = statusFromAction(pending, envelope.preview.intentDigest);
-    }
-    this.#database.transaction(() => {
-      this.#journal.insertCommand(
-        context,
-        request.command,
-        request.projectId,
-        actionSessionId(authenticated, envelope.preview.intent),
-        "takeover",
-        payloadHash,
-        currentStatus,
-        result,
-        result,
-        "committed",
-      );
-    })();
-    return result;
+    return this.#chairLiveHandoffAdapter.reconcile(context, request, stored, envelope, authenticated, payloadHash);
   }
 
   async #readCurrentState(intent: OperatorActionIntent): Promise<OperatorActionCurrentState> {
@@ -1596,11 +1381,10 @@ export class OperatorActionStore {
       return { kind: "chair-bridge-recovery", revision: state.revision, state };
     }
     if (intent.kind === "chair-live-handoff") {
-      if (this.#chairLiveHandoffCustody === undefined) {
+      if (this.#chairLiveHandoffAdapter === undefined) {
         throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair live handoff custody runtime is unavailable");
       }
-      const state = await this.#chairLiveHandoffCustody.readChairLiveHandoffCurrentState(intent);
-      return { kind: "chair-live-handoff", revision: state.revision, state };
+      return await this.#chairLiveHandoffAdapter.readCurrentState(intent);
     }
     if (intent.kind !== "project-session-launch") return await this.#statePort.read(intent);
     if (this.#launchCustody === undefined) {

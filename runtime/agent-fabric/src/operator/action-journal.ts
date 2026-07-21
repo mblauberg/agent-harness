@@ -19,6 +19,7 @@ import type Database from "better-sqlite3";
 import { ProjectFabricCoreError, type AuthenticatedOperatorContext } from "../project-session/contracts.js";
 import { canonicalJson, integer, isRow, nullableText, row, sha256, text, type Row } from "../project-session/store-support.js";
 import type { AuthenticatedOperatorCredential } from "./store.js";
+import type { ProviderActionTicket } from "../application/provider-action-admission.js";
 
 export type StoredPendingAction = {
   status: "pending";
@@ -195,6 +196,30 @@ export function protocolCodeForRejection(code: OperatorActionRejectionCode): Con
   if (code === "release-binding-mismatch") return "GATE_BLOCKED";
   if (code === "dedupe-conflict") return "DEDUPE_CONFLICT";
   return "STALE_REVISION";
+}
+
+/**
+ * Shared with `action-store.ts`'s chair-recovery and chair-live-handoff commit paths (S4c):
+ * releases a provider-action preflight ticket if in-transaction preparation throws, then
+ * rethrows the original error so it stays authoritative.
+ */
+export function prepareProviderActionAfterPreflight<T>(
+  prepare: () => T,
+  custody: Readonly<{
+    releaseProviderActionPreflightAfterRollback?(ticket: ProviderActionTicket, failure: unknown): void;
+  }>,
+  ticket: ProviderActionTicket,
+): T {
+  try {
+    return prepare();
+  } catch (error: unknown) {
+    try {
+      custody.releaseProviderActionPreflightAfterRollback?.(ticket, error);
+    } catch {
+      // Preserve the original preparation error if release races or fails.
+    }
+    throw error;
+  }
 }
 
 /**
