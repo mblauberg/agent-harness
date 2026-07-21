@@ -38,8 +38,9 @@ may strengthen a profile, never weaken kernel gates silently.
    copied scores or sampling metadata are not evidence. Retain failed or
    incomplete evaluation receipts as non-gating history.
 5. Review independently with lenses selected from the dependency cone.
-   Substantial+ requires a fresh native reviewer and the other primary family.
-   Bonus-family failures are recorded and non-blocking.
+   Substantial+ follows `HARNESS.md`: targeted lenses plus the other primary;
+   distinct-family review is used when available, with terminal pressure made
+   stronger and skipped optional legs recorded.
 6. Repair at most twice. Scope/design drift returns to the user gate.
 7. Validate from the project root with
    `"${AGENTS_HOME:-$HOME/.agents}/skills/deliver/scripts/validate_delivery.py"

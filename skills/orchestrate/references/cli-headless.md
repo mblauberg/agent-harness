@@ -8,7 +8,7 @@ Verified locally on macOS, 2026-06-07. Model IDs, flags, auth, and safety modes 
 - [Safety rule](#safety-rule)
 - [Harness-conditioned rule](#harness-conditioned-rule)
 - [Auth preflight](#auth-preflight)
-- [Fabric bonus lane](#fabric-bonus-lane)
+- [Fabric distinct-family lane](#fabric-distinct-family-lane)
 - [Runtime routing](#runtime-routing)
 - [Output normalisation](#output-normalisation)
 - [Data policy](#data-policy)
@@ -110,7 +110,7 @@ the result in the run manifest and move to the next tool.
 | `kiro-cli` | `kiro-cli chat --list-models` | credits / auth |
 | `copilot` | `copilot --help`; `copilot -p "OK" --mode plan` | login / permission prompt |
 
-## Fabric bonus lane
+## Fabric distinct-family lane
 
 Gemini/Agy work is an Agent Fabric provider task, never a `cf_dispatch.sh`
 direct-CLI route. The chair supplies a narrowed authority and budget; Fabric
@@ -127,7 +127,7 @@ questions: <what to refute, complete, or falsify>
 return: hypothesis | risk | evidence_needed | likely_files | falsification_check
 ```
 
-Do not treat bonus output as established fact. Feed its claims to native section reviewers or certified
+Do not treat distinct-family output as established fact. Feed its claims to targeted reviewers or certified
 cross-family verifiers for source/test/schema confirmation.
 
 ## Runtime routing

@@ -11,6 +11,10 @@ from pathlib import Path
 import sys
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from _shared.review_ladder import check_review_ladder
+
+
 TERMINAL = {"succeeded", "failed", "cancelled"}
 STATUSES = {"draft", "verified", "superseded", "retired"}
 RETENTION = {"capsule", "evidence", "ephemeral"}
@@ -105,7 +109,7 @@ def _validate_review_plan(raw: object, run_dir: Path | None = None) -> list[str]
             errors.append(f"receipt review_plan.reviews[{index}].id must be non-empty and unique")
         else:
             seen.add(review["id"])
-        if not isinstance(review["scope"], str) or review["scope"] not in {"targeted", "full-scope"}:
+        if not isinstance(review["scope"], str) or review["scope"] not in {"targeted", "primary"}:
             errors.append(f"receipt review_plan.reviews[{index}].scope is invalid")
         if not isinstance(review["tier"], str) or review["tier"] not in {"scout", "workhorse", "flagship"}:
             errors.append(f"receipt review_plan.reviews[{index}].tier is invalid")
@@ -171,7 +175,7 @@ def _validate_review_plan(raw: object, run_dir: Path | None = None) -> list[str]
                             route_alias = route_value.get("route_alias", route_value.get("alias"))
                             if review["tier"] == "flagship" and route_alias != "flagship":
                                 errors.append(f"receipt review_plan.reviews[{index}].route_receipt does not prove flagship strength")
-                            if review["scope"] == "full-scope" and (
+                            if review["scope"] == "primary" and (
                                 route_value.get("cross_family") is not True
                                 or route_value.get("certification_eligible") is not True
                             ):
@@ -193,6 +197,14 @@ def _validate_review_plan(raw: object, run_dir: Path | None = None) -> list[str]
         errors.append("substantial review_plan requires an openai or anthropic chair_family")
     chair = chair_value if isinstance(chair_value, str) else ""
     other_primary = "anthropic" if chair == "openai" else "openai"
+    for review in checked:
+        if (
+            review["scope"] == "primary"
+            and review["family"] == other_primary
+            and not review["substitution_for"]
+            and review["tier"] != "flagship"
+        ):
+            errors.append("other-primary review must use flagship strength")
     targeted = [r for r in checked if r["scope"] == "targeted" and r["status"] == "complete"]
     if len({r["reviewer_id"] for r in targeted}) != len(targeted):
         errors.append("completed targeted reviews require distinct reviewer_id values")
@@ -207,45 +219,33 @@ def _validate_review_plan(raw: object, run_dir: Path | None = None) -> list[str]
         digests = [identity[1] for identity in identities]
         if len(identities) != len(targeted) or len(set(digests)) != len(targeted):
             errors.append(f"completed targeted reviews require distinct {field} artifacts")
-    targeted_omission = any(
-        r["scope"] == "targeted" and r["status"] in {"failed", "unavailable", "omitted"}
-        and r["substitution_for"] == "targeted-lens"
-        and r["lens"] not in {item["lens"] for item in targeted} for r in checked
-    )
-    target_count = len({r["lens"] for r in targeted})
-    if target_count < 2 or (target_count < 3 and not targeted_omission):
-        errors.append("substantial review_plan requires three targeted lenses or two plus a recorded targeted omission")
-    primary = [
-        r for r in checked
-        if r["scope"] == "full-scope" and r["status"] == "complete"
-        and r["tier"] == "flagship" and r["family"] == other_primary
-        and not r["substitution_for"]
-    ]
-    substitutes = [
-        r for r in checked
-        if r["scope"] == "full-scope" and r["status"] == "complete"
-        and r["tier"] == "flagship" and r["family"] not in {chair, other_primary}
-        and r["substitution_for"] == "other-primary"
-    ]
-    unavailable_primary = any(
-        r["scope"] == "full-scope" and r["status"] in {"failed", "unavailable", "omitted"}
-        and r["lens"] == "other-primary" and r["family"] == other_primary for r in checked
-    )
-    if not primary and not (unavailable_primary and len({r["family"] for r in substitutes}) >= 2):
-        errors.append("substantial review_plan requires other-primary full-scope review or its two-family substitution")
-    if risk in {"crucial", "terminal"}:
-        full_families = {
-            r["family"] for r in checked
-            if r["scope"] == "full-scope" and r["status"] == "complete" and r["tier"] == "flagship"
-        }
-        recorded_omission = any(
-            r["scope"] == "full-scope" and r["status"] in {"failed", "unavailable", "omitted"}
-            and r["substitution_for"] == "additional-distinct-family"
-            and r["family"] not in {chair, other_primary} and r["tier"] == "flagship"
-            for r in checked
-        )
-        if len(full_families) < 2 and not recorded_omission:
-            errors.append("crucial review_plan requires a second distinct-family full-scope review or recorded omission")
+    legs: list[dict[str, object]] = []
+    for review in checked:
+        if review["scope"] == "targeted":
+            role = "targeted"
+        elif (
+            review["scope"] == "primary"
+            and review["family"] == other_primary
+            and not review["substitution_for"]
+        ):
+            role = "other-primary"
+        elif (
+            review["scope"] == "primary"
+            and review["family"] not in {chair, other_primary}
+            and (review["tier"] == "flagship" or review["status"] != "complete")
+        ):
+            role = "distinct-family"
+        else:
+            continue
+        legs.append({
+            "role": role,
+            "family": review["family"],
+            "status": "pass" if review["status"] == "complete" else review["status"],
+            "lenses": [review["lens"]],
+            "reason": review["reason"],
+            "substitution_for": review["substitution_for"],
+        })
+    errors.extend(check_review_ladder(risk, legs, chair_family=chair))
     waves: dict[int, int] = {}
     for review in checked:
         if review["status"] != "omitted" and isinstance(review["wave"], int):

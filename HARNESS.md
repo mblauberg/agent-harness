@@ -46,13 +46,13 @@ confidence; `clean` is valid, fluent unverified output is not.
 | Risk | Minimum review pressure |
 |---|---|
 | `routine` | chair plus objective/native checks |
-| `substantial` | multiple targeted lenses plus strong other-primary full-scope review |
-| `crucial` | substantial coverage plus another strong distinct-family full-scope review when available |
+| `substantial` | multiple targeted lenses plus strong other-primary review |
+| `crucial` | substantial coverage plus another strong distinct-family review when available |
 | `terminal` | all preceding coverage with stronger targeted and adversarial pressure |
 
-The chair adapts topology and concurrency; unavailable legs need recorded substitution, compensating
-evidence or omission. If the other primary is unavailable, two strong distinct-family full-scope
-reviews plus targeted lenses may substitute. Evidence, never majority voting, decides claims.
+For machine checking, multiple means at least two distinct targeted lenses; terminal raises that
+minimum to three and requires an adversarial or challenge lens. The other-primary leg remains required
+from substantial upwards; skipped distinct-family legs record a reason. Evidence, never majority voting, decides claims.
 
 ## Load depth only when triggered
 

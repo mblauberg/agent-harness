@@ -42,8 +42,9 @@ def test_constitution_names_equal_primaries_and_router_has_current_codex_family(
     assert "fallback orchestrator" not in text.lower()
     assert all(alias in text for alias in ("flagship", "workhorse", "scout"))
     assert "equal primary orchestrators" in text
-    assert "unavailable legs need recorded substitution" in text
-    assert "two strong distinct-family full-scope" in text
+    assert "other-primary leg remains required" in text
+    assert "multiple targeted lenses plus strong other-primary" in text
+    assert "stronger targeted and adversarial pressure" in text
     routing = (ROOT / "skills" / "orchestrate" / "references" / "routing-and-tiers.md").read_text()
     assert "GPT-5.6" in routing
 
@@ -193,7 +194,7 @@ def test_claude_workflows_use_router_and_safe_implement_loop():
     assert "git reset" not in implementation
     assert "required: false" in implementation
     assert "otherPrimaryRan" in implementation
-    assert "bonus availability never blocks" in implementation
+    assert "distinct-family availability never replaces other-primary" in implementation
     assert "Copy the global deliver RUN.template.json" in implementation
     assert "refusing the next dispatch" in implementation
     assert "do not recreate or replace it" in implementation
@@ -226,7 +227,7 @@ def test_read_only_review_allows_scoped_artifacts_but_forbids_unscoped_scratch()
 def test_code_review_uses_task_selected_multi_agent_lenses_without_voting():
     skill = (ROOT / "skills" / "code-review" / "SKILL.md").read_text()
     topology = (ROOT / "skills" / "code-review" / "references" / "multi-agent-review.md").read_text()
-    assert "at least 3 blind targeted agents" in skill
+    assert "independent targeted agents" in skill
     assert "Correctness/spec alignment" in skill
     assert "anonymised claim challenge" in skill
     assert "Never rank prose or majority-vote" in skill

@@ -21,7 +21,8 @@ mutable-branch dependency on it.
 - the worker may run longer than about two minutes;
 - the user benefits from watching or steering it;
 - it may block for input;
-- it is the other primary family or a bonus-family review leg worth observing;
+- it is the other primary family or a distinct-family/adversarial review leg
+  worth observing;
 - the task must survive the lead's context churn.
 
 Keep short mechanical/native fan-out inline. For substantial eligible work done

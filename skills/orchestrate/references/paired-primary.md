@@ -68,7 +68,7 @@ needs durable peer exchange. Only the chair mutates shared pair state.
 - Reversible engineering dispute: chair adjudicates from evidence and records
   the losing case.
 - Author/reviewer dispute: one falsification round, then one fresh-context or
-  bonus-family pressure pass.
+  stronger targeted/adversarial pressure pass.
 - One-way-door, scope-changing or still-deadlocked decision: user gate.
 - Peer unavailable before start: solo mode plus `PAIR-NOT-RUN: <reason>`.
 - Peer lost mid-stage: preserve partials, mark `PAIR-DEGRADED`, and reassign only

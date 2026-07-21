@@ -10,9 +10,9 @@ not a chair assertion. It is true only when:
    publication lineage, sealed delivery review basis, clean
    base/head source-state and review-diff.v1 digest, complete review bundle/
    coverage digest, one unbroken active target-chair binding and one resolved
-   `certifying-review-four-slot-v1` snapshot;
-- its four linear slot heads each name one current terminal safe certifying
-   CLEAN evidence record and an empty complete open-finding set;
+   review snapshot meeting the current `HARNESS.md` ladder;
+- its targeted lens heads and other-primary head each name one current terminal
+   safe certifying CLEAN evidence record and an empty complete open-finding set;
 - every head/action-pair/evidence record binds that target, active chair-
    binding chain, artifact,
    bundle, coverage, profile, task, route, answer/result and final-prompt digest,
@@ -21,10 +21,9 @@ not a chair assertion. It is true only when:
    equals both admission and the resolved profile, while every other observed
    route field is admission-equal (honest unavailable optional arms remain
    allowed);
-- `native` is explicitly `same-family-exempt`, while
-   `other-primary`, `cursor-grok` and `agy-gemini` each prove reviewer family
-   distinct from the target-chair family; this is not a contributor-family
-   independence claim; and
+- targeted lenses are independent of authorship, while `other-primary` proves
+   reviewer family distinct from the target-chair family; available
+   distinct-family review is advisory and records any skip reason; and
 - required `unavailableSlots` is empty, normal finding capacity is available,
    and top-level blockers and every slot
    blocker array are empty. A nonterminal, ambiguous, route-integrity,
@@ -32,12 +31,12 @@ not a chair assertion. It is true only when:
    UNUSABLE or proved terminal provider-failure
    action cannot complete a slot.
 
-For the current Codex/OpenAI target the resolved matrix requires native Codex,
-Claude/Anthropic, Cursor/Grok/xAI and Agy/Gemini/Google. This is a target
-snapshot, not a permanent vendor interpretation: any chair generation/family
-change outside the exact adopted same-agent binding rule makes the target stale;
-a successful successor preparation resolves all four slots again and then
-persists supersession.
+For the current Codex/OpenAI target the resolved matrix requires targeted
+Codex lenses and Claude/Anthropic other-primary review. Available distinct
+families are added when warranted. This is a target snapshot, not a permanent
+vendor interpretation: any chair generation/family change outside the exact
+adopted same-agent binding rule makes the target stale; a successful successor
+preparation resolves the current ladder again and then persists supersession.
 
 The daemon derives CLEAN by strict review-result.v1 parsing over the exact
 target generation and coverage digest. Current chair annotation is displayed
@@ -150,10 +149,10 @@ Implementation is accepted only when objective tests demonstrate:
     reserve/release, exhaustion, unknown usage and restart reconciliation tests
     cover every configured dimension and the Console projects remaining or
     unknown capacity honestly.
-33. Fresh native and other-primary reviews report no unresolved P0-P2 findings.
-    The exact head-based `finalReviewComplete` predicate above also proves
-    current clean Cursor Grok and Agy Gemini slots against one complete bundle;
-    direct CLI evidence cannot satisfy it.
+33. Targeted and other-primary reviews report no unresolved P0-P2 findings.
+    The exact head-based `finalReviewComplete` predicate above also records
+    available distinct-family review or its skip reason; direct CLI evidence
+    cannot satisfy it.
 34. A real scoping intake registers a spec, ADR, decision/finding and Git diff;
     Project/Evidence row and detail preserve exact accepted scope, kind,
     revision, provenance and source digest. Multi-page content continues without
@@ -201,7 +200,7 @@ Implementation is accepted only when objective tests demonstrate:
     stale-binding output remains adverse and permanently noncertifying. Exact
     callback/lookup replay is idempotent, changed input quarantines and recovery
     never redispatches. Bundle/source mutation, CLEAN/P0-P2 grammar, unsafe
-    canaries, reviewer-family relation, four-slot completion and repaired-target
+    canaries, reviewer-family relation, ladder completion and repaired-target
     carry-forward all pass.
 39. Rotate/compact returns an immutable accepted-suspended receipt after
     unique caller inference, pre-digest write quarantine, durable checkpoint,

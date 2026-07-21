@@ -25,8 +25,8 @@ Decompose -> waves -> reduce -> gate.
   `FABRIC-ROUNDTRIP-UNAVAILABLE` and collect an artifact.
 - Record worker cwd; never assume repository.
 - **Workers write full output to files**; return a digest/path.
-- **Cross-family follows the HARNESS risk ladder.** Normally use the other primary, with two
-  recorded distinct-family full-scope substitutes if unavailable.
+- **Cross-family follows the HARNESS risk ladder.** Targeted lenses plus other
+  primary; distinct family when available; record terminal skips.
 - **Objective checks outrank opinions. You own the final call.**
 - Discover current model/tool options at runtime.
 

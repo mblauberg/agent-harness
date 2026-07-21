@@ -267,8 +267,10 @@ remains disabled.
 - **FR-014 (Stage 3):** The daemon shall not delete provider-native session files.
 - **FR-015 (Stage 3):** Model and effort resolution shall use the existing
   trusted model router. For a task-bound answer-bearing spawn, the daemon shall   invoke it from a strict route request at new-action admission and atomically   retain the canonical request, receipt and both digests on the provider action   before provider I/O; a caller-authored post-hoc receipt cannot certify the   action.
-- **FR-016 (Stage 4):** An optional bonus-family leg shall follow its configured
-  retry and acknowledgement deadline, then terminate as degraded or failed and   record the reason rather than block the required primary path.
+- **FR-016 (Stage 4):** A distinct-family review or adversarial leg shall follow
+  its configured retry and acknowledgement deadline, then terminate as degraded
+  or failed and record the reason rather than replace the required other-primary
+  path.
 - **FR-016A (Stage 4):** A fresh ephemeral provider worker or reviewer shall run
   through a route-bound, task-bound `provider-action.dispatch` `spawn`, commit   its bounded answer privately and project the applicable bounded answer or   certifying-review digest/safe result. It shall create no   retained agent identity or implicit provider-session authority. Review   certification shall use the terminal action's daemon-derived route and   artifact lineage rather than caller-supplied reviewer-family relation.
 - **FR-017 (Stage 1):** The daemon shall resume committed coordination state after an
