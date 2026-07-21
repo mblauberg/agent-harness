@@ -274,9 +274,19 @@ describe("S1 E4 and GATE: settlement ordering and certifying budget boundary", (
     await expect(reopened.recoverStartupState()).resolves.toMatchObject({ actionsReconciled: 0, actionsQuarantined: 0 });
   });
 
-  it.skip("GATE-B' S3_EXPECTED_AFTER_GATE: would-be-fixed certifying settlement refusal", () => {
-    // Intentionally skipped on the frozen base. S3 flips this single gate when the external
-    // review-evidence daemon's certifying-budget intent is settled.
+  it.skip("GATE-B' DECISION-GATE RESOLVED (restate): certifying settlement is owner-agnostic BY DESIGN", () => {
+    // Decision gate (#354 S1->S2) RESOLVED 2026-07-21: verdict = RESTATE, not fix. Owner-agnostic budget
+    // settlement is intended behaviour, not a latent bug. Settlement is ledger bookkeeping on a reservation
+    // the authority already committed at admission: `budget_authority_id` IS the settlement authority, and
+    // `assertProviderActionOwner` (fabric.ts:10563) already fences the row-owner precondition. Refusing to
+    // settle a validly-bound row purely because its custody owner is `certifying_review` would STRAND the
+    // reservation (reserved units never released) — that harms the reliability floor rather than protecting
+    // it; budgets are ceilings and consuming an explicitly reserved ceiling is correct accounting regardless
+    // of owner. The dangerous dual-bound combination is not producible by any in-repo writer (only the test
+    // helper `admitDualBoundCertifyingAction`, impersonating the out-of-tree review-evidence daemon), so a
+    // refusal branch would be a speculative guard on an unreachable path. GATE-B pins the real behaviour;
+    // this stays a PERMANENT documented skip. Revisit ONLY if the external review-evidence daemon later
+    // publishes a settled contract that demands custody-scoped settlement.
   });
 });
 
