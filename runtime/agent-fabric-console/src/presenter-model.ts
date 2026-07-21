@@ -159,6 +159,8 @@ export type PresentedHeader = Readonly<{
   nextMilestone: string;
   health: string;
   attentionCount: number;
+  needsYouCount: number;
+  watchCount: number;
   runCount: number;
   capacity: string;
 }>;
@@ -241,6 +243,9 @@ export type FabricConsolePresentation = Readonly<{
   views: readonly PresentedView[];
   activeView: FabricView;
   masterRows: readonly PresentedRow[];
+  needsYouRows: readonly PresentedRow[];
+  watchRows: readonly PresentedRow[];
+  watchCollapsed: true;
   topAttention: PresentedRow | null;
   detail: PresentedDetail | null;
   actions: readonly PresentedAction[];

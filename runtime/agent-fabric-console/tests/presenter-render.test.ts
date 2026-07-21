@@ -1532,6 +1532,36 @@ describe("structured presenter and responsive Fabric renderer", () => {
     expect(JSON.stringify(presentation)).not.toMatch(/\d+%|percentage/i);
   });
 
+  it("keeps advisory attention in the collapsed Watch stream", () => {
+    const dataset = richDataset();
+    const controller = controllerState();
+    const presentation = presentFabricConsole(
+      dataset,
+      controller,
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+
+    expect(presentation.needsYouRows.map(({ stableId }) => stableId)).toStrictEqual([
+      "attention:safety",
+    ]);
+    expect(presentation.watchRows.map(({ stableId }) => stableId)).toStrictEqual([
+      "attention:fyi",
+    ]);
+    expect(presentation.watchCollapsed).toBe(true);
+    expect(presentation.header.needsYouCount).toBe(1);
+    expect(presentation.header.watchCount).toBe(1);
+
+    const frame = renderFabricConsoleFrame(
+      dataset,
+      controller,
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+    expect(frame.rows.join("\n")).toContain("WATCH:1 collapsed");
+    expect(frame.rows.join("\n")).not.toContain("Routine evaluation complete");
+  });
+
   it("joins authoritative attention grouping metadata and ages quiet projections at render time", () => {
     const base = richDataset();
     const observedAtMs = Date.parse(timestamp);

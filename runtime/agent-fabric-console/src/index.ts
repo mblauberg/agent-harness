@@ -561,7 +561,14 @@ function renderFabricMaster(
       : [];
   const masterItems = [
     ...sessionChoices.map((choice) => ({ kind: "session" as const, choice })),
-    ...presentation.masterRows.map((item) => ({ kind: "row" as const, item })),
+    ...(presentation.activeView === "attention" &&
+      (presentation.header.needsYouCount > 0 || presentation.watchRows.length > 0)
+      ? [{ kind: "watch" as const }]
+      : []),
+    ...(presentation.activeView === "attention"
+      ? presentation.needsYouRows
+      : presentation.masterRows
+    ).map((item) => ({ kind: "row" as const, item })),
   ];
   const visibleCapacity = bounds.y2 - bounds.y1 + 1;
   const offset = Math.min(
@@ -601,6 +608,21 @@ function renderFabricMaster(
         geometryKey,
         binding: null,
       });
+      continue;
+    }
+    if (visible.kind === "watch") {
+      const text = `NEEDS YOU:${String(presentation.header.needsYouCount)} | WATCH:${String(presentation.header.watchCount)} collapsed`;
+      if (bounds.x1 === 1 && bounds.x2 === columns) {
+        setFabricRow(rows, y, columns, text);
+      } else {
+        const existing = rows[y - 1] ?? " ".repeat(columns);
+        rows[y - 1] = writeFixedCells(
+          existing,
+          bounds.x1,
+          bounds.x2 - bounds.x1 + 1,
+          chromeText(text),
+        );
+      }
       continue;
     }
     const { item } = visible;
@@ -1374,7 +1396,13 @@ function renderFabricStrip(
     : null;
   const contentEnd = actionRow === null ? bodyEnd : actionRow - 1;
   const selected = presentation.masterRows.find((row) => row.selected);
-  const work = selected ?? presentation.topAttention ?? presentation.masterRows[0];
+  const primaryRows = presentation.activeView === "attention"
+    ? presentation.needsYouRows
+    : presentation.masterRows;
+  const work = selected?.view !== "attention" || selected === undefined ||
+      presentation.needsYouRows.some(({ stableId }) => stableId === selected.stableId)
+    ? selected ?? presentation.topAttention ?? primaryRows[0]
+    : presentation.topAttention ?? primaryRows[0];
   const topAttention = presentation.topAttention?.stableId === work?.stableId
     ? null
     : presentation.topAttention;
@@ -1388,6 +1416,7 @@ function renderFabricStrip(
     `Owner:${header.owner}`,
     `Next:${header.nextMilestone}`,
     `Health:${header.health}`,
+    `Need you:${String(header.needsYouCount)} | Watch:${String(header.watchCount)} collapsed`,
   ];
   let nextRow = 1;
   const renderWork = (item: PresentedRow): void => {
@@ -1424,7 +1453,7 @@ function renderFabricStrip(
       rows,
       nextRow,
       columns,
-      `P:${header.project} S:${header.session} R:${header.run} r${header.revision ?? "?"} ${header.freshness.toUpperCase()}`,
+      `P:${header.project} S:${header.session} R:${header.run} r${header.revision ?? "?"} ${header.freshness.toUpperCase()} N:${String(header.needsYouCount)} W:${String(header.watchCount)}`,
     );
     nextRow += 1;
     if (work !== undefined) renderWork(work);
@@ -1442,7 +1471,7 @@ function renderFabricStrip(
     setFabricRow(rows, nextRow, columns, `${detail.label}:${detail.value}`);
     nextRow += 1;
   }
-  for (const item of presentation.masterRows) {
+  for (const item of primaryRows) {
     if (
       nextRow > contentEnd ||
       item.stableId === work?.stableId ||
