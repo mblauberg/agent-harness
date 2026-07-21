@@ -18,8 +18,8 @@ Decompose -> waves -> reduce -> gate.
 - Parallel lanes stop ready-to-merge. The chair merges serially, refreshes the
   next branch from current main, then reruns checks and reviews after commit/tree
   changes.
-- **Keep topology exact.** One chair; leaders settle recursion. Handoff is a
-  generation-bound operator action.
+- **Keep topology exact.** One chair; leaders settle recursive obligations.
+  Handoff is a generation-bound operator action.
 - **Answer-bearing external work uses Fabric request/reply; Herdr only wakes.**
   Pane injection is fire-and-forget steering. Without callback, record
   `FABRIC-ROUNDTRIP-UNAVAILABLE` and collect an artifact.
