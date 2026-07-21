@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { readGlobalLiveness } from "../../../src/daemon/global-liveness.ts";
+import { readGlobalLiveness } from "../../../src/lifecycle/global-liveness.ts";
 import { createLivenessDatabase, seedProject } from "./liveness-fixture.ts";
 
 const databases: ReturnType<typeof createLivenessDatabase>[] = [];

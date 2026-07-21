@@ -9,7 +9,7 @@ import type {
 } from "./action-store.js";
 import { ExternalEffectService } from "./external-effect-service.js";
 import { ProjectFabricCoreError } from "../project-session/contracts.js";
-import { readGlobalLiveness, type QuiesceToken } from "../daemon/global-liveness.js";
+import { readGlobalLiveness, type QuiesceToken } from "../lifecycle/global-liveness.js";
 import { TypedGitService } from "./typed-git-service.js";
 import {
   readControlActiveTurns,

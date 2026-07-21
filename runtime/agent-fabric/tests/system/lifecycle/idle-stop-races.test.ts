@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BootstrapElection, FLOCK_ELECTION_LOCK_PORT } from "../../../src/daemon/bootstrap-election.ts";
-import { attemptDrainedStop, attemptIdleStop } from "../../../src/daemon/global-liveness.ts";
+import { attemptDrainedStop, attemptIdleStop } from "../../../src/lifecycle/global-liveness.ts";
 import {
   closeRecoverableUnixListener,
   openRecoverableUnixListener,

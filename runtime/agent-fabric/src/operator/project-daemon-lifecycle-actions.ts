@@ -36,10 +36,9 @@ export type ProjectDaemonLifecycleDaemonStopPort = {
 };
 
 /**
- * Structural mirror of `GlobalLivenessSnapshot` from `../daemon/global-liveness.js`, duplicated
- * here (rather than imported) so this module never touches that import path — the file-specific
- * `#344` allowance belongs to `production-action-ports.ts` alone and must not broaden to new
- * modules. The facade injects a narrow liveness callback built from the real function instead.
+ * Structural mirror of `GlobalLivenessSnapshot` from `../lifecycle/global-liveness.js`, duplicated
+ * here (rather than imported) so this module depends only on the narrow liveness callback. The
+ * facade owns the concrete lifecycle import and injects a callback built from the real function.
  */
 export type GlobalLivenessSnapshotLike = {
   idle: boolean;
@@ -95,7 +94,7 @@ function integer(value: Row, field: string): number {
  * checks all occur before daemon-stop adapter I/O; custody settlement after daemon-stop I/O remains
  * outside any transaction, matching the original ordering. The facade still owns `#custodyId`,
  * `#effectScope`, `#effectCustody`, `#custodyEffectRef`, and `#storeCustodyOutcome` — injected here
- * as a narrow host port — and still owns the `../daemon/global-liveness.js` import, injected here as
+ * as a narrow host port — and still owns the `../lifecycle/global-liveness.js` import, injected here as
  * a narrow liveness callback.
  */
 export class ProjectDaemonLifecycleActions {

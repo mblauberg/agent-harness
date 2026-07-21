@@ -17,9 +17,6 @@ source_size_ceilings:
   runtime/agent-fabric/src/integrations/herdr-fabric-ports.ts: 1044
 
 import_allowances:
-  - file: runtime/agent-fabric/src/core/fabric.ts
-    specifier_prefix: ../daemon/global-liveness.js
-    removal_issue: "#344"
   - file: runtime/agent-fabric/src/index.ts
     specifier_prefix: ./daemon/client.js
     removal_issue: "#344"
@@ -43,7 +40,4 @@ import_allowances:
     removal_issue: "#344"
   - file: runtime/agent-fabric/src/operator/local-console-session.ts
     specifier_prefix: ../cli/workspace-trust.js
-    removal_issue: "#344"
-  - file: runtime/agent-fabric/src/operator/production-action-ports.ts
-    specifier_prefix: ../daemon/global-liveness.js
     removal_issue: "#344"

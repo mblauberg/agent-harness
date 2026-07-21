@@ -124,7 +124,7 @@ import {
   type IdleElectionPort,
   type IdleStopResult,
   type QuiesceToken,
-} from "../daemon/global-liveness.js";
+} from "../lifecycle/global-liveness.js";
 import { dispatchAgentProtocol } from "./agent-protocol-dispatch.js";
 import { ProjectSessionStore } from "../project-session/store.js";
 import { ProjectSessionMembershipStore } from "../project-session/membership-store.js";

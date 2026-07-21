@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { recoverDaemonRuntimeEpoch } from "../../../src/daemon/global-liveness.ts";
+import { recoverDaemonRuntimeEpoch } from "../../../src/lifecycle/global-liveness.ts";
 import { openFabricDatabase } from "../../../src/persistence/sqlite.ts";
 
 describe("daemon runtime epoch production schema", () => {
