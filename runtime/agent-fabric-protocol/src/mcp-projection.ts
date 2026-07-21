@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
-import { OPERATION_CODECS, operationInputSchemaForPrincipal } from "./operation-codecs.js";
+import { OPERATION_CODECS } from "./operation-codecs/registry.js";
+import { operationInputSchemaForPrincipal } from "./operation-codecs.js";
 import {
   FABRIC_OPERATIONS,
   OPERATION_REGISTRY,

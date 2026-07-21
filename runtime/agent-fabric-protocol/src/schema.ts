@@ -11,7 +11,7 @@ import {
   protocolFailureMessage,
   secret,
 } from "./codec.js";
-import { OPERATION_CODECS } from "./operation-codecs.js";
+import { OPERATION_CODECS } from "./operation-codecs/registry.js";
 import {
   LAUNCH_ADAPTER_OUTCOME_V1_CODEC,
   LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC,
