@@ -52,9 +52,8 @@ import {
 } from "../application/provider-action-admission.js";
 import {
   assertProviderActionOwner,
-  classifyProviderActionOwnerRowForStartup,
-  ProviderActionOwnerError, quarantineProviderActionOwnerAtStartup,
-  type ProviderActionCustodyOwner, type ProviderActionOwnerStartupRow,
+  ProviderActionOwnerError,
+  type ProviderActionCustodyOwner,
 } from "../application/provider-action-owner.js";
 import { ProviderSessionCoordinator } from "../application/provider-session-coordinator.js";
 import { FabricError } from "../errors.js";
@@ -221,10 +220,9 @@ import { ProviderActionExecutor } from "../provider-action/executor.js";
 import {
   ProviderActionState,
   isProviderActionResult,
-  isTaskBoundEphemeralProviderPayload,
   providerActionResult,
-  providerActionResultWithRequiredAnswer,
 } from "../provider-action/state.js";
+import { ProviderActionRecovery } from "../provider-action/recovery.js";
 import type {
   LifecycleIntegrityReceiptAuthorityPort,
 } from "../lifecycle/receipt-authority.js";
@@ -755,7 +753,7 @@ export class Fabric {
   readonly #maximumConcurrentProviderTurns: number;
   readonly #providerActionState: ProviderActionState;
   readonly #providerActionExecutor: ProviderActionExecutor;
-  readonly #providerActionReconciliations = new Map<string, Promise<ProviderActionResult>>();
+  readonly #providerActionRecovery: ProviderActionRecovery;
   #closing = false;
   readonly #operatorStore: OperatorStore;
   readonly #operatorProjections: OperatorProjectionStore;
@@ -854,6 +852,28 @@ export class Fabric {
       enqueueDeferred: (input) => this.#providerActionState.enqueueDeferred(input),
       persistProviderAction: (runId, adapterId, actionId, raw, result, expectedOwner) =>
         this.#providerActionState.persist(runId, adapterId, actionId, raw, result, expectedOwner),
+    });
+    this.#providerActionRecovery = new ProviderActionRecovery({
+      database: this.#database,
+      clock: this.#clock,
+      commandJournal: this.#commandJournal,
+      assertChair: (runId, actorAgentId) => this.#assertChair(runId, actorAgentId),
+      event: (runId, type, actorAgentId, payload) => {
+        this.#event(runId, type, actorAgentId, payload);
+      },
+      requestAdapter: (adapterId, method, params) => this.#requestAdapter(adapterId, method, params),
+      assertProviderPrincipalActive: (runId, agentId) => this.#payloadAuthority.assertProviderPrincipalActive(runId, agentId),
+      track: (operation) => this.#providerActionState.trackGenericOperation(operation),
+      get: (runId, adapterId, actionId) => this.#providerActionState.get(runId, adapterId, actionId),
+      persist: (runId, adapterId, actionId, raw, result, expectedOwner) =>
+        this.#providerActionState.persist(runId, adapterId, actionId, raw, result, expectedOwner),
+      isOwned: (runId, adapterId, actionId) => this.#providerActionState.isOwned(runId, adapterId, actionId),
+      enqueue: (input) => this.#providerActionState.enqueueDeferred(input),
+      settle: (runId, adapterId, actionId, status) => this.#providerActionState.settleAndPump(runId, adapterId, actionId, status),
+      ownershipKey: (runId, adapterId, actionId) => this.#providerActionState.ownershipKey(runId, adapterId, actionId),
+      assertGenericProviderAction: (runId, adapterId, actionId) =>
+        this.#providerActionState.assertGenericProviderAction(runId, adapterId, actionId),
+      completeAdapterOperation: (input) => this.#providerActionExecutor.completeAdapterOperation(input),
     });
     this.#capabilityKey = options.capabilityKey ?? randomBytes(32).toString("base64url");
     this.#fabricSocketPath = options.fabricSocketPath;
@@ -1424,20 +1444,6 @@ export class Fabric {
     return await this.#providerActionState.trackGenericOperation(operation);
   }
 
-  #providerActionOwnershipKey(runId: string, adapterId: string, actionId: string): string {
-    return this.#providerActionState.ownershipKey(runId, adapterId, actionId);
-  }
-
-  #enqueueDeferredProviderAction(input: {
-    runId: string;
-    adapterId: string;
-    actionId: string;
-    owner?: ProviderActionCustodyOwner;
-    execute: () => Promise<ProviderActionResult>;
-  }): void {
-    this.#providerActionState.enqueueDeferred(input);
-  }
-
   #settleProviderTurnAndPump(
     runId: string,
     adapterId: string,
@@ -1717,23 +1723,6 @@ export class Fabric {
     }
     return this.#ambiguousLaunchOutcome(input, "conflict", record);
   }
-  #quarantineProviderActionOwnerAtStartup(
-    recovery: ProviderActionOwnerStartupRow, now: number, payload: Readonly<{ owner: string; reason: string }>,
-  ): boolean {
-    const identity = recovery.diagnosticRef;
-    try {
-      return quarantineProviderActionOwnerAtStartup(this.#database, recovery, now, () => this.#event(
-        identity.runId, "startup-provider-action-quarantined", null,
-        { actionId: identity.actionId, adapterId: identity.adapterId, ...payload },
-      ));
-    } catch (error: unknown) {
-      this.#event(identity.runId, "startup-provider-action-quarantine-failed", null, {
-        actionId: identity.actionId, adapterId: identity.adapterId, rowId: recovery.rowId,
-        reason: error instanceof Error ? error.message : String(error),
-      });
-      return false;
-    }
-  }
   async recoverStartupState(): Promise<{
     actionsReconciled: number; actionsQuarantined: number;
     leasesQuarantined: number; sessionsDegraded: number; deliveriesReleased: number;
@@ -1770,38 +1759,7 @@ export class Fabric {
         this.#event(stringField(lease, "run_id"), "startup-write-lease-quarantined", null, { leaseId: stringField(lease, "lease_id"), predecessorAgentId: stringField(lease, "holder_agent_id") });
       }
     })();
-    const certifyingReviewRecovery = await this.#recoverCertifyingReviewProviderActions();
-    let { actionsReconciled, actionsQuarantined } = certifyingReviewRecovery;
-    const pendingActions = this.#database.prepare(`
-      SELECT CAST(p.rowid AS TEXT) AS provider_action_rowid,p.run_id,p.action_id,p.adapter_id,p.status,p.updated_at,r.chair_agent_id
-       FROM provider_actions p LEFT JOIN runs r ON r.run_id = p.run_id
-       WHERE p.status IN ('prepared', 'dispatched', 'ambiguous')
-       ORDER BY p.updated_at, p.action_id
-    `).all().flatMap((value) => {
-      const recovery = classifyProviderActionOwnerRowForStartup(this.#database, value);
-      if (recovery.owner === "integrity_failed") {
-        if (this.#quarantineProviderActionOwnerAtStartup(
-          recovery, now, { owner: recovery.owner, reason: recovery.reason },
-        )) actionsQuarantined += 1;
-      }
-      return recovery.owner === "generic" && recovery.ref !== null ? [recovery] : [];
-    });
-    for (const recovery of pendingActions) {
-      const { action, ref } = recovery;
-      if (ref === null) throw new Error("generic startup provider action identity is unavailable");
-      try {
-        const result = await this.reconcileProviderAction(ref.runId, stringField(action, "chair_agent_id"), {
-          adapterId: ref.adapterId, actionId: ref.actionId,
-          commandId: `startup-recovery:${ref.actionId}:${stringField(action, "status")}:${numberField(action, "updated_at")}`,
-        });
-        if (result.status === "quarantined") actionsQuarantined += 1; else actionsReconciled += 1;
-      } catch (error: unknown) {
-        if (this.#quarantineProviderActionOwnerAtStartup(recovery, now, {
-          owner: error instanceof ProviderActionOwnerError ? error.actualOwner : recovery.owner,
-          reason: error instanceof Error ? error.message : String(error),
-        })) actionsQuarantined += 1;
-      }
-    }
+    const { actionsReconciled, actionsQuarantined } = await this.#providerActionRecovery.recoverStartupProviderActions(now);
     let sessionsDegraded = 0;
     const sessions = this.#database.prepare(`
       SELECT a.run_id,a.agent_id,a.provider_session_ref,b.adapter_id,
@@ -1947,40 +1905,6 @@ export class Fabric {
       }
     }
     return { actionsReconciled, actionsQuarantined, leasesQuarantined: expiredLeases.length, sessionsDegraded, deliveriesReleased };
-  }
-
-  async #recoverCertifyingReviewProviderActions(): Promise<{
-    actionsReconciled: number;
-    actionsQuarantined: number;
-  }> {
-    let actionsReconciled = 0;
-    let actionsQuarantined = 0;
-    const pending = this.#database.prepare(`
-      SELECT CAST(p.rowid AS TEXT) AS provider_action_rowid,p.run_id,p.adapter_id,p.action_id,p.status,p.updated_at,r.chair_agent_id
-        FROM provider_actions p LEFT JOIN runs r ON r.run_id=p.run_id
-       WHERE p.status IN ('prepared','dispatched','ambiguous')
-       ORDER BY p.updated_at,p.action_id
-    `).all().flatMap((value) => {
-      const recovery = classifyProviderActionOwnerRowForStartup(this.#database, value);
-      return recovery.owner === "certifying_review" && recovery.ref !== null ? [recovery] : [];
-    });
-    for (const recovery of pending) {
-      const { action, ref } = recovery;
-      if (ref === null) throw new Error("certifying review startup provider action identity is unavailable");
-      try {
-        const result = await this.#reconcileProviderAction(ref.runId, stringField(action, "chair_agent_id"), {
-          adapterId: ref.adapterId, actionId: ref.actionId,
-          commandId: `certifying-review-recovery:${ref.actionId}:${stringField(action, "status")}:${numberField(action, "updated_at")}`,
-        }, "certifying_review");
-        if (result.status === "quarantined") actionsQuarantined += 1; else actionsReconciled += 1;
-      } catch (error: unknown) {
-        if (this.#quarantineProviderActionOwnerAtStartup(recovery, this.#clock(), {
-          owner: error instanceof ProviderActionOwnerError ? error.actualOwner : recovery.owner,
-          reason: error instanceof Error ? error.message : String(error),
-        })) actionsQuarantined += 1;
-      }
-    }
-    return { actionsReconciled, actionsQuarantined };
   }
 
   bindCurrentMcpSeats(input: CurrentMcpSeatBindingInput): CurrentMcpSeatBindingResult {
@@ -5655,241 +5579,7 @@ export class Fabric {
     actorAgentId: string,
     input: { adapterId: string; actionId: string; commandId: string },
   ): Promise<ProviderActionResult> {
-    return await this.#trackProviderOperation(
-      async () => {
-        assertProviderActionOwner(this.#database, {
-          runId,
-          adapterId: input.adapterId,
-          actionId: input.actionId,
-        }, "generic");
-        const replay = this.#commandJournal.read(
-          runId,
-          actorAgentId,
-          input.commandId,
-          input,
-          isProviderActionResult,
-        );
-        if (replay !== undefined) return replay;
-        this.#assertChair(runId, actorAgentId);
-        const key = this.#providerActionOwnershipKey(runId, input.adapterId, input.actionId);
-        const existing = this.#providerActionReconciliations.get(key);
-        if (existing !== undefined) {
-          await existing;
-          const concurrentReplay = this.#commandJournal.read(
-            runId,
-            actorAgentId,
-            input.commandId,
-            input,
-            isProviderActionResult,
-          );
-          if (concurrentReplay !== undefined) {
-            assertProviderActionOwner(this.#database, {
-              runId,
-              adapterId: input.adapterId,
-              actionId: input.actionId,
-            }, "generic");
-            return concurrentReplay;
-          }
-          this.#assertChair(runId, actorAgentId);
-          this.#assertGenericProviderAction(runId, input.adapterId, input.actionId);
-          const current = this.getProviderAction(runId, input.adapterId, input.actionId);
-          if (current.status === "terminal" || current.status === "quarantined") {
-            this.#commandJournal.write(runId, actorAgentId, input.commandId, input, current);
-            return current;
-          }
-          return await this.#reconcileProviderAction(runId, actorAgentId, input);
-        }
-        const owned = this.#reconcileProviderAction(runId, actorAgentId, input);
-        this.#providerActionReconciliations.set(key, owned);
-        try {
-          return await owned;
-        } finally {
-          if (this.#providerActionReconciliations.get(key) === owned) {
-            this.#providerActionReconciliations.delete(key);
-          }
-        }
-      },
-    );
-  }
-
-  async #reconcileProviderAction(
-    runId: string,
-    actorAgentId: string,
-    input: { adapterId: string; actionId: string; commandId: string },
-    expectedOwner: ProviderActionCustodyOwner = "generic",
-  ): Promise<ProviderActionResult> {
-    this.#assertChair(runId, actorAgentId);
-    assertProviderActionOwner(this.#database, {
-      runId,
-      adapterId: input.adapterId,
-      actionId: input.actionId,
-    }, expectedOwner);
-    const replay = this.#commandJournal.read(runId, actorAgentId, input.commandId, input, isProviderActionResult);
-    if (replay !== undefined) return replay;
-    const stored = rowOrNotFound(
-      this.#database
-        .prepare("SELECT adapter_id, operation, payload_json, status, idempotency_proven, target_agent_id, budget_state FROM provider_actions WHERE run_id = ? AND adapter_id = ? AND action_id = ?")
-        .get(runId, input.adapterId, input.actionId),
-      "provider action",
-    );
-    const storedPayload: unknown = JSON.parse(stringField(stored, "payload_json"));
-    if (!isRow(storedPayload)) throw new Error("stored provider action payload is invalid");
-    const answerBearing = stored.operation === "spawn" && isTaskBoundEphemeralProviderPayload(storedPayload);
-    const quarantine = (candidate: ProviderActionResult): ProviderActionResult => {
-      const quarantined: ProviderActionResult = {
-        ...candidate,
-        status: "quarantined",
-      };
-      delete quarantined.providerAnswer;
-      if (answerBearing) delete quarantined.result;
-      this.#persistProviderAction(runId, input.adapterId, input.actionId, { idempotencyProven: false }, quarantined, expectedOwner);
-      this.#settleProviderTurnAndPump(runId, input.adapterId, input.actionId, "quarantined");
-      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, quarantined);
-      return quarantined;
-    };
-    let result = this.getProviderAction(runId, input.adapterId, input.actionId);
-    if (this.#providerActionState.isOwned(runId, input.adapterId, input.actionId)) {
-      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
-      return result;
-    }
-    if (result.status === "prepared") {
-      if (answerBearing) {
-        const adapterId = stringField(stored, "adapter_id");
-        this.#enqueueDeferredProviderAction({
-          runId,
-          adapterId,
-          actionId: input.actionId,
-          owner: expectedOwner,
-          execute: async () => await this.#providerActionExecutor.completeAdapterOperation({
-            runId,
-            adapterId,
-            actionId: input.actionId,
-            operation: "spawn",
-            method: "spawn",
-            payload: storedPayload,
-            requireProviderAnswer: true,
-            owner: expectedOwner,
-          }),
-        });
-        result = this.getProviderAction(runId, input.adapterId, input.actionId);
-        this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
-        return result;
-      }
-      if (typeof stored.target_agent_id === "string") {
-        this.#payloadAuthority.assertProviderPrincipalActive(runId, stored.target_agent_id);
-      }
-      const adapterId = stringField(stored, "adapter_id");
-      assertProviderActionOwner(this.#database, {
-        runId,
-        adapterId: input.adapterId,
-        actionId: input.actionId,
-      }, expectedOwner);
-      this.#database
-        .prepare("UPDATE provider_actions SET status = 'dispatched', history_json = '[\"prepared\",\"dispatched\"]', execution_count = 1, updated_at = ? WHERE run_id = ? AND adapter_id = ? AND action_id = ?")
-        .run(this.#clock(), runId, input.adapterId, input.actionId);
-      try {
-        const response = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload: storedPayload });
-        result = providerActionResultWithRequiredAnswer(response, answerBearing, input.actionId);
-        this.#persistProviderAction(runId, input.adapterId, input.actionId, response, result, expectedOwner);
-      } catch (error: unknown) {
-        if (error instanceof ProviderActionOwnerError) throw error;
-        result = {
-          actionId: input.actionId,
-          status: "ambiguous",
-          history: ["prepared", "dispatched", "ambiguous"],
-          executionCount: 1,
-          effectCount: 0,
-        };
-        this.#persistProviderAction(runId, input.adapterId, input.actionId, { idempotencyProven: false }, result, expectedOwner);
-      }
-      this.#settleProviderTurnAndPump(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
-      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
-      return result;
-    }
-    const resolvedEffectWithUnknownUsage = answerBearing &&
-      (result.status === "terminal" || result.status === "quarantined") &&
-      stored.budget_state === "usage-unknown";
-    const resolvedEffectResult = result;
-    const preserveResolvedEffect = (): ProviderActionResult => {
-      assertProviderActionOwner(this.#database, {
-        runId,
-        adapterId: input.adapterId,
-        actionId: input.actionId,
-      }, expectedOwner);
-      this.#settleProviderTurnAndPump(
-        runId,
-        input.adapterId,
-        input.actionId,
-        resolvedEffectResult.status === "terminal" ? "terminal" : "quarantined",
-      );
-      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, resolvedEffectResult);
-      return resolvedEffectResult;
-    };
-    if (result.status !== "ambiguous" && result.status !== "dispatched" && !resolvedEffectWithUnknownUsage) {
-      this.#settleProviderTurnAndPump(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
-      this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
-      return result;
-    }
-    const adapterId = stringField(stored, "adapter_id");
-    let lookup: unknown;
-    try {
-      assertProviderActionOwner(this.#database, {
-        runId,
-        adapterId: input.adapterId,
-        actionId: input.actionId,
-      }, expectedOwner);
-      lookup = await this.#requestAdapter(adapterId, "lookup_action", { actionId: input.actionId });
-    } catch (error: unknown) {
-      if (error instanceof ProviderActionOwnerError) throw error;
-      if (resolvedEffectWithUnknownUsage) return preserveResolvedEffect();
-      return quarantine(result);
-    }
-    let lookedUp: ProviderActionResult;
-    try {
-      lookedUp = providerActionResultWithRequiredAnswer(lookup, answerBearing, input.actionId);
-    } catch {
-      if (resolvedEffectWithUnknownUsage) return preserveResolvedEffect();
-      return quarantine(result);
-    }
-    const idempotencyProven = numberField(stored, "idempotency_proven") === 1 ||
-      (isRow(lookup) && lookup.idempotencyProven === true);
-    if (lookedUp.status === "terminal") {
-      result = lookedUp;
-      try {
-        this.#persistProviderAction(runId, input.adapterId, input.actionId, lookup, result, expectedOwner);
-      } catch (error: unknown) {
-        if (error instanceof ProviderActionOwnerError) throw error;
-        if (resolvedEffectWithUnknownUsage) return preserveResolvedEffect();
-        return quarantine(this.getProviderAction(runId, input.adapterId, input.actionId));
-      }
-    } else if (resolvedEffectWithUnknownUsage) {
-      return preserveResolvedEffect();
-    } else if (idempotencyProven && !answerBearing) {
-      if (typeof stored.target_agent_id === "string") {
-        this.#payloadAuthority.assertProviderPrincipalActive(runId, stored.target_agent_id);
-      }
-      assertProviderActionOwner(this.#database, {
-        runId,
-        adapterId: input.adapterId,
-        actionId: input.actionId,
-      }, expectedOwner);
-      const replayed = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload: storedPayload });
-      try {
-        result = providerActionResultWithRequiredAnswer(replayed, answerBearing, input.actionId);
-      } catch {
-        return quarantine(result);
-      }
-      try {
-        this.#persistProviderAction(runId, input.adapterId, input.actionId, replayed, result, expectedOwner);
-      } catch {
-        return quarantine(this.getProviderAction(runId, input.adapterId, input.actionId));
-      }
-    } else {
-      return quarantine(lookedUp);
-    }
-    this.#settleProviderTurnAndPump(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
-    this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
-    return result;
+    return await this.#providerActionRecovery.reconcile(runId, actorAgentId, input);
   }
 
   getProviderAction(runId: string, adapterId: string, actionId: string): ProviderActionResult {
