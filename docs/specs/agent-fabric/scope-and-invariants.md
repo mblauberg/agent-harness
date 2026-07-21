@@ -127,12 +127,25 @@ Claude or Codex MCP process
 ~/.agents/
   runtime/agent-fabric/
     package.json
-    src/core/
+    src/core/fabric.ts
     src/adapters/
-    src/transports/
+    src/transport/
+    src/lifecycle/
+    src/provider-action/
+    src/project-session/
+      launch-custody.ts
+      provider-agent-custody.ts
+      chair-recovery-custody.ts
+      chair-live-handoff-custody.ts
+    src/operator/
+      action-store.ts
+      production-action-ports.ts
     schemas/
     migrations/
     tests/
+  runtime/agent-fabric-protocol/
+    src/operation-codecs.ts  # stable public import point
+    src/operation-codecs/    # codec owner
   config/agent-fabric.yaml
   config/model-routing.json
   scripts/agent-fabric
