@@ -131,13 +131,18 @@ import {
   HERDR_STEER_DISPATCH_REQUEST_CODEC,
   HERDR_STEER_DISPATCH_RESULT_CODEC,
 } from "./herdr-control.js";
+import {
+  composeOperationCodecFragments,
+  assertComposedRegistryExhaustive,
+} from "./operation-codecs/registry.js";
+import type {
+  ObjectWireShape,
+  OperationCodecFragment,
+  OperationCodecPair,
+  WireShape,
+} from "./operation-codecs/common.js";
 
-export type ObjectWireShape = {
-  kind: "object";
-  required: readonly string[];
-  optional: readonly string[];
-};
-export type WireShape = ObjectWireShape | { kind: "array" } | { kind: "null" };
+export type { ObjectWireShape, OperationCodecPair, WireShape };
 
 const object = (required: readonly string[], optional: readonly string[] = []): ObjectWireShape => ({
   kind: "object",
@@ -3417,11 +3422,6 @@ const resourceReservationResultCodec = objectCodec({
   capacity: recordOf(resourceDimensionCodec, { maximum: 128, keyCodec: budgetUnitKey }),
 });
 
-export type OperationCodecPair = {
-  readonly input: Codec<unknown>;
-  readonly result: Codec<unknown>;
-};
-
 function parsedBy(
   codec: Codec<unknown>,
   parser: (value: unknown) => unknown,
@@ -3643,15 +3643,17 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
   return semanticShapeCodec(operation, "result", OPERATION_RESULT_SHAPES[operation]);
 }
 
-function buildOperationCodecs(): Readonly<Record<ProtocolOperation, OperationCodecPair>> {
+// TEMPORARY (#354 S5a-S5c): the entire canonical operation set as one catch-all fragment, replaced
+// by the 13 named domain fragments in S5b/S5c; the composer below proves the union is exact.
+function legacyOperationCodecFragment(): OperationCodecFragment {
   const codecs: Partial<Record<ProtocolOperation, OperationCodecPair>> = {};
   for (const operation of Object.keys(OPERATION_REGISTRY) as ProtocolOperation[]) {
     codecs[operation] = Object.freeze({ input: inputCodecFor(operation), result: resultCodecFor(operation) });
   }
-  return Object.freeze(codecs) as Readonly<Record<ProtocolOperation, OperationCodecPair>>;
+  return Object.freeze(codecs);
 }
 
-export const OPERATION_CODECS = buildOperationCodecs();
+export const OPERATION_CODECS = composeOperationCodecFragments([legacyOperationCodecFragment()]);
 
 export function operationInputSchemaForPrincipal(
   operation: ProtocolOperation,
@@ -3832,8 +3834,5 @@ export function parseOperationResultForInput<Operation extends ProtocolOperation
 }
 
 export function assertCodecRegistryExhaustive(): void {
-  const operations = Object.keys(OPERATION_REGISTRY);
-  if (operations.length !== Object.keys(OPERATION_CODECS).length) {
-    throw new Error("operation codec registry is not exhaustive");
-  }
+  assertComposedRegistryExhaustive(OPERATION_CODECS);
 }
