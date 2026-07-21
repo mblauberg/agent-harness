@@ -60,6 +60,22 @@ import { parseArtifactContentReadResult } from "@local/agent-fabric-protocol";
 import { readConsoleMessageBody } from "./message.js";
 
 import {
+  BOOTSTRAP_FAILURE_DETAILS,
+  connectionDiagnosisRows,
+  createConnectionDiagnosis,
+  type BootstrapUnavailableReason,
+  type ConsoleConnectionDiagnosis,
+} from "./connection-diagnosis.js";
+
+export type {
+  BootstrapUnavailableReason,
+  ConsoleConnectionDiagnosis,
+  ConsoleConnectionStage,
+  ConsoleConnectionStageId,
+  ConsoleConnectionStageState,
+} from "./connection-diagnosis.js";
+
+import {
   FABRIC_VIEWS,
   createEmptyViewPages,
   mapProtocolRow,
@@ -466,6 +482,7 @@ export type ConsoleReviewProjections = Readonly<{
 
 export type FabricConsoleDataset = Readonly<{
   connection: ConsoleConnection;
+  connectionDiagnosis?: ConsoleConnectionDiagnosis;
   snapshot: OperatorProjectionSnapshot | null;
   snapshotRevision: Revision | null;
   cursor: number;
@@ -512,84 +529,42 @@ function closedProjectionUnavailable(
   return { state: "unavailable", reason, code };
 }
 
-export type BootstrapUnavailableReason =
-  | "feature-unavailable"
-  | "configuration-missing"
-  | "schema-cutover-required"
-  | "authority-unavailable"
-  | "daemon-unreachable"
-  | "daemon-incompatible"
-  | "socket-unavailable"
-  | "daemon-election-conflict"
-  | "daemon-spawn-failed"
-  | "bootstrap-receipt-invalid"
-  | "start-failed";
-
 /**
  * Truthful System-view rendering for each bootstrap-unavailable reason. The
  * transport axis stays `bootstrap-unavailable` (one honest connection axis),
  * while the System `daemon` row names the exact causal finding and its bounded
  * remediation instead of collapsing every daemon/transport failure into a
  * generic message. Every detail is a safe, non-secret operator summary.
+ *
+ * Text derives from `BOOTSTRAP_FAILURE_DETAILS` (connection-diagnosis.ts),
+ * the single source of per-reason narrative text, so the two files never
+ * maintain independent prose for the same 11 reasons. A few reasons keep a
+ * distinct operator-facing phrasing (e.g. an all-caps cutover alert) via
+ * `DETAIL_OVERRIDES`.
  */
+const DETAIL_OVERRIDES: Partial<Record<BootstrapUnavailableReason, string>> = {
+  "schema-cutover-required": "CUTOVER REQUIRED — existing database preserved",
+  "daemon-unreachable":
+    "no reachable Fabric daemon — the daemon socket is absent or unresponsive; retry to start it",
+};
+
 const BOOTSTRAP_UNAVAILABLE_DETAILS: Record<
   BootstrapUnavailableReason,
   { kind: SystemViewItem["kind"]; detail: string }
-> = {
-  "feature-unavailable": {
-    kind: "daemon",
-    detail:
-      "the Fabric daemon does not negotiate a required Console feature — adopt the current build",
-  },
-  "configuration-missing": {
-    kind: "daemon",
-    detail:
-      "workspace trust configuration is unavailable — run fabric doctor to repair project configuration",
-  },
-  "schema-cutover-required": {
-    kind: "daemon",
-    detail: "CUTOVER REQUIRED — existing database preserved",
-  },
-  "authority-unavailable": {
-    kind: "daemon",
-    detail:
-      "the requested project session is not attachable under this operator authority",
-  },
-  "daemon-unreachable": {
-    kind: "daemon",
-    detail:
-      "no reachable Fabric daemon — the daemon socket is absent or unresponsive; retry to start it",
-  },
-  "daemon-incompatible": {
-    kind: "daemon",
-    detail:
-      "the running Fabric daemon is protocol-incompatible — stop it so the current build can start",
-  },
-  "socket-unavailable": {
-    kind: "daemon",
-    detail:
-      "the Fabric daemon socket did not match the trusted path — reconcile a stale daemon and retry",
-  },
-  "daemon-election-conflict": {
-    kind: "daemon",
-    detail:
-      "a concurrent Fabric daemon bootstrap is in progress — retry after the election settles",
-  },
-  "daemon-spawn-failed": {
-    kind: "daemon",
-    detail:
-      "the Fabric daemon failed to launch — inspect fabric doctor for the failed bootstrap stage",
-  },
-  "bootstrap-receipt-invalid": {
-    kind: "daemon",
-    detail:
-      "the Fabric daemon bootstrap receipt was invalid — reconcile the daemon and retry",
-  },
-  "start-failed": {
-    kind: "daemon",
-    detail: "the Fabric daemon could not be started",
-  },
-};
+> = Object.fromEntries(
+  (Object.keys(BOOTSTRAP_FAILURE_DETAILS) as BootstrapUnavailableReason[]).map(
+    (reason) => {
+      const { summary, remediation } = BOOTSTRAP_FAILURE_DETAILS[reason];
+      return [
+        reason,
+        {
+          kind: "daemon" as const,
+          detail: DETAIL_OVERRIDES[reason] ?? `${summary} — ${remediation}`,
+        },
+      ];
+    },
+  ),
+) as Record<BootstrapUnavailableReason, { kind: SystemViewItem["kind"]; detail: string }>;
 
 export function createBootstrapUnavailableDataset(
   reason: BootstrapUnavailableReason,
@@ -597,8 +572,19 @@ export function createBootstrapUnavailableDataset(
 ): FabricConsoleDataset {
   const pages = createEmptyViewPages();
   const revision = revisionFromProtocol(0);
+  const diagnosis = createConnectionDiagnosis(reason, nowMs);
+  const stageRows = connectionDiagnosisRows(diagnosis, nowMs).map((stage) => ({
+    view: "system" as const,
+    ...stage,
+    detailRef: null,
+    actionAvailability: {
+      state: "read-only" as const,
+      reason: "fact-unavailable" as const,
+    },
+  }));
   return {
     connection: { state: "unavailable", reason: "bootstrap-unavailable" },
+    connectionDiagnosis: diagnosis,
     snapshot: null,
     snapshotRevision: null,
     cursor: 0,
@@ -608,32 +594,33 @@ export function createBootstrapUnavailableDataset(
         view: "system",
         rows: [
           {
-            view: "system",
+            view: "system" as const,
             stableId: "bootstrap",
             revision,
-            urgency: "safety-integrity",
+            urgency: "safety-integrity" as const,
             freshness: {
-              state: "unavailable",
-              source: "fabric",
+              state: "unavailable" as const,
+              source: "fabric" as const,
               revision,
               observedAt: new Date(nowMs).toISOString() as never,
               ageMs: 0,
               reason,
             },
             summary: {
-              kind: "system",
+              kind: "system" as const,
               systemKind: BOOTSTRAP_UNAVAILABLE_DETAILS[reason].kind,
-              state: "unavailable",
+              state: "unavailable" as const,
               detail: BOOTSTRAP_UNAVAILABLE_DETAILS[reason].detail,
             },
             detailRef: null,
             actionAvailability: {
-              state: "read-only",
-              reason: "fact-unavailable",
+              state: "read-only" as const,
+              reason: "fact-unavailable" as const,
             },
           },
+          ...stageRows,
         ],
-        nextCursor: 0,
+        nextCursor: stageRows.length + 1,
         hasMore: false,
         snapshotRevision: null,
         readTransactionId: null,

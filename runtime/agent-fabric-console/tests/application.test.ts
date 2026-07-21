@@ -340,7 +340,7 @@ describe("typed Console application bootstrap boundary", () => {
       },
     });
     expect(application.frame.rows.join("\n")).toContain(
-      "the Fabric daemon does not negotiate",
+      "the required Console feature was not negotiated",
     );
     expect(JSON.stringify(application.dataset)).not.toContain("token-never-render");
     await application.close("operator");
