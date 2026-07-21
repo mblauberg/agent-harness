@@ -138,7 +138,20 @@ import {
   type AgentDispatchHandle,
   type LaunchDispatchHandle,
   type ChairRecoveryDispatchHandle,
+  type RetainedChairBridge,
 } from "../project-session/launch-custody.js";
+import { ProviderAgentCustodyAdapter } from "../project-session/provider-agent-custody.js";
+import { ProviderAgentCustodyRecoveryAdapter } from "../project-session/provider-agent-custody-recovery.js";
+import {
+  ChairLiveHandoffCustodyAdapter,
+  type RetainedSuccessorBridgeProbe,
+} from "../project-session/chair-live-handoff-custody.js";
+import { ChairLiveHandoffCustodyRecoveryAdapter } from "../project-session/chair-live-handoff-custody-recovery.js";
+import { ChairRecoveryCustodyService } from "../project-session/chair-recovery-custody.js";
+import { LaunchService } from "../project-session/launch-service.js";
+import { LaunchSettlement } from "../project-session/launch-settlement.js";
+import type { Digest } from "../project-session/launch-contracts.js";
+import { reconcileUnknownLaunchUsage as reconcileUnknownLaunchUsageOwner } from "../project-session/launch-usage-reconciliation.js";
 import { IntakeStore } from "../project-session/intake-store.js";
 import { assertSafeLaunchProviderInput } from "../project-session/provider-input-safety.js";
 import {
@@ -1031,39 +1044,42 @@ export class Fabric {
         this.#adapterSupervisor.retireProjectSessionBridges(projectSessionId);
       },
     });
-    this.#launchCustody = options.fabricSocketPath === undefined
+    // Plan §1 "What dissolve means, minimally" (issue #354, S4e2): each of the four custody
+    // families is constructed here with only its own narrow effects/options; `LaunchCustodyService`
+    // is a thin facade over the already-built instances (launch-custody.ts), and the operator ports
+    // below receive the narrow family adapters directly rather than the combined facade.
+    const launchCustodyFamilies = options.fabricSocketPath === undefined
       ? undefined
-      : new LaunchCustodyService({
-          database: this.#database,
-          providerActionAdmission: this.#providerActionAdmission,
-          clock: this.#clock,
-          randomCapability: () => `afc_${randomBytes(32).toString("base64url")}`,
-          fabricSocketPath: options.fabricSocketPath,
-          adapterContracts: {
-            inspect: async (adapterId) => await this.#inspectLaunchAdapterContract(adapterId),
-          },
-          adapterEffects: {
-            dispatch: async (handle) => await this.#dispatchLaunchAdapter(handle),
-            lookup: async (input) => await this.#lookupLaunchAdapter(input),
-            hasRetainedChairBridge: (entry) => this.#adapterSupervisor.hasRetainedChairBridge(entry),
-            recoverChair: async (handle) => await this.#dispatchChairRecoveryAdapter(handle),
-            lookupChairRecovery: async (input) => await this.#requestAdapter(
+      : (() => {
+          const database = this.#database;
+          const clock = this.#clock;
+          const fabricSocketPath = options.fabricSocketPath;
+          const daemonInstanceGeneration = () => this.#currentDaemonInstanceGeneration();
+          const adapterContracts = {
+            inspect: async (adapterId: string) => await this.#inspectLaunchAdapterContract(adapterId),
+          };
+          const adapterEffects = {
+            dispatch: async (handle: LaunchDispatchHandle) => await this.#dispatchLaunchAdapter(handle),
+            lookup: async (input: Readonly<{ providerAdapterId: string; providerActionId: string; providerContractDigest: Digest; attestationChallengeDigest: Digest }>) => await this.#lookupLaunchAdapter(input),
+            hasRetainedChairBridge: (entry: RetainedChairBridge) => this.#adapterSupervisor.hasRetainedChairBridge(entry),
+            recoverChair: async (handle: ChairRecoveryDispatchHandle) => await this.#dispatchChairRecoveryAdapter(handle),
+            lookupChairRecovery: async (input: Readonly<{ adapterId: string; actionId: string }>) => await this.#requestAdapter(
               input.adapterId,
               "lookup_action",
               { actionId: input.actionId },
             ),
-            lookupRetainedSuccessorBridge: async (input) => (
+            lookupRetainedSuccessorBridge: async (input: RetainedSuccessorBridgeProbe) => (
               await this.#adapterSupervisor.lookupRetainedSuccessorBridge(input)
             ),
-            promoteRetainedSuccessorBridge: async (input) => (
+            promoteRetainedSuccessorBridge: async (input: RetainedSuccessorBridgeProbe) => (
               await this.#adapterSupervisor.promoteRetainedChildBridgeToChair(input)
             ),
-          },
-          agentEffects: {
-            dispatch: async (handle) => await this.#dispatchAgentAdapter(handle),
-            attachWithoutBridge: async (handle) => await this.#attachWithoutBridge(handle),
-            lookup: async (input) => await this.#requestAdapter(input.adapterId, "lookup_action", { actionId: input.actionId }),
-            hasRetainedBridge: (result, handle) => this.#adapterSupervisor.hasRetainedChildBridge({
+          };
+          const agentEffects = {
+            dispatch: async (handle: AgentDispatchHandle) => await this.#dispatchAgentAdapter(handle),
+            attachWithoutBridge: async (handle: AgentDispatchHandle) => await this.#attachWithoutBridge(handle),
+            lookup: async (input: Readonly<{ adapterId: string; actionId: string }>) => await this.#requestAdapter(input.adapterId, "lookup_action", { actionId: input.actionId }),
+            hasRetainedBridge: (result: AgentCustodyResult, handle: AgentDispatchHandle) => this.#adapterSupervisor.hasRetainedChildBridge({
               runId: handle.runId,
               agentId: result.agentId,
               adapterId: result.adapterId,
@@ -1072,14 +1088,93 @@ export class Fabric {
               providerSessionGeneration: result.providerSessionGeneration,
               bridgeGeneration: result.bridgeGeneration,
             }),
-          },
-          retireVolatileProjectSession: (projectSessionId) => {
+          };
+          const retireVolatileProjectSession = (projectSessionId: string) => {
             this.#adapterSupervisor.retireProjectSessionBridges(projectSessionId);
-          },
-          retireVolatileChairBridge: (entry) => {
+          };
+          const retireVolatileChairBridge = (entry: RetainedChairBridge) => {
             this.#adapterSupervisor.retireChairBridge(entry);
-          },
-          daemonInstanceGeneration: () => this.#currentDaemonInstanceGeneration(),
+          };
+          const randomCapability = () => `afc_${randomBytes(32).toString("base64url")}`;
+          const providerAgentCustody = new ProviderAgentCustodyAdapter({
+            database,
+            providerActionAdmission: this.#providerActionAdmission,
+            clock,
+            fault: this.#fault,
+            randomCapability,
+            fabricSocketPath,
+            agentEffects,
+            daemonInstanceGeneration,
+          });
+          const providerAgentCustodyRecovery = new ProviderAgentCustodyRecoveryAdapter({
+            database,
+            agentEffects,
+            custody: providerAgentCustody.recoveryPort(),
+          });
+          const chairLiveHandoffCustody = new ChairLiveHandoffCustodyAdapter({
+            database,
+            providerActionAdmission: this.#providerActionAdmission,
+            clock,
+            fault: this.#fault,
+            adapterContracts,
+            adapterEffects,
+            retireVolatileChairBridge,
+          });
+          const chairLiveHandoffCustodyRecovery = new ChairLiveHandoffCustodyRecoveryAdapter({
+            database,
+            custody: chairLiveHandoffCustody.recoveryPort(),
+          });
+          const chairRecoveryCustody = new ChairRecoveryCustodyService({
+            database,
+            providerActionAdmission: this.#providerActionAdmission,
+            clock,
+            fault: this.#fault,
+            randomCapability,
+            randomAttestationChallenge: () => randomBytes(32).toString("hex"),
+            fabricSocketPath,
+            adapterContracts,
+            adapterEffects,
+            daemonInstanceGeneration,
+            retireVolatileProjectSession,
+            reconcileUnknownLaunchUsage: (input) => reconcileUnknownLaunchUsageOwner(database, clock, input),
+          });
+          const launchSettlement = new LaunchSettlement({
+            database,
+            clock,
+            adapterContracts,
+            adapterEffects,
+            chairLoss: {
+              observeChairBridgeLoss: (input) => chairRecoveryCustody.observeChairBridgeLoss(input),
+            },
+          });
+          const launchService = new LaunchService({
+            database,
+            providerActionAdmission: this.#providerActionAdmission,
+            clock,
+            fault: this.#fault,
+            randomCapability,
+            randomAttestationChallenge: () => randomBytes(32).toString("hex"),
+            fabricSocketPath,
+            adapterContracts,
+            adapterEffects,
+            settlement: launchSettlement,
+          });
+          return {
+            providerAgentCustody,
+            providerAgentCustodyRecovery,
+            chairLiveHandoffCustody,
+            chairLiveHandoffCustodyRecovery,
+            chairRecoveryCustody,
+            launchService,
+            launchSettlement,
+          };
+        })();
+    this.#launchCustody = launchCustodyFamilies === undefined
+      ? undefined
+      : new LaunchCustodyService({
+          database: this.#database,
+          clock: this.#clock,
+          ...launchCustodyFamilies,
         });
     if (this.#launchCustody !== undefined) {
       this.#adapterSupervisor.setChairBridgeLossHandler((entry, reason) => {

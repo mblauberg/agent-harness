@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import type {
   AgentCustodyResult,
   ChairBridgeRecoveryIntent,
@@ -6,26 +5,24 @@ import type {
   ProjectSessionLaunchCurrentState,
 } from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
-import { isAbsolute } from "node:path";
 import type { ArtifactRef } from "@local/agent-fabric-protocol";
 
 import type { AuthenticatedOperatorContext } from "./contracts.js";
 import {
-  ProviderAgentCustodyAdapter,
+  type ProviderAgentCustodyAdapter,
   type AgentCustodyInput,
-  type AgentDispatchHandle,
 } from "./provider-agent-custody.js";
-import { ProviderAgentCustodyRecoveryAdapter } from "./provider-agent-custody-recovery.js";
+import { type ProviderAgentCustodyRecoveryAdapter } from "./provider-agent-custody-recovery.js";
 import {
-  ChairLiveHandoffCustodyAdapter,
+  type ChairLiveHandoffCustodyAdapter,
   type ChairLiveHandoffCommit,
   type ChairLiveHandoffCurrentState,
   type ChairLiveHandoffDispatchHandle,
   type ChairLiveHandoffInspection,
 } from "./chair-live-handoff-custody.js";
-import { ChairLiveHandoffCustodyRecoveryAdapter } from "./chair-live-handoff-custody-recovery.js";
+import { type ChairLiveHandoffCustodyRecoveryAdapter } from "./chair-live-handoff-custody-recovery.js";
 import {
-  ChairRecoveryCustodyService,
+  type ChairRecoveryCustodyService,
   type ChairRecoveryCommit,
   type ChairRecoveryCurrentState,
   type ChairRecoveryDispatchHandle,
@@ -37,14 +34,13 @@ import {
   type LaunchUsageReconciliationResult,
 } from "./launch-usage-reconciliation.js";
 import {
-  ProviderActionAdmissionCoordinator,
   type ProviderActionTicket,
 } from "../application/provider-action-admission.js";
-import { LaunchService, type LaunchServiceAdapterEffectsPort } from "./launch-service.js";
-import { LaunchSettlement, type LaunchSettlementAdapterEffectsPort } from "./launch-settlement.js";
+import { type LaunchService } from "./launch-service.js";
+import { type LaunchSettlement } from "./launch-settlement.js";
+import { recoverLaunchCustodyFamilies } from "./custody-startup.js";
 import type {
   Digest,
-  LaunchAdapterContract,
   LaunchCustodyIntent,
   LaunchDispatchHandle,
   LaunchInspection,
@@ -60,61 +56,24 @@ import type {
  * sibling family adapters (provider-agent, chair live handoff, chair recovery) that S4b-S4d
  * already extracted, and keeps every public method signature unchanged for callers (fabric.ts,
  * action-store.ts, and the operator adapters).
+ *
+ * As of S4e2, `fabric.ts` constructs each of the seven family/recovery pieces itself (each with
+ * its own narrow constructor options — `ProviderAgentCustodyAdapterOptions`,
+ * `ChairLiveHandoffCustodyAdapterOptions`, `ChairRecoveryCustodyServiceOptions`,
+ * `LaunchServiceOptions`, plus their recovery-adapter counterparts) and passes the already-built
+ * instances here; this class no longer owns any cross-family wiring or a mixed options bag.
  */
 
-export type LaunchCustodyServiceOptions = Readonly<{
+export type LaunchCustodyServiceFamilies = Readonly<{
   database: Database.Database;
-  providerActionAdmission: ProviderActionAdmissionCoordinator;
   clock?: () => number;
-  fault?: (label: string) => void;
-  randomCapability: () => string;
-  randomAttestationChallenge?: () => string;
-  fabricSocketPath: string;
-  adapterContracts: {
-    inspect(adapterId: string): Promise<LaunchAdapterContract>;
-  };
-  adapterEffects: LaunchServiceAdapterEffectsPort & LaunchSettlementAdapterEffectsPort & Readonly<{
-    hasRetainedChairBridge?(entry: RetainedChairBridge): boolean;
-    recoverChair?(handle: ChairRecoveryDispatchHandle): Promise<unknown>;
-    lookupChairRecovery?(input: Readonly<{ adapterId: string; actionId: string }>): Promise<unknown>;
-    lookupRetainedSuccessorBridge?(input: Readonly<{
-      projectSessionId: string;
-      runId: string;
-      agentId: string;
-      principalGeneration: number;
-      adapterId: string;
-      actionId: string;
-      providerSessionRef: string;
-      providerSessionGeneration: number;
-      sourceBridgeGeneration: number;
-      chairBridgeGeneration: number;
-      sourceActionId?: string;
-      promotionActionId?: string;
-    }>): Promise<"child" | "chair" | "missing">;
-    promoteRetainedSuccessorBridge?(input: Readonly<{
-      projectSessionId: string;
-      runId: string;
-      agentId: string;
-      principalGeneration: number;
-      adapterId: string;
-      actionId: string;
-      providerSessionRef: string;
-      providerSessionGeneration: number;
-      sourceBridgeGeneration: number;
-      chairBridgeGeneration: number;
-      sourceActionId?: string;
-      promotionActionId?: string;
-    }>): Promise<boolean>;
-  }>;
-  agentEffects?: {
-    dispatch(handle: AgentDispatchHandle): Promise<unknown>;
-    attachWithoutBridge(handle: AgentDispatchHandle): Promise<unknown>;
-    lookup(input: Readonly<{ adapterId: string; actionId: string }>): Promise<unknown>;
-    hasRetainedBridge(result: AgentCustodyResult, handle: AgentDispatchHandle): boolean;
-  };
-  daemonInstanceGeneration?: () => number;
-  retireVolatileProjectSession?: (projectSessionId: string) => void;
-  retireVolatileChairBridge?: (entry: RetainedChairBridge) => void;
+  providerAgentCustody: ProviderAgentCustodyAdapter;
+  providerAgentCustodyRecovery: ProviderAgentCustodyRecoveryAdapter;
+  chairLiveHandoffCustody: ChairLiveHandoffCustodyAdapter;
+  chairLiveHandoffCustodyRecovery: ChairLiveHandoffCustodyRecoveryAdapter;
+  chairRecoveryCustody: ChairRecoveryCustodyService;
+  launchService: LaunchService;
+  launchSettlement: LaunchSettlement;
 }>;
 
 export type {
@@ -150,7 +109,6 @@ export type {
 export class LaunchCustodyService {
   readonly #database: Database.Database;
   readonly #clock: () => number;
-  readonly #providerActionAdmission: ProviderActionAdmissionCoordinator;
   readonly #providerAgentCustody: ProviderAgentCustodyAdapter;
   readonly #providerAgentCustodyRecovery: ProviderAgentCustodyRecoveryAdapter;
   readonly #chairLiveHandoffCustody: ChairLiveHandoffCustodyAdapter;
@@ -159,88 +117,16 @@ export class LaunchCustodyService {
   readonly #launchService: LaunchService;
   readonly #launchSettlement: LaunchSettlement;
 
-  constructor(options: LaunchCustodyServiceOptions) {
-    const database = options.database;
-    this.#database = database;
-    this.#providerActionAdmission = options.providerActionAdmission;
-    const clock = options.clock ?? Date.now;
-    this.#clock = clock;
-    const fault = options.fault ?? (() => undefined);
-    const randomCapability = options.randomCapability;
-    const randomAttestationChallenge = options.randomAttestationChallenge ?? (() => randomBytes(32).toString("hex"));
-    const fabricSocketPath = options.fabricSocketPath;
-    const adapterContracts = options.adapterContracts;
-    const adapterEffects = options.adapterEffects;
-    const agentEffects = options.agentEffects;
-    const retireVolatileProjectSession = options.retireVolatileProjectSession;
-    const retireVolatileChairBridge = options.retireVolatileChairBridge;
-    const daemonInstanceGeneration = options.daemonInstanceGeneration ?? (() => 1);
-    if (!isAbsolute(fabricSocketPath)) throw new TypeError("Fabric socket path must be absolute");
-    this.#providerAgentCustody = new ProviderAgentCustodyAdapter({
-      database,
-      providerActionAdmission: this.#providerActionAdmission,
-      clock,
-      fault,
-      randomCapability,
-      fabricSocketPath,
-      agentEffects,
-      daemonInstanceGeneration,
-    });
-    this.#providerAgentCustodyRecovery = new ProviderAgentCustodyRecoveryAdapter({
-      database,
-      agentEffects,
-      custody: this.#providerAgentCustody.recoveryPort(),
-    });
-    this.#chairLiveHandoffCustody = new ChairLiveHandoffCustodyAdapter({
-      database,
-      providerActionAdmission: this.#providerActionAdmission,
-      clock,
-      fault,
-      adapterContracts,
-      adapterEffects,
-      ...(retireVolatileChairBridge === undefined ? {} : { retireVolatileChairBridge }),
-    });
-    this.#chairLiveHandoffCustodyRecovery = new ChairLiveHandoffCustodyRecoveryAdapter({
-      database,
-      custody: this.#chairLiveHandoffCustody.recoveryPort(),
-    });
-    this.#chairRecoveryCustody = new ChairRecoveryCustodyService({
-      database,
-      providerActionAdmission: this.#providerActionAdmission,
-      clock,
-      fault,
-      randomCapability,
-      randomAttestationChallenge,
-      fabricSocketPath,
-      adapterContracts,
-      adapterEffects,
-      daemonInstanceGeneration,
-      ...(retireVolatileProjectSession === undefined ? {} : { retireVolatileProjectSession }),
-      reconcileUnknownLaunchUsage: (input) => this.reconcileUnknownLaunchUsage(input),
-    });
-    // Plan §2 "S4e": inject a transaction-safe chair-loss port instead of `LaunchSettlement`
-    // reaching directly into the sibling chair-recovery family.
-    this.#launchSettlement = new LaunchSettlement({
-      database,
-      clock,
-      adapterContracts,
-      adapterEffects,
-      chairLoss: {
-        observeChairBridgeLoss: (input) => this.#chairRecoveryCustody.observeChairBridgeLoss(input),
-      },
-    });
-    this.#launchService = new LaunchService({
-      database,
-      providerActionAdmission: this.#providerActionAdmission,
-      clock,
-      fault,
-      randomCapability,
-      randomAttestationChallenge,
-      fabricSocketPath,
-      adapterContracts,
-      adapterEffects,
-      settlement: this.#launchSettlement,
-    });
+  constructor(families: LaunchCustodyServiceFamilies) {
+    this.#database = families.database;
+    this.#clock = families.clock ?? Date.now;
+    this.#providerAgentCustody = families.providerAgentCustody;
+    this.#providerAgentCustodyRecovery = families.providerAgentCustodyRecovery;
+    this.#chairLiveHandoffCustody = families.chairLiveHandoffCustody;
+    this.#chairLiveHandoffCustodyRecovery = families.chairLiveHandoffCustodyRecovery;
+    this.#chairRecoveryCustody = families.chairRecoveryCustody;
+    this.#launchSettlement = families.launchSettlement;
+    this.#launchService = families.launchService;
   }
 
   reconcileUnknownLaunchUsage(input: LaunchUsageReconciliationInput): LaunchUsageReconciliationResult {
@@ -409,43 +295,18 @@ export class LaunchCustodyService {
   }
 
   /**
-   * Byte-moved from `LaunchCustodyService#recover` (issue #354, S4d/S4e). Preserves the exact
-   * original ordering — live handoff, chair recovery, provider-agent, launch, then retained-chair
-   * audit — and continue-after-error semantics: every family's recovery is attempted even if an
-   * earlier family throws, and only the final aggregate raises. The launch family's own recovery
-   * loop now lives in `LaunchSettlement#recoverLaunchCustody` (launch-settlement.ts); this method
-   * remains the single ordering/aggregation point across all four families.
+   * Byte-moved from `LaunchCustodyService#recover` (issue #354, S4d/S4e); as of S4e2 the exact
+   * ordering — live handoff, chair recovery, provider-agent, launch, then retained-chair audit —
+   * and continue-after-error/aggregate-error semantics live in the narrow startup coordinator
+   * `custody-startup.ts` (`recoverLaunchCustodyFamilies`). This method remains the unchanged
+   * public entry point for callers (fabric.ts).
    */
   async recover(): Promise<LaunchRecoveryResult> {
-    const result: {
-      preparedFailed: number;
-      lookedUp: number;
-      activated: number;
-      failed: number;
-      ambiguous: number;
-      recoveryRequired: number;
-    } = {
-      preparedFailed: 0,
-      lookedUp: 0,
-      activated: 0,
-      failed: 0,
-      ambiguous: 0,
-      recoveryRequired: 0,
-    };
-    const errors: unknown[] = [];
-    await this.#chairLiveHandoffCustodyRecovery.recoverChairLiveHandoffCustody(result, errors);
-    try {
-      await this.#chairRecoveryCustody.recoverChairRecoveryCustody(result);
-    } catch (error: unknown) {
-      errors.push(error);
-      result.ambiguous += 1;
-    }
-    await this.#providerAgentCustodyRecovery.recoverAgentCustody(result, errors);
-    await this.#launchSettlement.recoverLaunchCustody(result, errors);
-    this.#chairRecoveryCustody.auditRetainedChairBridges(result, errors);
-    if (errors.length > 0) {
-      throw new AggregateError(errors, "launch custody recovery left one or more sessions unfenced");
-    }
-    return result;
+    return await recoverLaunchCustodyFamilies({
+      chairLiveHandoffCustodyRecovery: this.#chairLiveHandoffCustodyRecovery,
+      chairRecoveryCustody: this.#chairRecoveryCustody,
+      providerAgentCustodyRecovery: this.#providerAgentCustodyRecovery,
+      launchSettlement: this.#launchSettlement,
+    });
   }
 }
