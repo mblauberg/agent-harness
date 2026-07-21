@@ -7,7 +7,12 @@
 // exactly once.
 import { OPERATION_REGISTRY } from "../operations.js";
 import type { ProtocolOperation } from "../rpc-contract.js";
-import type { OperationCodecFragment, OperationCodecPair } from "./common.js";
+import type {
+  OperationCodecFragment,
+  OperationCodecPair,
+  OperationShapeFragment,
+  WireShape,
+} from "./common.js";
 
 /**
  * Compose an ordered list of domain codec fragments into one registry record, throwing on the
@@ -18,19 +23,56 @@ export function composeOperationCodecFragments(
   fragments: readonly OperationCodecFragment[],
 ): Readonly<Record<ProtocolOperation, OperationCodecPair>> {
   const seen = new Set<ProtocolOperation>();
+  const canonical = new Set(Object.keys(OPERATION_REGISTRY));
   for (const fragment of fragments) {
-    for (const key of Object.keys(fragment) as ProtocolOperation[]) {
-      if (seen.has(key)) {
+    for (const key of Object.keys(fragment)) {
+      if (!canonical.has(key)) {
+        throw new Error(`operation codec registry: unexpected fragment entry for operation "${key}"`);
+      }
+      if (seen.has(key as ProtocolOperation)) {
         throw new Error(`operation codec registry: duplicate fragment entry for operation "${key}"`);
       }
-      seen.add(key);
+      if (fragment[key as ProtocolOperation] === undefined) {
+        throw new Error(`operation codec registry: undefined fragment entry for operation "${key}"`);
+      }
+      seen.add(key as ProtocolOperation);
     }
   }
   const composed: Partial<Record<ProtocolOperation, OperationCodecPair>> = {};
   for (const fragment of fragments) {
     Object.assign(composed, fragment);
   }
-  return Object.freeze(composed) as Readonly<Record<ProtocolOperation, OperationCodecPair>>;
+  const ordered: Partial<Record<ProtocolOperation, OperationCodecPair>> = {};
+  for (const operation of Object.keys(OPERATION_REGISTRY) as ProtocolOperation[]) {
+    if (Object.hasOwn(composed, operation)) ordered[operation] = composed[operation]!;
+  }
+  return Object.freeze(ordered) as Readonly<Record<ProtocolOperation, OperationCodecPair>>;
+}
+
+/** Compose shape fragments with the same duplicate and canonical-order guarantees as codecs. */
+export function composeOperationShapeFragments(
+  fragments: readonly OperationShapeFragment[],
+): Readonly<Record<ProtocolOperation, WireShape>> {
+  const seen = new Set<ProtocolOperation>();
+  const canonical = new Set(Object.keys(OPERATION_REGISTRY));
+  const composed: Partial<Record<ProtocolOperation, WireShape>> = {};
+  for (const fragment of fragments) {
+    for (const key of Object.keys(fragment)) {
+      if (!canonical.has(key)) {
+        throw new Error(`operation shape registry: unexpected fragment entry for operation "${key}"`);
+      }
+      if (seen.has(key as ProtocolOperation)) {
+        throw new Error(`operation shape registry: duplicate fragment entry for operation "${key}"`);
+      }
+      seen.add(key as ProtocolOperation);
+      composed[key as ProtocolOperation] = fragment[key as ProtocolOperation]!;
+    }
+  }
+  const ordered: Partial<Record<ProtocolOperation, WireShape>> = {};
+  for (const operation of Object.keys(OPERATION_REGISTRY) as ProtocolOperation[]) {
+    if (Object.hasOwn(composed, operation)) ordered[operation] = composed[operation]!;
+  }
+  return Object.freeze(ordered) as Readonly<Record<ProtocolOperation, WireShape>>;
 }
 
 /**
@@ -44,7 +86,7 @@ export function assertComposedRegistryExhaustive(
 ): void {
   const canonical = new Set(Object.keys(OPERATION_REGISTRY));
   const actual = new Set(Object.keys(registry));
-  const missing = [...canonical].filter((key) => !actual.has(key)).sort();
+  const missing = [...canonical].filter((key) => !actual.has(key) || Reflect.get(registry, key) === undefined).sort();
   const unexpected = [...actual].filter((key) => !canonical.has(key)).sort();
   if (missing.length > 0 || unexpected.length > 0) {
     const parts: string[] = [];

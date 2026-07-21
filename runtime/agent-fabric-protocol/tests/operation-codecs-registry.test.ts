@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   composeOperationCodecFragments,
+  composeOperationShapeFragments,
   assertComposedRegistryExhaustive,
 } from "../src/operation-codecs/registry.js";
-import type { OperationCodecFragment, OperationCodecPair } from "../src/operation-codecs/common.js";
+import type { OperationCodecFragment, OperationCodecPair, OperationShapeFragment, WireShape } from "../src/operation-codecs/common.js";
 import { assertCodecRegistryExhaustive, OPERATION_CODECS } from "../src/operation-codecs.js";
 import { OPERATION_REGISTRY } from "../src/operations.js";
 import type { ProtocolOperation } from "../src/rpc-contract.js";
@@ -33,6 +34,24 @@ describe("operation codec registry composer", () => {
     const fragmentB: OperationCodecFragment = { [operationA]: fixturePair };
 
     expect(() => composeOperationCodecFragments([fragmentA, fragmentB])).toThrow(
+      /duplicate fragment entry/,
+    );
+  });
+
+  it("rejects unexpected and undefined codec fragment entries before canonical ordering", () => {
+    const unexpected = { "fabric.v1.not-a-real-operation": fixturePair } as unknown as OperationCodecFragment;
+    expect(() => composeOperationCodecFragments([unexpected])).toThrow(/unexpected fragment entry/);
+
+    const undefinedEntry = { [operationA]: undefined } as unknown as OperationCodecFragment;
+    expect(() => composeOperationCodecFragments([undefinedEntry])).toThrow(/undefined fragment entry/);
+  });
+
+  it("rejects duplicate shape ownership instead of allowing a spread overwrite", () => {
+    const shape: WireShape = { kind: "object", required: [], optional: [] };
+    const fragmentA: OperationShapeFragment = { [operationA]: shape };
+    const fragmentB: OperationShapeFragment = { [operationA]: shape };
+
+    expect(() => composeOperationShapeFragments([fragmentA, fragmentB])).toThrow(
       /duplicate fragment entry/,
     );
   });

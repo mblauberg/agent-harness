@@ -1,157 +1,39 @@
 import {
-  FABRIC_OPERATIONS,
-  isFabricOperation,
-  isActiveFabricOperation,
-  OPERATION_REGISTRY,
-  type FabricOperation,
+  FABRIC_OPERATIONS, isFabricOperation, OPERATION_REGISTRY,
   type OperationPrincipalKind,
 } from "./operations.js";
-import { AUTHORITY_ENVELOPE_V2_CODEC } from "./authority.js";
 import {
-  arrayOf,
-  boolean,
-  boundedString,
-  defineCodec,
-  enumeration,
-  identifier,
-  integer,
-  jsonValue,
-  literal,
-  nullable,
-  objectCodec,
-  parserBacked,
-  recordOf,
-  relativePath,
-  secret,
-  sha256,
-  sha256Hex,
-  timestamp,
-  unionOf,
-  type Codec,
-  type JsonSchema,
+  arrayOf, boolean, boundedString, enumeration, identifier, integer, jsonValue, literal, nullable,
+  objectCodec, parserBacked, recordOf, relativePath, secret, sha256, sha256Hex, timestamp, unionOf,
+  type Codec, type JsonSchema,
 } from "./codec.js";
-import {
-  parseChairMutationContext,
-  parseIntegrationInputAttestationRequest,
-  parseOperatorInputAttestation,
-  parseOperatorMutationContext,
-} from "./operator.js";
-import {
-  parseIntake,
-  parseIntakeDraftCreateRequest,
-  parseIntakeReadRequest,
-  parseIntakeRevisionRequest,
-  parseIntakeSubmission,
-} from "./intake.js";
-import { parseMembershipBindRequest, parseMembershipBindResult } from "./membership.js";
-import {
-  parseScopedGate,
-  parseScopedGateCheckRequest,
-  parseScopedGateCreateRequest,
-  parseScopedGateResolveRequest,
-} from "./gates.js";
-import { parseProjectSession } from "./project-session.js";
-import {
-  LAUNCH_PACKET_V1_CODEC,
-  LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC,
-  LAUNCH_RESOURCE_PLAN_V1_CODEC,
-  PROJECT_SESSION_LAUNCH_INTENT_CODEC,
-} from "./launch.js";
-import {
-  parseResultDelivery,
-  parseTaskCompleteWithReply,
-  parseTaskRequest,
-} from "./request-result.js";
+import { parseIntake, parseIntakeDraftCreateRequest, parseIntakeReadRequest, parseIntakeRevisionRequest, parseIntakeSubmission } from "./intake.js";
+import { parseScopedGate, parseScopedGateCheckRequest, parseScopedGateCreateRequest, parseScopedGateResolveRequest } from "./gates.js";
+import { LAUNCH_PROVIDER_ACTION_JOURNAL_REF_V1_CODEC, PROJECT_SESSION_LAUNCH_INTENT_CODEC } from "./launch.js";
+import { AGENT_LIFECYCLE_RECOVERY_INTENT_V1_CODEC } from "./lifecycle.js";
 import { parseResourceReservationRequest } from "./resources.js";
-import type {
-  OperationInputMap,
-  OperationResultMap,
-  ProtocolOperation,
-} from "./rpc-contract.js";
+import type { OperationInputMap, OperationResultMap, ProtocolOperation } from "./rpc-contract.js";
 import { budgetUnitKey } from "./resource-unit-keys.js";
+import { composeOperationCodecFragments, composeOperationShapeFragments, assertComposedRegistryExhaustive } from "./operation-codecs/registry.js";
 import {
-  parseArtifactContentReadRequest,
-  parseArtifactContentReadResult,
-  parseEvidenceArtifactRegistration,
-  parseEvidencePublishRequest,
-} from "./artifacts.js";
-import {
-  assertWorkstreamCreateSemantics,
-  type WorkstreamCreateRequest,
-} from "./workstreams.js";
-import {
-  PROVIDER_ROUTE_INTEGRITY_RECOVERY_PROJECTION_V1_CODEC,
-  PROVIDER_ROUTE_INTEGRITY_RECOVERY_READ_ERROR_V1_CODEC,
-  PROVIDER_ROUTE_INTEGRITY_RECOVERY_READ_REQUEST_V1_CODEC,
-  REVIEW_COMPLETION_READ_REQUEST_V1_CODEC,
-  REVIEW_COMPLETION_V1_CODEC,
-  REVIEW_EVIDENCE_ANNOTATION_APPEND_REQUEST_V1_CODEC,
-  REVIEW_EVIDENCE_ANNOTATION_CURRENT_READ_REQUEST_V1_CODEC,
-  REVIEW_EVIDENCE_ANNOTATION_CURRENT_READ_RESULT_V1_CODEC,
-  REVIEW_EVIDENCE_ANNOTATION_V1_CODEC,
-  REVIEW_EVIDENCE_LIST_REQUEST_V1_CODEC,
-  REVIEW_EVIDENCE_LIST_RESULT_V1_CODEC,
-  REVIEW_EVIDENCE_READ_REQUEST_V1_CODEC,
-  REVIEW_EVIDENCE_READ_V1_CODEC,
-  REVIEW_FINDING_PAGE_READ_REQUEST_V1_CODEC,
-  REVIEW_FINDING_PAGE_READ_RESULT_V1_CODEC,
-  REVIEW_READ_ERROR_V1_CODEC,
-  REVIEW_TARGET_PREPARATION_ACCEPTED_V1_CODEC,
-  REVIEW_TARGET_PREPARATION_READ_REQUEST_V1_CODEC,
-  REVIEW_TARGET_PREPARATION_READ_ERROR_V1_CODEC,
-  REVIEW_TARGET_PREPARATION_READ_V1_CODEC,
-  REVIEW_TARGET_PREPARE_V1_CODEC,
-  REVIEW_TARGET_REBIND_RECEIPT_V1_CODEC,
-  REVIEW_TARGET_REBIND_V1_CODEC,
-} from "./provider-review.js";
-import {
-  PROVIDER_CONTEXT_PRESSURE_READ_REQUEST_V1_CODEC,
-  PROVIDER_CONTEXT_PRESSURE_READ_V1_CODEC,
-} from "./route-lineage.js";
-import {
-  TOPOLOGY_WAVE_APPEND_RECEIPT_V1_CODEC,
-  TOPOLOGY_WAVE_APPEND_REQUEST_V1_CODEC,
-  TOPOLOGY_WAVE_CURRENT_READ_REQUEST_V1_CODEC,
-  TOPOLOGY_WAVE_CURRENT_READ_V1_CODEC,
-  TOPOLOGY_WAVE_LIST_REQUEST_V1_CODEC,
-  TOPOLOGY_WAVE_LIST_V1_CODEC,
-} from "./topology-evaluation.js";
-import {
-  PROVIDER_ACTION_DISPATCH_INPUT_V1_CODEC,
-  PROVIDER_ACTION_RESULT_V1_CODEC,
-} from "./provider-action.js";
-import {
-  AGENT_LIFECYCLE_RECOVERY_INTENT_V1_CODEC,
-  LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC,
-  LIFECYCLE_CURRENT_STATE_V1_CODEC,
-  LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATE_REQUEST_V1_CODEC,
-  LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATION_V1_CODEC,
-} from "./lifecycle.js";
-import {
-  HERDR_STEER_DISPATCH_REQUEST_CODEC,
-  HERDR_STEER_DISPATCH_RESULT_CODEC,
-} from "./herdr-control.js";
-import {
-  composeOperationCodecFragments,
-  assertComposedRegistryExhaustive,
-} from "./operation-codecs/registry.js";
-import type {
-  ObjectWireShape,
-  OperationCodecFragment,
-  OperationCodecPair,
-  WireShape,
+  artifactRefCodec, artifactRefsCodec, authorityCodec, activeOperationCodec, chairMutationCodec, credentialCodec, discussionGroupCodec,
+  integerList, jsonRecord, messageAudienceCodec, messageContextCodec, nonEmptyNumberRecord, nullableNumberRecord, numberRecord, nil, object,
+  operatorMutationCodec, optionalText, parsedBy, positiveInteger, provenanceCodec, recoveryEvidenceCodec, rootTaskInputCodec, stringList,
+  stringRecord, teamLeaderCodec, teamMemberCodec, text, textList,
+  type OperationCodecFragment, type OperationCodecPair, type OperationResultPrincipalContext, type OperationShapeFragment,
+  type WireShape,
 } from "./operation-codecs/common.js";
+import { semanticShapeCodec as commonSemanticShapeCodec } from "./operation-codecs/common.js";
+import { lifecycleCheckpointCodec, lifecycleOperationCodecFragment, LIFECYCLE_INPUT_SHAPES, LIFECYCLE_RESULT_SHAPES, validateLifecycleResultForInput } from "./operation-codecs/lifecycle.js";
+import { providerActionOperationCodecFragment, PROVIDER_ACTION_INPUT_SHAPES, PROVIDER_ACTION_RESULT_SHAPES, validateProviderActionResultForInput } from "./operation-codecs/provider-action.js";
+import { createProjectSessionOperationCodecFragment, projectSessionCodec, projectSessionMemberCodec, PROJECT_SESSION_INPUT_SHAPES, PROJECT_SESSION_RESULT_SHAPES, terminalPathCodec } from "./operation-codecs/project-session.js";
+import { requestResultOperationCodecFragment, REQUEST_RESULT_INPUT_SHAPES, REQUEST_RESULT_RESULT_SHAPES, resultDeliveryCodec, taskRequestCodec, taskRequestTaskCodec, replyCodec, terminalResultCodec } from "./operation-codecs/request-result.js";
+import { controlPlaneOperationCodecFragment, CONTROL_PLANE_INPUT_SHAPES, CONTROL_PLANE_RESULT_SHAPES, attestationCodec, gateBindingCodec, integrationContextCodec, providerEventCodec } from "./operation-codecs/control-plane.js";
+import { artifactsOperationCodecFragment, ARTIFACTS_INPUT_SHAPES, ARTIFACTS_RESULT_SHAPES } from "./operation-codecs/artifacts.js";
+import { providerReviewOperationCodecFragment, PROVIDER_REVIEW_INPUT_SHAPES, PROVIDER_REVIEW_RESULT_SHAPES } from "./operation-codecs/provider-review.js";
 
-export type { ObjectWireShape, OperationCodecPair, WireShape };
-
-const object = (required: readonly string[], optional: readonly string[] = []): ObjectWireShape => ({
-  kind: "object",
-  required,
-  optional,
-});
-const nil: WireShape = { kind: "null" };
-
-export const OPERATION_INPUT_SHAPES = {
+export type { ObjectWireShape, OperationCodecPair, WireShape, ProviderActionResultKind, OperationResultPrincipalContext } from "./operation-codecs/common.js";
+const LEGACY_OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.delegateAuthority]: object(["parentAuthorityId", "authority"], ["commandId"]),
   [FABRIC_OPERATIONS.registerAgent]: object(["agentId", "authorityId"], ["providerSessionRef", "adapterId"]),
   [FABRIC_OPERATIONS.spawnAgent]: object(["agentId", "authorityId", "adapterId", "actionId", "payload"]),
@@ -179,18 +61,6 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.renewWriteLease]: object(["leaseId", "expectedGeneration", "ttlMs", "commandId"]),
   [FABRIC_OPERATIONS.getWriteLease]: object(["leaseId"]),
   [FABRIC_OPERATIONS.releaseWriteLease]: object(["leaseId", "expectedGeneration", "commandId"]),
-  [FABRIC_OPERATIONS.requestLifecycle]: object(["action", "agentId", "taskId", "taskRevision", "checkpoint", "commandId"]),
-  [FABRIC_OPERATIONS.getAgentLifecycle]: object(["agentId"]),
-  [FABRIC_OPERATIONS.reportProviderState]: object([
-    "sourceEventId", "providerSessionRef", "providerSessionGeneration", "contextRevision",
-    "evidenceDigest", "agentId", "commandId",
-  ], ["checkpointSha256"]),
-  [FABRIC_OPERATIONS.dispatchProviderAction]: object(
-    ["adapterId", "actionId", "operation", "payload", "commandId", "certifyingReview"],
-    ["authorityId", "taskId", "routeRequest"],
-  ),
-  [FABRIC_OPERATIONS.reconcileProviderAction]: object(["adapterId", "actionId", "expectedActionKind", "commandId"]),
-  [FABRIC_OPERATIONS.getProviderAction]: object(["adapterId", "actionId", "expectedActionKind"]),
   [FABRIC_OPERATIONS.recordOperatorIntervention]: object(["source", "directInputProvenance", "taskRevision", "summary", "commandId"]),
   [FABRIC_OPERATIONS.recordVisibilityFailure]: object(["kind", "agentId", "commandId"]),
   [FABRIC_OPERATIONS.createTeam]: object(["teamId", "leader", "rootTask", "initialMembers", "discussionGroups", "reservedBudget", "commandId"], ["parentTeamId"]),
@@ -211,18 +81,6 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.listAgents]: object(["runId"]),
   [FABRIC_OPERATIONS.listReceipts]: object(["runId"]),
   [FABRIC_OPERATIONS.exportReceipt]: object(["commandId"]),
-  [FABRIC_OPERATIONS.launchAttest]: object(["challengeResponse"]),
-  [FABRIC_OPERATIONS.projectSessionCreate]: object(["command", "projectSessionId", "projectId", "mode", "generation", "authorityRef", "budgetRef", "launchPacketRef"]),
-  [FABRIC_OPERATIONS.projectSessionGet]: object(["projectId", "projectSessionId", "expectedGeneration"]),
-  [FABRIC_OPERATIONS.projectSessionTransition]: object(["command", "projectSessionId", "expectedGeneration", "transition"]),
-  [FABRIC_OPERATIONS.projectSessionClose]: object(["command", "projectSessionId", "expectedGeneration", "terminalPath"]),
-  [FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare]: object(["command", "projectId", "projectSessionId", "expectedSessionGeneration", "intakeId", "acceptedScopeRef", "launchPacketRef", "resourcePlanRef", "launchPacket", "resourcePlan"]),
-  [FABRIC_OPERATIONS.projectSessionLaunchPrepare]: object(["command", "projectId", "projectSessionId", "expectedSessionGeneration", "launchPacketRef"]),
-  [FABRIC_OPERATIONS.membershipBind]: object(["origin", "command", "projectSessionId", "coordinationRunId", "expectedMembershipRevision", "members"]),
-  [FABRIC_OPERATIONS.operatorAttach]: object(["command", "projectId", "requestedExpiresAt"], ["projectSessionId", "expectedAttachmentGeneration"]),
-  [FABRIC_OPERATIONS.operatorDetach]: object(["command", "attachmentGeneration"]),
-  [FABRIC_OPERATIONS.operatorHeartbeat]: object(["command", "attachmentGeneration", "extendUntil"]),
-  [FABRIC_OPERATIONS.integrationInputAttest]: object(["context", "attestation"]),
   [FABRIC_OPERATIONS.intakeDraftCreate]: object(["command", "intakeId", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
   [FABRIC_OPERATIONS.intakeRead]: object(["credential", "intakeId"]),
   [FABRIC_OPERATIONS.intakeSubmit]: object(["command", "intakeId", "expectedRevision", "projectSessionId", "coordinationRunId", "summary", "artifactRefs", "gateIds", "chairRequest"]),
@@ -234,22 +92,6 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.resourceReserve]: object(["commandId", "reservationId", "projectSessionId", "path", "amounts"], ["writerAdmission", "taskId"]),
   [FABRIC_OPERATIONS.resourceRelease]: object(["commandId", "reservationId", "expectedRevision", "consumed"]),
   [FABRIC_OPERATIONS.resourceReconcile]: object(["commandId", "reservationId", "expectedRevision", "observedUsage", "evidence"]),
-  [FABRIC_OPERATIONS.taskRequest]: object(["commandId", "projectSessionId", "coordinationRunId", "task", "request"]),
-  [FABRIC_OPERATIONS.taskCompleteWithReply]: object(["commandId", "taskId", "expectedTaskRevision", "ownerLeaseId", "ownerLeaseGeneration", "requestMessageId", "expectedRequestRevision", "callbackId", "callbackGeneration", "reply", "terminalResult"]),
-  [FABRIC_OPERATIONS.resultDeliveryClaim]: object(["commandId", "resultDeliveryId", "expectedRevision", "expectedClaimGeneration", "claimantAgentId", "claimDeadline"]),
-  [FABRIC_OPERATIONS.resultDeliveryProviderAccept]: object(["commandId", "resultDeliveryId", "expectedRevision", "claimGeneration", "providerAdapterId", "providerActionId"]),
-  [FABRIC_OPERATIONS.resultDeliveryConsume]: object(["commandId", "resultDeliveryId", "expectedRevision", "claimGeneration", "callbackId", "payloadDigest"]),
-  [FABRIC_OPERATIONS.resultDeliveryRetry]: object(["commandId", "resultDeliveryId", "expectedRevision", "sameCallbackId", "reason"]),
-  [FABRIC_OPERATIONS.resultDeliveryReassign]: object(["commandId", "resultDeliveryId", "expectedRevision", "targetAgentId", "targetProviderSessionRef", "reason"]),
-  [FABRIC_OPERATIONS.resultDeliveryAbandon]: object(["commandId", "resultDeliveryId", "expectedRevision", "reason"]),
-  [FABRIC_OPERATIONS.workstreamCreate]: object([
-    "command", "expectedSessionGeneration", "expectedMembershipRevision", "workstreamId",
-    "deliveryRunId", "launchPacketRef", "team", "resources",
-  ]),
-  [FABRIC_OPERATIONS.workstreamSettle]: object([
-    "command", "expectedSessionGeneration", "expectedMembershipRevision", "workstreamId",
-    "expectedWorkstreamRevision", "expectedRootTaskRevision", "expectedTeamGeneration",
-  ]),
   [FABRIC_OPERATIONS.chairTakeover]: object(["command", "projectSessionId", "runId", "expectedChairAgentId", "successorChairAgentId", "expectedChairGeneration", "expectedSessionGeneration", "handoffRef", "targetRevision"]),
   [FABRIC_OPERATIONS.projectDiscover]: object(["credential", "projectId", "after", "limit"]),
   [FABRIC_OPERATIONS.projectionSnapshot]: object(["credential", "projectId"], ["projectSessionId"]),
@@ -261,55 +103,36 @@ export const OPERATION_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.operatorActionCommit]: object(["command", "projectId", "previewId", "expectedPreviewRevision", "previewDigest", "expectedIntentDigest", "confirmation"]),
   [FABRIC_OPERATIONS.operatorActionStatus]: object(["credential", "projectId", "commandId"]),
   [FABRIC_OPERATIONS.operatorActionReconcile]: object(["command", "projectId", "targetCommandId", "expectedStatus", "expectedAttemptGeneration", "mode"]),
-  [FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "agentId", "source", "checkpointArtifactRef", "expectedSessionRevision", "expectedSessionGeneration", "expectedRunRevision", "expectedAgentRevision", "expectedSourceRevision", "gateId", "expectedGateRevision", "expectedGateStatus"]),
   [FABRIC_OPERATIONS.messageBodyRead]: object(["credential", "projectSessionId", "messageId", "expectedRevision"]),
   [FABRIC_OPERATIONS.operatorRepositoryRead]: object(
     ["credential", "projectId", "snapshotRevision", "target", "diff", "log"],
     ["projectSessionId"],
   ),
-  [FABRIC_OPERATIONS.evidencePublish]: object(
-    [
-      "commandId",
-      "projectSessionId",
-      "coordinationRunId",
-      "requestedSourceKind",
-      "evidenceKind",
-      "relativePath",
-      "sourceDigest",
-    ],
-    ["taskId"],
-  ),
-  [FABRIC_OPERATIONS.operatorArtifactContentRead]: object(
-    [
-      "credential",
-      "projectId",
-      "evidenceId",
-      "expectedEvidenceRevision",
-      "artifactRef",
-      "cursor",
-      "maximumBytes",
-      "maximumLines",
-    ],
-    ["projectSessionId"],
-  ),
-  [FABRIC_OPERATIONS.reviewTargetPrepare]: object(["schemaVersion", "commandId", "taskId", "expectedTargetGeneration", "deliveryManifestRef"]),
-  [FABRIC_OPERATIONS.reviewTargetPreparationRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "preparationId"]),
-  [FABRIC_OPERATIONS.reviewTargetRebind]: object(["schemaVersion", "commandId", "targetGeneration", "expectedChairBindingGeneration", "lifecycleCustodyRef"]),
-  [FABRIC_OPERATIONS.reviewEvidenceRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "evidenceId"]),
-  [FABRIC_OPERATIONS.reviewEvidenceList]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "targetGeneration", "slot", "pageSize", "cursor"]),
-  [FABRIC_OPERATIONS.reviewEvidenceAnnotate]: object(["schemaVersion", "commandId", "projectSessionId", "coordinationRunId", "evidenceId", "expectedResultDigest", "expectedHeadGeneration", "expectedAnnotationRevision", "disposition", "note"]),
-  [FABRIC_OPERATIONS.reviewEvidenceAnnotationCurrentRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "evidenceId"]),
-  [FABRIC_OPERATIONS.reviewFindingPageRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "findingSetDigest", "pageDigest"]),
-  [FABRIC_OPERATIONS.reviewCompletionRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId"]),
-  [FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "actionRef"]),
-  [FABRIC_OPERATIONS.providerContextPressureRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "agentId"]),
-  [FABRIC_OPERATIONS.herdrSteerDispatch]: object(["actionId", "fireAndForget", "targetAgentId", "paneRef", "reference", "prompt"]),
-  [FABRIC_OPERATIONS.topologyWaveAppend]: object(["schemaVersion", "commandId", "projectSessionId", "coordinationRunId", "expectedCurrent", "plan"]),
-  [FABRIC_OPERATIONS.topologyWaveCurrentRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "taskId"]),
-  [FABRIC_OPERATIONS.topologyWaveList]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "taskId", "pageSize", "cursor"]),
+} as const satisfies OperationShapeFragment;
+
+composeOperationShapeFragments([
+  LEGACY_OPERATION_INPUT_SHAPES,
+  LIFECYCLE_INPUT_SHAPES,
+  PROVIDER_ACTION_INPUT_SHAPES,
+  PROJECT_SESSION_INPUT_SHAPES,
+  REQUEST_RESULT_INPUT_SHAPES,
+  CONTROL_PLANE_INPUT_SHAPES,
+  ARTIFACTS_INPUT_SHAPES,
+  PROVIDER_REVIEW_INPUT_SHAPES,
+]);
+
+export const OPERATION_INPUT_SHAPES = {
+  ...LEGACY_OPERATION_INPUT_SHAPES,
+  ...LIFECYCLE_INPUT_SHAPES,
+  ...PROVIDER_ACTION_INPUT_SHAPES,
+  ...PROJECT_SESSION_INPUT_SHAPES,
+  ...REQUEST_RESULT_INPUT_SHAPES,
+  ...CONTROL_PLANE_INPUT_SHAPES,
+  ...ARTIFACTS_INPUT_SHAPES,
+  ...PROVIDER_REVIEW_INPUT_SHAPES,
 } as const satisfies Record<ProtocolOperation, WireShape>;
 
-export const OPERATION_RESULT_SHAPES = {
+const LEGACY_OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.delegateAuthority]: object(["authorityId"]),
   [FABRIC_OPERATIONS.registerAgent]: object(["capability"]),
   [FABRIC_OPERATIONS.spawnAgent]: object(["agentId", "authorityId", "adapterId", "actionId", "providerSessionRef", "providerSessionGeneration", "bridgeState", "bridgeGeneration", "evidenceDigest"]),
@@ -337,12 +160,6 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.renewWriteLease]: object(["leaseId", "holderAgentId", "generation", "status", "scope"]),
   [FABRIC_OPERATIONS.getWriteLease]: object(["leaseId", "holderAgentId", "generation", "status", "scope"]),
   [FABRIC_OPERATIONS.releaseWriteLease]: object(["leaseId", "status", "generation"]),
-  [FABRIC_OPERATIONS.requestLifecycle]: object(["schemaVersion", "kind", "agentId"]),
-  [FABRIC_OPERATIONS.getAgentLifecycle]: object(["schemaVersion", "kind", "agentId"]),
-  [FABRIC_OPERATIONS.reportProviderState]: object(["schemaVersion", "kind", "agentId"]),
-  [FABRIC_OPERATIONS.dispatchProviderAction]: object(["kind"], ["actionRef", "status", "history", "executionCount", "effectCount", "resultDigest", "providerAnswer", "action"]),
-  [FABRIC_OPERATIONS.reconcileProviderAction]: object(["kind"], ["actionRef", "status", "history", "executionCount", "effectCount", "resultDigest", "providerAnswer", "action"]),
-  [FABRIC_OPERATIONS.getProviderAction]: object(["kind"], ["actionRef", "status", "history", "executionCount", "effectCount", "resultDigest", "providerAnswer", "action"]),
   [FABRIC_OPERATIONS.recordOperatorIntervention]: object(["interventionId"]),
   [FABRIC_OPERATIONS.recordVisibilityFailure]: object(["visibility", "providerSession", "delivery"], ["recovery"]),
   [FABRIC_OPERATIONS.createTeam]: object(["teamId", "parentTeamId", "depth", "leaderAgentId", "rootTaskId", "ownedTaskIds", "memberAgentIds", "budgetId", "state", "generation", "successorAgentId", "discussionGroups", "reservedBudget"], ["leader", "rootTask", "initialMembers"]),
@@ -363,17 +180,6 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.listAgents]: object(["agents"]),
   [FABRIC_OPERATIONS.listReceipts]: object(["receipts"]),
   [FABRIC_OPERATIONS.exportReceipt]: object(["relativePath", "schemaVersion", "sha256"]),
-  [FABRIC_OPERATIONS.launchAttest]: object(["attested", "challengeDigest"]),
-  [FABRIC_OPERATIONS.projectSessionCreate]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
-  [FABRIC_OPERATIONS.projectSessionGet]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
-  [FABRIC_OPERATIONS.projectSessionTransition]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin"], ["terminalPath"]),
-  [FABRIC_OPERATIONS.projectSessionClose]: object(["projectSessionId", "projectId", "mode", "state", "revision", "generation", "authorityRef", "budgetRef", "launchPacketRef", "membershipRevision", "origin", "terminalPath"]),
-  [FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare]: object(["projectSession", "launchPacketRef", "resourcePlanRef", "acceptedScopeRef"]),
-  [FABRIC_OPERATIONS.membershipBind]: object(["projectSessionId", "coordinationRunId", "membershipRevision", "members"]),
-  [FABRIC_OPERATIONS.operatorAttach]: object(["clientId", "projectId", "projectAuthorityGeneration", "projectSessionId", "generation", "expiresAt"]),
-  [FABRIC_OPERATIONS.operatorDetach]: object(["detached", "revision"]),
-  [FABRIC_OPERATIONS.operatorHeartbeat]: object(["clientId", "projectId", "projectAuthorityGeneration", "projectSessionId", "generation", "expiresAt"]),
-  [FABRIC_OPERATIONS.integrationInputAttest]: object(["attestationId", "integrationId", "integrationGeneration", "operatorId", "projectId", "projectSessionId", "providerEvent", "humanUtterance", "gateBinding", "recordedAt"]),
   [FABRIC_OPERATIONS.intakeDraftCreate]: object(["intakeId", "projectId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
   [FABRIC_OPERATIONS.intakeRead]: object(["intakeId", "projectId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"], ["projectSessionId", "coordinationRunId", "acceptedScopeRef"]),
   [FABRIC_OPERATIONS.intakeSubmit]: object(["intakeId", "projectId", "projectSessionId", "coordinationRunId", "revision", "state", "dedupeKey", "summary", "artifactRefs", "gateIds"]),
@@ -385,24 +191,6 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.resourceReserve]: object(["reservationId", "revision", "state", "path", "amounts", "capacity"]),
   [FABRIC_OPERATIONS.resourceRelease]: object(["reservationId", "revision", "state", "path", "amounts", "capacity"]),
   [FABRIC_OPERATIONS.resourceReconcile]: object(["reservationId", "revision", "state", "path", "amounts", "capacity"]),
-  [FABRIC_OPERATIONS.taskRequest]: object(["taskRevision", "requestRevision", "callbackId", "callbackGeneration"]),
-  [FABRIC_OPERATIONS.taskCompleteWithReply]: object(["taskRevision", "replyRevision", "resultDelivery"]),
-  [FABRIC_OPERATIONS.resultDeliveryClaim]: object(["resultDeliveryId", "revision", "projectSessionId", "taskId", "requestMessageId", "requestRevision", "replyMessageId", "replyRevision", "taskRevision", "callbackId", "callbackGeneration", "assignmentGeneration", "targetAgentId", "targetProviderSessionRef", "payloadDigest", "responseDeadline", "dependentBarrierId", "required", "state", "claimGeneration"], ["claimedByAgentId", "claimDeadline", "providerAcceptedAt", "consumedAt", "overdueAt", "abandonedAt", "reason"]),
-  [FABRIC_OPERATIONS.resultDeliveryProviderAccept]: object(["resultDeliveryId", "revision", "projectSessionId", "taskId", "requestMessageId", "requestRevision", "replyMessageId", "replyRevision", "taskRevision", "callbackId", "callbackGeneration", "assignmentGeneration", "targetAgentId", "targetProviderSessionRef", "payloadDigest", "responseDeadline", "dependentBarrierId", "required", "state", "claimGeneration"], ["claimedByAgentId", "claimDeadline", "providerAcceptedAt", "consumedAt", "overdueAt", "abandonedAt", "reason"]),
-  [FABRIC_OPERATIONS.resultDeliveryConsume]: object(["resultDeliveryId", "revision", "projectSessionId", "taskId", "requestMessageId", "requestRevision", "replyMessageId", "replyRevision", "taskRevision", "callbackId", "callbackGeneration", "assignmentGeneration", "targetAgentId", "targetProviderSessionRef", "payloadDigest", "responseDeadline", "dependentBarrierId", "required", "state", "claimGeneration"], ["claimedByAgentId", "claimDeadline", "providerAcceptedAt", "consumedAt", "overdueAt", "abandonedAt", "reason"]),
-  [FABRIC_OPERATIONS.resultDeliveryRetry]: object(["resultDeliveryId", "revision", "projectSessionId", "taskId", "requestMessageId", "requestRevision", "replyMessageId", "replyRevision", "taskRevision", "callbackId", "callbackGeneration", "assignmentGeneration", "targetAgentId", "targetProviderSessionRef", "payloadDigest", "responseDeadline", "dependentBarrierId", "required", "state", "claimGeneration"], ["claimedByAgentId", "claimDeadline", "providerAcceptedAt", "consumedAt", "overdueAt", "abandonedAt", "reason"]),
-  [FABRIC_OPERATIONS.resultDeliveryReassign]: object(["resultDeliveryId", "revision", "projectSessionId", "taskId", "requestMessageId", "requestRevision", "replyMessageId", "replyRevision", "taskRevision", "callbackId", "callbackGeneration", "assignmentGeneration", "targetAgentId", "targetProviderSessionRef", "payloadDigest", "responseDeadline", "dependentBarrierId", "required", "state", "claimGeneration"], ["claimedByAgentId", "claimDeadline", "providerAcceptedAt", "consumedAt", "overdueAt", "abandonedAt", "reason"]),
-  [FABRIC_OPERATIONS.resultDeliveryAbandon]: object(["resultDeliveryId", "revision", "projectSessionId", "taskId", "requestMessageId", "requestRevision", "replyMessageId", "replyRevision", "taskRevision", "callbackId", "callbackGeneration", "assignmentGeneration", "targetAgentId", "targetProviderSessionRef", "payloadDigest", "responseDeadline", "dependentBarrierId", "required", "state", "claimGeneration"], ["claimedByAgentId", "claimDeadline", "providerAcceptedAt", "consumedAt", "overdueAt", "abandonedAt", "reason"]),
-  [FABRIC_OPERATIONS.workstreamCreate]: object([
-    "workstreamId", "projectSessionId", "coordinationRunId", "deliveryRunId", "teamId",
-    "rootTaskId", "leadAgentId", "authorityId", "budgetId", "teamScopeId", "state",
-    "revision", "membershipRevision",
-  ]),
-  [FABRIC_OPERATIONS.workstreamSettle]: object([
-    "workstreamId", "projectSessionId", "coordinationRunId", "deliveryRunId", "teamId",
-    "rootTaskId", "leadAgentId", "authorityId", "budgetId", "teamScopeId", "state",
-    "revision", "membershipRevision",
-  ]),
   [FABRIC_OPERATIONS.chairTakeover]: object(["projectSessionId", "sessionRevision", "runRevision", "chairAgentId", "chairGeneration"]),
   [FABRIC_OPERATIONS.projectDiscover]: object(["project", "sessions"]),
   [FABRIC_OPERATIONS.projectionSnapshot]: object(["schemaVersion", "snapshotRevision", "readTransactionId", "project", "session", "runs", "attention", "capacity", "cursor", "stateDigest"]),
@@ -411,449 +199,37 @@ export const OPERATION_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.projectionViewPage]: object(["status", "view"], ["rows", "nextCursor", "hasMore", "snapshotRevision", "readTransactionId", "reason", "currentSnapshotRevision", "snapshotCursor"]),
   [FABRIC_OPERATIONS.projectionDetailRead]: object(["status"], ["detailRef", "detail", "snapshotRevision", "readTransactionId", "reason", "currentSnapshotRevision"]),
   [FABRIC_OPERATIONS.operatorActionPreview]: object(["previewId", "previewRevision", "previewDigest", "intent", "intentDigest", "beforeStateDigest", "consequenceClass", "evidenceRefs", "gateIds", "confirmationMode", "expiresAt"]),
-  [FABRIC_OPERATIONS.projectSessionLaunchPrepare]: object(["previewId", "previewRevision", "previewDigest", "intent", "intentDigest", "beforeStateDigest", "consequenceClass", "evidenceRefs", "gateIds", "confirmationMode", "expiresAt"]),
   [FABRIC_OPERATIONS.operatorActionCommit]: object(["commandId", "previewId", "previewRevision", "intentDigest", "beforeStateDigest", "afterStateDigest", "evidenceRefs", "committedAt"], ["effectRef", "launchProviderActionJournalRef"]),
   [FABRIC_OPERATIONS.operatorActionStatus]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "launchProviderActionJournalRef", "receipt", "seatProvisioning", "code", "evidenceRefs"]),
   [FABRIC_OPERATIONS.operatorActionReconcile]: object(["status", "commandId"], ["intentDigest", "phase", "attemptGeneration", "effectRef", "launchProviderActionJournalRef", "receipt", "seatProvisioning", "code", "evidenceRefs"]),
-  [FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate]: object(["schemaVersion", "status"], ["source", "checkpointRef", "checkpointDigest", "checkpointVectorDigest", "validationReceiptDigest", "reason", "evidenceDigest"]),
   [FABRIC_OPERATIONS.messageBodyRead]: object(["available", "messageId", "revision"], ["body", "terminalNeutralised", "capabilityValuesRedacted", "artifactRefs", "reason"]),
   [FABRIC_OPERATIONS.operatorRepositoryRead]: object(
     ["status"],
     ["projectId", "projectSessionId", "snapshotRevision", "readTransactionId", "repository", "reason", "currentSnapshotRevision"],
   ),
-  [FABRIC_OPERATIONS.evidencePublish]: object([
-    "evidenceId",
-    "evidenceRevision",
-    "projectId",
-    "projectSessionId",
-    "coordinationRunId",
-    "taskId",
-    "sourceKind",
-    "evidenceKind",
-    "artifactRef",
-    "publisherKind",
-    "publisherRef",
-    "createdAt",
-  ]),
-  [FABRIC_OPERATIONS.operatorArtifactContentRead]: object(
-    ["available", "artifactRef"],
-    [
-      "reason",
-      "mediaType",
-      "content",
-      "totalBytes",
-      "totalLines",
-      "renderedTotalBytes",
-      "renderedTotalLines",
-      "pageIndex",
-      "lineFragment",
-      "pageContentDigest",
-      "renderedArtifactDigest",
-      "nextCursor",
-      "transformation",
-      "terminalNeutralised",
-      "capabilityValuesRedacted",
-      "credentialValuesRedacted",
-    ],
-  ),
-  [FABRIC_OPERATIONS.reviewTargetPrepare]: object(["schemaVersion", "preparationId", "ownerCommandId", "inputDigest", "projectSessionId", "coordinationRunId", "taskId", "expectedTargetGeneration", "reservedTargetGeneration", "reservedBundleGeneration", "deliveryManifestRef", "state", "acceptedReceiptDigest"]),
-  [FABRIC_OPERATIONS.reviewTargetPreparationRead]: object(["schemaVersion", "accepted", "revision", "state", "phase", "progress", "terminal"]),
-  [FABRIC_OPERATIONS.reviewTargetRebind]: object(["schemaVersion", "status", "targetGeneration", "reviewSubjectDigest", "priorBindingGeneration", "newBindingGeneration", "priorBindingDigest", "newBindingDigest", "lifecycleAdoptionDigest", "bundleDigest", "profileDigest", "slotHeadSetDigest", "openAndRepairFindingSetDigest", "rebindReceiptDigest"]),
-  [FABRIC_OPERATIONS.reviewEvidenceRead]: object(["schemaVersion", "record", "currency", "annotation"]),
-  [FABRIC_OPERATIONS.reviewEvidenceList]: object(["schemaVersion", "entries", "nextCursor"]),
-  [FABRIC_OPERATIONS.reviewEvidenceAnnotate]: object(["schemaVersion", "evidenceId", "annotationRevision", "priorAnnotationRevision", "commandId", "chairBindingGeneration", "disposition", "note", "noteDigest", "annotationDigest"]),
-  [FABRIC_OPERATIONS.reviewEvidenceAnnotationCurrentRead]: object(["schemaVersion", "evidenceId", "annotation"]),
-  [FABRIC_OPERATIONS.reviewFindingPageRead]: object(["schemaVersion", "findingSetDigest", "pageDigest", "members", "nextPageDigest"]),
-  [FABRIC_OPERATIONS.reviewCompletionRead]: object(["schemaVersion", "blockers", "targetGeneration", "targetChair", "reviewedArtifactRef", "publicationLineageDigest", "bundleDigest", "manifestRootDigest", "coverageDigest", "riskReadMapDigest", "mandatoryReadSetDigest", "profileDigest", "unavailableSlots", "slots", "finalReviewComplete"]),
-  [FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead]: object(["schemaVersion", "projectSessionId", "coordinationRunId", "taskId", "actionRef", "targetGeneration", "slot", "attemptGeneration", "recoveryGeneration", "state", "reason", "reservationDigest", "routeState", "routeReceiptDigest", "lookupState", "lookupEvidenceDigest", "disposition", "settlementDigest", "recoveryEvidenceDigest", "retirementEligible"]),
-  [FABRIC_OPERATIONS.providerContextPressureRead]: object(["schemaVersion", "currency", "pressure", "readAt", "ageSeconds"]),
-  [FABRIC_OPERATIONS.herdrSteerDispatch]: object(["status"], ["actionId", "revision", "reason", "integration", "receipt"]),
-  [FABRIC_OPERATIONS.topologyWaveAppend]: object(["schemaVersion", "commandId", "status", "priorPlanRef", "planRef", "pointer", "receiptDigest"]),
-  [FABRIC_OPERATIONS.topologyWaveCurrentRead]: object(["schemaVersion", "currency", "plan", "pointer"]),
-  [FABRIC_OPERATIONS.topologyWaveList]: object(["schemaVersion", "plans", "nextCursor", "watermarkRevision"]),
+} as const satisfies OperationShapeFragment;
+
+composeOperationShapeFragments([
+  LEGACY_OPERATION_RESULT_SHAPES,
+  LIFECYCLE_RESULT_SHAPES,
+  PROVIDER_ACTION_RESULT_SHAPES,
+  PROJECT_SESSION_RESULT_SHAPES,
+  REQUEST_RESULT_RESULT_SHAPES,
+  CONTROL_PLANE_RESULT_SHAPES,
+  ARTIFACTS_RESULT_SHAPES,
+  PROVIDER_REVIEW_RESULT_SHAPES,
+]);
+
+export const OPERATION_RESULT_SHAPES = {
+  ...LEGACY_OPERATION_RESULT_SHAPES,
+  ...LIFECYCLE_RESULT_SHAPES,
+  ...PROVIDER_ACTION_RESULT_SHAPES,
+  ...PROJECT_SESSION_RESULT_SHAPES,
+  ...REQUEST_RESULT_RESULT_SHAPES,
+  ...CONTROL_PLANE_RESULT_SHAPES,
+  ...ARTIFACTS_RESULT_SHAPES,
+  ...PROVIDER_REVIEW_RESULT_SHAPES,
 } as const satisfies Record<ProtocolOperation, WireShape>;
-
-const text = boundedString();
-const optionalText = boundedString({ minBytes: 0 });
-const positiveInteger = integer({ minimum: 1 });
-const stringList = arrayOf(identifier, { maximum: 256, unique: true });
-const textList = arrayOf(text, { maximum: 256 });
-const integerList = arrayOf(integer(), { maximum: 256, unique: true });
-const numberRecord = recordOf(integer(), { maximum: 128, keyCodec: budgetUnitKey });
-const nonEmptyNumberRecord = recordOf(integer(), {
-  minimum: 1,
-  maximum: 128,
-  keyCodec: budgetUnitKey,
-  exampleKey: "concurrent_turns",
-});
-const nullableNumberRecord = recordOf(nullable(integer()), {
-  minimum: 1,
-  maximum: 128,
-  keyCodec: budgetUnitKey,
-  exampleKey: "concurrent_turns",
-});
-const stringRecord = recordOf(text, { maximum: 128 });
-const jsonRecord = recordOf(jsonValue, { maximum: 128 });
-const activeOperationValues = Object.keys(OPERATION_REGISTRY).filter(isActiveFabricOperation);
-const activeOperationCodec = defineCodec<FabricOperation>({
-  type: "string",
-  enum: activeOperationValues,
-}, FABRIC_OPERATIONS.acknowledgeDelivery, (value, path) => {
-  if (typeof value !== "string" || !isActiveFabricOperation(value)) {
-    throw new TypeError(`${path} must be an active protocol operation`);
-  }
-  return value;
-});
-const artifactRefCodec = objectCodec({ path: relativePath, digest: sha256 });
-const artifactRefsCodec = arrayOf(artifactRefCodec, { maximum: 128 });
-const credentialCodec = objectCodec({ capabilityId: identifier, token: secret });
-const evidenceKindCodec = enumeration(["artifact", "diff", "test", "review", "receipt"]);
-const publishableEvidenceSourceKindCodec = enumeration(["project-file", "run-file"]);
-const evidencePublishInputCodec = parserBacked(
-  objectCodec({
-    commandId: identifier,
-    projectSessionId: identifier,
-    coordinationRunId: identifier,
-    requestedSourceKind: publishableEvidenceSourceKindCodec,
-    evidenceKind: evidenceKindCodec,
-    relativePath,
-    sourceDigest: sha256,
-  }, { taskId: identifier }),
-  parseEvidencePublishRequest,
-  parseEvidencePublishRequest({
-    commandId: "command_01",
-    projectSessionId: "session_01",
-    coordinationRunId: "run_01",
-    requestedSourceKind: "run-file",
-    evidenceKind: "artifact",
-    relativePath: "artifacts/item.json",
-    sourceDigest: sha256.example,
-  }),
-);
-const evidenceRegistrationCodec = parserBacked(
-  objectCodec({
-    evidenceId: identifier,
-    evidenceRevision: positiveInteger,
-    projectId: identifier,
-    projectSessionId: identifier,
-    coordinationRunId: identifier,
-    taskId: nullable(identifier),
-    sourceKind: publishableEvidenceSourceKindCodec,
-    evidenceKind: evidenceKindCodec,
-    artifactRef: artifactRefCodec,
-    publisherKind: literal("agent"),
-    publisherRef: identifier,
-    createdAt: timestamp,
-  }),
-  parseEvidenceArtifactRegistration,
-  parseEvidenceArtifactRegistration({
-    evidenceId: "artifact_01",
-    evidenceRevision: 1,
-    projectId: "project_01",
-    projectSessionId: "session_01",
-    coordinationRunId: "run_01",
-    taskId: null,
-    sourceKind: "run-file",
-    evidenceKind: "artifact",
-    artifactRef: artifactRefCodec.example,
-    publisherKind: "agent",
-    publisherRef: "agent_01",
-    createdAt: timestamp.example,
-  }),
-);
-const artifactContentReadInputCodec = parserBacked(
-  objectCodec({
-    credential: credentialCodec,
-    projectId: identifier,
-    evidenceId: identifier,
-    expectedEvidenceRevision: positiveInteger,
-    artifactRef: artifactRefCodec,
-    cursor: nullable(boundedString({ maxBytes: 4096, example: "cursor_01" })),
-    maximumBytes: integer({ minimum: 4, maximum: 131_072 }),
-    maximumLines: integer({ minimum: 1, maximum: 2_000 }),
-  }, { projectSessionId: identifier }),
-  parseArtifactContentReadRequest,
-  parseArtifactContentReadRequest({
-    credential: credentialCodec.example,
-    projectId: "project_01",
-    evidenceId: "artifact_01",
-    expectedEvidenceRevision: 1,
-    artifactRef: artifactRefCodec.example,
-    cursor: null,
-    maximumBytes: 131_072,
-    maximumLines: 2_000,
-  }),
-);
-const artifactContentReadResultCodec = parserBacked(
-  unionOf([
-    objectCodec({
-      available: literal(false),
-      artifactRef: artifactRefCodec,
-      reason: enumeration(["not-found", "forbidden", "unsupported-media", "unsafe-content", "stale", "oversized"]),
-    }),
-    objectCodec({
-      available: literal(true),
-      artifactRef: artifactRefCodec,
-      mediaType: enumeration(["text/markdown", "application/json", "text/x-diff", "text/plain"]),
-      content: boundedString({ minBytes: 0, maxBytes: 131_072, example: "safe content\n" }),
-      totalBytes: integer(),
-      totalLines: integer(),
-      renderedTotalBytes: integer(),
-      renderedTotalLines: integer(),
-      pageIndex: integer(),
-      lineFragment: enumeration(["whole", "start", "middle", "end"]),
-      pageContentDigest: sha256,
-      renderedArtifactDigest: sha256,
-      nextCursor: nullable(boundedString({ maxBytes: 4096, example: "cursor_02" })),
-      transformation: enumeration([
-        "none",
-        "terminal-neutralised",
-        "capability-redacted",
-        "credential-redacted",
-        "combined",
-      ]),
-      terminalNeutralised: literal(true),
-      capabilityValuesRedacted: literal(true),
-      credentialValuesRedacted: literal(true),
-    }),
-  ]),
-  parseArtifactContentReadResult,
-  parseArtifactContentReadResult({
-    available: false,
-    artifactRef: artifactRefCodec.example,
-    reason: "not-found",
-  }),
-);
-const consoleProvenanceCodec = objectCodec({
-  kind: literal("console-direct-input"),
-  clientId: identifier,
-  inputEventId: identifier,
-});
-const attestedProvenanceCodec = objectCodec({
-  kind: literal("attested-provider-input"),
-  attestationId: identifier,
-  integrationId: identifier,
-  integrationGeneration: positiveInteger,
-});
-const provenanceCodec = unionOf([consoleProvenanceCodec, attestedProvenanceCodec]);
-const operatorMutationBaseCodec = objectCodec({
-  credential: credentialCodec,
-  commandId: identifier,
-  expectedRevision: integer(),
-  actor: identifier,
-  provenance: provenanceCodec,
-  evidenceRefs: artifactRefsCodec,
-});
-const operatorMutationCodec = parserBacked(
-  operatorMutationBaseCodec,
-  parseOperatorMutationContext,
-  parseOperatorMutationContext(operatorMutationBaseCodec.example),
-);
-const chairMutationBaseCodec = objectCodec({
-  commandId: identifier,
-  agentId: identifier,
-  projectSessionId: identifier,
-  coordinationRunId: identifier,
-  principalGeneration: positiveInteger,
-  chairLeaseId: identifier,
-  chairLeaseGeneration: positiveInteger,
-  expectedRunRevision: integer(),
-  expectedRevision: positiveInteger,
-});
-const chairMutationCodec = parserBacked(
-  chairMutationBaseCodec,
-  parseChairMutationContext,
-  parseChairMutationContext(chairMutationBaseCodec.example),
-);
-
-const authorityCodec = AUTHORITY_ENVELOPE_V2_CODEC;
-
-const messageAudienceCodec = unionOf([
-  objectCodec({ kind: literal("agents"), agentIds: arrayOf(identifier, { minimum: 1, maximum: 64, unique: true }) }),
-  objectCodec({ kind: literal("team"), teamId: identifier }),
-  objectCodec({ kind: literal("task"), taskId: identifier }),
-]);
-const messageContextCodec = unionOf([
-  objectCodec({ kind: literal("direct") }),
-  objectCodec({ kind: literal("task"), taskId: identifier }),
-  objectCodec({ kind: literal("task-dependency"), fromTaskId: identifier, toTaskId: identifier }),
-  objectCodec({ kind: literal("discussion-group"), groupId: identifier }),
-]);
-const recoveryEvidenceCodec = unionOf([
-  objectCodec({ kind: literal("unproven") }),
-  objectCodec({ kind: literal("predecessor-terminal"), agentId: identifier, providerSessionRef: identifier }),
-  objectCodec({ kind: literal("os-isolated"), proofRef: identifier }),
-  objectCodec({ kind: literal("patch-only"), serialApplierRef: identifier }),
-]);
-const lifecycleCheckpointCodec = objectCodec({
-  relativePath,
-  sha256: sha256Hex,
-  mailboxWatermark: integer(),
-  acknowledgedAboveWatermark: integerList,
-  inFlightChildren: stringList,
-  openWork: textList,
-  nextAction: text,
-  providerResumeReference: identifier,
-});
-
-const teamMemberCodec = objectCodec({ agentId: identifier, authority: authorityCodec });
-const discussionGroupCodec = objectCodec({
-  groupId: identifier,
-  memberAgentIds: arrayOf(identifier, { minimum: 2, maximum: 64, unique: true }),
-});
-const teamLeaderCodec = objectCodec({ agentId: identifier, authority: authorityCodec });
-const rootTaskInputCodec = objectCodec({ taskId: identifier, objective: text, baseRevision: text });
-const workstreamCreateBaseCodec = objectCodec({
-  command: chairMutationCodec,
-  expectedSessionGeneration: positiveInteger,
-  expectedMembershipRevision: positiveInteger,
-  workstreamId: identifier,
-  deliveryRunId: identifier,
-  launchPacketRef: artifactRefCodec,
-  team: objectCodec({
-    teamId: identifier,
-    leader: teamLeaderCodec,
-    rootTask: rootTaskInputCodec,
-    initialMembers: arrayOf(teamMemberCodec, { maximum: 5 }),
-    discussionGroups: arrayOf(discussionGroupCodec, { maximum: 64 }),
-    reservedBudget: numberRecord,
-  }),
-  resources: objectCodec({
-    runScopeId: identifier,
-    teamScopeId: identifier,
-    teamLimits: numberRecord,
-    agentScopes: arrayOf(objectCodec({
-      agentId: identifier,
-      scopeId: identifier,
-      limits: numberRecord,
-    }), { minimum: 1, maximum: 6 }),
-  }),
-});
-const baseWorkstreamCreateExample = workstreamCreateBaseCodec.example as WorkstreamCreateRequest;
-const workstreamCreateCodec = parserBacked(
-  workstreamCreateBaseCodec,
-  (value) => assertWorkstreamCreateSemantics(value as WorkstreamCreateRequest),
-  assertWorkstreamCreateSemantics({
-    ...baseWorkstreamCreateExample,
-    team: {
-      ...baseWorkstreamCreateExample.team,
-      reservedBudget: { provider_calls: 1 },
-    },
-    resources: {
-      ...baseWorkstreamCreateExample.resources,
-      teamLimits: { provider_calls: 1 },
-      agentScopes: [{
-        agentId: baseWorkstreamCreateExample.team.leader.agentId,
-        scopeId: "workstream_agent_scope_01",
-        limits: { provider_calls: 1 },
-      }],
-    },
-  }),
-);
-const workstreamSettleCodec = objectCodec({
-  command: chairMutationCodec,
-  expectedSessionGeneration: positiveInteger,
-  expectedMembershipRevision: positiveInteger,
-  workstreamId: identifier,
-  expectedWorkstreamRevision: positiveInteger,
-  expectedRootTaskRevision: positiveInteger,
-  expectedTeamGeneration: positiveInteger,
-});
-
-const projectSessionOriginCodec = objectCodec({ kind: literal("operator-launch"), operatorId: identifier });
-const cancelledTerminalPathCodec = objectCodec({ kind: literal("cancelled"), reason: text });
-const terminalPathCodec = unionOf([
-  objectCodec({ kind: literal("accepted"), acceptanceRef: sha256 }),
-  cancelledTerminalPathCodec,
-  objectCodec({ kind: literal("failed"), reason: text, failureRef: sha256 }),
-]);
-const projectSessionCommonFields = {
-  projectSessionId: identifier,
-  projectId: identifier,
-  mode: enumeration(["coordinated", "independent"]),
-  revision: positiveInteger,
-  generation: positiveInteger,
-  authorityRef: sha256,
-  budgetRef: identifier,
-  launchPacketRef: artifactRefCodec,
-  membershipRevision: integer(),
-  origin: projectSessionOriginCodec,
-};
-const projectSessionWireCodec = unionOf([
-  objectCodec({
-    ...projectSessionCommonFields,
-    state: enumeration([
-      "draft",
-      "awaiting_launch",
-      "launching",
-      "active",
-      "quiescing",
-      "awaiting_acceptance",
-      "launch_failed",
-      "launch_ambiguous",
-      "reconciling",
-      "visibility_degraded",
-      "recovery_required",
-      "quarantined",
-    ]),
-  }),
-  objectCodec({ ...projectSessionCommonFields, state: literal("closed"), terminalPath: terminalPathCodec }),
-  objectCodec({ ...projectSessionCommonFields, state: literal("cancelled"), terminalPath: cancelledTerminalPathCodec }),
-]);
-const projectSessionCodec = parserBacked(
-  projectSessionWireCodec,
-  parseProjectSession,
-  parseProjectSession(projectSessionWireCodec.example),
-);
-const projectSessionTransitionInputCodec = objectCodec({
-  command: operatorMutationCodec,
-  projectSessionId: identifier,
-  expectedGeneration: positiveInteger,
-  transition: unionOf([
-    objectCodec({
-      to: literal("awaiting_launch"),
-      reason: text,
-      launchPacketRef: artifactRefCodec,
-    }),
-    objectCodec({
-      to: enumeration([
-        "draft",
-        "active",
-        "reconciling",
-        "visibility_degraded",
-        "recovery_required",
-        "quarantined",
-      ]),
-      reason: text,
-    }),
-    objectCodec({ to: literal("awaiting_acceptance"), closureEvidence: artifactRefCodec }),
-  ]),
-});
-const projectSessionLaunchPacketPrepareInputCodec = objectCodec({
-  command: operatorMutationCodec,
-  projectId: identifier,
-  projectSessionId: identifier,
-  expectedSessionGeneration: positiveInteger,
-  intakeId: identifier,
-  acceptedScopeRef: artifactRefCodec,
-  launchPacketRef: artifactRefCodec,
-  resourcePlanRef: artifactRefCodec,
-  launchPacket: LAUNCH_PACKET_V1_CODEC,
-  resourcePlan: LAUNCH_RESOURCE_PLAN_V1_CODEC,
-});
-const projectSessionLaunchPacketPreparationCodec = objectCodec({
-  projectSession: projectSessionCodec,
-  launchPacketRef: artifactRefCodec,
-  resourcePlanRef: artifactRefCodec,
-  acceptedScopeRef: artifactRefCodec,
-});
-const projectSessionLaunchPrepareInputCodec = objectCodec({
-  command: operatorMutationCodec,
-  projectId: identifier,
-  projectSessionId: identifier,
-  expectedSessionGeneration: positiveInteger,
-  launchPacketRef: artifactRefCodec,
-});
 
 const runProjectionCodec = objectCodec({
   runId: identifier,
@@ -998,6 +374,7 @@ const gitLogEntryCodec = objectCodec({
   authorTimestamp: timestamp,
 });
 const gitLogPageCodec = unionOf([
+
   objectCodec({
     items: arrayOf(gitLogEntryCodec, { maximum: 128 }),
     hasMore: literal(false),
@@ -1160,156 +537,6 @@ const visibleTeamResultCodec = objectCodec({
 }, {
   rootTask: taskResultCodec,
 });
-const workstreamProjectionCodec = objectCodec({
-  workstreamId: identifier,
-  projectSessionId: identifier,
-  coordinationRunId: identifier,
-  deliveryRunId: identifier,
-  teamId: identifier,
-  rootTaskId: identifier,
-  leadAgentId: identifier,
-  authorityId: identifier,
-  budgetId: identifier,
-  teamScopeId: identifier,
-  state: enumeration(["active", "complete", "cancelled", "degraded"]),
-  revision: positiveInteger,
-  membershipRevision: positiveInteger,
-});
-
-const intakeBindingCodec = objectCodec({
-  intakeId: identifier,
-  intakeRevision: positiveInteger,
-  gateIds: stringList,
-  artifactDigests: arrayOf(sha256, { maximum: 128, unique: true }),
-});
-const taskRequestTaskCodec = objectCodec({
-  taskId: identifier,
-  taskRevision: positiveInteger,
-  objective: text,
-  baseRevision: text,
-  expectedArtifactPaths: arrayOf(relativePath, { maximum: 128, unique: true }),
-});
-const taskRequestMessageCodec = objectCodec({
-  requestRevision: positiveInteger,
-  messageId: identifier,
-  conversationId: identifier,
-  targetAgentId: identifier,
-  targetProviderSessionRef: identifier,
-  requiresAck: literal(true),
-  dedupeKey: text,
-  responseDeadline: timestamp,
-  callbackId: identifier,
-  callbackGeneration: positiveInteger,
-  dependentBarrierId: identifier,
-}, { intakeBinding: intakeBindingCodec });
-const taskRequestCodec = objectCodec({
-  commandId: identifier,
-  projectSessionId: identifier,
-  coordinationRunId: identifier,
-  task: taskRequestTaskCodec,
-  request: taskRequestMessageCodec,
-});
-const replyCodec = objectCodec({
-  messageId: identifier,
-  conversationId: identifier,
-  replyToMessageId: identifier,
-  body: boundedString({ maxBytes: 4096 }),
-  artifactRefs: artifactRefsCodec,
-});
-const terminalResultCodec = objectCodec({
-  status: literal("complete"),
-  summary: text,
-  completedAt: timestamp,
-});
-const taskCompletionCodec = objectCodec({
-  commandId: identifier,
-  taskId: identifier,
-  expectedTaskRevision: positiveInteger,
-  ownerLeaseId: identifier,
-  ownerLeaseGeneration: positiveInteger,
-  requestMessageId: identifier,
-  expectedRequestRevision: positiveInteger,
-  callbackId: identifier,
-  callbackGeneration: positiveInteger,
-  reply: replyCodec,
-  terminalResult: terminalResultCodec,
-});
-
-const resultDeliveryBase = {
-  resultDeliveryId: identifier,
-  revision: positiveInteger,
-  projectSessionId: identifier,
-  taskId: identifier,
-  requestMessageId: identifier,
-  requestRevision: positiveInteger,
-  replyMessageId: identifier,
-  replyRevision: positiveInteger,
-  taskRevision: positiveInteger,
-  callbackId: identifier,
-  callbackGeneration: positiveInteger,
-  assignmentGeneration: positiveInteger,
-  targetAgentId: identifier,
-  targetProviderSessionRef: identifier,
-  payloadDigest: sha256,
-  responseDeadline: timestamp,
-  dependentBarrierId: identifier,
-  required: boolean,
-  claimGeneration: integer(),
-};
-const resultDeliveryCodec = unionOf([
-  objectCodec({ ...resultDeliveryBase, state: literal("pending") }),
-  objectCodec({
-    ...resultDeliveryBase,
-    state: literal("claimed"),
-    claimedByAgentId: identifier,
-    claimDeadline: timestamp,
-  }),
-  objectCodec({
-    ...resultDeliveryBase,
-    state: literal("provider-accepted"),
-    claimedByAgentId: identifier,
-    claimDeadline: timestamp,
-    providerAcceptedAt: timestamp,
-  }),
-  objectCodec({ ...resultDeliveryBase, state: literal("consumed"), consumedAt: timestamp }),
-  objectCodec({ ...resultDeliveryBase, state: literal("overdue"), overdueAt: timestamp }),
-  objectCodec({ ...resultDeliveryBase, state: literal("abandoned"), abandonedAt: timestamp, reason: text }),
-]);
-
-const integrationContextCodec = objectCodec({
-  commandId: identifier,
-  integrationId: identifier,
-  expectedIntegrationGeneration: positiveInteger,
-  eventId: identifier,
-  eventDigest: sha256,
-});
-const providerEventCodec = objectCodec({
-  providerId: identifier,
-  providerSessionRef: identifier,
-  providerMessageId: identifier,
-  inputEventId: identifier,
-  eventDigest: sha256,
-  classification: literal("direct-human"),
-});
-const gateBindingCodec = objectCodec({
-  gateId: identifier,
-  expectedGateRevision: positiveInteger,
-  artifactDigests: arrayOf(sha256, { minimum: 1, maximum: 128, unique: true }),
-  interpretedDecision: enumeration(["approve", "reject", "defer", "request-changes"]),
-});
-const attestationCodec = objectCodec({
-  attestationId: identifier,
-  integrationId: identifier,
-  integrationGeneration: positiveInteger,
-  operatorId: identifier,
-  projectId: identifier,
-  projectSessionId: identifier,
-  providerEvent: providerEventCodec,
-  humanUtterance: text,
-  gateBinding: gateBindingCodec,
-  recordedAt: timestamp,
-});
-
 const intakeDraftCodec = objectCodec({
   intakeId: identifier,
   projectId: identifier,
@@ -1498,6 +725,7 @@ const remoteOperationFields = {
   destinationRef: gitRefCodec,
   sourceObjectDigest: sha256,
   destinationObjectDigest: nullable(sha256),
+
 };
 const conflictSuccessorFields = {
   predecessorCustodyId: identifier,
@@ -1998,6 +1226,7 @@ const operatorActionIntentCodec = unionOf([
   gitAuthoriseIntentCodec,
   gitOperationDraftIntentCodec,
   gitCustodyResolveIntentCodec,
+
   AGENT_LIFECYCLE_RECOVERY_INTENT_V1_CODEC,
   objectCodec({
     kind: literal("registered-external-effect"),
@@ -2498,6 +1727,7 @@ const runWorkstreamIdentityCodec = objectCodec({
 });
 // The coordination arm is the only current run-kind arm. Accepted-scope and
 // current-plan refs are deliberately deferred to the plan-declaration
+
 // package: no run-level scope or plan binding authority exists in Fabric
 // yet, and each lands as its own result-shape cutover.
 const runIdentityBaseCodec = objectCodec({
@@ -2866,54 +2096,6 @@ const scopedGateReadInputCodec = objectCodec({
   gateId: identifier,
 }, { expectedRevision: positiveInteger });
 
-function memberVariants(
-  kind: string,
-  identityField: string,
-  additionalIdentity: Readonly<Record<string, Codec<unknown>>> = {},
-): Codec<unknown>[] {
-  const identity = {
-    kind: literal(kind),
-    membershipId: identifier,
-    coordinationRunId: identifier,
-    [identityField]: identifier,
-    ...additionalIdentity,
-  };
-  return [
-    objectCodec({ ...identity, state: literal("active") }),
-    objectCodec({ ...identity, state: literal("terminal") }),
-    objectCodec({ ...identity, state: literal("abandoned"), reason: text }),
-  ];
-}
-const projectSessionMemberCodec = unionOf([
-  ...memberVariants("coordination-run", "runId"),
-  ...memberVariants("workstream", "workstreamId"),
-  ...memberVariants("task", "taskId"),
-  ...memberVariants("lease", "leaseId"),
-  ...memberVariants("provider-action", "providerActionId", { providerAdapterId: identifier }),
-  ...memberVariants("required-message", "messageId"),
-  ...memberVariants("artifact-obligation", "artifactObligationId"),
-  ...memberVariants("gate", "gateId"),
-  ...memberVariants("scoped-barrier", "barrierId"),
-] as [Codec<unknown>, ...Codec<unknown>[]]);
-const membershipBindCodec = unionOf([
-  objectCodec({
-    origin: literal("operator"),
-    command: operatorMutationCodec,
-    projectSessionId: identifier,
-    coordinationRunId: identifier,
-    expectedMembershipRevision: integer(),
-    members: arrayOf(projectSessionMemberCodec, { maximum: 256 }),
-  }),
-  objectCodec({
-    origin: literal("chair"),
-    command: chairMutationCodec,
-    projectSessionId: identifier,
-    coordinationRunId: identifier,
-    expectedMembershipRevision: positiveInteger,
-    members: arrayOf(projectSessionMemberCodec, { maximum: 256 }),
-  }),
-]);
-
 const resourceDimensionCodec = unionOf([
   objectCodec({ unknown: literal(false), used: integer(), reserved: integer(), remaining: integer() }),
   objectCodec({ unknown: literal(true), used: nullable(integer()), reserved: integer(), remaining: literal(null) }),
@@ -2998,6 +2180,7 @@ const activityViewItemFields = {
   summary: text,
   occurredAt: timestamp,
   sourceRevision: integer(),
+
 };
 const activityViewItemCodec = unionOf([
   objectCodec({ ...activityViewItemFields, kind: literal("message"), messageBodyRef: messageBodyRefCodec }),
@@ -3107,19 +2290,6 @@ const observerEventCodec = objectCodec({
   summary: text,
 });
 const receiptCodec = objectCodec({ relativePath, schemaVersion: unionOf([literal(1), literal(2)]), sha256: sha256Hex });
-const launchAttestationInputCodec = objectCodec({
-  challengeResponse: boundedString({
-    minBytes: 64,
-    maxBytes: 64,
-    pattern: "^[a-f0-9]{64}$",
-    example: "ab".repeat(32),
-  }),
-});
-const launchAttestationResultCodec = objectCodec({
-  attested: literal(true),
-  challengeDigest: sha256,
-});
-
 type CodecDirection = "input" | "result";
 
 const timestampFields = new Set([
@@ -3363,13 +2533,15 @@ function semanticShapeCodec(
   direction: CodecDirection,
   shape: WireShape,
 ): Codec<unknown> {
-  if (shape.kind === "null") return literal(null);
-  if (shape.kind === "array") return operation === FABRIC_OPERATIONS.receiveMessages
-    ? arrayOf(deliveryItemCodec, { maximum: 256 })
-    : arrayOf(jsonValue, { maximum: 256 });
-  const required = Object.fromEntries(shape.required.map((field) => [field, semanticFieldCodec(operation, field, direction)]));
-  const optional = Object.fromEntries(shape.optional.map((field) => [field, semanticFieldCodec(operation, field, direction)]));
-  return objectCodec(required, optional);
+  if (shape.kind === "array" && operation === FABRIC_OPERATIONS.receiveMessages) {
+    return arrayOf(deliveryItemCodec, { maximum: 256 });
+  }
+  return commonSemanticShapeCodec(
+    operation,
+    direction,
+    shape,
+    (resolvedOperation, field, resolvedDirection) => semanticFieldCodec(resolvedOperation, field, resolvedDirection),
+  );
 }
 
 const messageBodyResultCodec = unionOf([
@@ -3405,14 +2577,6 @@ const projectionEventsResultCodec = unionOf([
     snapshotCursor: integer(),
   }),
 ]);
-const operatorAttachmentCodec = objectCodec({
-  clientId: identifier,
-  projectId: identifier,
-  projectAuthorityGeneration: positiveInteger,
-  projectSessionId: nullable(identifier),
-  generation: positiveInteger,
-  expiresAt: timestamp,
-});
 const resourceReservationResultCodec = objectCodec({
   reservationId: identifier,
   revision: positiveInteger,
@@ -3421,13 +2585,6 @@ const resourceReservationResultCodec = objectCodec({
   amounts: nonEmptyNumberRecord,
   capacity: recordOf(resourceDimensionCodec, { maximum: 128, keyCodec: budgetUnitKey }),
 });
-
-function parsedBy(
-  codec: Codec<unknown>,
-  parser: (value: unknown) => unknown,
-): Codec<unknown> {
-  return parserBacked(codec, (value) => parser(value), codec.example);
-}
 
 const taskResultOperations: ReadonlySet<ProtocolOperation> = new Set([
   FABRIC_OPERATIONS.createTask,
@@ -3443,11 +2600,6 @@ const leaseResultOperations: ReadonlySet<ProtocolOperation> = new Set([
   FABRIC_OPERATIONS.renewWriteLease,
   FABRIC_OPERATIONS.getWriteLease,
 ]);
-const providerActionResultOperations: ReadonlySet<ProtocolOperation> = new Set([
-  FABRIC_OPERATIONS.dispatchProviderAction,
-  FABRIC_OPERATIONS.reconcileProviderAction,
-  FABRIC_OPERATIONS.getProviderAction,
-]);
 const teamResultOperations: ReadonlySet<ProtocolOperation> = new Set([
   FABRIC_OPERATIONS.getTeam,
   FABRIC_OPERATIONS.freezeSubtree,
@@ -3462,51 +2614,23 @@ const budgetResultOperations: ReadonlySet<ProtocolOperation> = new Set([
 ]);
 
 function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
-  if (operation === FABRIC_OPERATIONS.dispatchProviderAction) return PROVIDER_ACTION_DISPATCH_INPUT_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.reviewTargetPrepare) return REVIEW_TARGET_PREPARE_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.reviewTargetPreparationRead) return REVIEW_TARGET_PREPARATION_READ_REQUEST_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.reviewTargetRebind) return REVIEW_TARGET_REBIND_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.reviewEvidenceRead) return REVIEW_EVIDENCE_READ_REQUEST_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.reviewEvidenceList) return REVIEW_EVIDENCE_LIST_REQUEST_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.reviewEvidenceAnnotate) return REVIEW_EVIDENCE_ANNOTATION_APPEND_REQUEST_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.reviewEvidenceAnnotationCurrentRead) return REVIEW_EVIDENCE_ANNOTATION_CURRENT_READ_REQUEST_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.reviewFindingPageRead) return REVIEW_FINDING_PAGE_READ_REQUEST_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.reviewCompletionRead) return REVIEW_COMPLETION_READ_REQUEST_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead) return PROVIDER_ROUTE_INTEGRITY_RECOVERY_READ_REQUEST_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.providerContextPressureRead) return PROVIDER_CONTEXT_PRESSURE_READ_REQUEST_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.herdrSteerDispatch) return HERDR_STEER_DISPATCH_REQUEST_CODEC;
-  if (operation === FABRIC_OPERATIONS.topologyWaveAppend) return TOPOLOGY_WAVE_APPEND_REQUEST_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.topologyWaveCurrentRead) return TOPOLOGY_WAVE_CURRENT_READ_REQUEST_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.topologyWaveList) return TOPOLOGY_WAVE_LIST_REQUEST_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.evidencePublish) return evidencePublishInputCodec;
-  if (operation === FABRIC_OPERATIONS.operatorArtifactContentRead) return artifactContentReadInputCodec;
-  if (operation === FABRIC_OPERATIONS.launchAttest) return launchAttestationInputCodec;
   if (operation === FABRIC_OPERATIONS.sendMessage) return messageCodec;
   if (operation === FABRIC_OPERATIONS.createTeam) return teamCreateStructuredCodec;
-  if (operation === FABRIC_OPERATIONS.workstreamCreate) return workstreamCreateCodec;
-  if (operation === FABRIC_OPERATIONS.workstreamSettle) return workstreamSettleCodec;
   if (operation === FABRIC_OPERATIONS.intakeDraftCreate) return intakeDraftCreateCodec;
   if (operation === FABRIC_OPERATIONS.scopedGateRead) return scopedGateReadInputCodec;
   if (operation === FABRIC_OPERATIONS.projectionViewPage) return operatorViewPageInputCodec;
   if (operation === FABRIC_OPERATIONS.projectionDetailRead) return operatorDetailReadInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorRepositoryRead) return gitRepositoryReadInputCodec;
-  if (operation === FABRIC_OPERATIONS.projectSessionTransition) return projectSessionTransitionInputCodec;
-  if (operation === FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare) return projectSessionLaunchPacketPrepareInputCodec;
-  if (operation === FABRIC_OPERATIONS.projectSessionLaunchPrepare) return projectSessionLaunchPrepareInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionPreview) return operatorActionPreviewInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionCommit) return operatorActionCommitCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionStatus) return operatorActionStatusInputCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionReconcile) return operatorActionReconcileCodec;
-  if (operation === FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate) return LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATE_REQUEST_V1_CODEC;
+
   if (operation === FABRIC_OPERATIONS.scopedGateCheck) return parsedBy(scopedGateCheckCodec, parseScopedGateCheckRequest);
-  if (operation === FABRIC_OPERATIONS.membershipBind) return parsedBy(membershipBindCodec, parseMembershipBindRequest);
   if (operation === FABRIC_OPERATIONS.intakeRevise) return parsedBy(intakeRevisionCodec, parseIntakeRevisionRequest);
   if (operation === FABRIC_OPERATIONS.scopedGateCreate) return parsedBy(gateCreateCodec, parseScopedGateCreateRequest);
-  if (operation === FABRIC_OPERATIONS.taskRequest) return parsedBy(taskRequestCodec, parseTaskRequest);
-  if (operation === FABRIC_OPERATIONS.taskCompleteWithReply) return parsedBy(taskCompletionCodec, parseTaskCompleteWithReply);
   const base = semanticShapeCodec(operation, "input", OPERATION_INPUT_SHAPES[operation]);
   if (operation === FABRIC_OPERATIONS.intakeRead) return parsedBy(base, parseIntakeReadRequest);
-  if (operation === FABRIC_OPERATIONS.integrationInputAttest) return parsedBy(base, parseIntegrationInputAttestationRequest);
   if (operation === FABRIC_OPERATIONS.intakeSubmit) return parsedBy(base, parseIntakeSubmission);
   if (operation === FABRIC_OPERATIONS.scopedGateResolve) return parsedBy(base, parseScopedGateResolveRequest);
   if (operation === FABRIC_OPERATIONS.resourceReserve) return parsedBy(base, parseResourceReservationRequest);
@@ -3514,53 +2638,15 @@ function inputCodecFor(operation: ProtocolOperation): Codec<unknown> {
 }
 
 function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
-  if (operation === FABRIC_OPERATIONS.reviewTargetPrepare) return REVIEW_TARGET_PREPARATION_ACCEPTED_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.reviewTargetPreparationRead) return unionOf([REVIEW_TARGET_PREPARATION_READ_V1_CODEC, REVIEW_TARGET_PREPARATION_READ_ERROR_V1_CODEC]);
-  if (operation === FABRIC_OPERATIONS.reviewTargetRebind) return REVIEW_TARGET_REBIND_RECEIPT_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.reviewEvidenceRead) return unionOf([REVIEW_EVIDENCE_READ_V1_CODEC, REVIEW_READ_ERROR_V1_CODEC]);
-  if (operation === FABRIC_OPERATIONS.reviewEvidenceList) return unionOf([REVIEW_EVIDENCE_LIST_RESULT_V1_CODEC, REVIEW_READ_ERROR_V1_CODEC]);
-  if (operation === FABRIC_OPERATIONS.reviewEvidenceAnnotate) return unionOf([REVIEW_EVIDENCE_ANNOTATION_V1_CODEC, REVIEW_READ_ERROR_V1_CODEC]);
-  if (operation === FABRIC_OPERATIONS.reviewEvidenceAnnotationCurrentRead) return unionOf([REVIEW_EVIDENCE_ANNOTATION_CURRENT_READ_RESULT_V1_CODEC, REVIEW_READ_ERROR_V1_CODEC]);
-  if (operation === FABRIC_OPERATIONS.reviewFindingPageRead) return unionOf([REVIEW_FINDING_PAGE_READ_RESULT_V1_CODEC, REVIEW_READ_ERROR_V1_CODEC]);
-  if (operation === FABRIC_OPERATIONS.reviewCompletionRead) return unionOf([REVIEW_COMPLETION_V1_CODEC, REVIEW_READ_ERROR_V1_CODEC]);
-  if (operation === FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead) return unionOf([PROVIDER_ROUTE_INTEGRITY_RECOVERY_PROJECTION_V1_CODEC, PROVIDER_ROUTE_INTEGRITY_RECOVERY_READ_ERROR_V1_CODEC]);
-  if (operation === FABRIC_OPERATIONS.providerContextPressureRead) return PROVIDER_CONTEXT_PRESSURE_READ_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.herdrSteerDispatch) return HERDR_STEER_DISPATCH_RESULT_CODEC;
-  if (operation === FABRIC_OPERATIONS.topologyWaveAppend) return TOPOLOGY_WAVE_APPEND_RECEIPT_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.topologyWaveCurrentRead) return TOPOLOGY_WAVE_CURRENT_READ_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.topologyWaveList) return TOPOLOGY_WAVE_LIST_V1_CODEC;
-  if (operation === FABRIC_OPERATIONS.evidencePublish) return evidenceRegistrationCodec;
-  if (operation === FABRIC_OPERATIONS.operatorArtifactContentRead) return artifactContentReadResultCodec;
-  if (operation === FABRIC_OPERATIONS.launchAttest) return launchAttestationResultCodec;
   if (operation === FABRIC_OPERATIONS.spawnAgent || operation === FABRIC_OPERATIONS.attachAgent) {
     return agentCustodyResultCodec;
   }
   if (taskResultOperations.has(operation)) return taskResultCodec;
   if (leaseResultOperations.has(operation)) return leaseResultCodec;
-  if (operation === FABRIC_OPERATIONS.requestLifecycle) {
-    return unionOf([LIFECYCLE_ACCEPTED_SUSPENDED_V1_CODEC, LIFECYCLE_CURRENT_STATE_V1_CODEC]);
-  }
-  if (operation === FABRIC_OPERATIONS.getAgentLifecycle || operation === FABRIC_OPERATIONS.reportProviderState) {
-    return LIFECYCLE_CURRENT_STATE_V1_CODEC;
-  }
-  if (providerActionResultOperations.has(operation)) return PROVIDER_ACTION_RESULT_V1_CODEC;
   if (operation === FABRIC_OPERATIONS.createTeam) return teamResultCodec;
-  if (operation === FABRIC_OPERATIONS.workstreamCreate || operation === FABRIC_OPERATIONS.workstreamSettle) {
-    return workstreamProjectionCodec;
-  }
   if (operation === FABRIC_OPERATIONS.listAgents) return agentListResultCodec;
   if (teamResultOperations.has(operation)) return visibleTeamResultCodec;
   if (budgetResultOperations.has(operation)) return budgetResultCodec;
-  if (([
-    FABRIC_OPERATIONS.projectSessionCreate,
-    FABRIC_OPERATIONS.projectSessionGet,
-    FABRIC_OPERATIONS.projectSessionTransition,
-    FABRIC_OPERATIONS.projectSessionClose,
-  ] as readonly ProtocolOperation[]).includes(operation)) return projectSessionCodec;
-  if (operation === FABRIC_OPERATIONS.operatorAttach || operation === FABRIC_OPERATIONS.operatorHeartbeat) {
-    return operatorAttachmentCodec;
-  }
-  if (operation === FABRIC_OPERATIONS.integrationInputAttest) return parsedBy(attestationCodec, parseOperatorInputAttestation);
   if (operation === FABRIC_OPERATIONS.scopedGateRead) {
     const gateBase = semanticShapeCodec(
       FABRIC_OPERATIONS.scopedGateCreate,
@@ -3597,18 +2683,9 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
   if (operation === FABRIC_OPERATIONS.projectionDetailRead) return operatorDetailReadResultCodec;
   if (operation === FABRIC_OPERATIONS.operatorRepositoryRead) return gitRepositoryReadResultCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionPreview) return operatorActionPreviewCodec;
-  if (operation === FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare) return projectSessionLaunchPacketPreparationCodec;
-  if (operation === FABRIC_OPERATIONS.projectSessionLaunchPrepare) return operatorActionPreviewCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionCommit) return operatorActionReceiptCodec;
   if (operation === FABRIC_OPERATIONS.operatorActionStatus || operation === FABRIC_OPERATIONS.operatorActionReconcile) {
     return operatorActionStatusCodec;
-  }
-  if (operation === FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate) {
-    return LIFECYCLE_RECOVERY_CHECKPOINT_VALIDATION_V1_CODEC;
-  }
-  if (operation === FABRIC_OPERATIONS.membershipBind) {
-    const base = semanticShapeCodec(operation, "result", OPERATION_RESULT_SHAPES[operation]);
-    return parsedBy(base, parseMembershipBindResult);
   }
   if (operation === FABRIC_OPERATIONS.intakeDraftCreate) {
     return parsedBy(intakeDraftCodec, parseIntake);
@@ -3626,34 +2703,81 @@ function resultCodecFor(operation: ProtocolOperation): Codec<unknown> {
     FABRIC_OPERATIONS.resourceRelease,
     FABRIC_OPERATIONS.resourceReconcile,
   ] as readonly ProtocolOperation[]).includes(operation)) return resourceReservationResultCodec;
-  if (([
-    FABRIC_OPERATIONS.resultDeliveryClaim,
-    FABRIC_OPERATIONS.resultDeliveryProviderAccept,
-    FABRIC_OPERATIONS.resultDeliveryConsume,
-    FABRIC_OPERATIONS.resultDeliveryRetry,
-    FABRIC_OPERATIONS.resultDeliveryReassign,
-    FABRIC_OPERATIONS.resultDeliveryAbandon,
-  ] as readonly ProtocolOperation[]).includes(operation)) return parsedBy(resultDeliveryCodec, parseResultDelivery);
-  if (operation === FABRIC_OPERATIONS.taskCompleteWithReply) {
-    return objectCodec({ taskRevision: positiveInteger, replyRevision: positiveInteger, resultDelivery: resultDeliveryCodec });
-  }
   if (operation === FABRIC_OPERATIONS.projectionEvents) return projectionEventsResultCodec;
   if (operation === FABRIC_OPERATIONS.projectionPage) return projectionPageResultCodec;
   if (operation === FABRIC_OPERATIONS.messageBodyRead) return messageBodyResultCodec;
   return semanticShapeCodec(operation, "result", OPERATION_RESULT_SHAPES[operation]);
 }
 
-// TEMPORARY (#354 S5a-S5c): the entire canonical operation set as one catch-all fragment, replaced
-// by the 13 named domain fragments in S5b/S5c; the composer below proves the union is exact.
+const S5B_OPERATION_KEYS = new Set<ProtocolOperation>([
+  FABRIC_OPERATIONS.requestLifecycle,
+  FABRIC_OPERATIONS.getAgentLifecycle,
+  FABRIC_OPERATIONS.reportProviderState,
+  FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate,
+  FABRIC_OPERATIONS.dispatchProviderAction,
+  FABRIC_OPERATIONS.reconcileProviderAction,
+  FABRIC_OPERATIONS.getProviderAction,
+  FABRIC_OPERATIONS.launchAttest,
+  FABRIC_OPERATIONS.projectSessionCreate,
+  FABRIC_OPERATIONS.projectSessionGet,
+  FABRIC_OPERATIONS.projectSessionTransition,
+  FABRIC_OPERATIONS.projectSessionClose,
+  FABRIC_OPERATIONS.projectSessionLaunchPacketPrepare,
+  FABRIC_OPERATIONS.projectSessionLaunchPrepare,
+  FABRIC_OPERATIONS.membershipBind,
+  FABRIC_OPERATIONS.taskRequest,
+  FABRIC_OPERATIONS.taskCompleteWithReply,
+  FABRIC_OPERATIONS.resultDeliveryClaim,
+  FABRIC_OPERATIONS.resultDeliveryProviderAccept,
+  FABRIC_OPERATIONS.resultDeliveryConsume,
+  FABRIC_OPERATIONS.resultDeliveryRetry,
+  FABRIC_OPERATIONS.resultDeliveryReassign,
+  FABRIC_OPERATIONS.resultDeliveryAbandon,
+  FABRIC_OPERATIONS.workstreamCreate,
+  FABRIC_OPERATIONS.workstreamSettle,
+  FABRIC_OPERATIONS.operatorAttach,
+  FABRIC_OPERATIONS.operatorDetach,
+  FABRIC_OPERATIONS.operatorHeartbeat,
+  FABRIC_OPERATIONS.integrationInputAttest,
+  FABRIC_OPERATIONS.herdrSteerDispatch,
+  FABRIC_OPERATIONS.topologyWaveAppend,
+  FABRIC_OPERATIONS.topologyWaveCurrentRead,
+  FABRIC_OPERATIONS.topologyWaveList,
+  FABRIC_OPERATIONS.evidencePublish,
+  FABRIC_OPERATIONS.operatorArtifactContentRead,
+  FABRIC_OPERATIONS.reviewTargetPrepare,
+  FABRIC_OPERATIONS.reviewTargetPreparationRead,
+  FABRIC_OPERATIONS.reviewTargetRebind,
+  FABRIC_OPERATIONS.reviewEvidenceRead,
+  FABRIC_OPERATIONS.reviewEvidenceList,
+  FABRIC_OPERATIONS.reviewEvidenceAnnotate,
+  FABRIC_OPERATIONS.reviewEvidenceAnnotationCurrentRead,
+  FABRIC_OPERATIONS.reviewFindingPageRead,
+  FABRIC_OPERATIONS.reviewCompletionRead,
+  FABRIC_OPERATIONS.providerRouteIntegrityRecoveryRead,
+  FABRIC_OPERATIONS.providerContextPressureRead,
+]);
+
 function legacyOperationCodecFragment(): OperationCodecFragment {
   const codecs: Partial<Record<ProtocolOperation, OperationCodecPair>> = {};
   for (const operation of Object.keys(OPERATION_REGISTRY) as ProtocolOperation[]) {
+    if (S5B_OPERATION_KEYS.has(operation)) continue;
     codecs[operation] = Object.freeze({ input: inputCodecFor(operation), result: resultCodecFor(operation) });
   }
   return Object.freeze(codecs);
 }
 
-export const OPERATION_CODECS = composeOperationCodecFragments([legacyOperationCodecFragment()]);
+export const OPERATION_CODECS = composeOperationCodecFragments([
+  legacyOperationCodecFragment(),
+  lifecycleOperationCodecFragment,
+  providerActionOperationCodecFragment,
+  createProjectSessionOperationCodecFragment({ operatorActionPreviewCodec }),
+  requestResultOperationCodecFragment,
+  controlPlaneOperationCodecFragment,
+  artifactsOperationCodecFragment,
+  providerReviewOperationCodecFragment,
+]);
+assertComposedRegistryExhaustive(OPERATION_CODECS);
 
 export function operationInputSchemaForPrincipal(
   operation: ProtocolOperation,
@@ -3737,26 +2861,6 @@ export function parseOperationResult<Operation extends ProtocolOperation>(
   return OPERATION_CODECS[operation].result.parse(value, `${operation}.result`) as OperationResultMap[Operation];
 }
 
-export type ProviderActionResultKind = "non-review" | "certifying-review";
-
-export type OperationResultPrincipalContext = Readonly<{
-  kind: OperationPrincipalKind;
-  agentId?: string;
-  projectSessionId?: string;
-  runId?: string;
-}>;
-
-function providerActionIdentity(value: unknown, path: string): Readonly<{ adapterId: unknown; actionId: unknown }> {
-  const result = value as Readonly<Record<string, unknown>>;
-  const ref = result.kind === "certifying-review"
-    ? ((result.action as Readonly<Record<string, unknown>>).actionRef as Readonly<Record<string, unknown>>)
-    : result.actionRef as Readonly<Record<string, unknown>>;
-  if (ref === undefined || ref === null || typeof ref !== "object") {
-    throw new TypeError(`${path} has no canonical actionRef`);
-  }
-  return { adapterId: ref.adapterId, actionId: ref.actionId };
-}
-
 export function parseOperationResultForInput<Operation extends ProtocolOperation>(
   operation: Operation,
   input: OperationInputMap[Operation],
@@ -3764,72 +2868,8 @@ export function parseOperationResultForInput<Operation extends ProtocolOperation
   principal?: OperationResultPrincipalContext,
 ): OperationResultMap[Operation] {
   const result = parseOperationResult(operation, value);
-  if (([
-    FABRIC_OPERATIONS.dispatchProviderAction,
-    FABRIC_OPERATIONS.reconcileProviderAction,
-    FABRIC_OPERATIONS.getProviderAction,
-  ] as readonly ProtocolOperation[]).includes(operation)) {
-    const request = input as Readonly<Record<string, unknown>>;
-    const parsed = result as Readonly<Record<string, unknown>>;
-    const identity = providerActionIdentity(parsed, `${operation}.result`);
-    if (identity.adapterId !== request.adapterId || identity.actionId !== request.actionId) {
-      throw new TypeError(`${operation}.result action identity must equal the exact requested actionRef`);
-    }
-    const dispatchKind = operation === FABRIC_OPERATIONS.dispatchProviderAction
-      ? (request.certifyingReview === null ? "non-review" : "certifying-review")
-      : undefined;
-    const expectedKind = dispatchKind ?? request.expectedActionKind;
-    if (parsed.kind !== expectedKind) {
-      throw new TypeError(`${operation}.result kind must be ${expectedKind} for the classified provider action`);
-    }
-    if (
-      operation === FABRIC_OPERATIONS.dispatchProviderAction &&
-      parsed.kind === "non-review" &&
-      parsed.providerAnswer !== undefined &&
-      request.operation !== "spawn"
-    ) {
-      throw new TypeError(`${operation}.result providerAnswer is available only for a task-bound non-review spawn`);
-    }
-  }
-  if (operation === FABRIC_OPERATIONS.requestLifecycle) {
-    const request = input as Readonly<Record<string, unknown>>;
-    const parsed = result as Readonly<Record<string, unknown>>;
-    const action = request.action;
-    if (action === "rotate" || action === "compact") {
-      if (parsed.kind !== "accepted-suspended") {
-        throw new TypeError(`${operation}.result for ${action} must be accepted-suspended, not current-state`);
-      }
-      if (
-        parsed.action !== action ||
-        parsed.agentId !== request.agentId ||
-        parsed.taskId !== request.taskId ||
-        parsed.taskRevision !== request.taskRevision
-      ) {
-        throw new TypeError(`${operation}.result accepted-suspended identity must equal the exact lifecycle request`);
-      }
-      if (
-        principal?.kind !== "agent" ||
-        parsed.projectSessionId !== principal.projectSessionId ||
-        parsed.coordinationRunId !== principal.runId ||
-        parsed.agentId !== principal.agentId
-      ) {
-        throw new TypeError(`${operation}.result accepted-suspended session and run must equal the authenticated agent principal`);
-      }
-      const checkpoint = request.checkpoint as Readonly<Record<string, unknown>>;
-      if (parsed.checkpointDigest !== `sha256:${String(checkpoint.sha256)}`) {
-        throw new TypeError(`${operation}.result checkpointDigest must equal the exact lifecycle request checkpoint`);
-      }
-    } else if (parsed.kind !== "current-state" || parsed.agentId !== request.agentId) {
-      throw new TypeError(`${operation}.result for ${String(action)} must be current-state for the exact agent`);
-    }
-  }
-  if (operation === FABRIC_OPERATIONS.agentLifecycleRecoveryCheckpointValidate) {
-    const request = input as Readonly<Record<string, unknown>>;
-    const parsed = result as Readonly<Record<string, unknown>>;
-    if (parsed.status === "validated" && JSON.stringify(parsed.source) !== JSON.stringify(request.source)) {
-      throw new TypeError(`${operation}.result source must equal the exact checkpoint validation request source`);
-    }
-  }
+  validateProviderActionResultForInput(operation, input, result);
+  validateLifecycleResultForInput(operation, input, result, principal);
   return result;
 }
 
