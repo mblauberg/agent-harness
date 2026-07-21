@@ -60,6 +60,77 @@ def substantial_plan(risk="substantial"):
     }
 
 
+def bind_complete_reviews(run, plan):
+    reviews_dir = run / "reviews"
+    reviews_dir.mkdir()
+    for row in plan["reviews"]:
+        if row["status"] != "complete":
+            continue
+        evidence = run / row["evidence"]["path"]
+        evidence.write_text(row["id"] + ":evidence")
+        row["evidence"]["digest"] = "sha256:" + __import__("hashlib").sha256(evidence.read_bytes()).hexdigest()
+        route = run / row["route_receipt"]["path"]
+        route.write_text(json.dumps({
+            "status": "ok", "adapter": row["adapter"], "resolved_model": row["model"],
+            "catalog_model": row["catalog_model"], "model_family": row["family"],
+            "route_alias": row["tier"], "reviewer_id": row["reviewer_id"],
+            "cross_family": row["scope"] == "full-scope",
+            "certification_eligible": row["scope"] == "full-scope",
+        }))
+        row["route_receipt"]["digest"] = "sha256:" + __import__("hashlib").sha256(route.read_bytes()).hexdigest()
+
+
+def test_real_run_allows_unavailable_other_primary_with_two_family_substitution(tmp_path):
+    plan = substantial_plan()
+    plan["reviews"][-1] = review(
+        "primary-down", "full-scope", "other-primary", "anthropic", status="unavailable"
+    )
+    plan["reviews"].extend([
+        review("sub-google", "full-scope", "whole-change-a", "google", substitution_for="other-primary", wave=2),
+        review("sub-xai", "full-scope", "whole-change-b", "xai", substitution_for="other-primary", wave=2),
+    ])
+    bind_complete_reviews(tmp_path, plan)
+
+    assert run_dir_finalize._validate_review_plan(plan, tmp_path) == []
+
+
+def test_real_run_allows_recorded_targeted_omission(tmp_path):
+    plan = substantial_plan()
+    plan["reviews"] = [plan["reviews"][0], plan["reviews"][1], plan["reviews"][3]]
+    plan["reviews"].append(
+        review(
+            "target-omitted", "targeted", "authority", "google",
+            status="omitted", substitution_for="targeted-lens", wave=2,
+        )
+    )
+    bind_complete_reviews(tmp_path, plan)
+
+    assert run_dir_finalize._validate_review_plan(plan, tmp_path) == []
+
+
+def test_real_run_allows_recorded_crucial_second_family_omission(tmp_path):
+    plan = substantial_plan("crucial")
+    plan["reviews"].append(
+        review(
+            "second-family-omitted", "full-scope", "terminal-challenge", "google",
+            status="omitted", substitution_for="additional-distinct-family", wave=2,
+        )
+    )
+    bind_complete_reviews(tmp_path, plan)
+
+    assert run_dir_finalize._validate_review_plan(plan, tmp_path) == []
+
+
+def test_real_run_complete_full_scope_still_requires_route_receipt(tmp_path):
+    plan = substantial_plan()
+    bind_complete_reviews(tmp_path, plan)
+    (tmp_path / plan["reviews"][-1]["route_receipt"]["path"]).unlink()
+
+    errors = run_dir_finalize._validate_review_plan(plan, tmp_path)
+
+    assert any("route_receipt is missing or does not match" in error for error in errors)
+
+
 def test_substantial_review_topology_is_machine_checked():
     assert run_dir_finalize._validate_review_plan(substantial_plan()) == []
     plan = substantial_plan()

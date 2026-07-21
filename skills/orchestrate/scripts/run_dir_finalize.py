@@ -130,7 +130,7 @@ def _validate_review_plan(raw: object, run_dir: Path | None = None) -> list[str]
             digest = evidence["digest"]
             if path.is_absolute() or ".." in path.parts or not isinstance(digest, str) or not digest.startswith("sha256:"):
                 errors.append(f"receipt review_plan.reviews[{index}].evidence is invalid")
-            elif run_dir is not None:
+            elif run_dir is not None and review["status"] == "complete":
                 target = run_dir / path
                 if not _inside(run_dir, target) or not target.is_file() or "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest() != digest:
                     errors.append(f"receipt review_plan.reviews[{index}].evidence is missing or does not match")
@@ -146,7 +146,7 @@ def _validate_review_plan(raw: object, run_dir: Path | None = None) -> list[str]
             route_digest = route["digest"]
             if route_path.is_absolute() or ".." in route_path.parts or not isinstance(route_digest, str) or not route_digest.startswith("sha256:"):
                 errors.append(f"receipt review_plan.reviews[{index}].route_receipt is invalid")
-            elif run_dir is not None:
+            elif run_dir is not None and review["status"] == "complete":
                 target = run_dir / route_path
                 if not _inside(run_dir, target) or not target.is_file() or "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest() != route_digest:
                     errors.append(f"receipt review_plan.reviews[{index}].route_receipt is missing or does not match")
