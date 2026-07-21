@@ -510,6 +510,12 @@ input.on("line", (line) => {
   }
   if (request.method === "release") {
     const reference = request.params.resumeReference;
+    // Result variant (issue-354 E2R-3): a resume reference carrying the ":release-deleted"
+    // sentinel simulates a destructive release. The adapter reports released+deleted, which the
+    // fabric release proof (fabric.ts:5712) rejects as non-destructive-proof failure. The sentinel
+    // is supplied entirely through the test-controlled agents.provider_session_ref column, so no
+    // adapter env wiring is required.
+    const destructive = typeof reference === "string" && reference.endsWith(":release-deleted");
     if (typeof reference === "string") {
       journal.sessions[reference] = {
         released: true,
@@ -517,7 +523,7 @@ input.on("line", (line) => {
       };
       saveJournal(journal);
     }
-    respond(request.id, { released: true, deleted: false });
+    respond(request.id, { released: true, deleted: destructive });
     return;
   }
   if (request.method === "dispatch") {
