@@ -26,7 +26,6 @@ import {
 } from "@local/agent-fabric-protocol";
 import { parseEvidenceArtifactRegistration } from "@local/agent-fabric-protocol";
 
-import { compileProviderPayload } from "../authority/authority-compiler.js";
 import { readStoredAuthority } from "../authority/stored-authority.js";
 
 import type {
@@ -67,7 +66,6 @@ import {
   ProviderAdapterError,
   type AgentBridgeCapability,
 } from "../adapters/providers/types.js";
-import { assessAdapterModelPolicy } from "../adapters/model-selection.js";
 import { projectFabricReceipt } from "../exports/projector.js";
 import { assertFabricReceiptSchema } from "../exports/schema.js";
 import { openFabricDatabase } from "../persistence/sqlite.js";
@@ -219,6 +217,7 @@ import { LifecycleContinuation } from "../lifecycle/continuation.js";
 import { LifecycleRecovery } from "../lifecycle/recovery.js";
 import { LifecycleService } from "../lifecycle/service.js";
 import { GenerationLossRepository } from "../lifecycle/generation-loss-repository.js";
+import { ProviderPayloadAuthority } from "../provider-action/payload-authority.js";
 import type {
   LifecycleIntegrityReceiptAuthorityPort,
 } from "../lifecycle/receipt-authority.js";
@@ -805,6 +804,7 @@ export class Fabric {
   readonly #readPolicy: FabricReadPolicy;
   readonly #commandJournal: CommandJournal;
   readonly #providerActionAdmission: ProviderActionAdmissionCoordinator;
+  readonly #payloadAuthority: ProviderPayloadAuthority;
   readonly #lifecycleRotations: LifecycleRotationRepository;
   readonly #checkpointPolicy: LifecycleCheckpointPolicy;
   readonly #admission: LifecycleAdmission;
@@ -899,6 +899,12 @@ export class Fabric {
       : new LifecycleReceiptRecoveryService(this.#database, options.lifecycleReceiptAuthority);
     this.#artifactRegistry = new ArtifactRegistry(this.#database, this.#clock);
     this.#adapters = options.adapters ?? {};
+    this.#payloadAuthority = new ProviderPayloadAuthority({
+      database: this.#database,
+      clock: this.#clock,
+      workspaceRootForRun: (runId) => this.#workspaceRootForRun(runId),
+      adapterModelPolicy: (adapterId) => this.#adapter(adapterId).modelPolicy,
+    });
     this.#adapterSupervisor = new AdapterSupervisor(this.#adapters);
     this.#maximumConcurrentProviderTurns = options.maximumConcurrentProviderTurns ?? 8;
     this.#providerSessions = new ProviderSessionCoordinator({
@@ -3967,14 +3973,14 @@ export class Fabric {
       authorityId: input.authorityId,
       adapterId: input.adapterId,
     });
-    const providerPayload = this.#admitProviderPayload(
+    const providerPayload = this.#payloadAuthority.admitProviderPayload(
       runId,
       input.authorityId,
       input.payload,
       true,
       { actorAgentId, taskId: typeof input.payload.taskId === "string" ? input.payload.taskId : undefined },
     );
-    this.#assertAdapterModel(input.adapterId, providerPayload);
+    this.#payloadAuthority.assertAdapterModel(input.adapterId, providerPayload);
     const bridgeContract = await this.#inspectAgentBridgeContract(input.adapterId, "spawn");
     if (this.#launchCustody === undefined) {
       throw new FabricError("CAPABILITY_UNAVAILABLE", "agent custody requires an elected daemon socket");
@@ -4013,7 +4019,7 @@ export class Fabric {
       adapterId: input.adapterId,
       providerSessionRef: input.providerSessionRef,
     });
-    const providerPayload = this.#admitProviderPayload(runId, input.authorityId, {});
+    const providerPayload = this.#payloadAuthority.admitProviderPayload(runId, input.authorityId, {});
     const bridgeContract = await this.#inspectAgentBridgeContract(input.adapterId, "attach");
     if (this.#launchCustody === undefined) {
       throw new FabricError("CAPABILITY_UNAVAILABLE", "agent custody requires an elected daemon socket");
@@ -5480,7 +5486,7 @@ export class Fabric {
         };
     let admittedInputPayload = taskBoundPayload;
     if (target !== undefined) {
-      if (existingPayload === undefined) this.#assertProviderPrincipalActive(runId, target.agentId);
+      if (existingPayload === undefined) this.#payloadAuthority.assertProviderPrincipalActive(runId, target.agentId);
       if (taskId !== undefined) {
         const taskMember = this.#database.prepare(`
           SELECT 1 FROM tasks task
@@ -5500,7 +5506,7 @@ export class Fabric {
         this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, target.agentId),
         "provider target agent",
       );
-      admittedInputPayload = this.#admitProviderPayload(
+      admittedInputPayload = this.#payloadAuthority.admitProviderPayload(
         runId,
         stringField(targetAgent, "authority_id"),
         taskBoundPayload,
@@ -5534,11 +5540,11 @@ export class Fabric {
       );
       let providerAuthorityId = stringField(actor, "authority_id");
       if (ephemeralSpawn) {
-        this.#assertEphemeralProviderAuthority(runId, actorAgentId, input.authorityId as string);
+        this.#payloadAuthority.assertEphemeralProviderAuthority(runId, actorAgentId, input.authorityId as string);
         providerAuthorityId = input.authorityId as string;
         ephemeralProviderAuthorityId = providerAuthorityId;
       }
-      admittedInputPayload = this.#admitProviderPayload(
+      admittedInputPayload = this.#payloadAuthority.admitProviderPayload(
         runId,
         providerAuthorityId,
         taskBoundPayload,
@@ -5554,7 +5560,7 @@ export class Fabric {
       existingPayload === undefined &&
       (input.operation === "spawn" || input.operation === "send_turn" || input.operation === "steer")
     ) {
-      this.#assertAdapterModel(input.adapterId, admittedInputPayload);
+      this.#payloadAuthority.assertAdapterModel(input.adapterId, admittedInputPayload);
     }
     const identityHash = sha256(canonicalJson({
       adapterId: input.adapterId,
@@ -5618,7 +5624,7 @@ export class Fabric {
       }
       const ephemeralAuthorityBudget = {
         authorityId: ephemeralProviderAuthorityId,
-        reservation: this.#providerBudgetReservation(
+        reservation: this.#payloadAuthority.providerBudgetReservation(
           ephemeralProviderAuthorityId,
           stringField(admittedInputPayload, "modelFamily"),
           ephemeralMaxTurns,
@@ -5684,7 +5690,7 @@ export class Fabric {
               throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider admission changed while Fabric was closing");
             }
             this.#assertChair(runId, actorAgentId);
-            this.#assertProviderPrincipalActive(runId, actorAgentId);
+            this.#payloadAuthority.assertProviderPrincipalActive(runId, actorAgentId);
             const reboundTaskId = resolveTaskBindingForActiveWork(
               this.#database,
               runId,
@@ -5702,8 +5708,8 @@ export class Fabric {
             );
             assertScopedTaskReadinessAllowed(this.#database, runId, taskId);
             assertRunAcceptingWork(this.#database, runId);
-            this.#assertEphemeralProviderAuthority(runId, actorAgentId, ephemeralProviderAuthorityId as string);
-            this.#admitProviderPayload(
+            this.#payloadAuthority.assertEphemeralProviderAuthority(runId, actorAgentId, ephemeralProviderAuthorityId as string);
+            this.#payloadAuthority.admitProviderPayload(
               runId,
               ephemeralProviderAuthorityId as string,
               taskBoundPayload,
@@ -5970,7 +5976,7 @@ export class Fabric {
         return result;
       }
       if (typeof stored.target_agent_id === "string") {
-        this.#assertProviderPrincipalActive(runId, stored.target_agent_id);
+        this.#payloadAuthority.assertProviderPrincipalActive(runId, stored.target_agent_id);
       }
       const adapterId = stringField(stored, "adapter_id");
       assertProviderActionOwner(this.#database, {
@@ -6060,7 +6066,7 @@ export class Fabric {
       return preserveResolvedEffect();
     } else if (idempotencyProven && !answerBearing) {
       if (typeof stored.target_agent_id === "string") {
-        this.#assertProviderPrincipalActive(runId, stored.target_agent_id);
+        this.#payloadAuthority.assertProviderPrincipalActive(runId, stored.target_agent_id);
       }
       assertProviderActionOwner(this.#database, {
         runId,
@@ -7136,192 +7142,6 @@ export class Fabric {
     const adapter = this.#adapters[adapterId];
     if (adapter === undefined) throw new FabricError("ADAPTER_DISABLED", `adapter is not activated: ${adapterId}`);
     return adapter;
-  }
-
-  #assertAdapterModel(adapterId: string, payload: Record<string, unknown>): void {
-    const policy = this.#adapter(adapterId).modelPolicy;
-    if (policy === undefined) return;
-    const assessment = assessAdapterModelPolicy({
-      modelFamily: typeof payload.modelFamily === "string" ? payload.modelFamily : "",
-      modelId: typeof payload.model === "string" ? payload.model : null,
-      allowedFamilies: policy.allowedFamilies,
-      allowedModelPatterns: policy.allowedModelPatterns,
-      requiresExplicitModel: policy.requiresExplicitModel,
-    });
-    if (assessment.allowed) return;
-    if (assessment.reason === "model-required") {
-      throw new FabricError("ADAPTER_MODEL_REQUIRED", `${adapterId} requires an explicit model`);
-    }
-    if (assessment.reason === "model-forbidden") {
-      throw new FabricError("MODEL_NOT_ALLOWED", `${adapterId} model is outside trusted compatibility patterns`);
-    }
-    throw new FabricError("ADAPTER_FAMILY_FORBIDDEN", `${adapterId} model family is outside trusted compatibility policy`);
-  }
-
-  #providerBudgetReservation(
-    authorityId: string,
-    modelFamily: string,
-    maximumTurns: number,
-  ): Record<string, number> {
-    const reservation: Record<string, number> = {};
-    for (const value of this.#database.prepare(`
-      SELECT unit_key,granted,reserved,consumed,usage_unknown
-        FROM authority_budget WHERE authority_id=? ORDER BY unit_key
-    `).all(authorityId)) {
-      const row = rowOrNotFound(value, "provider authority budget");
-      const unit = stringField(row, "unit_key");
-      const relevant = unit === "turns" || unit === "provider_calls" ||
-        unit === "concurrent_turns" || unit === "wall_clock_milliseconds" ||
-        unit.startsWith("cost:") || unit === `input_tokens:${modelFamily}` ||
-        unit === `output_tokens:${modelFamily}`;
-      if (!relevant) continue;
-      if (numberField(row, "usage_unknown") === 1) {
-        throw new FabricError("BUDGET_USAGE_UNKNOWN", `delegated provider usage is unknown for ${unit}`);
-      }
-      const available = numberField(row, "granted") - numberField(row, "reserved") - numberField(row, "consumed");
-      const amount = unit === "turns" ? maximumTurns
-        : unit === "provider_calls" || unit === "concurrent_turns" ? 1
-          : available;
-      if (amount < 1 || amount > available) {
-        throw new FabricError("BUDGET_EXCEEDED", `delegated provider budget is exhausted for ${unit}`);
-      }
-      reservation[unit] = amount;
-    }
-    if (reservation.turns !== maximumTurns) {
-      throw new FabricError("BUDGET_EXCEEDED", "delegated provider authority has no positive hard turns ceiling");
-    }
-    return reservation;
-  }
-
-  #admitProviderPayload(
-    runId: string,
-    authorityId: string,
-    payload: Record<string, unknown>,
-    validateCurrent = true,
-    projectionContext?:
-      | { actorAgentId: string; taskId: string | undefined }
-      | { workspacePath: string },
-  ): Record<string, unknown> {
-    const row = rowOrNotFound(
-      this.#database.prepare("SELECT authority_json, authority_hash FROM authorities WHERE run_id = ? AND authority_id = ?").get(runId, authorityId),
-      "provider authority",
-    );
-    const authority = parseAuthority(row);
-    const trustedProjection = projectionContext === undefined
-      ? undefined
-      : "workspacePath" in projectionContext
-        ? this.#replayWorkspaceWriteOfflineProjection(runId, authority, payload, projectionContext.workspacePath)
-        : this.#workspaceWriteOfflineProjection(
-          runId,
-          projectionContext.actorAgentId,
-          projectionContext.taskId,
-          authority,
-          payload,
-        );
-    const admittedPayload = trustedProjection === undefined
-      ? payload
-      : { ...payload, cwd: trustedProjection.workspacePath };
-    return compileProviderPayload({
-      authority,
-      workspaceRoot: () => this.#workspaceRootForRun(runId),
-      payload: admittedPayload,
-      ...(trustedProjection === undefined ? {} : { trustedProjection }),
-      ...(validateCurrent
-        ? { now: this.#clock(), validateCurrent: true }
-        : { now: null, validateCurrent: false }),
-    });
-  }
-
-  #replayWorkspaceWriteOfflineProjection(
-    runId: string,
-    authority: AuthorityInput,
-    payload: Record<string, unknown>,
-    workspacePath: string,
-  ): { kind: "workspace-write-offline"; workspacePath: string } | undefined {
-    if (payload.cwd !== undefined && typeof payload.cwd !== "string") return undefined;
-    try {
-      const workspaceRoot = this.#workspaceRootForRun(runId);
-      const relativeWorkspacePath = relative(workspaceRoot, workspacePath);
-      if (
-        relativeWorkspacePath === ".." || relativeWorkspacePath.startsWith(`..${sep}`) ||
-        isAbsolute(relativeWorkspacePath)
-      ) return undefined;
-      const replayPath = relativeWorkspacePath === ""
-        ? "."
-        : normalize(relativeWorkspacePath).replaceAll(sep, "/");
-      const requestedPath = canonicalAuthorityPath(
-        workspaceRoot,
-        payload.cwd ?? authority.sourcePaths[0] ?? ".",
-      );
-      return requestedPath === replayPath ? { kind: "workspace-write-offline", workspacePath: replayPath } : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  #workspaceWriteOfflineProjection(
-    runId: string,
-    actorAgentId: string,
-    taskId: string | undefined,
-    authority: AuthorityInput,
-    payload: Record<string, unknown>,
-  ): { kind: "workspace-write-offline"; workspacePath: string } | undefined {
-    if (taskId === undefined) return undefined;
-    if (payload.cwd !== undefined && typeof payload.cwd !== "string") return undefined;
-    const requestedCwd = payload.cwd ?? authority.sourcePaths[0] ?? ".";
-    let workspacePath: string;
-    try {
-      workspacePath = canonicalAuthorityPath(this.#workspaceRootForRun(runId), requestedCwd);
-    } catch {
-      return undefined;
-    }
-    const leaseRows = this.#database.prepare(`
-      SELECT scope.canonical_path
-        FROM leases lease
-        JOIN write_scope_entries scope ON scope.lease_id=lease.lease_id
-        JOIN task_obligation_bindings binding
-          ON binding.coordination_run_id=lease.run_id
-         AND binding.obligation_kind='write-lease'
-         AND binding.obligation_id=lease.lease_id
-       WHERE lease.run_id=? AND lease.kind='write' AND lease.holder_agent_id=?
-         AND lease.status='active' AND lease.expires_at>?
-         AND binding.task_id=? AND binding.state='active'
-    `).all(runId, actorAgentId, this.#clock(), taskId);
-    if (!leaseRows.some((value) => isRow(value) && pathContains(stringField(value, "canonical_path"), workspacePath))) {
-      return undefined;
-    }
-    return { kind: "workspace-write-offline", workspacePath };
-  }
-
-  #assertProviderPrincipalActive(runId: string, agentId: string): void {
-    const principal = rowOrNotFound(this.#database.prepare(`
-      SELECT c.revoked_at, c.expires_at, agent.lifecycle
-        FROM capabilities c
-        JOIN agents agent ON agent.run_id=c.run_id AND agent.agent_id=c.agent_id
-       WHERE c.run_id = ? AND c.agent_id = ?
-       ORDER BY c.principal_generation DESC LIMIT 1
-    `).get(runId, agentId), "provider principal");
-    if (principal.revoked_at !== null || numberField(principal, "expires_at") <= this.#clock()) {
-      throw new FabricError("AUTHENTICATION_FAILED", "provider principal is revoked or expired");
-    }
-    if (principal.lifecycle === "suspended" || principal.lifecycle === "context-unreconciled") {
-      throw new FabricError("CONTEXT_UNRECONCILED", "provider principal requires explicit lifecycle recovery");
-    }
-  }
-
-  #assertEphemeralProviderAuthority(runId: string, actorAgentId: string, authorityId: string): void {
-    const actor = rowOrNotFound(
-      this.#database.prepare("SELECT authority_id FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, actorAgentId),
-      "provider actor",
-    );
-    const delegated = rowOrNotFound(
-      this.#database.prepare("SELECT parent_authority_id FROM authorities WHERE run_id = ? AND authority_id = ?")
-        .get(runId, authorityId),
-      "ephemeral provider authority",
-    );
-    if (delegated.parent_authority_id !== stringField(actor, "authority_id")) {
-      throw new FabricError("CAPABILITY_FORBIDDEN", "ephemeral provider authority is not delegated by the chair");
-    }
   }
 
   #adapterIdForAgent(runId: string, agentId: string): string {
