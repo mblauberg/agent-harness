@@ -14,6 +14,7 @@ import {
   boolean,
   boundedString,
   defineCodec,
+  enumeration,
   identifier,
   integer,
   jsonValue,
@@ -108,6 +109,50 @@ export const activeOperationCodec = defineCodec<FabricOperation>({
 export const artifactRefCodec = objectCodec({ path: relativePath, digest: sha256 });
 
 export const artifactRefsCodec = arrayOf(artifactRefCodec, { maximum: 128 });
+
+export const absoluteFilesystemPathCodec = boundedString({
+  maxBytes: 4096,
+  pattern: "^/",
+  example: "/workspace/project",
+});
+
+export const releaseBindingCodec = objectCodec({
+  acceptedDeliveryReceiptRef: artifactRefCodec,
+  artifactDigest: sha256,
+  promotionAction: text,
+  target: text,
+});
+
+export const projectionSourceCodec = enumeration(["fabric", "delivery-run", "git", "github", "herdr", "provider"]);
+
+export function projectionFact(
+  valueCodec: Codec<unknown>,
+  sourceCodec: Codec<unknown> = projectionSourceCodec,
+): Codec<unknown> {
+  return unionOf([
+    objectCodec({
+      freshness: enumeration(["live", "snapshot", "stale"]),
+      source: sourceCodec,
+      revision: integer(),
+      observedAt: timestamp,
+      value: valueCodec,
+    }),
+    objectCodec({
+      freshness: literal("unavailable"),
+      source: sourceCodec,
+      revision: integer(),
+      observedAt: timestamp,
+      reason: text,
+    }),
+    objectCodec({
+      freshness: literal("conflict"),
+      source: sourceCodec,
+      revision: integer(),
+      observedAt: timestamp,
+      candidates: arrayOf(valueCodec, { minimum: 2, maximum: 16 }),
+    }),
+  ]);
+}
 
 export const credentialCodec = objectCodec({ capabilityId: identifier, token: secret });
 

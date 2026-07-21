@@ -1,18 +1,42 @@
 // Proof-bearing operation-codec registry composer (#354 S5a).
 //
 // This module owns the fragment contract and the composition/exhaustiveness machinery only. It
-// must not own any operation-specific codec logic — domain fragments (moved in S5b/S5c) and the
-// temporary catch-all legacy fragment (operation-codecs.ts, S5a-S5c) supply the actual codec
-// pairs; this module only proves, at compose time, that every canonical operation is covered
-// exactly once.
+// must not own any operation-specific codec logic — the 13 domain fragments supply the actual
+// codec pairs; this module only wires cross-domain dependencies and proves, at compose time, that
+// every canonical operation is covered exactly once.
 import { OPERATION_REGISTRY } from "../operations.js";
 import type { ProtocolOperation } from "../rpc-contract.js";
 import type {
+  AssertNever,
   OperationCodecFragment,
   OperationCodecPair,
   OperationShapeFragment,
   WireShape,
 } from "./common.js";
+import { artifactsOperationCodecFragment, ARTIFACTS_INPUT_SHAPES, ARTIFACTS_RESULT_SHAPES } from "./artifacts.js";
+import { coreOperationCodecFragment, CORE_INPUT_SHAPES, CORE_RESULT_SHAPES } from "./core.js";
+import { controlPlaneOperationCodecFragment, CONTROL_PLANE_INPUT_SHAPES, CONTROL_PLANE_RESULT_SHAPES } from "./control-plane.js";
+import { createAdmissionOperationCodecFragment, ADMISSION_INPUT_SHAPES, ADMISSION_RESULT_SHAPES } from "./admission.js";
+import {
+  gitActionsOperationCodecFragment,
+  gitAuthoriseIntentCodec,
+  gitCustodyResolveIntentCodec,
+  gitIntentCodec,
+  gitOperationDraftIntentCodec,
+  gitRepositoryProjectionCodec,
+  gitRepositorySummaryCodec,
+  gitResolutionEligibilityReasonCodec,
+  GIT_ACTIONS_INPUT_SHAPES,
+  GIT_ACTIONS_RESULT_SHAPES,
+} from "./git-actions.js";
+import { lifecycleOperationCodecFragment, LIFECYCLE_INPUT_SHAPES, LIFECYCLE_RESULT_SHAPES } from "./lifecycle.js";
+import { messagingOperationCodecFragment, MESSAGING_INPUT_SHAPES, MESSAGING_RESULT_SHAPES } from "./messaging.js";
+import { createOperatorActionsCodecs, OPERATOR_ACTIONS_INPUT_SHAPES, OPERATOR_ACTIONS_RESULT_SHAPES } from "./operator-actions.js";
+import { createOperatorProjectionOperationCodecFragment, OPERATOR_PROJECTION_INPUT_SHAPES, OPERATOR_PROJECTION_RESULT_SHAPES } from "./operator-projection.js";
+import { createProjectSessionOperationCodecFragment, projectSessionCodec, PROJECT_SESSION_INPUT_SHAPES, PROJECT_SESSION_RESULT_SHAPES } from "./project-session.js";
+import { providerActionOperationCodecFragment, PROVIDER_ACTION_INPUT_SHAPES, PROVIDER_ACTION_RESULT_SHAPES } from "./provider-action.js";
+import { providerReviewOperationCodecFragment, PROVIDER_REVIEW_INPUT_SHAPES, PROVIDER_REVIEW_RESULT_SHAPES } from "./provider-review.js";
+import { requestResultOperationCodecFragment, REQUEST_RESULT_INPUT_SHAPES, REQUEST_RESULT_RESULT_SHAPES, taskRequestCodec } from "./request-result.js";
 
 /**
  * Compose an ordered list of domain codec fragments into one registry record, throwing on the
@@ -49,10 +73,14 @@ export function composeOperationCodecFragments(
   return Object.freeze(ordered) as Readonly<Record<ProtocolOperation, OperationCodecPair>>;
 }
 
+type UnionToIntersection<Union> = (
+  Union extends unknown ? (value: Union) => void : never
+) extends (value: infer Intersection) => void ? Intersection : never;
+
 /** Compose shape fragments with the same duplicate and canonical-order guarantees as codecs. */
-export function composeOperationShapeFragments(
-  fragments: readonly OperationShapeFragment[],
-): Readonly<Record<ProtocolOperation, WireShape>> {
+export function composeOperationShapeFragments<const Fragments extends readonly OperationShapeFragment[]>(
+  fragments: Fragments,
+): Readonly<UnionToIntersection<Fragments[number]>> {
   const seen = new Set<ProtocolOperation>();
   const canonical = new Set(Object.keys(OPERATION_REGISTRY));
   const composed: Partial<Record<ProtocolOperation, WireShape>> = {};
@@ -72,7 +100,7 @@ export function composeOperationShapeFragments(
   for (const operation of Object.keys(OPERATION_REGISTRY) as ProtocolOperation[]) {
     if (Object.hasOwn(composed, operation)) ordered[operation] = composed[operation]!;
   }
-  return Object.freeze(ordered) as Readonly<Record<ProtocolOperation, WireShape>>;
+  return Object.freeze(ordered) as Readonly<UnionToIntersection<Fragments[number]>>;
 }
 
 /**
@@ -95,3 +123,124 @@ export function assertComposedRegistryExhaustive(
     throw new Error(`operation codec registry is not exhaustive: ${parts.join(" ")}`);
   }
 }
+
+const operatorActionsCodecs = createOperatorActionsCodecs({
+  gitIntentCodec,
+  gitAuthoriseIntentCodec,
+  gitOperationDraftIntentCodec,
+  gitCustodyResolveIntentCodec,
+  gitResolutionEligibilityReasonCodec,
+});
+
+const projectSessionOperationCodecFragment = createProjectSessionOperationCodecFragment({
+  operatorActionPreviewCodec: operatorActionsCodecs.operatorActionPreviewCodec,
+});
+const admissionOperationCodecFragment = createAdmissionOperationCodecFragment({ taskRequestCodec });
+const operatorActionsOperationCodecFragment = operatorActionsCodecs.fragment;
+const operatorProjectionOperationCodecFragment = createOperatorProjectionOperationCodecFragment({
+  projectSessionCodec,
+  gitRepositorySummaryCodec,
+  gitRepositoryProjectionCodec,
+});
+
+const operationCodecFragments = [
+  coreOperationCodecFragment,
+  messagingOperationCodecFragment,
+  lifecycleOperationCodecFragment,
+  providerActionOperationCodecFragment,
+  projectSessionOperationCodecFragment,
+  requestResultOperationCodecFragment,
+  controlPlaneOperationCodecFragment,
+  admissionOperationCodecFragment,
+  gitActionsOperationCodecFragment,
+  operatorActionsOperationCodecFragment,
+  operatorProjectionOperationCodecFragment,
+  artifactsOperationCodecFragment,
+  providerReviewOperationCodecFragment,
+] as const;
+
+const exactOperationCodecs = {
+  ...coreOperationCodecFragment,
+  ...messagingOperationCodecFragment,
+  ...lifecycleOperationCodecFragment,
+  ...providerActionOperationCodecFragment,
+  ...projectSessionOperationCodecFragment,
+  ...requestResultOperationCodecFragment,
+  ...controlPlaneOperationCodecFragment,
+  ...admissionOperationCodecFragment,
+  ...gitActionsOperationCodecFragment,
+  ...operatorActionsOperationCodecFragment,
+  ...operatorProjectionOperationCodecFragment,
+  ...artifactsOperationCodecFragment,
+  ...providerReviewOperationCodecFragment,
+} as const satisfies Record<ProtocolOperation, OperationCodecPair>;
+
+export type OperationCodecMissingKeyProof = AssertNever<Exclude<ProtocolOperation, keyof typeof exactOperationCodecs>>;
+export type OperationCodecExtraKeyProof = AssertNever<Exclude<keyof typeof exactOperationCodecs, ProtocolOperation>>;
+
+export const OPERATION_CODECS = composeOperationCodecFragments(operationCodecFragments);
+assertComposedRegistryExhaustive(OPERATION_CODECS);
+
+const s5cInputShapes = composeOperationShapeFragments([
+  CORE_INPUT_SHAPES,
+  MESSAGING_INPUT_SHAPES,
+  ADMISSION_INPUT_SHAPES,
+  GIT_ACTIONS_INPUT_SHAPES,
+  OPERATOR_ACTIONS_INPUT_SHAPES,
+  OPERATOR_PROJECTION_INPUT_SHAPES,
+] as const);
+
+const inputShapeFragments = [
+  s5cInputShapes,
+  LIFECYCLE_INPUT_SHAPES,
+  PROVIDER_ACTION_INPUT_SHAPES,
+  PROJECT_SESSION_INPUT_SHAPES,
+  REQUEST_RESULT_INPUT_SHAPES,
+  CONTROL_PLANE_INPUT_SHAPES,
+  ARTIFACTS_INPUT_SHAPES,
+  PROVIDER_REVIEW_INPUT_SHAPES,
+] as const;
+
+composeOperationShapeFragments(inputShapeFragments);
+export const OPERATION_INPUT_SHAPES = {
+  ...s5cInputShapes,
+  ...LIFECYCLE_INPUT_SHAPES,
+  ...PROVIDER_ACTION_INPUT_SHAPES,
+  ...PROJECT_SESSION_INPUT_SHAPES,
+  ...REQUEST_RESULT_INPUT_SHAPES,
+  ...CONTROL_PLANE_INPUT_SHAPES,
+  ...ARTIFACTS_INPUT_SHAPES,
+  ...PROVIDER_REVIEW_INPUT_SHAPES,
+} as const satisfies Record<ProtocolOperation, WireShape>;
+
+const s5cResultShapes = composeOperationShapeFragments([
+  CORE_RESULT_SHAPES,
+  MESSAGING_RESULT_SHAPES,
+  ADMISSION_RESULT_SHAPES,
+  GIT_ACTIONS_RESULT_SHAPES,
+  OPERATOR_ACTIONS_RESULT_SHAPES,
+  OPERATOR_PROJECTION_RESULT_SHAPES,
+] as const);
+
+const resultShapeFragments = [
+  s5cResultShapes,
+  LIFECYCLE_RESULT_SHAPES,
+  PROVIDER_ACTION_RESULT_SHAPES,
+  PROJECT_SESSION_RESULT_SHAPES,
+  REQUEST_RESULT_RESULT_SHAPES,
+  CONTROL_PLANE_RESULT_SHAPES,
+  ARTIFACTS_RESULT_SHAPES,
+  PROVIDER_REVIEW_RESULT_SHAPES,
+] as const;
+
+composeOperationShapeFragments(resultShapeFragments);
+export const OPERATION_RESULT_SHAPES = {
+  ...s5cResultShapes,
+  ...LIFECYCLE_RESULT_SHAPES,
+  ...PROVIDER_ACTION_RESULT_SHAPES,
+  ...PROJECT_SESSION_RESULT_SHAPES,
+  ...REQUEST_RESULT_RESULT_SHAPES,
+  ...CONTROL_PLANE_RESULT_SHAPES,
+  ...ARTIFACTS_RESULT_SHAPES,
+  ...PROVIDER_REVIEW_RESULT_SHAPES,
+} as const satisfies Record<ProtocolOperation, WireShape>;

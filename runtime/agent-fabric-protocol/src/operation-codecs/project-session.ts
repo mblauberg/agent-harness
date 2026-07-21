@@ -203,7 +203,7 @@ const projectSessionFieldCodec = (_operation: Parameters<typeof semanticShapeCod
   return undefined;
 };
 
-export function createProjectSessionOperationCodecFragment(dependencies: ProjectSessionFragmentDependencies): OperationCodecFragment {
+export function createProjectSessionOperationCodecFragment(dependencies: ProjectSessionFragmentDependencies) {
   const membershipResultBase = semanticShapeCodec(FABRIC_OPERATIONS.membershipBind, "result", PROJECT_SESSION_RESULT_SHAPES[FABRIC_OPERATIONS.membershipBind], (_operation, field) =>
     field === "members" ? arrayOf(projectSessionMemberCodec, { maximum: 256 }) : undefined);
   return {
