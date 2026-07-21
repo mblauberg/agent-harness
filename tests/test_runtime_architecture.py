@@ -3,8 +3,8 @@
 The first invariant ratchets every oversized hand-written runtime TypeScript
 source file while holding every new source file to 1,000 lines. The second
 keeps protocol, implementation, and console imports on the intended dependency
-side of three explicit boundaries, with temporary #344 allowances kept live by
-staleness checks.
+side of three explicit boundaries, with temporary allowances and permanent
+declared placements kept live by staleness checks.
 
 Specifier extraction deliberately uses regexes over comment-masked source
 rather than a TypeScript AST: the relevant ESM forms have literal string
@@ -32,6 +32,9 @@ EXCLUDED_SOURCE_DIRECTORIES = frozenset(
 )
 RESTRICTED_FABRIC_DIRECTORIES = frozenset({"daemon", "mcp", "cli"})
 REMOVAL_ISSUE = re.compile(r"^#\d+$")
+IMPORT_ALLOWANCE_KEYS = frozenset(
+    {"file", "specifier_prefix", "removal_issue", "rationale"}
+)
 IMPORT_FROM = re.compile(
     r"^[ \t]*(?:import|export)\s+(?![('\"])[^;]*?\bfrom\s*"
     r"(?P<quote>['\"])(?P<specifier>[^'\"]+)(?P=quote)",
@@ -271,14 +274,33 @@ def _check_import_boundaries(root: Path, allowances: list[dict[str, str]]) -> No
     errors: list[str] = []
     used_allowances: set[int] = set()
     for index, allowance in enumerate(allowances):
-        required = ("file", "specifier_prefix", "removal_issue")
+        unknown_keys = sorted(set(allowance) - IMPORT_ALLOWANCE_KEYS)
+        if unknown_keys:
+            errors.append(
+                f"invalid import allowance at index {index}: unknown keys {unknown_keys}"
+            )
+        required = ("file", "specifier_prefix")
         if not all(isinstance(allowance.get(field), str) for field in required):
             errors.append(f"invalid import allowance at index {index}: {required} are required strings")
             continue
-        if REMOVAL_ISSUE.fullmatch(allowance["removal_issue"]) is None:
+        declared_fields = {field for field in ("removal_issue", "rationale") if field in allowance}
+        if len(declared_fields) != 1:
+            errors.append(
+                f"invalid import allowance at index {index}: exactly one of "
+                "removal_issue or rationale is required"
+            )
+            continue
+        declared_field = next(iter(declared_fields))
+        declared_value = allowance[declared_field]
+        if not isinstance(declared_value, str) or not declared_value.strip():
+            errors.append(
+                f"invalid {declared_field} for import allowance at index {index}: "
+                "a non-empty string is required"
+            )
+        elif declared_field == "removal_issue" and REMOVAL_ISSUE.fullmatch(declared_value) is None:
             errors.append(
                 f"invalid removal_issue for import allowance at index {index}: "
-                f"{allowance['removal_issue']!r} must match ^#\\d+$"
+                f"{declared_value!r} must match ^#\\d+$"
             )
 
     for violation in _import_violations(root):
@@ -413,6 +435,44 @@ def test_import_checker_rejects_stale_allowance(tmp_path: Path) -> None:
     }
 
     with pytest.raises(AssertionError, match="stale import allowance"):
+        _check_import_boundaries(tmp_path, [allowance])
+
+
+def test_import_checker_accepts_permanent_allowance(tmp_path: Path) -> None:
+    _write_source(
+        tmp_path,
+        "runtime/agent-fabric/src/gates/store.ts",
+        'import { x } from "../daemon/protocol.js";\n',
+    )
+    allowance = {
+        "file": "runtime/agent-fabric/src/gates/store.ts",
+        "specifier_prefix": "../daemon/protocol.js",
+        "rationale": "permanent composition placement",
+    }
+
+    _check_import_boundaries(tmp_path, [allowance])
+
+
+def test_import_checker_rejects_allowance_missing_both_fields(tmp_path: Path) -> None:
+    _write_source(tmp_path, "runtime/agent-fabric/src/gates/store.ts", "export {};\n")
+    allowance = {
+        "file": "runtime/agent-fabric/src/gates/store.ts",
+        "specifier_prefix": "../daemon/protocol.js",
+    }
+
+    with pytest.raises(AssertionError, match="exactly one of removal_issue or rationale"):
+        _check_import_boundaries(tmp_path, [allowance])
+
+
+def test_import_checker_rejects_empty_rationale(tmp_path: Path) -> None:
+    _write_source(tmp_path, "runtime/agent-fabric/src/gates/store.ts", "export {};\n")
+    allowance = {
+        "file": "runtime/agent-fabric/src/gates/store.ts",
+        "specifier_prefix": "../daemon/protocol.js",
+        "rationale": " ",
+    }
+
+    with pytest.raises(AssertionError, match="invalid rationale"):
         _check_import_boundaries(tmp_path, [allowance])
 
 

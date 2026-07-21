@@ -19,25 +19,22 @@ source_size_ceilings:
 import_allowances:
   - file: runtime/agent-fabric/src/index.ts
     specifier_prefix: ./daemon/client.js
-    removal_issue: "#344"
-    note: adjudicate layer
+    rationale: package public composition barrel
   - file: runtime/agent-fabric/src/index.ts
     specifier_prefix: ./daemon/herdr-composition.js
-    removal_issue: "#344"
-    note: adjudicate layer
+    rationale: package public composition barrel
   - file: runtime/agent-fabric/src/index.ts
     specifier_prefix: ./cli/paths.js
-    removal_issue: "#344"
-    note: adjudicate layer
+    rationale: package public composition barrel
   - file: runtime/agent-fabric/src/operator/local-console-session.ts
     specifier_prefix: ../daemon/client.js
-    removal_issue: "#344"
+    rationale: local-bootstrap composition point wiring cli/* + daemon client
   - file: runtime/agent-fabric/src/operator/local-console-session.ts
     specifier_prefix: ../cli/paths.js
-    removal_issue: "#344"
+    rationale: local-bootstrap composition point wiring cli/* + daemon client
   - file: runtime/agent-fabric/src/operator/local-console-session.ts
     specifier_prefix: ../cli/default-daemon-options.js
-    removal_issue: "#344"
+    rationale: local-bootstrap composition point wiring cli/* + daemon client
   - file: runtime/agent-fabric/src/operator/local-console-session.ts
     specifier_prefix: ../cli/workspace-trust.js
-    removal_issue: "#344"
+    rationale: local-bootstrap composition point wiring cli/* + daemon client
