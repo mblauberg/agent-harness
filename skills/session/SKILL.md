@@ -65,8 +65,8 @@ success and disable condition. It may audit/archive classified artifacts and
 refresh indexes, but not commit, deploy, communicate externally or delete
 unknown files. Staleness becomes visible state, not catch-up churn.
 
-Project knowledge belongs in project docs. Harness-private memory holds only
-cross-project user preferences; raw session logs never become state.
+Put project knowledge in project docs; follow
+[context-hygiene.md](references/context-hygiene.md) for lightweight private memory.
 
 ## Adapter-absent path
 
