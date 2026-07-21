@@ -49,7 +49,6 @@ import { CommandJournal } from "../application/command-journal.js";
 import {
   ProviderActionAdmissionCoordinator,
   ProviderActionAdmissionTransactionError,
-  type ProviderActionTicket,
 } from "../application/provider-action-admission.js";
 import {
   assertProviderActionOwner,
@@ -218,13 +217,13 @@ import { LifecycleRecovery } from "../lifecycle/recovery.js";
 import { LifecycleService } from "../lifecycle/service.js";
 import { GenerationLossRepository } from "../lifecycle/generation-loss-repository.js";
 import { ProviderPayloadAuthority } from "../provider-action/payload-authority.js";
+import { ProviderActionExecutor } from "../provider-action/executor.js";
 import {
   ProviderActionState,
   isProviderActionResult,
   isTaskBoundEphemeralProviderPayload,
   providerActionResult,
   providerActionResultWithRequiredAnswer,
-  providerAnswerFromAdapterResult,
 } from "../provider-action/state.js";
 import type {
   LifecycleIntegrityReceiptAuthorityPort,
@@ -755,6 +754,7 @@ export class Fabric {
   readonly #providerSessions: ProviderSessionCoordinator;
   readonly #maximumConcurrentProviderTurns: number;
   readonly #providerActionState: ProviderActionState;
+  readonly #providerActionExecutor: ProviderActionExecutor;
   readonly #providerActionReconciliations = new Map<string, Promise<ProviderActionResult>>();
   #closing = false;
   readonly #operatorStore: OperatorStore;
@@ -843,6 +843,18 @@ export class Fabric {
       settleProviderTurn: (runId, adapterId, actionId, status) =>
         this.#providerSessions.settleTurn(runId, adapterId, actionId, status),
     });
+    this.#providerActionExecutor = new ProviderActionExecutor({
+      database: this.#database,
+      clock: this.#clock,
+      commandJournal: this.#commandJournal,
+      providerActionAdmission: this.#providerActionAdmission,
+      providerSessions: this.#providerSessions,
+      requestAdapter: (adapterId, method, params) => this.#requestAdapter(adapterId, method, params),
+      getProviderAction: (runId, adapterId, actionId) => this.#providerActionState.get(runId, adapterId, actionId),
+      enqueueDeferred: (input) => this.#providerActionState.enqueueDeferred(input),
+      persistProviderAction: (runId, adapterId, actionId, raw, result, expectedOwner) =>
+        this.#providerActionState.persist(runId, adapterId, actionId, raw, result, expectedOwner),
+    });
     this.#capabilityKey = options.capabilityKey ?? randomBytes(32).toString("base64url");
     this.#fabricSocketPath = options.fabricSocketPath;
     this.#admission = new LifecycleAdmission({
@@ -909,7 +921,7 @@ export class Fabric {
       providerActionAdmission: this.#providerActionAdmission,
       assertChair: (runId, actorAgentId) => this.#assertChair(runId, actorAgentId),
       adapterIdForAgent: (runId, agentId) => this.#adapterIdForAgent(runId, agentId),
-      executeGenericRelease: (input) => this.#executeGenericRelease(input),
+      executeGenericRelease: (input) => this.#providerActionExecutor.executeGenericRelease(input),
       event: (runId, type, actorAgentId, payload) => {
         this.#event(runId, type, actorAgentId, payload);
       },
@@ -5456,7 +5468,7 @@ export class Fabric {
         ) {
           throw new FabricError("CAPABILITY_UNAVAILABLE", "delegated authority omits an adapter-mandatory usage dimension");
         }
-        return await this.#executeGenericAdapterOperation({
+        return await this.#providerActionExecutor.executeGenericAdapterOperation({
           runId,
           adapterId: input.adapterId,
           actionId: input.actionId,
@@ -5748,7 +5760,7 @@ export class Fabric {
           adapterId,
           actionId: input.actionId,
           owner: expectedOwner,
-          execute: async () => await this.#completeAdapterOperation({
+          execute: async () => await this.#providerActionExecutor.completeAdapterOperation({
             runId,
             adapterId,
             actionId: input.actionId,
@@ -6914,214 +6926,6 @@ export class Fabric {
       "agent adapter binding",
     );
     return stringField(binding, "adapter_id");
-  }
-
-  async #executeGenericAdapterOperation(input: {
-    runId: string;
-    adapterId: string;
-    actionId: string;
-    operation: string;
-    method: string;
-    payload: Record<string, unknown>;
-    requireProviderAnswer?: true;
-    authorityBudget?: Readonly<{
-      authorityId: string;
-      reservation: Readonly<Record<string, number>>;
-    }>;
-    taskId?: string;
-    deferCompletion?: true;
-    deferredCommand?: {
-      actorAgentId: string;
-      commandId: string;
-      payload: unknown;
-    };
-    revalidateAdmission?: () => void;
-    providerActionTicket?: ProviderActionTicket;
-  }): Promise<ProviderActionResult> {
-    const payloadJson = canonicalJson(input.payload);
-    const targetAgentId = typeof input.payload.agentId === "string" ? input.payload.agentId : undefined;
-    const providerSessionGeneration = typeof input.payload.generation === "number"
-      ? input.payload.generation
-      : undefined;
-    const identityHash = sha256(canonicalJson({
-      adapterId: input.adapterId,
-      operation: input.operation,
-      targetAgentId: targetAgentId ?? null,
-      providerSessionGeneration: providerSessionGeneration ?? null,
-      ...(input.authorityBudget === undefined ? {} : { authorityId: input.authorityBudget.authorityId }),
-      payload: input.payload,
-    }));
-    const existingAction = this.#database.prepare(`
-      SELECT 1 FROM provider_actions
-       WHERE run_id=? AND adapter_id=? AND action_id=?
-    `).get(input.runId, input.adapterId, input.actionId);
-    if (existingAction !== undefined) {
-      assertProviderActionOwner(this.#database, input, "generic");
-    }
-    const existing = existingAction !== undefined && this.#providerSessions.assertActionIdentity({
-      runId: input.runId,
-      actionId: input.actionId,
-      adapterId: input.adapterId,
-      operation: input.operation,
-      identityHash,
-      ...(targetAgentId === undefined ? {} : { targetAgentId }),
-      ...(providerSessionGeneration === undefined ? {} : { providerSessionGeneration }),
-    });
-    if (existing) {
-      return this.getProviderAction(input.runId, input.adapterId, input.actionId);
-    }
-    const deferred = input.deferCompletion === true;
-    if (deferred && input.deferredCommand === undefined) {
-      throw new Error("deferred provider action requires atomic command custody");
-    }
-    const receipt: ProviderActionResult = {
-      actionId: input.actionId,
-      status: deferred ? "prepared" : "dispatched",
-      history: deferred ? ["prepared"] : ["prepared", "dispatched"],
-      executionCount: deferred ? 0 : 1,
-      effectCount: 0,
-    };
-    try {
-      this.#database.transaction(() => {
-        input.revalidateAdmission?.();
-        if (input.authorityBudget !== undefined) {
-          if (input.taskId === undefined) throw new Error("provider budget requires an exact task binding");
-          const task = rowOrNotFound(
-            this.#database.prepare("SELECT state FROM tasks WHERE run_id=? AND task_id=?").get(input.runId, input.taskId),
-            "ephemeral provider task",
-          );
-          if (["complete", "cancelled", "degraded"].includes(stringField(task, "state"))) {
-            throw new ProjectFabricCoreError(
-              "LIFECYCLE_PRECONDITION_FAILED",
-              "terminal task cannot admit an ephemeral provider spawn",
-            );
-          }
-        }
-        if (input.providerActionTicket === undefined) {
-          throw new Error("provider action admission ticket is required");
-        }
-        this.#providerActionAdmission.admitUnroutedInCurrentTransaction(input.providerActionTicket, {
-          runId: input.runId,
-          actionId: input.actionId,
-          adapterId: input.adapterId,
-          operation: input.operation,
-          targetAgentId: targetAgentId ?? null,
-          providerSessionGeneration: providerSessionGeneration ?? null,
-          identityHash,
-          payloadHash: sha256(payloadJson),
-          payloadJson,
-          status: receipt.status,
-          historyJson: canonicalJson(receipt.history),
-          executionCount: receipt.executionCount,
-          updatedAt: this.#clock(),
-          taskId: input.taskId ?? null,
-          budgetAuthorityId: input.authorityBudget?.authorityId ?? null,
-          budgetReservationJson: input.authorityBudget === undefined
-            ? null
-            : canonicalJson(input.authorityBudget.reservation),
-          budgetState: input.authorityBudget === undefined ? null : "reserved",
-          budgetStartedAt: input.authorityBudget === undefined ? null : this.#clock(),
-        }, "generic", () => {
-          if (input.deferredCommand !== undefined) {
-            this.#commandJournal.write(
-              input.runId,
-              input.deferredCommand.actorAgentId,
-              input.deferredCommand.commandId,
-              input.deferredCommand.payload,
-              receipt,
-            );
-          }
-        });
-      }).immediate();
-    } catch (error: unknown) {
-      if (
-        input.authorityBudget !== undefined && error instanceof Error &&
-        error.message.includes("INVARIANT_provider_actions_budget_reservation")
-      ) {
-        const unknown = Object.keys(input.authorityBudget.reservation).some((unit) => isRow(
-          this.#database.prepare(`
-            SELECT 1 FROM authority_budget
-             WHERE authority_id=? AND unit_key=? AND usage_unknown=1
-          `).get(input.authorityBudget?.authorityId, unit),
-        ));
-        const budgetError = new FabricError(
-          unknown ? "BUDGET_USAGE_UNKNOWN" : "BUDGET_EXCEEDED",
-          unknown ? "delegated provider usage became unknown before admission" : "delegated provider budget was concurrently exhausted",
-          { cause: error },
-        );
-        throw new ProviderActionAdmissionTransactionError(budgetError);
-      }
-      throw error;
-    }
-    const complete = async (): Promise<ProviderActionResult> => await this.#completeAdapterOperation(input);
-    if (deferred) {
-      this.#enqueueDeferredProviderAction({
-        runId: input.runId,
-        adapterId: input.adapterId,
-        actionId: input.actionId,
-        execute: complete,
-      });
-      return receipt;
-    }
-    return await complete();
-  }
-
-  async #executeGenericRelease(input: {
-    runId: string;
-    adapterId: string;
-    actionId: string;
-    operation: string;
-    method: string;
-    payload: Record<string, unknown>;
-    providerActionTicket?: ProviderActionTicket;
-  }): Promise<ProviderActionResult> {
-    return await this.#executeGenericAdapterOperation(input);
-  }
-
-  async #completeAdapterOperation(input: {
-    runId: string;
-    adapterId: string;
-    actionId: string;
-    operation: string;
-    method: string;
-    payload: Record<string, unknown>;
-    requireProviderAnswer?: true;
-    owner?: ProviderActionCustodyOwner;
-  }): Promise<ProviderActionResult> {
-    const owner = input.owner ?? "generic";
-    assertProviderActionOwner(this.#database, input, owner);
-    try {
-      const response = await this.#requestAdapter(input.adapterId, input.method, {
-        ...input.payload,
-        actionId: input.actionId,
-        payload: input.payload,
-      });
-      const providerAnswer = input.requireProviderAnswer === true
-        ? providerAnswerFromAdapterResult(response)
-        : undefined;
-      const result: ProviderActionResult = {
-        actionId: input.actionId,
-        status: "terminal",
-        history: ["prepared", "dispatched", "accepted", "terminal"],
-        executionCount: 1,
-        effectCount: 1,
-        result: response,
-        ...(providerAnswer === undefined ? {} : { providerAnswer }),
-      };
-      this.#persistProviderAction(input.runId, input.adapterId, input.actionId, { idempotencyProven: true }, result, owner);
-      return result;
-    } catch (error: unknown) {
-      if (error instanceof ProviderActionOwnerError) throw error;
-      const ambiguous: ProviderActionResult = {
-        actionId: input.actionId,
-        status: "ambiguous",
-        history: ["prepared", "dispatched", "ambiguous"],
-        executionCount: 1,
-        effectCount: 0,
-      };
-      this.#persistProviderAction(input.runId, input.adapterId, input.actionId, { idempotencyProven: false }, ambiguous, owner);
-      throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", `adapter ${input.operation} result is ambiguous`, { cause: error });
-    }
   }
 
 
