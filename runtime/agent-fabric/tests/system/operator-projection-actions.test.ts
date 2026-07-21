@@ -2671,6 +2671,117 @@ describe("operator lifecycle recovery action store", () => {
     expect(reconcilePairs).toEqual([["operator_01", "commit_lifecycle_recovery_01"]]);
   });
 
+  it("characterises the lifecycle reconcile crash window between target settlement and reconcile-command persistence", async () => {
+    // Pre-move characterisation (#354 S4a, plan §4): reconcile target settlement
+    // (`updateStoredAction` plus the direct `operator_commands` UPDATE for the target) happens
+    // before the separate immediate transaction that persists the *reconcile command itself*.
+    // A crash between those two steps leaves the target already terminal while the reconcile
+    // command row never exists. This test proves the window exists at base and must continue to
+    // exist, byte-identically, after the stored-action/journal substrate moves into
+    // `OperatorActionJournal` and the lifecycle port/commit/status/reconcile ranges move into
+    // `lifecycle/operator-actions.ts`.
+    const fixture = setupProjection();
+    const intent = lifecycleRecoveryIntent();
+    const recoveryDigest = parseSha256Digest(digest, "test.lifecycleRecoveryCrashDigest");
+    const lifecycleRecoveryCustody: OperatorLifecycleRecoveryCustodyPort = {
+      readLifecycleRecoveryCurrentState: async () => lifecycleRecoveryCurrentState(intent),
+      inspectLifecycleRecovery: async () => ({ intent, inspectionDigest: recoveryDigest }),
+      prepareLifecycleFreshRotateInTransaction: () => ({
+        status: "pending", recoveryId: "recovery_crash_01", path: "fresh-rotate", evidenceDigest: recoveryDigest,
+      }),
+      prepareLifecycleAbandonInTransaction: () => {
+        throw new Error("not expected");
+      },
+      lifecycleRecoveryStatus: () => ({
+        status: "pending" as const,
+        recoveryId: "recovery_crash_01",
+        path: "fresh-rotate" as const,
+        evidenceDigest: recoveryDigest,
+      }),
+      reconcileLifecycleRecovery: async () => ({
+        status: "committed" as const,
+        recoveryId: "recovery_crash_01",
+        path: "fresh-rotate" as const,
+        evidenceDigest: recoveryDigest,
+      }),
+    };
+    const actions = new OperatorActionStore({
+      database: fixture.database,
+      operatorStore: fixture.operatorStore,
+      statePort: { read: async () => { throw new Error("generic state port not expected"); } },
+      effectPort: {
+        dispatch: async () => { throw new Error("provider dispatch not expected"); },
+        observe: async () => { throw new Error("provider observe not expected"); },
+      },
+      lifecycleRecoveryCustody,
+      clock: () => now,
+    });
+
+    const preview = await actions.preview(fixture.context, lifecycleRecoveryPreviewRequest(fixture, intent));
+    const commitRequest: OperatorActionCommitRequest = {
+      command: {
+        ...lifecycleRecoveryPreviewRequest(fixture, intent).command,
+        commandId: identifier<"CommandId">("commit_lifecycle_recovery_crash_01"),
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_01"),
+          inputEventId: "input_commit_lifecycle_recovery_crash_01",
+        },
+      },
+      projectId: identifier<"ProjectId">("project_01"),
+      previewId: preview.previewId,
+      expectedPreviewRevision: preview.previewRevision,
+      previewDigest: preview.previewDigest,
+      expectedIntentDigest: preview.intentDigest,
+      confirmation: { kind: "explicit", confirmationId: "confirm_lifecycle_recovery_crash_01" },
+    };
+    const receipt = await actions.commit(fixture.context, commitRequest);
+
+    const reconcileCommandId = identifier<"CommandId">("reconcile_lifecycle_recovery_crash_01");
+    const rawPrepare = fixture.database.prepare.bind(fixture.database);
+    let failNextCommandInsert = false;
+    (fixture.database as unknown as { prepare: typeof fixture.database.prepare }).prepare = ((sql: string) => {
+      const statement = rawPrepare(sql);
+      if (failNextCommandInsert && sql.includes("INSERT INTO operator_commands")) {
+        failNextCommandInsert = false;
+        return { ...statement, run: () => { throw new Error("simulated crash before reconcile-command persistence"); } };
+      }
+      return statement;
+    }) as typeof fixture.database.prepare;
+    failNextCommandInsert = true;
+
+    await expect(actions.reconcile(fixture.context, {
+      command: {
+        ...commitRequest.command,
+        commandId: reconcileCommandId,
+        provenance: {
+          kind: "console-direct-input",
+          clientId: identifier<"OperatorClientId">("console_01"),
+          inputEventId: "input_reconcile_lifecycle_recovery_crash_01",
+        },
+      },
+      projectId: commitRequest.projectId,
+      targetCommandId: receipt.commandId,
+      expectedStatus: "pending",
+      expectedAttemptGeneration: 1,
+      mode: "observe-only",
+    })).rejects.toThrow("simulated crash before reconcile-command persistence");
+
+    // The target's stored action was already settled to terminal by the time the simulated
+    // crash struck — the reconcile command itself was never persisted. This is the pre-existing
+    // crash window; S4a preserves it rather than repairing it.
+    const previewRow = rawPrepare(`
+      SELECT preview_json FROM operator_previews WHERE preview_id=?
+    `).get(preview.previewId) as { preview_json: string };
+    const storedEnvelope: { action: { status: string; commandId: string } } = JSON.parse(previewRow.preview_json);
+    expect(storedEnvelope.action).toMatchObject({ status: "terminal", commandId: receipt.commandId });
+
+    const reconcileCommandRow = rawPrepare(`
+      SELECT command_id FROM operator_commands WHERE command_id=?
+    `).get(reconcileCommandId);
+    expect(reconcileCommandRow).toBeUndefined();
+  });
+
   it("fails closed before generic state or effect ports when lifecycle recovery custody is missing", async () => {
     const fixture = setupProjection();
     const intent = lifecycleRecoveryIntent();
