@@ -1,6 +1,7 @@
 import type { ConsoleControllerState } from "./controller.js";
 import { FABRIC_VIEWS } from "./model.js";
 import { presentFabricConsole, type FabricConsoleUiState, type FabricViewport } from "./presenter.js";
+import type { ConsoleConnectionDiagnosis } from "./connection-diagnosis.js";
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
 
 export type ConsoleSnapshotFormat = "json" | "markdown";
@@ -46,6 +47,36 @@ function safeValue(value: unknown, key = ""): unknown {
   return value;
 }
 
+function snapshotConnectionDiagnosis(
+  dataset: FabricConsoleDataset,
+): Record<string, unknown> | null {
+  const diagnosis = dataset.connectionDiagnosis;
+  if (diagnosis === undefined) return null;
+  const freshness = (stage: ConsoleConnectionDiagnosis["stages"][number]) => ({
+    state: stage.freshness.state,
+    source: stage.freshness.source,
+    revision: stage.freshness.revision,
+    ...("reason" in stage.freshness ? { reason: stage.freshness.reason } : {}),
+  });
+  return {
+    schemaVersion: diagnosis.schemaVersion,
+    causalStage: diagnosis.causalStage,
+    firstFailureCode: diagnosis.firstFailureCode,
+    stages: diagnosis.stages.map((stage) => ({
+      id: stage.id,
+      label: stage.label,
+      state: stage.state,
+      code: stage.code,
+      summary: stage.summary,
+      remediation: stage.remediation,
+      source: stage.source,
+      revision: stage.revision,
+      freshness: freshness(stage),
+      references: stage.references,
+    })),
+  };
+}
+
 function snapshotValue(input: ConsoleSnapshotInput): Record<string, unknown> {
   const presentation = presentFabricConsole(
     input.dataset,
@@ -63,6 +94,9 @@ function snapshotValue(input: ConsoleSnapshotInput): Record<string, unknown> {
     const page = input.dataset.pages[view];
     return [view, {
       rows: projected.masterRows,
+      needsYouRows: projected.needsYouRows,
+      watchRows: projected.watchRows,
+      watchCollapsed: projected.watchCollapsed,
       detail: projected.detail,
       hasMore: page.hasMore,
       nextCursor: page.nextCursor,
@@ -77,6 +111,7 @@ function snapshotValue(input: ConsoleSnapshotInput): Record<string, unknown> {
     mode: presentation.mode,
     connection: presentation.connection,
     connectionDetail: input.dataset.connection,
+    connectionDiagnosis: snapshotConnectionDiagnosis(input.dataset),
     header: presentation.header,
     navigation: presentation.views,
     views,
@@ -117,12 +152,20 @@ function markdownSnapshot(snapshot: Record<string, unknown>): string {
   for (const [view, projected] of Object.entries(views)) {
     const viewTitle = `${view.slice(0, 1).toUpperCase()}${view.slice(1)}`;
     const rows = projected.rows as readonly Record<string, unknown>[];
+    const needsYouRows = projected.needsYouRows as readonly Record<string, unknown>[];
+    const watchRows = projected.watchRows as readonly Record<string, unknown>[];
     const detail = projected.detail as Record<string, unknown> | null;
     lines.push("", `## ${viewTitle}`, "");
     if (rows.length === 0) lines.push("No projected rows.");
     for (const row of rows) {
       lines.push(
         `- ${markdownText(row.urgencyMarker)} ${markdownText(row.primary)} — ${markdownText(row.secondary)} (${markdownText(row.freshness)})`,
+      );
+    }
+    if (view === "attention") {
+      lines.push(
+        `- Needs you: ${String(needsYouRows.length)}`,
+        `- Watch: ${String(watchRows.length)} item${watchRows.length === 1 ? "" : "s"} (${projected.watchCollapsed === true ? "collapsed" : "expanded"})`,
       );
     }
     if (detail !== null) {
