@@ -12,6 +12,15 @@ def _text(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
 
 
+def test_live_cleanup_requires_exact_run_owned_process_identity() -> None:
+    live = _text("skills/ui-ux-design/reference/live.md")
+    cleanup = " ".join(live[live.index("## Exit"):live.index("## Cleanup")].split())
+    assert "exact background-task handle returned by this run" in cleanup
+    assert "run-owned PID plus its command and start identity" in cleanup
+    assert "Refuse broad name or pattern kills" in cleanup
+    assert "pkill" not in cleanup
+
+
 def test_react_request_and_listener_rules_are_stack_neutral() -> None:
     rules = ROOT / "skills/react-performance/rules"
     assert not (rules / "client-swr-dedup.md").exists()

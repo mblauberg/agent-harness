@@ -128,6 +128,10 @@ def infer_family(model: str, catalog: dict[str, Any]) -> str | None:
     return None
 
 
+def model_has_alias(model: str, alias: str) -> bool:
+    return alias.casefold() in model.casefold()
+
+
 def emit(record: dict[str, Any], code: int) -> int:
     print(json.dumps(record, sort_keys=True))
     return code
@@ -329,16 +333,21 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
         if args.task_class:
             record.update({"task_class": args.task_class, "route_source": "task-class"})
         return emit(record, 2)
+    risk_tier_effort = args.risk_override.get("default_effort", "")
     if task_class_effort:
         if role_effort and EFFORT_ORDER[role_effort] > EFFORT_ORDER[task_class_effort]:
             requested_effort, effort_source = role_effort, "role-default"
         else:
             requested_effort, effort_source = task_class_effort, "task-class"
     else:
-        requested_effort = args.effort or role_effort or {
+        requested_effort = args.effort or risk_tier_effort or role_effort or {
             "flagship": "high", "workhorse": "medium", "scout": "low"
         }[args.alias]
-        effort_source = "explicit" if args.effort else "role-default" if role_effort else "alias-default"
+        effort_source = (
+            "explicit" if args.effort else
+            "risk-tier-override" if risk_tier_effort else
+            "role-default" if role_effort else "alias-default"
+        )
     base = {
         "schema_version": 1,
         "catalog_date": catalog["catalog_date"],
@@ -353,6 +362,12 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
     }
     if args.task_class:
         base.update({"task_class": args.task_class, "route_source": "task-class"})
+    elif args.risk_tier:
+        base.update({
+            "risk_tier": args.risk_tier,
+            "route_source": "risk-tier-override",
+            "policy_override": f"{args.risk_tier}-fable-synthesis-adjudication",
+        })
     if not adapter:
         return emit({**base, "status": "unknown_adapter"}, 2)
     args.effort_transport = adapter.get("effort_transport", "none")
@@ -453,6 +468,11 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
                 1,
             )
         model = args.model
+        is_fable = model_has_alias(model, "fable")
+        if is_fable and not args.risk_override:
+            return emit_route({**base, "status": "fable_requires_risk_tier_override"}, 1)
+        if args.risk_override and not is_fable:
+            return emit_route({**base, "status": "risk_tier_model_mismatch"}, 1)
         family = infer_family(model, catalog)
         identity_source = "model-pattern"
         if not family:
@@ -484,7 +504,8 @@ def resolve(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
             )
         family = fixed_family
         family_config = catalog["families"][family]
-        candidates = family_config.get("role_overrides", {}).get(args.role, {}).get(args.alias)
+        candidates = args.risk_override.get("models")
+        candidates = candidates or family_config.get("role_overrides", {}).get(args.role, {}).get(args.alias)
         candidates = candidates or family_config["aliases"].get(args.alias)
         if not candidates:
             return emit_route({**base, "status": "alias_unavailable", "model_family": family}, 1)
@@ -706,6 +727,7 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--adapter", required=True)
     command.add_argument("--alias")
     command.add_argument("--task-class")
+    command.add_argument("--risk-tier", choices=("routine", "substantial", "crucial", "terminal"))
     command.add_argument("--role", required=True)
     command.add_argument("--effort")
     command.add_argument("--model")
@@ -751,6 +773,9 @@ def main(argv: list[str] | None = None) -> int:
             return emit(record, 2)
 
         args.task_class_effort = ""
+        args.risk_override = {}
+        if args.task_class and args.risk_tier:
+            return reject("route_input_conflict")
         if bool(args.alias) == bool(args.task_class):
             return reject("route_input_conflict" if args.alias else "route_input_missing")
         if args.task_class:
@@ -787,6 +812,37 @@ def main(argv: list[str] | None = None) -> int:
             return reject("unknown_alias")
         if args.effort and args.effort not in EFFORT_ORDER:
             return reject("invalid_effort", alias=args.alias)
+        if args.risk_tier:
+            adapter = catalog.get("adapters", {}).get(args.adapter, {})
+            family = adapter.get("fixed_model_family")
+            family_config = catalog.get("families", {}).get(family, {})
+            override = family_config.get("risk_tier_overrides", {}).get(args.risk_tier)
+            if not isinstance(override, dict):
+                return reject("risk_tier_override_unavailable", alias=args.alias)
+            default_effort = override.get("default_effort")
+            maximum_effort = override.get("maximum_effort")
+            models = override.get("models")
+            roles = override.get("roles")
+            if (
+                default_effort not in EFFORT_ORDER
+                or maximum_effort not in EFFORT_ORDER
+                or EFFORT_ORDER[default_effort] > EFFORT_ORDER[maximum_effort]
+                or maximum_effort != "medium"
+                or not isinstance(roles, list)
+                or set(roles) != {"synthesis", "adjudication"}
+                or len(roles) != 2
+                or override.get("alias") != "flagship"
+                or not isinstance(models, list)
+                or models != ["fable"]
+            ):
+                return reject("risk_tier_config_invalid", alias=args.alias)
+            if args.role not in roles:
+                return reject("risk_tier_role_mismatch", alias=args.alias)
+            if args.alias != override.get("alias"):
+                return reject("risk_tier_alias_mismatch", alias=args.alias)
+            if args.effort and EFFORT_ORDER[args.effort] > EFFORT_ORDER[maximum_effort]:
+                return reject("risk_tier_effort_above_ceiling", alias=args.alias, effort=args.effort)
+            args.risk_override = override
         return resolve(args, catalog)
     return 2
 

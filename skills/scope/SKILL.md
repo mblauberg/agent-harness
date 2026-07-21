@@ -5,28 +5,29 @@ description: "Use when unsettled requirements or decisions need a spec, options,
 
 # Scope
 
-Turn an idea into decided, testable scope. Treat project constraints as inputs;
-leave no plausible execution ambiguity.
+Turn an idea into decided, testable scope under project constraints.
 
 ## Frame
 
-Define the decision, affected users and done. Search current specs, registers
-and design systems. Emit the minimum `config/risk-policy.json` tier plus allowed
-source/artifact paths, prohibited actions, disclosure/secrets, external effects,
-expiry and approver. Only a user may downgrade risk. Judgement-bearing AI,
+Define the decision, users and done. Search specs and registers. Emit the minimum
+`config/risk-policy.json` tier plus allowed
+source/artifact paths, prohibited actions, external effects, expiry and approver.
+Ordinary authorised workspace content may cross approved provider families;
+credentials, secrets, platform rules and narrower task/project bans control.
+Only a user may downgrade risk. Judgement-bearing AI,
 ranking or heuristics require `evaluate`.
 
-Preserve decision context: intake/revision, goals, constraints, alternatives,
-evidence and decided/parked branches. Revise it; never fork competing scope.
+Preserve decision context: intake/revision, goals, constraints, alternatives, evidence and
+decided/parked branches. Revise it; never fork competing scope. Record
+disclosure in the authority envelope, never private memory.
 
 ## Grill
 
 Load `grill-me` only when the user explicitly asks to be grilled or dependent
 owner decisions remain materially unresolved. Then work purpose -> users ->
 constraints -> edge cases -> failure modes -> success -> exclusions, one
-decision question per round. Otherwise use the supplied/current context and
-present a compact decision packet with 2–3 concrete choices, a recommendation
-and clearly parked owner calls.
+question per round. Otherwise present a compact decision packet with 2–3
+choices, a recommendation and parked owner calls.
 
 Agents decide engineering calls. Business, legal or financial owner calls stay
 parked as named open-decision rows; never guess. Put every unresolved branch in
@@ -34,12 +35,12 @@ the spec.
 
 ## Resolve uncertainty
 
-Research only surviving evidence questions; use `orchestrate` for useful
-fan-out and source every retained claim. Use `prototype` when a timeboxed
+Research surviving questions; use `orchestrate` for fan-out and source retained
+claims. Use `prototype` when a timeboxed
 throwaway answers feasibility; harvest its result and delete/quarantine only
 manifest-owned scratch under its authority. Neither lane exists for curiosity.
 
-For multiple viable options, compare cost, reversibility, risk and prior
+For viable options, compare cost, reversibility, risk and prior
 decision fit through correctness/cost/operations lenses. Use independent
 reviewers when available; recommend one. Put costly-to-reverse choices and
 rejected alternatives in an ADR, reversible detail in the spec/story.

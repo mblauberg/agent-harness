@@ -70,7 +70,8 @@ role names) live only in the adapters.
 - **Chair/driver loss** — persist a handoff; only a generation-bound
   takeover promotes a new chair, never a silent promotion.
 - **Worker/peer loss** — preserve partial output, mark it degraded, and
-  reassign only if authority and review independence still hold.
+  reassign only if authority and review independence still hold. A failed,
+  missing, or null result never proves that the worker made no partial write.
 - **Cross-family failure** — record `CROSS-FAMILY-NOT-RUN: <reason>`; never
   substitute a same-family answer and call it cross-family.
 - **Tool/auth failure** — log the error to the run scratchpad and advance to

@@ -18,15 +18,15 @@ Decompose -> waves -> reduce -> gate.
 - Parallel lanes stop ready-to-merge. The chair merges serially, refreshes the
   next branch from current main, then reruns checks and reviews after commit/tree
   changes.
-- **Keep topology exact.** One chair per run; leaders settle recursive
-  obligations. Handoff is a generation-bound operator action.
+- **Keep topology exact.** One chair; leaders settle recursive obligations.
+  Handoff is a generation-bound operator action.
 - **Answer-bearing external work uses Fabric request/reply; Herdr only wakes.**
   Pane injection is fire-and-forget steering. Without callback, record
   `FABRIC-ROUNDTRIP-UNAVAILABLE` and collect an artifact.
 - Record worker cwd; never assume repository.
 - **Workers write full output to files**; return a digest/path.
-- **Cross-family follows the HARNESS risk ladder.** The other primary is
-  load-bearing at substantial+.
+- **Cross-family follows the HARNESS risk ladder.** Normally use the other primary, with two
+  recorded distinct-family full-scope substitutes if unavailable.
 - **Objective checks outrank opinions. You own the final call.**
 - Discover current model/tool options at runtime.
 

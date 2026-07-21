@@ -453,7 +453,11 @@ The user can stop live mode by:
 - Closing the browser tab (SSE drops, poll returns `exit` after 8s)
 - The browser's exit button
 
-When the poll returns `exit`, proceed to cleanup. If the poll is still running as a background task, kill it first.
+When the poll returns `exit`, proceed to cleanup. If the poll is still running,
+cancel or terminate only the exact background-task handle returned by this run.
+If the runner exposes only a PID, verify the run-owned PID plus its command and
+start identity immediately before signalling. Refuse broad name or pattern
+kills and treat uncertain or reused process identity as not owned.
 
 ## Cleanup
 
