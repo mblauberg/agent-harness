@@ -13,6 +13,7 @@
   "profile": "research",
   "status": "draft",
   "risk_tier": "substantial",
+  "chair_family": "openai",
   "risk_assessment": {
     "blast_radius": "multi-module",
     "reversibility": "moderate",

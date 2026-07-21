@@ -110,7 +110,7 @@ Restore `activeAdapters: []`, restart the visible daemon, retain journals and se
 - Provider-backed read-only smoke passes for each available logged-in provider/model family; unavailable account models are recorded, not substituted silently.
 - Herdr observer resumes without loss after an orderly restart, provides at-least-once rendering across a crash window, shows bounded local message previews and exposes no capability data.
 - Expiry warning and explicit coordinated rotation tests pass.
-- Fresh native and Fable reviews report no unresolved P0–P2 findings.
+- Multiple targeted lenses and an independent other-primary review report no unresolved P0–P2 findings; terminal pressure follows `HARNESS.md`.
 
 ## Capability and effective-route evidence
 

@@ -29,7 +29,7 @@ Partition lenses rather than assigning brands:
 
 The harness chooses scout, workhorse or flagship capacity and the required
 family diversity from risk and availability. Failed or skipped lanes stay
-explicit. An unavailable bonus family never blocks completion.
+explicit. An unavailable distinct family never blocks completion.
 
 ## Finding and repair contract
 

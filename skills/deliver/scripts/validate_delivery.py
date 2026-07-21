@@ -16,10 +16,14 @@ import sys
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "skills"))
+from _shared.review_ladder import PRIMARY_FAMILIES, check_review_ladder
+
 POLICY_VALIDATION_PATH = Path(__file__).with_name("delivery_policy_validation.py")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 SAFE_CLASSES = {"canonical", "evidence", "handoff", "scratch", "external"}
+REVIEW_ROLES = {"targeted", "other-primary", "distinct-family"}
 RISKS = ("routine", "substantial", "crucial", "terminal")
 NORMAL_STATES = (
     "draft", "scoped", "approved", "executing", "verifying", "reviewing",
@@ -51,25 +55,20 @@ EVALUATION_BINDING_FIELDS = {
     "evaluation_id", "evaluation_digest", "plan_digest",
 }
 
-
 class Invalid(ValueError):
     pass
-
 
 def fail(condition: bool, message: str) -> None:
     if condition:
         raise Invalid(message)
 
-
 def _mapping(value: Any, field: str) -> dict[str, Any]:
     fail(not isinstance(value, dict), f"{field} must be an object")
     return value
 
-
 def _list(value: Any, field: str) -> list[Any]:
     fail(not isinstance(value, list), f"{field} must be a list")
     return value
-
 
 def _utc(value: Any, field: str) -> datetime:
     fail(not isinstance(value, str) or not value.endswith("Z"), f"{field} must be a UTC timestamp")
@@ -78,10 +77,8 @@ def _utc(value: Any, field: str) -> datetime:
     except ValueError as exc:
         raise Invalid(f"{field} must be an ISO UTC timestamp") from exc
 
-
 def _digest(value: Any, field: str) -> None:
     fail(not isinstance(value, str) or not DIGEST.fullmatch(value), f"{field} must be a sha256 digest")
-
 
 def _identifier(value: Any, field: str) -> str:
     fail(
@@ -90,17 +87,14 @@ def _identifier(value: Any, field: str) -> str:
     )
     return value
 
-
 def _safe_path(value: Any, field: str) -> str:
     fail(not isinstance(value, str) or not value, f"{field} must be a non-empty path")
     path = Path(value)
     fail(path.is_absolute() or ".." in path.parts, f"{field} must be safe and relative")
     return path.as_posix().rstrip("/")
 
-
 def _inside(path: str, scope: str) -> bool:
     return scope in {"", "."} or path == scope or path.startswith(scope + "/")
-
 
 @lru_cache(maxsize=1)
 def _policy_validation_module():
@@ -112,7 +106,6 @@ def _policy_validation_module():
     spec.loader.exec_module(module)
     return module
 
-
 def _retrospect_validator():
     path = ROOT / "skills" / "retrospect" / "scripts" / "validate_retrospect.py"
     spec = importlib.util.spec_from_file_location("delivery_retrospect_validator", path)
@@ -120,7 +113,6 @@ def _retrospect_validator():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
 
 def _evaluate_validator():
     path = ROOT / "skills" / "evaluate" / "scripts" / "validate_evaluation.py"
@@ -442,6 +434,7 @@ def _validate_reviews(run: dict[str, Any], evidence: dict[str, dict[str, Any]], 
         item = _mapping(raw, f"reviews[{index}]")
         fail(item.get("status") not in {"pass", "failed", "unavailable", "skipped"}, f"review {index} status is invalid")
         fail(not item.get("provider_family") or not item.get("adapter") or not item.get("role"), f"review {index} lacks lineage")
+        fail(item.get("role") not in REVIEW_ROLES, f"review {index} role is invalid")
         fail(item.get("independent_of_authorship") is not True, f"review {index} is not independent")
         fail(not item.get("lenses"), f"review {index} requires lenses")
         if item.get("status") == "pass":
@@ -459,22 +452,25 @@ def _validate_reviews(run: dict[str, Any], evidence: dict[str, dict[str, Any]], 
         else:
             fail(not item.get("reason"), f"non-passing review {index} requires reason")
         reviews.append(item)
-    if required and run.get("risk_tier") in {"substantial", "crucial", "terminal"}:
-        native = [item for item in reviews if item.get("role") == "native-review" and item.get("status") == "pass"]
-        other = [item for item in reviews if item.get("role") == "other-primary" and item.get("status") == "pass"]
-        fail(not native, "substantial+ run requires native review")
-        fail(not other, "substantial+ run requires other-primary review")
-        fail(native[0]["provider_family"] == other[0]["provider_family"], "other-primary review must use a distinct primary family")
-        fail({native[0]["provider_family"], other[0]["provider_family"]} != {"openai", "anthropic"}, "primary reviews must use openai and anthropic")
-        fail(native[0].get("evidence_id") == other[0].get("evidence_id"), "primary reviews require distinct evidence ids")
-        lens_set = {lens for item in reviews if item.get("status") == "pass" for lens in item.get("lenses", [])}
-        fail(len(lens_set) < 2, "substantial+ review requires at least two distinct lenses")
-    bonus = [item for item in reviews if item.get("role") == "bonus"]
-    fail(any(item.get("provider_family") in {"openai", "anthropic"} for item in bonus), "bonus review must use a non-primary family")
-    if required and run.get("risk_tier") == "crucial":
-        fail(len(bonus) < 1, "crucial run must record one bonus-family attempt")
-    if required and run.get("risk_tier") == "terminal":
-        fail(len({item.get("provider_family") for item in bonus}) < 2, "terminal run must record two distinct bonus-family attempts")
+    optional = [item for item in reviews if item.get("role") == "distinct-family"]
+    fail(any(item.get("provider_family") in {"openai", "anthropic"} for item in optional), "distinct-family review must use a non-primary family")
+    if not required:
+        return
+    chair_family = run.get("chair_family")
+    legs = []
+    for item in reviews:
+        role = item.get("role")
+        ladder_role = "other-primary" if role == "other-primary" else "distinct-family" if role == "distinct-family" else "targeted"
+        legs.append({
+            "role": ladder_role,
+            "family": item.get("provider_family"),
+            "status": item.get("status"),
+            "lenses": item.get("lenses", []),
+            "reason": item.get("reason"),
+        })
+    ladder_errors = check_review_ladder(run.get("risk_tier"), legs, chair_family=chair_family)
+    if ladder_errors:
+        raise Invalid(ladder_errors[0])
 
 def _validate_security(run: dict[str, Any], registry: dict[str, Any], profile: dict[str, Any], artifacts: dict[str, dict[str, Any]], evidence: dict[str, dict[str, Any]], *, required: bool) -> None:
     security = _mapping(run.get("security"), "security")
@@ -848,6 +844,7 @@ def validate(
     profile = registry["profiles"].get(run.get("profile"))
     fail(profile is None, "unknown delivery profile")
     fail(run.get("risk_tier") not in RISKS, "risk_tier is invalid")
+    fail(run.get("chair_family") not in PRIMARY_FAMILIES, "chair_family must be a primary family (openai or anthropic)")
     fail(run.get("status") not in set(NORMAL_STATES) | SIDE_STATES, "status is invalid")
     repairs = run.get("repair_cycles")
     fail(isinstance(repairs, bool) or not isinstance(repairs, int) or not 0 <= repairs <= 2, "repair_cycles must be between 0 and 2")
@@ -926,7 +923,7 @@ def validate(
                 *profile_evidence["deterministic"], *profile_evidence["judgement"]
             }
         }
-        review_ids = {item.get("evidence_id") for item in run["reviews"] if item.get("status") == "pass" and item.get("role") in {"native-review", "other-primary"}}
+        review_ids = {item.get("evidence_id") for item in run["reviews"] if item.get("status") == "pass" and item.get("role") in REVIEW_ROLES}
         fail(not (profile_ids | review_ids) <= set(final_transition["evidence_ids"]), "awaiting_acceptance transition lacks profile or review evidence")
     _validate_security(run, registry, profile, artifacts, evidence, required=acceptance_reached)
     _validate_measures_assurance(

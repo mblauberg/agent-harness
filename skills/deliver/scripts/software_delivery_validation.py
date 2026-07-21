@@ -309,7 +309,8 @@ def validate(
         matched.add(lineage)
     required_primary = {
         (item.get("provider_family"), item.get("adapter"), item.get("model"))
-        for item in passing_reviews if item.get("role") in {"native-review", "other-primary"}
+        for item in passing_reviews
+        if item.get("role") in {"targeted", "other-primary", "distinct-family"}
     }
     _fail(not required_primary <= matched,
           "software_delivery review artifacts must retain every passing primary review", invalid_type)

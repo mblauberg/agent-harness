@@ -13,6 +13,16 @@ substantial work, then additional bonus-family attempts for crucial and
 terminal work. Earlier implementation identifiers inherited a milestone
 codename and obscured their durable owners.
 
+### Addendum — 2026-07-22, issue #361
+
+The context above records the earlier policy and remains unchanged. The live
+policy now resides in `HARNESS.md`: substantial work uses multiple targeted
+lenses plus required other-primary review; distinct-family review is used when
+available and never substitutes for other-primary; terminal work adds stronger
+targeted and adversarial pressure and records a skipped distinct-family leg. The
+delivery and orchestration validators share one ladder checker and no longer
+count fixed optional-provider attempts.
+
 ## Decision
 
 Certifying review pressure follows the current `HARNESS.md` risk table.

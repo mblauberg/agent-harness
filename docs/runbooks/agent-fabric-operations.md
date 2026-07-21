@@ -342,8 +342,9 @@ provider CLIs' existing subscription sessions. `scripts/model-route resolve`
 must report the exact family, model and high effort through `--adapter-gate
 fabric` before dispatch. A disabled entry, inactive adapter, unresolved pin,
 artifact mismatch, unavailable model or wrong family is terminal routing
-evidence; use another already-admitted review family or record the bonus leg as
-unavailable. Never bypass the gate with a direct CLI and claim Fabric evidence.
+evidence; use another already-admitted review family or record the distinct-family
+leg as unavailable. Never bypass the gate with a direct CLI and claim Fabric
+evidence.
 
 Real provider smokes are local-only, consume subscription quota and require
 current provider-use authority. They traverse the verified Fabric adapter

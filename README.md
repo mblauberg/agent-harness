@@ -57,7 +57,7 @@ flowchart TB
     subgraph Fabric["Agent Fabric — cross-provider execution"]
       direction LR
       P1["Claude Code and Codex<br/>primary clients"]
-      P2["bonus providers<br/>Agy, Cursor, Kiro, OpenCode"]
+      P2["optional providers<br/>Agy, Cursor, Kiro, OpenCode"]
     end
     U --> Harness
     Harness --> Skills
@@ -74,7 +74,7 @@ flowchart TB
   procedures, one folder with a `SKILL.md` each. Only the one-line descriptions
   sit in permanent context; a full body loads only when the task matches it.
 - **Agent Fabric:** cross-provider execution and durable coordination, so the
-  primaries can run and review each other's work. Optional bonus providers stay
+  primaries can run and review each other's work. Optional providers stay
   separately activated.
 
 ## Quick start
@@ -197,12 +197,12 @@ user can pass.
 ```mermaid
 flowchart TB
     accTitle: The delivery loop and its three user gates
-    accDescr: After a session sets up clean context, the deliver kernel runs the loop top to bottom: scope writes the specification and risk tier, a user gate approves it, implement writes the test first whenever observable behaviour changes, verify runs deterministic checks, and review reads the work in a fresh context that never wrote it, and from the substantial tier up must include the other model family. Two dotted edges return: the approval gate sends the plan back to scope, and a blocking review finding sends the work back to implement for a bounded repair. A user gate then accepts, leading to retrospect and the next cycle. Release and observe sit outside the loop, behind a third user gate that authorises the external action.
+    accDescr: After a session sets up clean context, the deliver kernel runs the loop top to bottom: scope writes the specification and risk tier, a user gate approves it, implement writes the test first whenever observable behaviour changes, verify runs deterministic checks, and review reads the work in a fresh context that never wrote it, using targeted lenses plus the other primary from the substantial tier up. Two dotted edges return: the approval gate sends the plan back to scope, and a blocking review finding sends the work back to implement for a bounded repair. A user gate then accepts, leading to retrospect and the next cycle. Release and observe sit outside the loop, behind a third user gate that authorises the external action.
     SC["scope · spec, risk tier, acceptance criteria"] --> G1{{"USER · approve the spec"}}
     G1 -. "send back" .-> SC
     G1 --> IM["implement · test first when behaviour changes"]
     IM --> VF["verify · deterministic checks"]
-    VF --> RV["review · fresh context<br/>the other model family at substantial+"]
+    VF --> RV["review · fresh context<br/>targeted lenses + other primary at substantial+"]
     RV -. "blocking finding" .-> IM
     RV --> G2{{"USER · accept"}}
     G2 --> RT["retrospect"]
@@ -215,9 +215,9 @@ flowchart TB
 
 Gold hexagons are user gates. Every gate can stop progression; specification
 approval and acceptance can return work for revision. `review` runs in a fresh
-context that never wrote the diff, and from the `substantial` tier up it must
-include the other model family; a receipt missing that leg cannot reach
-acceptance.
+context that never wrote the diff. From the `substantial` tier up it requires
+multiple targeted lenses plus the other primary; a receipt missing that leg cannot
+reach acceptance.
 
 The loop is [`deliver`](skills/deliver/SKILL.md), the kernel binding one run to one receipt;
 [`implement`](skills/implement/SKILL.md) is its software front door, and the
@@ -230,15 +230,15 @@ full lifecycle lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 | Risk | Minimum review pressure |
 |---|---|
 | `routine` | chair plus objective and native checks |
-| `substantial` | fresh-context native review plus the other primary |
-| `crucial` | substantial coverage, plus one distinct bonus family attempted |
-| `terminal` | substantial coverage, plus two distinct bonus families attempted |
+| `substantial` | multiple targeted lenses plus a strong other-primary review |
+| `crucial` | substantial coverage plus a distinct-family review when available |
+| `terminal` | all preceding coverage with stronger targeted and adversarial pressure |
 
 Solo `routine` work still completes, but `substantial` and above cannot reach
-acceptance with the other-primary leg missing. Bonus families (Gemini, xAI,
-others) never block on absence, quota or API failure, but at the top two tiers
-the _attempt_ is owed and every skipped leg is recorded. Evidence and
-corroboration, not model votes, make a finding blocking.
+acceptance with the other-primary leg missing. Distinct-family review is
+advisory when available; a skipped terminal distinct-family leg records its
+reason. Evidence and corroboration, not model votes, make a finding blocking.
+The canonical ladder lives in [`HARNESS.md`](HARNESS.md).
 
 **Durable boundaries hold regardless of tier:**
 

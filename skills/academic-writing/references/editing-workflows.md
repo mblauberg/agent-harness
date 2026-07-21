@@ -146,7 +146,7 @@ Use for full-chapter rewrites, whole-thesis rewrites, final-polish passes, or an
 3. Independent second opinions. Follow the harness risk tier and use fresh,
    non-authoring reviewers from the available primary families. Keep prompts
    independent so reviewers do not anchor on each other's conclusions. Record
-   unavailable or skipped bonus-family lanes without making them blockers.
+   unavailable or skipped distinct-family lanes without making them blockers.
 4. Rewrite slowly. Apply one coherent chapter or section slice at a time. Preserve labels, macros, result commands, citation keys, equations, tables, and file paths unless the user explicitly approves structural changes.
 5. Chapter-specific review. After each chapter rewrite, assign subagents to review that chapter for unsupported claims, citation misuse, lost technical meaning, concision failures, AI-sounding prose, LaTeX breakage, and chapter-boundary drift.
 6. Whole-work review. After all chapter edits, send separate agents for:

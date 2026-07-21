@@ -126,7 +126,7 @@ pins external executable, package and schema artifacts by hash; repository-owned
 3. Deterministic tests cover oversized frames, connection/in-flight overload, pre-handshake methods, mixed versions,
    backpressure, trust symlink/expiry, invalid current rows, baseline atomicity and preservation, query plans, repeated
    receipt export, archive integrity and daemon restart.
-4. Fresh native and other-primary reviews must report no unresolved P0–P2 findings before human acceptance.
+4. Multiple targeted lenses and the other-primary review must report no unresolved P0–P2 findings before human acceptance; terminal pressure follows `HARNESS.md`.
 
 ## Explicit rejections
 
@@ -192,7 +192,7 @@ These are operational safety bounds, not throughput targets. Load evidence may s
 - All resource, protocol, trust, database, retention, receipt and status acceptance tests pass.
 - The existing five adapter smokes and five-seat MCP health/round-trip remain green after hardening.
 - the activation contract rollback to coordination-only remains possible.
-- Fresh OpenAI-native and Anthropic-primary reviews are clean at P0–P2.
+- Targeted OpenAI lenses and an independent Anthropic other-primary review are clean at P0–P2; available distinct-family pressure is recorded when used.
 - Canonical delivery receipt validates at `awaiting_acceptance`.
 - Human final acceptance remains pending; Git push and release remain separate gates.
 
