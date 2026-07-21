@@ -1,8 +1,8 @@
 source_size_ceilings:
   runtime/agent-fabric/src/core/fabric.ts: 6134
-  runtime/agent-fabric/src/project-session/launch-custody.ts: 3937
+  runtime/agent-fabric/src/project-session/launch-custody.ts: 2380
   runtime/agent-fabric-protocol/src/operation-codecs.ts: 3839
-  runtime/agent-fabric/src/operator/action-store.ts: 1837
+  runtime/agent-fabric/src/operator/action-store.ts: 1640
   runtime/agent-fabric/src/operator/production-action-ports.ts: 2569
   runtime/agent-fabric/src/operator/projection-store.ts: 2054
   runtime/agent-fabric/src/operator/typed-git-service.ts: 2004
