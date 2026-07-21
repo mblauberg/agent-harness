@@ -222,6 +222,7 @@ import { LifecycleCheckpointPolicy, isLifecycleCheckpoint } from "../lifecycle/c
 import { LifecycleAdmission, isLifecycleResult, type LifecycleContinuationInput } from "../lifecycle/admission.js";
 import { LifecycleReceiptRepository } from "../lifecycle/receipt-repository.js";
 import { LifecycleFinalizer } from "../lifecycle/finalizer.js";
+import { LifecycleContinuation } from "../lifecycle/continuation.js";
 import {
   GenerationLossRepository,
   type GenerationLossSource,
@@ -341,11 +342,6 @@ function canonicalJson(value: unknown): string {
       .join(",")}}`;
   }
   throw new TypeError("value is not JSON-compatible");
-}
-
-function privateSafeErrorMessage(error: unknown, privateValues: readonly string[], fallback: string): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return privateValues.some((value) => message.includes(value)) ? fallback : message;
 }
 
 function sha256(value: string): string {
@@ -823,6 +819,7 @@ export class Fabric {
   readonly #checkpointPolicy: LifecycleCheckpointPolicy;
   readonly #admission: LifecycleAdmission;
   readonly #finalizer: LifecycleFinalizer;
+  readonly #continuation: LifecycleContinuation;
   readonly #lifecycleReceipts: LifecycleReceiptRepository;
   readonly #generationLosses: GenerationLossRepository;
   readonly #lifecycleReceiptAuthority: LifecycleIntegrityReceiptAuthorityPort | undefined;
@@ -834,7 +831,6 @@ export class Fabric {
   readonly #maximumConcurrentProviderTurns: number;
   readonly #ownedProviderActions = new Map<string, Promise<void>>();
   readonly #providerActionReconciliations = new Map<string, Promise<ProviderActionResult>>();
-  readonly #lifecycleContinuations = new Map<string, Promise<void>>();
   readonly #activeLifecycleProviderOperations = new Set<Promise<void>>();
   readonly #activeGenericProviderOperations = new Set<Promise<void>>();
   readonly #deferredProviderActions: Array<{
@@ -932,7 +928,7 @@ export class Fabric {
       lifecycleRotations: this.#lifecycleRotations,
       lifecycleReceiptAuthority: this.#lifecycleReceiptAuthority,
       scheduleLifecycleContinuation: (input: LifecycleContinuationInput) => {
-        this.#scheduleLifecycleContinuation(input);
+        this.#continuation.schedule(input);
       },
     });
     this.#finalizer = new LifecycleFinalizer({
@@ -944,6 +940,21 @@ export class Fabric {
       lifecycleRotations: this.#lifecycleRotations,
       admissionSourceVectorDigest: this.#admission.sourceVectorDigest.bind(this.#admission),
       checkpointPolicyRecordOperation: this.#checkpointPolicy.recordOperation.bind(this.#checkpointPolicy),
+    });
+    this.#continuation = new LifecycleContinuation({
+      database: this.#database,
+      clock: this.#clock,
+      lifecycleRotations: this.#lifecycleRotations,
+      adapterSupervisor: this.#adapterSupervisor,
+      finalizer: this.#finalizer,
+      fabricSocketPath: this.#fabricSocketPath,
+      ensureReceiptScope: this.#admission.ensureReceiptScope.bind(this.#admission),
+      getGenericPredecessor: (runId, adapterId, actionId) =>
+        this.#ownedProviderActions.get(this.#providerActionOwnershipKey(runId, adapterId, actionId)),
+      isClosing: () => this.#closing,
+      event: (runId, type, actorAgentId, payload) => {
+        this.#event(runId, type, actorAgentId, payload);
+      },
     });
     this.#operatorStore = new OperatorStore({ database: this.#database, clock: this.#clock });
     this.#gates = new ScopedGateStore({
@@ -1419,13 +1430,13 @@ export class Fabric {
       this.#activeLifecycleProviderOperations.size > 0 ||
       this.#activeGenericProviderOperations.size > 0 ||
       this.#ownedProviderActions.size > 0 ||
-      this.#lifecycleContinuations.size > 0
+      this.#continuation.size > 0
     ) {
       await Promise.allSettled([
         ...this.#activeLifecycleProviderOperations,
         ...this.#activeGenericProviderOperations,
         ...this.#ownedProviderActions.values(),
-        ...this.#lifecycleContinuations.values(),
+        ...this.#continuation.pending(),
       ]);
       this.#abandonDeferredProviderActions();
     }
@@ -8461,266 +8472,6 @@ export class Fabric {
         }
       }
     }
-  }
-
-  #scheduleLifecycleContinuation(input: Readonly<{
-    runId: string;
-    agentId: string;
-    custodyId: string;
-    adapterId: string;
-    actionId: string;
-    authorityId: string;
-    bridgeContractDigest: string;
-    sourceActionId: string;
-    sourceCapabilityHash: string;
-    sourceProviderSessionRef: string;
-    callerActionId: string;
-    targetProviderGeneration: number;
-    targetPrincipalGeneration: number;
-    targetBridgeGeneration: number;
-    stagedCapability: string;
-    stagedCapabilityHash: string;
-    capabilityExpiresAt: number;
-    providerPayload: Record<string, unknown>;
-    checkpointSha256: string;
-    launchAttestationChallenge: string;
-    launchAttestationChallengeDigest: string;
-    lifecycleInput: {
-      action: "compact" | "rotate";
-      agentId: string;
-      taskId: string;
-      taskRevision: number;
-      checkpoint: LifecycleCheckpoint;
-      commandId: string;
-    };
-  }>): void {
-    assertProviderActionOwner(this.#database, {
-      runId: input.runId,
-      adapterId: input.adapterId,
-      actionId: input.actionId,
-    }, "lifecycle");
-    const key = `lifecycle\0${input.runId}\0${input.agentId}\0${input.custodyId}`;
-    if (this.#lifecycleContinuations.has(key)) return;
-    const predecessor = this.#ownedProviderActions.get(
-      this.#providerActionOwnershipKey(input.runId, input.adapterId, input.callerActionId),
-    );
-    const continuation = (async () => {
-      if (predecessor !== undefined) await predecessor;
-      if (!this.#closing) await this.#continueLifecycleRotation(input);
-    })();
-    this.#lifecycleContinuations.set(key, continuation);
-    void continuation.catch((error: unknown) => {
-      if (error instanceof ProviderActionOwnerError) return;
-      this.#event(input.runId, "lifecycle-continuation-failed", input.agentId, {
-        custodyId: input.custodyId,
-        message: privateSafeErrorMessage(
-          error,
-          [input.launchAttestationChallenge],
-          "lifecycle replacement provider failed",
-        ),
-      });
-    }).finally(() => {
-      if (this.#lifecycleContinuations.get(key) === continuation) this.#lifecycleContinuations.delete(key);
-    });
-  }
-
-  async #continueLifecycleRotation(input: Readonly<{
-    runId: string;
-    agentId: string;
-    custodyId: string;
-    adapterId: string;
-    actionId: string;
-    authorityId: string;
-    bridgeContractDigest: string;
-    sourceActionId: string;
-    sourceCapabilityHash: string;
-    sourceProviderSessionRef: string;
-    callerActionId: string;
-    targetProviderGeneration: number;
-    targetPrincipalGeneration: number;
-    targetBridgeGeneration: number;
-    stagedCapability: string;
-    stagedCapabilityHash: string;
-    capabilityExpiresAt: number;
-    providerPayload: Record<string, unknown>;
-    checkpointSha256: string;
-    launchAttestationChallenge: string;
-    launchAttestationChallengeDigest: string;
-    lifecycleInput: {
-      action: "compact" | "rotate";
-      agentId: string;
-      taskId: string;
-      taskRevision: number;
-      checkpoint: LifecycleCheckpoint;
-      commandId: string;
-    };
-  }>): Promise<void> {
-    assertProviderActionOwner(this.#database, {
-      runId: input.runId,
-      adapterId: input.adapterId,
-      actionId: input.actionId,
-    }, "lifecycle");
-    await this.#admission.ensureReceiptScope(input.runId, input.agentId);
-    let head = this.#database.transaction(() => this.#lifecycleRotations.appendInCurrentTransaction({
-      runId: input.runId,
-      agentId: input.agentId,
-      custodyId: input.custodyId,
-      expectedRevision: 1,
-      state: "prepared",
-      recordedAt: this.#clock(),
-    })).immediate();
-    this.#database.transaction(() => {
-      this.#database.prepare(`
-        INSERT INTO capabilities(token_hash,run_id,agent_id,principal_generation,expires_at)
-        VALUES (?,?,?,?,?)
-      `).run(
-        input.stagedCapabilityHash,
-        input.runId,
-        input.agentId,
-        input.targetPrincipalGeneration,
-        input.capabilityExpiresAt,
-      );
-      this.#database.prepare(`
-        INSERT INTO provider_agent_custody(
-          run_id,action_id,operation,actor_agent_id,target_agent_id,authority_id,
-          adapter_id,bridge_contract_digest,bridge_capable,capability_hash,
-          capability_expires_at,principal_generation,requested_provider_session_ref,
-          intent_digest,created_at
-        ) VALUES (?,?, 'spawn',?,?,?,?,?,1,?,?,?,?,?,?)
-      `).run(
-        input.runId, input.actionId, input.agentId, input.agentId,
-        input.authorityId, input.adapterId, input.bridgeContractDigest,
-        input.stagedCapabilityHash, input.capabilityExpiresAt,
-        input.targetPrincipalGeneration, null,
-        sha256Digest(canonicalJson(input.providerPayload)), this.#clock(),
-      );
-      assertProviderActionOwner(this.#database, {
-        runId: input.runId,
-        adapterId: input.adapterId,
-        actionId: input.actionId,
-      }, "lifecycle");
-      const dispatched = this.#database.prepare(`
-        UPDATE provider_actions
-           SET status='dispatched',history_json='["prepared","dispatched"]',
-               execution_count=1,updated_at=?
-         WHERE run_id=? AND adapter_id=? AND action_id=? AND status='prepared'
-      `).run(this.#clock(), input.runId, input.adapterId, input.actionId);
-      if (dispatched.changes !== 1) throw new Error("lifecycle replacement dispatch claim failed");
-      head = this.#lifecycleRotations.appendInCurrentTransaction({
-        runId: input.runId,
-        agentId: input.agentId,
-        custodyId: input.custodyId,
-        expectedRevision: head.revision,
-        state: "dispatched",
-        recordedAt: this.#clock(),
-      });
-    }).immediate();
-    assertProviderActionOwner(this.#database, {
-      runId: input.runId,
-      adapterId: input.adapterId,
-      actionId: input.actionId,
-    }, "lifecycle");
-    const result = await this.#adapterSupervisor.provisionAgent(input.adapterId, {
-      schemaVersion: 1,
-      runId: input.runId,
-      operation: "spawn",
-      actionId: input.actionId,
-      targetAgentId: input.agentId,
-      authorityId: input.authorityId,
-      bridgeGeneration: input.targetBridgeGeneration,
-      bridgeContractDigest: input.bridgeContractDigest,
-      payload: input.providerPayload,
-      lifecycleAttestation: {
-        custodyId: input.custodyId,
-        checkpointDigest: `sha256:${input.checkpointSha256}`,
-        challengeDigest: input.launchAttestationChallengeDigest,
-      },
-    }, {
-      capability: input.stagedCapability,
-      socketPath: this.#fabricSocketPath as string,
-      expectedPrincipal: {
-        agentId: input.agentId,
-        projectSessionId: stringField(
-          rowOrNotFound(
-            this.#database.prepare("SELECT project_session_id FROM runs WHERE run_id=?").get(input.runId),
-            "lifecycle rotation run",
-          ),
-          "project_session_id",
-        ),
-        runId: input.runId,
-        principalGeneration: input.targetPrincipalGeneration,
-      },
-      lifecycleAttestation: {
-        challenge: input.launchAttestationChallenge,
-        custodyId: input.custodyId,
-        checkpointDigest: `sha256:${input.checkpointSha256}`,
-        challengeDigest: input.launchAttestationChallengeDigest,
-      },
-    });
-    assertProviderActionOwner(this.#database, {
-      runId: input.runId,
-      adapterId: input.adapterId,
-      actionId: input.actionId,
-    }, "lifecycle");
-    if (result.providerSessionGeneration !== input.targetProviderGeneration) {
-      const proof = {
-        schemaVersion: 1,
-        kind: "integrity-quarantine",
-        sourceState: head.state,
-        reason: "provider-result-reserved-generation-crossed",
-        providerActionRef: { runId: input.runId, adapterId: input.adapterId, actionId: input.actionId },
-        evidenceDigest: sha256Digest(canonicalJson({
-          expectedProviderSessionGeneration: input.targetProviderGeneration,
-          observedProviderSessionGeneration: result.providerSessionGeneration,
-        })),
-      };
-      await this.#finalizer.finalizeRotationAdopted(
-        input,
-        head,
-        sha256Digest(canonicalJson(proof)),
-        null,
-        {
-          disposition: "quarantined",
-          proofKind: "integrity-quarantine",
-          transitionProof: proof,
-        },
-      );
-      return;
-    }
-    const terminalEvidenceDigest = sha256Digest(canonicalJson(result));
-    this.#database.transaction(() => {
-      assertProviderActionOwner(this.#database, {
-        runId: input.runId,
-        adapterId: input.adapterId,
-        actionId: input.actionId,
-      }, "lifecycle");
-      const terminalized = this.#database.prepare(`
-        UPDATE provider_actions
-           SET status='terminal',history_json='["prepared","dispatched","accepted","terminal"]',
-               effect_count=1,idempotency_proven=1,result_json=?,updated_at=?
-         WHERE run_id=? AND adapter_id=? AND action_id=? AND status='dispatched'
-      `).run(canonicalJson(result), this.#clock(), input.runId, input.adapterId, input.actionId);
-      if (terminalized.changes !== 1) throw new Error("lifecycle replacement action changed before terminal commit");
-      head = this.#lifecycleRotations.appendInCurrentTransaction({
-        runId: input.runId,
-        agentId: input.agentId,
-        custodyId: input.custodyId,
-        expectedRevision: head.revision,
-        state: "provider-terminal",
-        terminalEvidenceDigest,
-        recordedAt: this.#clock(),
-      });
-      head = this.#lifecycleRotations.appendInCurrentTransaction({
-        runId: input.runId,
-        agentId: input.agentId,
-        custodyId: input.custodyId,
-        expectedRevision: head.revision,
-        state: "committing",
-        terminalEvidenceDigest,
-        recordedAt: this.#clock(),
-      });
-    }).immediate();
-    await this.#finalizer.finalizeRotationAdopted(input, head, terminalEvidenceDigest, result);
   }
 
 
