@@ -910,7 +910,8 @@ export class Fabric {
   readonly #ownedProviderActions = new Map<string, Promise<void>>();
   readonly #providerActionReconciliations = new Map<string, Promise<ProviderActionResult>>();
   readonly #lifecycleContinuations = new Map<string, Promise<void>>();
-  readonly #activeProviderOperations = new Set<Promise<void>>();
+  readonly #activeLifecycleProviderOperations = new Set<Promise<void>>();
+  readonly #activeGenericProviderOperations = new Set<Promise<void>>();
   readonly #deferredProviderActions: Array<{
     key: string;
     runId: string;
@@ -1460,12 +1461,14 @@ export class Fabric {
     this.#deferredProviderPumpTimer = undefined;
     this.#abandonDeferredProviderActions();
     while (
-      this.#activeProviderOperations.size > 0 ||
+      this.#activeLifecycleProviderOperations.size > 0 ||
+      this.#activeGenericProviderOperations.size > 0 ||
       this.#ownedProviderActions.size > 0 ||
       this.#lifecycleContinuations.size > 0
     ) {
       await Promise.allSettled([
-        ...this.#activeProviderOperations,
+        ...this.#activeLifecycleProviderOperations,
+        ...this.#activeGenericProviderOperations,
         ...this.#ownedProviderActions.values(),
         ...this.#lifecycleContinuations.values(),
       ]);
@@ -1483,7 +1486,7 @@ export class Fabric {
     return await this.#adapterSupervisor.request(adapterId, method, params);
   }
 
-  async #trackProviderOperation<T>(operation: () => Promise<T>): Promise<T> {
+  async #trackProviderOperationIn<T>(set: Set<Promise<void>>, operation: () => Promise<T>): Promise<T> {
     if (this.#closing) {
       throw new FabricError("LIFECYCLE_PRECONDITION_FAILED", "provider operation cannot start while Fabric is closing");
     }
@@ -1491,13 +1494,21 @@ export class Fabric {
     const tracked = new Promise<void>((resolvePromise) => {
       settle = resolvePromise;
     });
-    this.#activeProviderOperations.add(tracked);
+    set.add(tracked);
     try {
       return await operation();
     } finally {
-      this.#activeProviderOperations.delete(tracked);
+      set.delete(tracked);
       settle();
     }
+  }
+
+  async #trackProviderOperation<T>(operation: () => Promise<T>): Promise<T> {
+    return await this.#trackProviderOperationIn(this.#activeGenericProviderOperations, operation);
+  }
+
+  async #trackLifecycleProviderOperation<T>(operation: () => Promise<T>): Promise<T> {
+    return await this.#trackProviderOperationIn(this.#activeLifecycleProviderOperations, operation);
   }
 
   #providerActionOwnershipKey(runId: string, adapterId: string, actionId: string): string {
@@ -5587,7 +5598,7 @@ export class Fabric {
       commandId: string;
     },
   ): Promise<LifecycleResult> {
-    return await this.#trackProviderOperation(
+    return await this.#trackLifecycleProviderOperation(
       async () => await this.#requestLifecycle(runId, actorAgentId, input),
     );
   }
@@ -5689,7 +5700,7 @@ export class Fabric {
       });
       let action: ProviderActionResult;
       try {
-        action = await this.#executeAdapterOperation({
+        action = await this.#executeGenericRelease({
           runId,
           adapterId,
           actionId,
@@ -6109,7 +6120,7 @@ export class Fabric {
         ) {
           throw new FabricError("CAPABILITY_UNAVAILABLE", "delegated authority omits an adapter-mandatory usage dimension");
         }
-        return await this.#executeAdapterOperation({
+        return await this.#executeGenericAdapterOperation({
           runId,
           adapterId: input.adapterId,
           actionId: input.actionId,
@@ -7779,7 +7790,7 @@ export class Fabric {
     return stringField(binding, "adapter_id");
   }
 
-  async #executeAdapterOperation(input: {
+  async #executeGenericAdapterOperation(input: {
     runId: string;
     adapterId: string;
     actionId: string;
@@ -7927,6 +7938,18 @@ export class Fabric {
       return receipt;
     }
     return await complete();
+  }
+
+  async #executeGenericRelease(input: {
+    runId: string;
+    adapterId: string;
+    actionId: string;
+    operation: string;
+    method: string;
+    payload: Record<string, unknown>;
+    providerActionTicket?: ProviderActionTicket;
+  }): Promise<ProviderActionResult> {
+    return await this.#executeGenericAdapterOperation(input);
   }
 
   async #completeAdapterOperation(input: {
