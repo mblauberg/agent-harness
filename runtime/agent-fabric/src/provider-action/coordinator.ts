@@ -1,5 +1,4 @@
 import type Database from "better-sqlite3";
-import { createHash } from "node:crypto";
 
 import type { CommandJournal } from "../application/command-journal.js";
 import {
@@ -28,47 +27,7 @@ import { ProviderPayloadAuthority } from "./payload-authority.js";
 import { ProviderActionState, isProviderActionResult, providerActionResult } from "./state.js";
 import { ProviderActionExecutor } from "./executor.js";
 import { ProviderActionRecovery } from "./recovery.js";
-
-type Row = Record<string, unknown>;
-
-function isRow(value: unknown): value is Row {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  if (isRow(value)) {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
-      .join(",")}}`;
-  }
-  throw new TypeError("value is not JSON-compatible");
-}
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function rowOrNotFound(value: unknown, label: string): Row {
-  if (!isRow(value)) {
-    throw new FabricError("NOT_FOUND", `${label} was not found`);
-  }
-  return value;
-}
-
-function stringField(row: Row, field: string): string {
-  const value = row[field];
-  if (typeof value !== "string") {
-    throw new Error(`database field ${field} is not a string`);
-  }
-  return value;
-}
+import { canonicalJson, isRow, rowOrNotFound, sha256, stringField } from "./store-support.js";
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
@@ -396,7 +355,6 @@ export class ProviderActionCoordinator {
         commandId: `${input.commandId}:reconcile`,
       });
     }
-    const genericProviderActionTicket = providerActionTicket;
     if (ephemeralSpawn) {
       if (ephemeralProviderAuthorityId === undefined || ephemeralMaxTurns === undefined || taskId === undefined) {
         throw new Error("validated ephemeral provider budget is unavailable");
@@ -519,7 +477,6 @@ export class ProviderActionCoordinator {
     let turnLeaseGeneration: number | null = null;
     let actionPrepared = false;
     if (input.operation === "send_turn" && target !== undefined) {
-      if (genericProviderActionTicket === undefined) throw new Error("provider action ticket is unavailable");
       let admission;
       try {
         admission = this.#providerSessions.prepareTurnAction({
@@ -530,14 +487,14 @@ export class ProviderActionCoordinator {
           identityHash,
           target,
           payload: admittedInputPayload,
-          providerActionTicket: genericProviderActionTicket,
+          providerActionTicket,
         });
       } catch (error: unknown) {
         if (
-          genericProviderActionTicket.disposition === "resolving" &&
+          providerActionTicket.disposition === "resolving" &&
           !(error instanceof ProviderActionAdmissionTransactionError)
         ) {
-          this.#providerActionAdmission.release(genericProviderActionTicket, error);
+          this.#providerActionAdmission.release(providerActionTicket, error);
         }
         throw error;
       }
@@ -557,11 +514,10 @@ export class ProviderActionCoordinator {
       };
     }
     if (!actionPrepared) {
-      if (genericProviderActionTicket === undefined) throw new Error("provider action ticket is unavailable");
       const payloadJson = canonicalJson(providerPayload);
       try {
         this.#database.transaction(() => {
-          this.#providerActionAdmission.admitUnroutedInCurrentTransaction(genericProviderActionTicket, {
+          this.#providerActionAdmission.admitUnroutedInCurrentTransaction(providerActionTicket, {
             runId,
             actionId: input.actionId,
             adapterId: input.adapterId,
@@ -580,10 +536,10 @@ export class ProviderActionCoordinator {
         }).immediate();
       } catch (error: unknown) {
         if (
-          genericProviderActionTicket.disposition === "resolving" &&
+          providerActionTicket.disposition === "resolving" &&
           !(error instanceof ProviderActionAdmissionTransactionError)
         ) {
-          this.#providerActionAdmission.release(genericProviderActionTicket, error);
+          this.#providerActionAdmission.release(providerActionTicket, error);
         }
         throw error;
       }

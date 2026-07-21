@@ -1,5 +1,4 @@
 import type Database from "better-sqlite3";
-import { createHash } from "node:crypto";
 
 import type { CommandJournal } from "../application/command-journal.js";
 import {
@@ -17,47 +16,7 @@ import { FabricError } from "../errors.js";
 import { ProjectFabricCoreError } from "../project-session/contracts.js";
 import type { ProviderActionResult } from "../core/contracts.js";
 import { providerAnswerFromAdapterResult } from "./state.js";
-
-type Row = Record<string, unknown>;
-
-function isRow(value: unknown): value is Row {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  if (isRow(value)) {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
-      .join(",")}}`;
-  }
-  throw new TypeError("value is not JSON-compatible");
-}
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function rowOrNotFound(value: unknown, label: string): Row {
-  if (!isRow(value)) {
-    throw new FabricError("NOT_FOUND", `${label} was not found`);
-  }
-  return value;
-}
-
-function stringField(row: Row, field: string): string {
-  const value = row[field];
-  if (typeof value !== "string") {
-    throw new Error(`database field ${field} is not a string`);
-  }
-  return value;
-}
+import { canonicalJson, isRow, rowOrNotFound, sha256, stringField } from "./store-support.js";
 
 /**
  * Generic admission, provider I/O, and completion for generic provider actions. This is the
@@ -146,7 +105,7 @@ export class ProviderActionExecutor {
       payload: unknown;
     };
     revalidateAdmission?: () => void;
-    providerActionTicket?: ProviderActionTicket;
+    providerActionTicket: ProviderActionTicket;
   }): Promise<ProviderActionResult> {
     const payloadJson = canonicalJson(input.payload);
     const targetAgentId = typeof input.payload.agentId === "string" ? input.payload.agentId : undefined;
@@ -283,7 +242,7 @@ export class ProviderActionExecutor {
     operation: string;
     method: string;
     payload: Record<string, unknown>;
-    providerActionTicket?: ProviderActionTicket;
+    providerActionTicket: ProviderActionTicket;
   }): Promise<ProviderActionResult> {
     return await this.executeGenericAdapterOperation(input);
   }

@@ -4,32 +4,12 @@ import { FabricError } from "../errors.js";
 import { assertProviderActionOwner, type ProviderActionCustodyOwner } from "../application/provider-action-owner.js";
 import { isBudgetUnitKey } from "../domain/unit-keys.js";
 import type { ProviderActionResult } from "../core/contracts.js";
-
-type Row = Record<string, unknown>;
-
-function isRow(value: unknown): value is Row {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function stringField(row: Row, field: string): string {
-  const value = row[field];
-  if (typeof value !== "string") {
-    throw new Error(`database field ${field} is not a string`);
-  }
-  return value;
-}
+import { canonicalJson, isRow, rowOrNotFound, stringField, type Row } from "./store-support.js";
 
 function numberField(row: Row, field: string): number {
   const value = row[field];
   if (typeof value !== "number") {
     throw new Error(`database field ${field} is not a number`);
-  }
-  return value;
-}
-
-function rowOrNotFound(value: unknown, label: string): Row {
-  if (!isRow(value)) {
-    throw new FabricError("NOT_FOUND", `${label} was not found`);
   }
   return value;
 }
@@ -40,22 +20,6 @@ function isStringArray(value: unknown): value is string[] {
 
 function isNumberRecord(value: unknown): value is Record<string, number> {
   return isRow(value) && Object.values(value).every((item) => typeof item === "number");
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  if (isRow(value)) {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
-      .join(",")}}`;
-  }
-  throw new TypeError("value is not JSON-compatible");
 }
 
 function isProviderActionStatus(value: unknown): value is ProviderActionResult["status"] {

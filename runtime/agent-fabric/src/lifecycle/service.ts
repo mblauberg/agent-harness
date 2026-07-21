@@ -96,7 +96,7 @@ export class LifecycleService {
     operation: string;
     method: string;
     payload: Record<string, unknown>;
-    providerActionTicket?: ProviderActionTicket;
+    providerActionTicket: ProviderActionTicket;
   }) => Promise<ProviderActionResult>;
   readonly #event: (runId: string, type: string, actorAgentId: string | null, payload: unknown) => void;
   readonly #isClosing: () => boolean;
@@ -119,7 +119,7 @@ export class LifecycleService {
       operation: string;
       method: string;
       payload: Record<string, unknown>;
-      providerActionTicket?: ProviderActionTicket;
+      providerActionTicket: ProviderActionTicket;
     }) => Promise<ProviderActionResult>;
     event: (runId: string, type: string, actorAgentId: string | null, payload: unknown) => void;
     isClosing: () => boolean;
