@@ -17,23 +17,8 @@ source_size_ceilings:
   runtime/agent-fabric/src/integrations/herdr-fabric-ports.ts: 1044
 
 import_allowances:
-  - file: runtime/agent-fabric/src/adapters/conformance.ts
-    specifier_prefix: ../daemon/protocol.js
-    removal_issue: "#344"
-  - file: runtime/agent-fabric/src/core/fabric.ts
-    specifier_prefix: ../daemon/protocol-credentials.js
-    removal_issue: "#344"
-  - file: runtime/agent-fabric/src/core/fabric.ts
-    specifier_prefix: ../daemon/public-protocol.js
-    removal_issue: "#344"
   - file: runtime/agent-fabric/src/core/fabric.ts
     specifier_prefix: ../daemon/global-liveness.js
-    removal_issue: "#344"
-  - file: runtime/agent-fabric/src/core/fabric.ts
-    specifier_prefix: ../daemon/agent-protocol-dispatch.js
-    removal_issue: "#344"
-  - file: runtime/agent-fabric/src/exports/receipt.ts
-    specifier_prefix: ../daemon/protocol.js
     removal_issue: "#344"
   - file: runtime/agent-fabric/src/index.ts
     specifier_prefix: ./daemon/client.js
@@ -62,7 +47,3 @@ import_allowances:
   - file: runtime/agent-fabric/src/operator/production-action-ports.ts
     specifier_prefix: ../daemon/global-liveness.js
     removal_issue: "#344"
-  - file: runtime/agent-fabric/src/transport/ndjson-rpc.ts
-    specifier_prefix: ../daemon/protocol.js
-    removal_issue: "#344"
-    note: adjudicate layer

@@ -4,11 +4,11 @@ import {
   type OperationInputMap,
 } from "@local/agent-fabric-protocol";
 
-import type { FabricClient } from "../core/client.js";
+import type { FabricClient } from "./client.js";
 import type {
   ProviderActionDispatchRequest,
   ProviderActionResult,
-} from "../core/contracts.js";
+} from "./contracts.js";
 import { digest } from "../project-session/store-support.js";
 
 function providerActionRequestIdentity(value: unknown): Readonly<{

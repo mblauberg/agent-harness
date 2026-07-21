@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { isRecord } from "../daemon/protocol.js";
+import { isRecord } from "../domain/record.js";
 import { assertFabricReceiptSchema } from "./schema.js";
 
 export class FabricReceiptError extends Error {

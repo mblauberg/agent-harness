@@ -15,7 +15,6 @@ import {
   parseOperationResultForInput,
   parseProtocolInitializeRequest,
   strictRecord,
-  type FabricOperation,
   type JsonValue,
   type OperationInputMap,
   type OperationResultMap,
@@ -24,18 +23,12 @@ import {
   type ProtocolInitializeResult,
   type ProtocolLimits,
   type ProtocolOperation,
-  type ProtocolPrincipal,
   type VerifiedProtocolCredential,
 } from "@local/agent-fabric-protocol";
 
-export type PublicProtocolContext = {
-  principal: ProtocolPrincipal;
-  allowedOperations: ReadonlySet<FabricOperation>;
-  features: readonly ProtocolFeature[];
-  connectionNonce: string;
-  credentialHash: string;
-  daemonInstanceGeneration: number;
-};
+import type { PublicProtocolContext } from "../core/public-protocol-context.js";
+
+export type { PublicProtocolContext } from "../core/public-protocol-context.js";
 
 export type PublicProtocolServerOptions = {
   daemonVersion: string;

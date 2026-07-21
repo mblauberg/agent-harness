@@ -114,8 +114,8 @@ import {
   resolveTaskBindingForActiveWork,
   type ProductionDaemonStopPort,
 } from "../operator/production-action-ports.js";
-import { operatorOperationsForActions } from "../daemon/protocol-credentials.js";
-import type { PublicProtocolContext } from "../daemon/public-protocol.js";
+import { operatorOperationsForActions } from "../operator/protocol-credentials.js";
+import type { PublicProtocolContext } from "./public-protocol-context.js";
 import {
   attemptDrainedStop as attemptRuntimeDrainedStop,
   attemptIdleStop as attemptRuntimeIdleStop,
@@ -125,7 +125,7 @@ import {
   type IdleStopResult,
   type QuiesceToken,
 } from "../daemon/global-liveness.js";
-import { dispatchAgentProtocol } from "../daemon/agent-protocol-dispatch.js";
+import { dispatchAgentProtocol } from "./agent-protocol-dispatch.js";
 import { ProjectSessionStore } from "../project-session/store.js";
 import { ProjectSessionMembershipStore } from "../project-session/membership-store.js";
 import { CoordinatedWorkstreamStore } from "../project-session/workstream-store.js";

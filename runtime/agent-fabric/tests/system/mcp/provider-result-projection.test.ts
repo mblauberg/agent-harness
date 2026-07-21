@@ -2,7 +2,7 @@ import { FABRIC_OPERATIONS } from "@local/agent-fabric-protocol";
 import { describe, expect, it } from "vitest";
 
 import type { FabricClient } from "../../../src/core/client.ts";
-import { dispatchAgentProtocol } from "../../../src/daemon/agent-protocol-dispatch.ts";
+import { dispatchAgentProtocol } from "../../../src/core/agent-protocol-dispatch.ts";
 
 describe("public provider-action result projection", () => {
   it("projects the canonical non-review action identity and never exposes an answer for a non-spawn", async () => {

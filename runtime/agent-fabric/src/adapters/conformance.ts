@@ -1,4 +1,4 @@
-import { isRecord } from "../daemon/protocol.js";
+import { isRecord } from "../domain/record.js";
 import { AdapterProcessTransport } from "./process.js";
 
 type ActionReport = {
