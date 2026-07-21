@@ -37,8 +37,12 @@ invariant. Domain/project skills supply specialised rubrics.
    final severity-ordered findings.
 
 The implementer, stage owner or co-author cannot certify the reviewed surface.
-Other-primary and bonus-family lanes follow HARNESS coverage; bonus absence is
-non-blocking. Review repair output again because it is a new surface.
+Other-primary and distinct-family lanes follow `HARNESS.md`. Targeted lenses and
+other-primary coverage are required from substantial risk up; distinct-family
+review is used when available. Terminal work adds stronger targeted and
+adversarial pressure, and a skipped distinct-family leg records its reason.
+Missing other-primary coverage remains a blocking omission. Review repair output
+again because it is a new surface.
 
 Each lens artifact records reviewer/family/model, source and artifact authority,
 scope, base revision, checks, findings, rejected hypotheses and status. The

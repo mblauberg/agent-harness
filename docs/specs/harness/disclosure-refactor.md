@@ -8,7 +8,7 @@ pass). Risk tier `substantial`. Review pressure: r2 Codex paired-primary
 adversarial audit (verdict AMEND REQUIRED, five findings folded); r3 chaired
 three-leg review — chair sweep + fresh Claude pair (READY-WITH-AMENDMENTS) +
 Codex other-primary via Fabric roundtrip and high-effort CLI (both NOT-READY;
-all convergent findings folded here); fresh native review at implementation;
+all convergent findings folded here); fresh targeted review at implementation;
 held-out evals waived per
 [ADR 0014](../../adr/0014-comparative-skill-evals-on-suspicion.md).
 

@@ -711,7 +711,7 @@ def test_risk_tier_cannot_be_downgraded_without_human_evidence():
         module.validate(candidate, ROOT)
 
 
-def test_substantial_run_requires_design_and_both_primary_review_lanes():
+def test_substantial_run_requires_design_and_targeted_other_primary_review_lanes():
     module = load_validator()
     candidate = fixture("research")
     candidate["design"]["status"] = "not-required"
@@ -721,6 +721,117 @@ def test_substantial_run_requires_design_and_both_primary_review_lanes():
     candidate["reviews"] = [review for review in candidate["reviews"] if review["provider_family"] != "anthropic"]
     with pytest.raises(module.Invalid, match="other-primary"):
         module.validate(candidate, ROOT)
+
+
+def test_review_ladder_accepts_targeted_lenses_without_whole_change_leg():
+    module = load_validator()
+    candidate = fixture("research")
+    targeted = copy.deepcopy(candidate["reviews"][0])
+    targeted["role"] = "targeted"
+    targeted["lenses"] = ["correctness", "adversarial"]
+    candidate["reviews"] = [targeted, candidate["reviews"][1]]
+    module.validate(candidate, ROOT)
+
+
+def test_crucial_review_ladder_does_not_require_distinct_family():
+    module = load_validator()
+    candidate = fixture("agent-product")
+    candidate["risk_tier"] = "crucial"
+    candidate["reviews"] = [
+        review for review in candidate["reviews"] if review["role"] != "distinct-family"
+    ]
+    candidate["reviews"].append({
+        "role": "distinct-family", "provider_family": "google", "adapter": "gemini",
+        "model": "", "independent_of_authorship": True, "lenses": ["blind-spots"],
+        "status": "skipped", "evidence_id": "", "reason": "not warranted for this terminal change",
+    })
+    candidate["reviews"][0]["lenses"] = ["correctness", "tests"]
+    module._validate_reviews(
+        candidate,
+        {item["id"]: item for item in candidate["evidence"]},
+        required=True,
+    )
+
+
+def test_terminal_review_ladder_requires_adversarial_pressure_not_fixed_provider_count():
+    module = load_validator()
+    candidate = fixture("agent-product")
+    candidate["risk_tier"] = "terminal"
+    candidate["reviews"] = [
+        review for review in candidate["reviews"] if review["role"] != "distinct-family"
+    ]
+    candidate["reviews"].append({
+        "role": "distinct-family", "provider_family": "google", "adapter": "gemini",
+        "model": "", "independent_of_authorship": True, "lenses": ["blind-spots"],
+        "status": "skipped", "evidence_id": "", "reason": "not warranted for this terminal change",
+    })
+    candidate["reviews"][0]["lenses"] = ["correctness", "reliability", "adversarial"]
+    module._validate_reviews(
+        candidate,
+        {item["id"]: item for item in candidate["evidence"]},
+        required=True,
+    )
+
+    candidate["reviews"][0]["lenses"] = ["correctness", "reliability", "tests"]
+    with pytest.raises(module.Invalid, match="adversarial"):
+        module._validate_reviews(
+            candidate,
+            {item["id"]: item for item in candidate["evidence"]},
+            required=True,
+        )
+
+
+def test_same_family_other_primary_review_is_blocked():
+    module = load_validator()
+    candidate = fixture("research")
+    candidate["chair_family"] = "openai"
+    targeted = candidate["reviews"][0]
+    other_primary = next(r for r in candidate["reviews"] if r["role"] == "other-primary")
+    other_primary["provider_family"] = targeted["provider_family"]
+    other_primary["adapter"] = targeted["adapter"]
+    other_primary["model"] = targeted["model"]
+    other_primary["evidence_id"] = targeted["evidence_id"]
+    with pytest.raises(module.Invalid, match="distinct primary family"):
+        module.validate(candidate, ROOT)
+
+
+def test_missing_chair_family_is_rejected():
+    module = load_validator()
+    candidate = fixture()
+    candidate["chair_family"] = "google"
+    with pytest.raises(module.Invalid, match="chair_family"):
+        module.validate(candidate, ROOT)
+
+
+def test_crucial_review_ladder_blocks_with_no_distinct_family_or_recorded_skip():
+    module = load_validator()
+    candidate = fixture("agent-product")
+    candidate["risk_tier"] = "crucial"
+    candidate["reviews"] = [
+        review for review in candidate["reviews"] if review["role"] != "distinct-family"
+    ]
+    with pytest.raises(module.Invalid, match="distinct-family review or recorded skip"):
+        module._validate_reviews(
+            candidate,
+            {item["id"]: item for item in candidate["evidence"]},
+            required=True,
+        )
+
+
+def test_terminal_review_ladder_blocks_with_no_distinct_family_or_recorded_skip():
+    module = load_validator()
+    candidate = fixture("agent-product")
+    candidate["risk_tier"] = "terminal"
+    candidate["reviews"] = [
+        review for review in candidate["reviews"] if review["role"] != "distinct-family"
+    ]
+    candidate["reviews"][0]["lenses"] = ["correctness", "reliability", "adversarial"]
+    with pytest.raises(module.Invalid, match="distinct-family review or recorded skip"):
+        module._validate_reviews(
+            candidate,
+            {item["id"]: item for item in candidate["evidence"]},
+            required=True,
+        )
 
 
 def test_crucial_design_requires_alternatives_failure_analysis_and_containment():
@@ -816,7 +927,7 @@ def test_optional_family_failure_is_recorded_but_non_blocking(tmp_path):
     workspace_root = tmp_path / "agent-product"
     candidate = fixture("agent-product", workspace_root)
     candidate["reviews"].append({
-        "role": "bonus",
+        "role": "distinct-family",
         "provider_family": "google",
         "adapter": "gemini",
         "independent_of_authorship": True,

@@ -97,19 +97,18 @@ scan/extract stages to scout and reserve flagship for synthesis/adjudication
 
 ## Adaptive review topology
 
-For substantial work, normally assign at least three independent targeted
-lenses and one strong full-scope reviewer from the other primary family.
-Targeted lenses may use smaller models; their briefs must differ by failure
-surface. Crucial and terminal work normally add a second strong full-scope
-reviewer from a distinct family when available.
+Review pressure follows the current `HARNESS.md` ladder. Substantial work uses
+multiple targeted lenses and one strong other-primary review. Targeted lenses
+may use smaller models; their briefs must differ by failure surface. Crucial work
+uses a distinct family when available. Terminal work adds stronger targeted and
+adversarial pressure, and any skipped distinct-family leg records its reason.
 
 The chair schedules these legs under a per-run configurable concurrency ceiling
 and may sequence them around deterministic checks. It need not wait for a
-particular model. A missing or late leg requires a recorded substitution,
-compensating evidence, or omitted-leg reason. If the other primary is
-unavailable, two strong full-scope reviewers from other families plus the
-targeted lenses may substitute. Overlap creates defect pressure, not votes;
-objective checks and source evidence remain authoritative.
+particular model. A missing distinct-family leg requires an omitted-leg reason;
+the other-primary leg remains required at substantial and above. Overlap creates
+defect pressure, not votes; objective checks and source evidence remain
+authoritative.
 
 Express chains by **role → tier/family**, resolving names at runtime:
 

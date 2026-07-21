@@ -114,6 +114,7 @@ def make_reference_run(profile_name: str, root: Path = ROOT, *, high_stakes: boo
         "profile": profile_name,
         "status": "awaiting_acceptance",
         "risk_tier": "substantial",
+        "chair_family": "openai",
         "risk_assessment": {
             "blast_radius": "multi-module",
             "reversibility": "moderate",
@@ -202,9 +203,9 @@ def make_reference_run(profile_name: str, root: Path = ROOT, *, high_stakes: boo
             }] if profile_name == "agent-product" else []),
         },
         "reviews": [
-            {"role": "native-review", "provider_family": "openai", "adapter": "native-subagent", "model": "runtime-resolved", "independent_of_authorship": True, "lenses": ["correctness-spec"], "status": "pass", "evidence_id": judgement_by_family["openai"][0], "reason": ""},
+            {"role": "targeted", "provider_family": "openai", "adapter": "native-subagent", "model": "runtime-resolved", "independent_of_authorship": True, "lenses": ["correctness-spec", "tests"], "status": "pass", "evidence_id": judgement_by_family["openai"][0], "reason": ""},
             {"role": "other-primary", "provider_family": "anthropic", "adapter": "claude-code", "model": "runtime-resolved", "independent_of_authorship": True, "lenses": ["architecture-evidence"], "status": "pass", "evidence_id": judgement_by_family["anthropic"][0], "reason": ""},
-            {"role": "bonus", "provider_family": "google", "adapter": "gemini", "model": "", "independent_of_authorship": True, "lenses": ["blind-spots"], "status": "unavailable", "evidence_id": "", "reason": "reference run does not invoke optional providers"},
+            {"role": "distinct-family", "provider_family": "google", "adapter": "gemini", "model": "", "independent_of_authorship": True, "lenses": ["blind-spots"], "status": "unavailable", "evidence_id": "", "reason": "reference run does not invoke optional providers"},
         ],
         "security": {
             "status": security_status,

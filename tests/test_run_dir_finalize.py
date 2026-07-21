@@ -29,14 +29,14 @@ def add_manifest_row(run, row):
         handle.write(row + "\n")
 
 
-def review(review_id, scope, lens, family, tier="flagship", status="complete", substitution_for="", wave=1):
+def review(review_id, scope, lens, family, tier="flagship", status="complete", substitution_for="", wave=1, reason=None):
     evidence_digest = "sha256:" + __import__("hashlib").sha256((review_id + ":evidence").encode()).hexdigest()
     route_digest = "sha256:" + __import__("hashlib").sha256((review_id + ":route").encode()).hexdigest()
     return {
         "id": review_id, "scope": scope, "lens": lens, "family": family,
         "tier": tier, "status": status, "substitution_for": substitution_for,
         "evidence": {"path": f"reviews/{review_id}.md", "digest": evidence_digest},
-        "reason": "provider unavailable" if status != "complete" else "",
+        "reason": reason if reason is not None else ("provider unavailable" if status != "complete" else ""),
         "wave": wave,
         "adapter": "claude" if family == "anthropic" else "codex",
         "model": "opus" if status == "complete" else "",
@@ -47,17 +47,26 @@ def review(review_id, scope, lens, family, tier="flagship", status="complete", s
 
 
 def substantial_plan(risk="substantial"):
-    return {
+    terminal_lens = "adversarial" if risk == "terminal" else "authority"
+    plan = {
         "risk_tier": risk,
         "chair_family": "openai",
         "concurrency_ceiling": 4,
         "reviews": [
             review("target-memory", "targeted", "memory", "openai", "workhorse"),
             review("target-routing", "targeted", "routing", "openai", "workhorse"),
-            review("target-authority", "targeted", "authority", "anthropic", "workhorse"),
-            review("opus-full", "full-scope", "whole-change", "anthropic"),
+            review("target-authority", "targeted", terminal_lens, "anthropic", "workhorse"),
+            review("opus-primary", "primary", "whole-change", "anthropic"),
         ],
     }
+    if risk == "terminal":
+        plan["reviews"].append(
+            review(
+                "distinct-family-skipped", "primary", "distinct-family", "google",
+                status="omitted", reason="not warranted for this change",
+            )
+        )
+    return plan
 
 
 def bind_complete_reviews(run, plan):
@@ -74,24 +83,24 @@ def bind_complete_reviews(run, plan):
             "status": "ok", "adapter": row["adapter"], "resolved_model": row["model"],
             "catalog_model": row["catalog_model"], "model_family": row["family"],
             "route_alias": row["tier"], "reviewer_id": row["reviewer_id"],
-            "cross_family": row["scope"] == "full-scope",
-            "certification_eligible": row["scope"] == "full-scope",
+            "cross_family": row["scope"] == "primary",
+            "certification_eligible": row["scope"] == "primary",
         }))
         row["route_receipt"]["digest"] = "sha256:" + __import__("hashlib").sha256(route.read_bytes()).hexdigest()
 
 
-def test_real_run_allows_unavailable_other_primary_with_two_family_substitution(tmp_path):
+def test_real_run_rejects_unavailable_other_primary_with_distinct_family_reviews(tmp_path):
     plan = substantial_plan()
     plan["reviews"][-1] = review(
-        "primary-down", "full-scope", "other-primary", "anthropic", status="unavailable"
+        "primary-down", "primary", "other-primary", "anthropic", status="unavailable"
     )
     plan["reviews"].extend([
-        review("sub-google", "full-scope", "whole-change-a", "google", substitution_for="other-primary", wave=2),
-        review("sub-xai", "full-scope", "whole-change-b", "xai", substitution_for="other-primary", wave=2),
+        review("sub-google", "primary", "whole-change-a", "google", substitution_for="other-primary", wave=2),
+        review("sub-xai", "primary", "whole-change-b", "xai", substitution_for="other-primary", wave=2),
     ])
     bind_complete_reviews(tmp_path, plan)
 
-    assert run_dir_finalize._validate_review_plan(plan, tmp_path) == []
+    assert any("passing other-primary" in error for error in run_dir_finalize._validate_review_plan(plan, tmp_path))
 
 
 def test_real_run_allows_recorded_targeted_omission(tmp_path):
@@ -112,7 +121,7 @@ def test_real_run_allows_recorded_crucial_second_family_omission(tmp_path):
     plan = substantial_plan("crucial")
     plan["reviews"].append(
         review(
-            "second-family-omitted", "full-scope", "terminal-challenge", "google",
+            "second-family-omitted", "primary", "terminal-challenge", "google",
             status="omitted", substitution_for="additional-distinct-family", wave=2,
         )
     )
@@ -121,7 +130,7 @@ def test_real_run_allows_recorded_crucial_second_family_omission(tmp_path):
     assert run_dir_finalize._validate_review_plan(plan, tmp_path) == []
 
 
-def test_real_run_complete_full_scope_still_requires_route_receipt(tmp_path):
+def test_real_run_complete_primary_still_requires_route_receipt(tmp_path):
     plan = substantial_plan()
     bind_complete_reviews(tmp_path, plan)
     (tmp_path / plan["reviews"][-1]["route_receipt"]["path"]).unlink()
@@ -134,42 +143,62 @@ def test_real_run_complete_full_scope_still_requires_route_receipt(tmp_path):
 def test_substantial_review_topology_is_machine_checked():
     assert run_dir_finalize._validate_review_plan(substantial_plan()) == []
     plan = substantial_plan()
-    plan["reviews"] = plan["reviews"][1:]
-    assert any("three targeted lenses" in error for error in run_dir_finalize._validate_review_plan(plan))
-    plan["reviews"].append(
-        review("target-missing", "targeted", "missing-lens", "google", status="omitted", substitution_for="targeted-lens", wave=2)
-    )
+    other_primary = plan["reviews"][3]
+    plan["reviews"] = [plan["reviews"][0], plan["reviews"][1], other_primary]
     assert run_dir_finalize._validate_review_plan(plan) == []
-    plan["reviews"][-1]["lens"] = plan["reviews"][0]["lens"]
-    assert any("three targeted lenses" in error for error in run_dir_finalize._validate_review_plan(plan))
+    plan["reviews"] = [plan["reviews"][0], other_primary]
+    assert any("targeted lenses" in error for error in run_dir_finalize._validate_review_plan(plan))
 
 
-def test_other_primary_unavailability_requires_two_distinct_family_substitutes():
+def test_other_primary_review_requires_flagship_strength():
     plan = substantial_plan()
-    plan["reviews"][-1] = review("primary-down", "full-scope", "other-primary", "anthropic", status="unavailable")
-    plan["reviews"].extend([
-        review("sub-google", "full-scope", "whole-change-a", "google", substitution_for="other-primary", wave=2),
-        review("sub-xai", "full-scope", "whole-change-b", "xai", substitution_for="other-primary", wave=2),
-    ])
-    assert run_dir_finalize._validate_review_plan(plan) == []
-    plan["reviews"].pop()
-    assert any("two-family substitution" in error for error in run_dir_finalize._validate_review_plan(plan))
+    plan["reviews"][3]["tier"] = "workhorse"
+    assert any("flagship strength" in error for error in run_dir_finalize._validate_review_plan(plan))
+
+
+def test_other_primary_unavailability_remains_load_bearing():
     plan = substantial_plan()
-    plan["reviews"][-1] = review("wrong-primary-down", "full-scope", "other-primary", "google", status="unavailable")
+    plan["reviews"][-1] = review("primary-down", "primary", "other-primary", "anthropic", status="unavailable")
     plan["reviews"].extend([
-        review("sub-xai", "full-scope", "whole-change-a", "xai", substitution_for="other-primary", wave=2),
-        review("sub-mistral", "full-scope", "whole-change-b", "mistral", substitution_for="other-primary", wave=2),
+        review("sub-google", "primary", "whole-change-a", "google", substitution_for="other-primary", wave=2),
+        review("sub-xai", "primary", "whole-change-b", "xai", substitution_for="other-primary", wave=2),
     ])
-    assert any("other-primary" in error for error in run_dir_finalize._validate_review_plan(plan))
+    assert any("passing other-primary" in error for error in run_dir_finalize._validate_review_plan(plan))
 
 
 def test_crucial_review_topology_records_unavailable_second_family():
     plan = substantial_plan("crucial")
-    assert any("second distinct-family" in error for error in run_dir_finalize._validate_review_plan(plan))
+    assert any(
+        "distinct-family" in error for error in run_dir_finalize._validate_review_plan(plan)
+    )
     plan["reviews"].append(
-        review("second-family-down", "full-scope", "terminal-challenge", "google", status="unavailable", substitution_for="additional-distinct-family", wave=2)
+        review("second-family-down", "primary", "terminal-challenge", "google", status="unavailable", substitution_for="additional-distinct-family", wave=2)
     )
     assert run_dir_finalize._validate_review_plan(plan) == []
+
+
+def test_crucial_review_topology_blocks_with_no_distinct_family_or_recorded_skip():
+    plan = substantial_plan("crucial")
+    assert any(
+        "distinct-family review or recorded skip" in error
+        for error in run_dir_finalize._validate_review_plan(plan)
+    )
+
+
+def test_terminal_review_topology_blocks_with_no_distinct_family_or_recorded_skip():
+    plan = substantial_plan("terminal")
+    plan["reviews"] = plan["reviews"][:-1]
+    assert any(
+        "distinct-family review or recorded skip" in error
+        for error in run_dir_finalize._validate_review_plan(plan)
+    )
+
+
+def test_terminal_review_topology_uses_adversarial_pressure_without_fixed_provider_count():
+    plan = substantial_plan("terminal")
+    assert run_dir_finalize._validate_review_plan(plan) == []
+    plan["reviews"][2]["lens"] = "authority"
+    assert any("adversarial" in error for error in run_dir_finalize._validate_review_plan(plan))
 
 
 def test_review_topology_rejects_invalid_concurrency_ceiling():
@@ -257,13 +286,24 @@ def test_targeted_reviews_require_distinct_reviewer_and_artifact_identity():
     assert any("distinct route_receipt" in error for error in errors)
 
 
-@pytest.mark.parametrize(("family", "tier"), (("openai", "flagship"), ("anthropic", "flagship"), ("google", "workhorse")))
-def test_crucial_omission_must_be_distinct_family_flagship(family, tier):
+@pytest.mark.parametrize(("family", "tier"), (("openai", "flagship"), ("anthropic", "flagship")))
+def test_primary_family_recorded_omission_does_not_satisfy_distinct_family(family, tier):
     plan = substantial_plan("crucial")
     plan["reviews"].append(
-        review("invalid-extra", "full-scope", "terminal-challenge", family, tier=tier, status="omitted", substitution_for="additional-distinct-family", wave=0)
+        review("invalid-extra", "primary", "terminal-challenge", family, tier=tier, status="omitted", substitution_for="additional-distinct-family", wave=0)
     )
-    assert any("second distinct-family" in error for error in run_dir_finalize._validate_review_plan(plan))
+    assert any(
+        "distinct-family review or recorded skip" in error
+        for error in run_dir_finalize._validate_review_plan(plan)
+    )
+
+
+def test_recorded_distinct_family_skip_counts_regardless_of_tier():
+    plan = substantial_plan("crucial")
+    plan["reviews"].append(
+        review("invalid-extra", "primary", "terminal-challenge", "google", tier="workhorse", status="omitted", substitution_for="additional-distinct-family", wave=0)
+    )
+    assert run_dir_finalize._validate_review_plan(plan) == []
 
 
 @pytest.mark.parametrize(("field", "value"), (("risk_tier", []), ("chair_family", [])))

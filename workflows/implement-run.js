@@ -26,7 +26,7 @@
 //   plan framing / per-angle review / build       -> mid tier (intent)
 //   plan adjudication / synthesis / apply-gate     -> flagship tier (intent; the orchestrator session)
 //   other-primary explore + review                 -> Codex via cf_dispatch.sh
-//   bonus independent lens                         -> Cursor/xAI or Agy/Gemini when available
+//   distinct-family independent lens               -> Cursor/xAI or Agy/Gemini when warranted
 
 export const meta = {
   name: 'implement-run',
@@ -320,12 +320,12 @@ function crossFamilyDispatchHint(runDir, gitCwd, kind = 'primary') {
     'Apply the host data policy before dispatch.'
   )
   return (
-    'Attempt one non-load-bearing bonus-family worker in parallel. Prefer a current xAI model through ' +
-    'cursor-agent; Gemini through Agy is also valid. Discover and pin the exact model, keep the route ' +
-    'read-only or best-effort, and capture adapter, model_family, status and output. Do not substitute ' +
-    'Claude or OpenAI and do not wait or retry on quota/API failure. Any missing output is ' +
-    'BONUS-FAMILY-NOT-RUN: <reason> and never blocks the workflow. Bonus findings are advisory until ' +
-    'a primary-family reviewer corroborates their evidence.'
+    'Use a distinct-family reviewer when warranted. Prefer a current xAI model through cursor-agent; ' +
+    'Gemini through Agy is also valid. Discover and pin the exact model, keep the route read-only or ' +
+    'best-effort, and capture adapter, model_family, status and output. Do not substitute Claude or ' +
+    'OpenAI and do not wait or retry on quota/API failure. Any skipped leg is ' +
+    'DISTINCT-FAMILY-NOT-RUN: <reason> and never replaces the other-primary gate. Distinct-family ' +
+    'findings are advisory until a primary-family reviewer corroborates their evidence.'
   )
 }
 
@@ -578,13 +578,13 @@ const REVIEW_ANGLES = [
   { angle: 'regression-and-structure', model: models.criticalReviewer, cf: '', required: true, lens: 'dependency-cone regressions, ownership, state/types, atomicity and simplification' },
   { angle: 'scope-and-risk', model: models.criticalReviewer, cf: '', required: true, lens: 'scope drift, risk tier and authority boundaries' },
   { angle: 'other-primary', model: models.scout, cf: 'primary', required: true, lens: 'drive an independent OpenAI-primary adversarial review' },
-  { angle: 'bonus-family', model: models.scout, cf: 'bonus', required: false, lens: 'attempt an xAI/Gemini independent lens without making it load-bearing' },
+  { angle: 'distinct-family', model: models.scout, cf: 'distinct-family', required: false, lens: 'distinct-family blind-spot pressure when warranted' },
 ]
 let reviews = []
 let verify = null
 let blocking = 0
 let otherPrimaryRan = false
-let bonusRan = false
+let distinctFamilyRan = false
 let checksPass = false
 let repairCycles = 0
 let patchDigest = ''
@@ -603,7 +603,7 @@ for (let cycle = 0; cycle <= 2; cycle += 1) {
           ESCALATION_RULES +
           '\nFor a native Claude review, set crossFamily to ran=false, tool="", status="not-applicable", ' +
           'modelFamily="anthropic", endpointProvider="anthropic", crossFamily=false, certificationEligible=false, readOnlyGuarantee="none", ' +
-          'outputPath="", routeReceipt="", notRunReason="native-review". For a dispatched review, copy every normalised field ' +
+          'outputPath="", routeReceipt="", notRunReason="targeted-review". For a dispatched review, copy every normalised field ' +
           'from the dispatcher record; do not infer or relabel lineage.\n' +
           `\nWrite full review to ${runDir}/findings/review-${cycle}-${rv.angle}.md and return the structured verdict.` +
           (rv.cf ? '\n' + crossFamilyDispatchHint(runDir, gitCwd, rv.cf) : ''),
@@ -618,21 +618,21 @@ for (let cycle = 0; cycle <= 2; cycle += 1) {
       issues: REVIEW_ANGLES[index].required
         ? [{ severity: 'P1', patchPath: '', detail: 'required review lane failed or returned no result' }]
         : [],
-      crossFamily: { ran: false, tool: '', status: 'unavailable', modelFamily: '', endpointProvider: '', crossFamily: false, certificationEligible: false, readOnlyGuarantee: 'none', outputPath: '', routeReceipt: '', notRunReason: REVIEW_ANGLES[index].required ? 'review-lane-failed' : 'bonus-review-unavailable' },
+      crossFamily: { ran: false, tool: '', status: 'unavailable', modelFamily: '', endpointProvider: '', crossFamily: false, certificationEligible: false, readOnlyGuarantee: 'none', outputPath: '', routeReceipt: '', notRunReason: REVIEW_ANGLES[index].required ? 'review-lane-failed' : 'distinct-family-review-unavailable' },
       path: '',
     },
   )
-  const bonusReview = reviews.find((r) => r.angle === 'bonus-family')
-  if (bonusReview && bonusReview.crossFamily && bonusReview.crossFamily.ran && bonusReview.issues.length > 0) {
+  const distinctFamilyReview = reviews.find((r) => r.angle === 'distinct-family')
+  if (distinctFamilyReview && distinctFamilyReview.crossFamily && distinctFamilyReview.crossFamily.ran && distinctFamilyReview.issues.length > 0) {
     const corroborated = await agent(
-      'Corroborate the bonus-family review against the actual patches, repository context and acceptance criteria. ' +
+      'Corroborate the distinct-family review against the actual patches, repository context and acceptance criteria. ' +
       'Treat it as a lead, not authority. Return block only for a reproducible, task-relevant defect supported by ' +
         'primary evidence; otherwise approve or approve-with-nits. This is a native Claude corroboration: set ' +
         'crossFamily to ran=false, tool="", status="not-applicable", modelFamily="anthropic", ' +
         'endpointProvider="anthropic", crossFamily=false, certificationEligible=false, readOnlyGuarantee="none", outputPath="", routeReceipt="", ' +
         'notRunReason="native-corroboration".\n' +
-        `Bonus review: ${JSON.stringify(bonusReview)}\nPatches: ${patchDigest}\nTask: ${task}`,
-      { label: `review:${cycle}:bonus-corroboration`, phase: 'Review', schema: REVIEW_SCHEMA, model: models.criticalReviewer },
+        `Distinct-family review: ${JSON.stringify(distinctFamilyReview)}\nPatches: ${patchDigest}\nTask: ${task}`,
+      { label: `review:${cycle}:distinct-family-corroboration`, phase: 'Review', schema: REVIEW_SCHEMA, model: models.criticalReviewer },
     )
     if (corroborated) reviews.push(corroborated)
   }
@@ -640,8 +640,8 @@ for (let cycle = 0; cycle <= 2; cycle += 1) {
     (index >= REVIEW_ANGLES.length || REVIEW_ANGLES[index].required) && r.verdict === 'block'
   ).length
   otherPrimaryRan = reviews.some((r) => r.angle === 'other-primary' && r.crossFamily && r.crossFamily.ran && r.crossFamily.status === 'ok' && r.crossFamily.crossFamily && r.crossFamily.certificationEligible && ['enforced', 'oauth_safe_mode'].includes(r.crossFamily.readOnlyGuarantee))
-  bonusRan = reviews.some((r) => r.angle === 'bonus-family' && r.crossFamily && r.crossFamily.ran && r.crossFamily.status === 'ok')
-  log(`Review cycle ${cycle}: ${reviews.length} verdicts, ${blocking} blocking; other-primary ${otherPrimaryRan ? 'ran' : 'NOT run'}; bonus ${bonusRan ? 'ran' : 'not available'}.`)
+  distinctFamilyRan = reviews.some((r) => r.angle === 'distinct-family' && r.crossFamily && r.crossFamily.ran && r.crossFamily.status === 'ok')
+  log(`Review cycle ${cycle}: ${reviews.length} verdicts, ${blocking} blocking; other-primary ${otherPrimaryRan ? 'ran' : 'NOT run'}; distinct-family ${distinctFamilyRan ? 'ran' : 'not available'}.`)
   await checkpoint(`review-${cycle}-complete`, 'run objective verification', [], reviews.map((r) => r.path).filter(Boolean))
 
   phase('Verify')
@@ -727,7 +727,7 @@ const apply = await agent(
     'patch at a time (avoids concurrent-write corruption on non-git trees).\n' +
     `Auto-apply permitted this run: ${autoApplyAllowed} (objective checks passed, no reviewer blocked, ` +
     `and required other-primary coverage ran for this risk tier). Other-primary ran: ${otherPrimaryRan}; ` +
-    `bonus-family ran: ${bonusRan} (bonus availability never blocks).\n` +
+    `distinct-family availability never replaces other-primary coverage; ran: ${distinctFamilyRan}.\n` +
     'Pre-apply freshness guard (do this BEFORE applying anything):\n' +
     '- If the repo root is a git tree, run `git -C <repo-root> status --porcelain`. Each patch targets ' +
     'specific files; for every target file that already shows uncommitted local changes, DO NOT apply ' +
@@ -759,11 +759,11 @@ const apply = await agent(
     `status=active while this change awaits human acceptance. Record unresolved blockers and every reviewer lane ` +
     `including failures. The preserved cross-family dispatch record supplies ` +
     `adapter/model_family, output_path, dispatch_status, cross_family, certification_eligible and read_only_guarantee; ` +
-    `role=native-review for a fresh Claude subagent, role=other-primary only for a certified ` +
-    `OpenAI-family reviewer with its exact route_receipt path, output sha256 and reviewed_revision, and role=bonus-family-N for xAI/Gemini attempts including failed/unavailable ` +
-    `status plus reason. If a terminal run cannot attempt two distinct bonus families, record bonus_coverage_reason; ` +
-    `bonus-family failure never enters unresolved_blockers. Populate review_council from at least two distinct blind ` +
-    `native/other-primary review artifacts, ${JSON.stringify(councilChallenge || {})}, and ${JSON.stringify(councilReduction || {})}; ` +
+    `role=targeted for fresh targeted lenses, role=other-primary only for a certified ` +
+    `OpenAI-family reviewer with its exact route_receipt path, output sha256 and reviewed_revision, and role=distinct-family for advisory distinct-family attempts including failed/unavailable ` +
+    `status plus reason. For terminal work, apply stronger targeted and adversarial pressure; if a distinct family is skipped, record distinct_family_coverage_reason. ` +
+    `Distinct-family failure never replaces other-primary coverage. Populate review_council from at least two distinct blind ` +
+    `targeted/other-primary review artifacts, ${JSON.stringify(councilChallenge || {})}, and ${JSON.stringify(councilReduction || {})}; ` +
     `record distinct paths, output SHA-256 values, actor family/adapter/review role, final reviewed_revision and post_repair_review; ` +
     `name the correctness lens exactly correctness-spec. Run ` +
     `${'${AGENTS_HOME:-$HOME/.agents}'}/skills/deliver/scripts/validate_delivery.py ${runDir}/RUN.json --workspace-root ${gitCwd} --verify-hashes. ` +
@@ -789,7 +789,7 @@ if (effectiveRisk === 'terminal' && appliedN === 0 && escalatedN > 0) {
   return {
     task, runId, runDir, chosenFraming: chosen.chosenFraming, patchesEmitted: built.patches.length,
     checksPass, blockingReviews: blocking, otherPrimaryReviewRan: otherPrimaryRan,
-    bonusFamilyReviewRan: bonusRan, repairCycles, state: 'awaiting-apply-approval',
+    distinctFamilyReviewRan: distinctFamilyRan, repairCycles, state: 'awaiting-apply-approval',
     applied: appliedN, escalated: escalatedN, manifest: apply.manifestPath,
     recommendation: apply.recommendationPath, runReceipt: apply.runPath, machineGatePassed: false,
   }
@@ -807,7 +807,7 @@ if (!apply || !apply.machineGatePassed) {
     checksPass,
     blockingReviews: blocking,
     otherPrimaryReviewRan: otherPrimaryRan,
-    bonusFamilyReviewRan: bonusRan,
+    distinctFamilyReviewRan: distinctFamilyRan,
     repairCycles,
     state: 'failed',
     applied: appliedN,
@@ -831,7 +831,7 @@ return {
   checksPass,
   blockingReviews: blocking,
   otherPrimaryReviewRan: otherPrimaryRan,
-  bonusFamilyReviewRan: bonusRan,
+  distinctFamilyReviewRan: distinctFamilyRan,
   repairCycles,
   state: 'awaiting-human',
   applied: appliedN,

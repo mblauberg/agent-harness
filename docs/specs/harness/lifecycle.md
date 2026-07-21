@@ -212,13 +212,15 @@ Required invariants:
 - authority may be narrowed by delegates but not broadened;
 - actual model/provider lineage is recorded when model work affects a gate;
 - reviewer independence is explicit;
-- optional-family failure records a reason but cannot fail a primary gate;
+- distinct-family failure records a reason but cannot replace the other-primary gate;
 - acceptance and release are separate;
 - a profile validator may add requirements but not remove kernel invariants.
 
 ## Design and risk gate
 
-Risk tiers remain `routine`, `substantial`, `crucial` and `terminal`.
+Risk tiers remain `routine`, `substantial`, `crucial` and `terminal`. Review
+pressure follows [`HARNESS.md`](../../../HARNESS.md); this specification does
+not duplicate the tier ladder.
 Substantial, crucial and terminal runs require an intent/design artifact.
 Crucial and terminal runs additionally require alternatives, threat/failure
 analysis, rollback or containment, unresolved decisions and named user
@@ -256,11 +258,12 @@ alignment, security, privacy, performance, reliability/concurrency, state/type
 boundaries, test/eval coverage, accessibility, evidence quality,
 readability/maintainability and structural simplification.
 
-Substantial work requires a fresh native reviewer and the other primary family.
-Crucial work also attempts an advisory family. Reviewers work independently
-before synthesis. The reducer adjudicates against evidence and records
-disagreement; no majority vote can override a deterministic failure or user
-authority.
+Substantial work requires multiple targeted lenses and the other primary family.
+Crucial work uses a distinct family when available. Terminal work increases
+targeted and adversarial pressure and records any skipped distinct-family leg.
+Reviewers work independently before synthesis. The reducer adjudicates against
+evidence and records disagreement; no majority vote can override a deterministic
+failure or user authority.
 
 ## Local skill evidence and shared exports
 
@@ -453,7 +456,7 @@ cases are labelled separately.
 
 - Run regression and public-safety checks.
 - Exercise all profiles with reference runs and negative cases.
-- Obtain independent native, Fable/Opus and optional-family review.
+- Obtain independent targeted, other-primary and available distinct-family review.
 - Repair, record remaining degradation and request final user acceptance.
 
 ## Stability and rollback
@@ -490,8 +493,8 @@ The refactor is complete when:
    declared thresholds across repeated trials.
 10. Public-safety, deterministic harness tests, clean-install tests and context
     budgets pass.
-11. A Fable/Opus peer and a fresh Codex/native reviewer independently report no
-    unresolved blocking findings.
+11. The other-primary reviewer and fresh targeted reviewers independently report
+    no unresolved blocking findings.
 12. The user accepts the completed lifecycle; release remains a separate gate.
 
 ### Implementation evidence
@@ -506,7 +509,7 @@ The refactor is complete when:
 | 8 | `manage_installation.py`, rename registry and managed-install tests |
 | 9 | balanced core fixtures, held-out dataset and repeated Fable routing receipts |
 | 10 | `scripts/check-harness`, public-release check, clean-install and context-budget suites |
-| 11 | HREF-002 fresh native and Fable review artifacts after the final source freeze |
+| 11 | HREF-002 targeted and other-primary review artifacts after the final source freeze |
 | 12 | Explicit user acceptance evidence; no release or push authority is implied |
 
 ## Known risks and controls

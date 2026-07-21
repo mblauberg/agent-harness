@@ -24,9 +24,10 @@ resulting system, not the changed lines alone.
    is mandatory; add security/privacy, data/concurrency,
    performance/reliability, tests, architecture, readability, UX/accessibility
    or operations only when activated by the dependency cone.
-5. For substantial+ or wide-surface work, normally use at least 3 blind targeted agents
-   with distinct primary lenses and deliberate overlap on the riskiest
-   invariant. `orchestrate` adds the required full-scope family reviews. Then
+5. For substantial+ or wide-surface work, use independent targeted agents with
+   distinct primary lenses and deliberate overlap on the riskiest invariant.
+   `orchestrate` adds the required other-primary and distinct-family review
+   pressure from `HARNESS.md`. Then
    run an anonymised claim challenge and a fresh reduction.
    Never rank prose or majority-vote findings.
 6. Review the design delta. Look for duplicated ownership, scattered flags,
