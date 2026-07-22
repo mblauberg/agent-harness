@@ -73,6 +73,23 @@ describe("provider action dispatch request canonicalisation", () => {
       { ...spawnRequest(), payload: { taskId: "task-2" } },
       "provider payload task ID conflicts with the canonical top-level task ID",
     ],
+    [
+      "a NUL-containing adapter identity",
+      { ...spawnRequest(), adapterId: "fake\0lifecycle" },
+      "provider adapter ID and action ID must not contain NUL",
+    ],
+    [
+      "a NUL-containing action identity",
+      {
+        adapterId: "fake-lifecycle",
+        actionId: "provider-action\0steer",
+        operation: "steer",
+        certifyingReview: null,
+        payload: {},
+        commandId: "provider-action:steer:command",
+      },
+      "provider adapter ID and action ID must not contain NUL",
+    ],
   ])("rejects %s", (_case, malformed, message) => {
     expect(() => canonicaliseProviderActionDispatchRequest(
       malformed as ProviderActionDispatchRequest,
