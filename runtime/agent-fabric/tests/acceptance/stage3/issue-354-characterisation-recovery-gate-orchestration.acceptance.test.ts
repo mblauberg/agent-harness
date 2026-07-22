@@ -274,6 +274,7 @@ describe("S1 E4 and GATE: settlement ordering and certifying budget boundary", (
     await expect(reopened.recoverStartupState()).resolves.toMatchObject({ actionsReconciled: 0, actionsQuarantined: 0 });
   });
 
+  // Permanent by design: RESTATE decision; this GATE-B' characterisation remains skipped.
   it.skip("GATE-B' DECISION-GATE RESOLVED (restate): certifying settlement is owner-agnostic BY DESIGN", () => {
     // Decision gate (#354 S1->S2) RESOLVED 2026-07-21: verdict = RESTATE, not fix. Owner-agnostic budget
     // settlement is intended behaviour, not a latent bug. Settlement is ledger bookkeeping on a reservation
