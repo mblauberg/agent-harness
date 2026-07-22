@@ -80,8 +80,8 @@ bootstrap operation. It binds the current configuration and compatibility
 digests and reconciles an ambiguous prior action before another effect. A
 diagnostic command may be shown as inert copyable text; the Console does not
 embed a shell or execute arbitrary remediation. Supported fresh launch and
-bootstrap sequencing remains owned by GitHub issue `#139`; the Console owns the
-stage presentation, diagnostics and reviewed retry path.
+bootstrap sequencing landed through issue #139 and PR #173; the Console owns
+the stage presentation, diagnostics and reviewed retry path.
 
 On the first Console/Fabric read or command, the client library uses a
 lock-safe, idempotent bootstrap protocol to attach to the existing machine-wide
@@ -165,5 +165,6 @@ The following decisions remain nonbinding: automatic context-pressure control an
 thresholds/hysteresis/maximum compactions; task-local Pareto or learned routing
 and its quality floors/trial volumes/expiry policy; versioned provider deep-mode
 IDs or cross-primary deep execution; a total provider-visible discovery-surface
-ceiling; OpenCode login/activation; and global model, effort, hook or paid
-data-residency preferences.
+ceiling; and global model, effort, hook or paid data-residency preferences.
+OpenCode activation has landed and is governed by the live adapter
+compatibility configuration and Agent Fabric operations runbook.

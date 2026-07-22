@@ -1,6 +1,7 @@
 # Skill portfolio evaluation appendix
 
-Evidence cut-off: 19 July 2026
+Evaluation evidence cut-off: 19 July 2026
+Current-state note refreshed: 23 July 2026
 Predecessor delivery run: `SKAUD-20260714`
 
 This appendix is the durable evidence index for the 2026 portfolio refactor.
@@ -30,11 +31,11 @@ infrastructure status, not a semantic routing failure.
 
 The outstanding refresh is exactly three fresh no-retry trials on exact Fabric
 routes `Gemini 3.1 Pro (High)` through `agy` and `cursor-grok-4.5-high`
-(Grok 4.5, high) through `cursor-agent`. Re-run only after
-[issue #330](https://github.com/mblauberg/provenant/issues/330) resolves the
-public provider-action task binding and a reviewed Fabric run grants task-bound
-provider-action authority. Retain every terminal action without retrying or
-relabelling failures.
+(Grok 4.5, high) through `cursor-agent`. The public provider-action task binding
+landed through [PR #331](https://github.com/mblauberg/provenant/pull/331); a
+rerun still requires a reviewed Fabric run with task-bound provider-action
+authority. Retain every terminal action without retrying or relabelling
+failures.
 
 ## Predecessor routing evidence
 

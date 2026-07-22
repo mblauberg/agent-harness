@@ -44,14 +44,14 @@ Alternatives rejected for now:
 - **npm to pnpm** — same split, different tool; the lockfile integrity pin
   would need re-proving.
 - **tsx to `node --strip-types`** — plausible simplification inside the Node
-  family; deferred pending the equivalence experiment tracked in issue
-  #201's orbit.
+  family, but deferred until a separately scoped equivalence experiment is
+  justified.
 
 ## Consequences
 
 - `fabric_node` and lockfile-integrity pins stay authoritative; no
   Bun-conditional paths are added.
-- Cold-start work continues inside the Node family (#198 done; #199, #200,
-  #201 open).
+- The linked #198–#201 follow-ups preserve the delivery-time investigation;
+  GitHub issues and Project Status, not this ADR, own their terminal state.
 - A future runtime-family proposal needs a separately approved scope and a
   new provenance/compatibility proof before any swap.
