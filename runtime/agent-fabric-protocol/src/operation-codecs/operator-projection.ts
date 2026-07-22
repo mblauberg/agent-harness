@@ -273,12 +273,70 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
     state: text,
     checkState: enumeration(["pending", "passing", "failing", "unknown"]),
   });
+  const agentTeamTopologyMembershipCodec = objectCodec({
+    teamId: identifier,
+    teamGeneration: positiveInteger,
+    relationship: enumeration(["Lead", "Member"]),
+    leadAgentId: identifier,
+  });
+  const agentTopologyCodec = objectCodec({
+    topologyRevision: positiveInteger,
+    teams: objectCodec({
+      observation: literal("Observed"),
+      memberships: arrayOf(agentTeamTopologyMembershipCodec, { maximum: 4 }),
+    }),
+    supervisor: unionOf([
+      objectCodec({ observation: literal("Observed"), agentId: identifier }),
+      objectCodec({ observation: literal("Unobserved") }),
+    ]),
+    currentTask: unionOf([
+      objectCodec({
+        observation: literal("Observed"),
+        taskId: identifier,
+        taskRevision: positiveInteger,
+        ownerLeaseGeneration: positiveInteger,
+      }),
+      objectCodec({ observation: literal("Unobserved") }),
+      objectCodec({ observation: literal("Unknown"), reason: literal("MultipleActiveClaims") }),
+    ]),
+    nativeChildren: objectCodec({ observation: literal("Unobserved") }),
+  });
+  const factCandidates = (fact: Record<string, unknown>): Record<string, unknown>[] => (
+    fact.freshness === "conflict"
+      ? fact.candidates as Record<string, unknown>[]
+      : fact.freshness === "unavailable"
+        ? []
+        : [fact.value as Record<string, unknown>]
+  );
+  const validateAgentTopology = (
+    topology: Record<string, unknown> | undefined,
+    agentId: unknown,
+    snapshotRevision: unknown,
+    path: string,
+  ): void => {
+    if (topology === undefined) return;
+    if (topology.topologyRevision !== snapshotRevision) {
+      throw new TypeError(`${path}.topologyRevision must match snapshotRevision`);
+    }
+    const teams = topology.teams as Record<string, unknown>;
+    const memberships = teams.memberships as Record<string, unknown>[];
+    const teamIds = new Set(memberships.map((membership) => membership.teamId));
+    if (teamIds.size !== memberships.length) {
+      throw new TypeError(`${path}.teams.memberships must have unique teamId values`);
+    }
+    for (const membership of memberships) {
+      const relationship = membership.leadAgentId === agentId ? "Lead" : "Member";
+      if (membership.relationship !== relationship) {
+        throw new TypeError(`${path}.teams.memberships relationship must match leadAgentId`);
+      }
+    }
+  };
   const agentSummaryCodec = objectCodec({
     kind: literal("agent"),
     role: enumeration(["chair", "lead", "worker", "reviewer"]),
     lifecycle: text,
     contextPressure: enumeration(["low", "medium", "high", "unknown"]),
-  });
+  }, { topology: agentTopologyCodec });
   const evidenceSummaryCodec = objectCodec({
     kind: literal("evidence"),
     evidenceKind: enumeration(["artifact", "diff", "test", "review", "receipt"]),
@@ -365,11 +423,23 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
     operatorViewPageBaseCodec,
     (value) => {
       if (Reflect.get(value as object, "status") !== "page") return value;
+      const view = Reflect.get(value as object, "view");
+      const snapshotRevision = Reflect.get(value as object, "snapshotRevision");
       const rows = Reflect.get(value as object, "rows") as Array<Record<string, unknown>>;
       for (const [index, row] of rows.entries()) {
         const fact = row.fact as Record<string, unknown>;
         if (row.itemRevision !== fact.revision) {
           throw new TypeError(`operatorViewPage.rows[${String(index)}] item revision does not match fact revision`);
+        }
+        if (view !== "agents") continue;
+        for (const candidate of factCandidates(fact)) {
+          const summary = candidate.summary as Record<string, unknown>;
+          validateAgentTopology(
+            summary.topology as Record<string, unknown> | undefined,
+            row.itemId,
+            snapshotRevision,
+            `operatorViewPage.rows[${String(index)}].fact.topology`,
+          );
         }
       }
       return value;
@@ -423,7 +493,7 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
       lifecycle: text,
       provider: text,
       providerSessionGeneration: positiveInteger,
-    }),
+    }, { topology: agentTopologyCodec }),
     objectCodec({
       kind: literal("evidence"),
       evidenceId: identifier,
@@ -500,6 +570,17 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
         throw new TypeError("operatorDetailRead detail kind does not match reference");
       }
       for (const detail of values) {
+        if (detail.kind === "agent") {
+          if (detail.agentId !== detailRef.agentId) {
+            throw new TypeError("operatorDetailRead agent identity does not match reference");
+          }
+          validateAgentTopology(
+            detail.topology as Record<string, unknown> | undefined,
+            detail.agentId,
+            Reflect.get(value as object, "snapshotRevision"),
+            "operatorDetailRead.detail.topology",
+          );
+        }
         if (detail.kind !== "run" || detail.identity === undefined) continue;
         const identity = detail.identity as Record<string, unknown>;
         if (identity.chairAgentId !== detail.chairAgentId) {

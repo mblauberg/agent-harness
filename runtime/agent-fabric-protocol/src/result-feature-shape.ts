@@ -19,6 +19,7 @@ export const NATIVE_NOTIFICATION_PROJECTION_FEATURE =
 export const RUN_SESSION_PROJECTION_FEATURE = "run-session-projection.v1" as const;
 export const DECLARED_RUN_PROGRESS_FEATURE = "declared-run-progress.v2" as const;
 export const RUN_IDENTITY_PROJECTION_FEATURE = "run-identity-projection.v2" as const;
+export const AGENT_TOPOLOGY_PROJECTION_FEATURE = "agent-topology-projection.v1" as const;
 
 export type ProtocolResultShapeFailureReason =
   | "missing-negotiated-field"
@@ -188,6 +189,27 @@ function runIdentityPresence(
   return [];
 }
 
+function agentTopologyPresence(
+  operation: ProtocolOperation,
+  result: OperationResultMap[ProtocolOperation],
+): readonly boolean[] {
+  if (operation === FABRIC_OPERATIONS.projectionViewPage) {
+    const page = result as OperatorViewPageResult;
+    if (page.status !== "page" || page.view !== "agents") return [];
+    const agents = page as Extract<OperatorViewPageResult<"agents">, { status: "page" }>;
+    return agents.rows.flatMap((row) => factValues(row.fact)
+      .map((value) => value.summary.topology !== undefined));
+  }
+  if (operation === FABRIC_OPERATIONS.projectionDetailRead) {
+    const read = result as OperatorDetailReadResult;
+    if (read.status !== "current") return [];
+    return factValues(read.detail).flatMap((detail) => (
+      detail.kind === "agent" ? [detail.topology !== undefined] : []
+    ));
+  }
+  return [];
+}
+
 function assertUniformFeaturePresence(
   operation: ProtocolOperation,
   featureNegotiated: boolean,
@@ -256,6 +278,11 @@ export function assertOperationResultFeatureShape<Operation extends ProtocolOper
     operation,
     features.includes(RUN_IDENTITY_PROJECTION_FEATURE),
     runIdentityPresence(operation, result as OperationResultMap[ProtocolOperation]),
+  );
+  assertUniformFeaturePresence(
+    operation,
+    features.includes(AGENT_TOPOLOGY_PROJECTION_FEATURE),
+    agentTopologyPresence(operation, result as OperationResultMap[ProtocolOperation]),
   );
   return result;
 }
