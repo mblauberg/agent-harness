@@ -40,29 +40,19 @@ agent's own mistakes.
 
 ## How it fits together
 
-Provenant is three parts working as one pipeline:
+Three parts bear on every request at once: the constitution sets the rules,
+a skill supplies the procedure, and Agent Fabric executes and cross-reviews
+the work. None of them is a stage the work passes through.
 
 ```mermaid
 flowchart TB
-    U(["User request"])
-    subgraph Harness["HARNESS.md — the constitution"]
-      direction LR
-      A["Authority<br/>access is not permission"]
-      L["Delivery lifecycle<br/>scope to review"]
-      R["Review pressure<br/>scales with risk tier"]
-    end
-    subgraph Skills["Skills library — 32 Agent Skills"]
-      SK["one SKILL.md per task<br/>only descriptions stay in context<br/>a body loads when the task matches"]
-    end
-    subgraph Fabric["Agent Fabric — cross-provider execution"]
-      direction LR
-      P1["Claude Code and Codex<br/>primary clients"]
-      P2["optional providers<br/>Agy, Cursor, Kiro, OpenCode"]
-    end
-    U --> Harness
-    Harness --> Skills
-    Skills --> Fabric
-    Fabric --> OUT(["Scoped, verified,<br/>independently reviewed change"])
+    accTitle: The three parts and the delivery loop they serve
+    accDescr: A user request enters the delivery loop, which runs scope, implement, verify and review, and produces a scoped, verified, independently reviewed change. Three parts act on that loop concurrently rather than in sequence. HARNESS.md, the constitution, sets the rules — authority, lifecycle and review pressure. The skills library supplies the procedure, one SKILL.md per task loaded when the task matches. Agent Fabric runs and reviews the work across providers, with Claude Code and Codex as primaries reviewing each other and optional providers separately activated.
+    U(["User request"]) --> LOOP["Delivery loop<br/>scope · implement · verify · review"]
+    LOOP --> OUT(["Scoped, verified,<br/>independently reviewed change"])
+    H["HARNESS.md — the constitution<br/>authority · lifecycle · review pressure"] -. "sets the rules" .-> LOOP
+    SK["Skills library — 32 Agent Skills<br/>one procedure per task, loaded on match"] -. "supplies the procedure" .-> LOOP
+    F["Agent Fabric — cross-provider execution<br/>Claude Code and Codex review each other;<br/>optional providers stay separately activated"] -. "runs and reviews the work" .-> LOOP
     classDef out fill:#1f6f43,stroke:#4fd08a,color:#ffffff,stroke-width:2px
     class OUT out
 ```
