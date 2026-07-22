@@ -40,6 +40,7 @@ Important boundaries:
 - `../agent-fabric-protocol/`: sole public operation, schema and MCP descriptor owner
 - `../agent-fabric-console/`: standalone responsive operator TUI
 - `../agent-fabric-herdr/`: typed Herdr control and degraded-steer boundary
+- `../agent-fabric-review-portal-supervisor/`: native review-portal process and filesystem-custody boundary
 
 ## Development
 
