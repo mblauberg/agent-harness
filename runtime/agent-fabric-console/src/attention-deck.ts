@@ -1,7 +1,8 @@
 import { attentionDeckLayoutFor, chromeText, fitCells, writeFixedCells, type Rect } from "./layout.js";
-import type { PresentedDeckRow, PresentedRow, FabricConsolePresentation, FabricConsoleUiState } from "./presenter.js";
+import type { PresentedDeckRow, PresentedHeader, PresentedRow, FabricConsolePresentation, FabricConsoleUiState } from "./presenter.js";
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
 import type { FabricHitBinding, FabricHitRegion } from "./index.js";
+import { attentionPinId, deckPinId } from "./view-filter.js";
 
 type AttentionDeckRenderInput = Readonly<{
   rows: string[];
@@ -52,28 +53,59 @@ function bindingFor(
       };
 }
 
-function rowText(row: PresentedRow, focused: boolean): string {
-  return `${focused ? ">" : row.selected ? "*" : " "}${row.urgencyMarker.padEnd(2, " ")} ${row.primary} | ${row.secondary} | ${row.freshness} | r${row.revision}`;
+function rowText(row: PresentedRow, focused: boolean, pinned: boolean): string {
+  const pin = pinned ? "^ PINNED " : "";
+  return `${focused ? ">" : row.selected ? "*" : " "}${row.urgencyMarker.padEnd(2, " ")} ${pin}${row.primary} | ${row.secondary} | ${row.freshness} | r${row.revision}`;
 }
 
-function deckRowText(row: PresentedDeckRow, focused: boolean): string {
-  return `${focused ? ">" : " "}${row.urgencyMarker.padEnd(2, " ")} ${row.primary} | ${row.statusLabel} | ${row.secondary}`;
+function deckRowText(row: PresentedDeckRow, focused: boolean, pinned: boolean): string {
+  const pin = pinned ? "^ PINNED " : "";
+  return `${focused ? ">" : " "}${row.urgencyMarker.padEnd(2, " ")} ${pin}${row.primary} | ${row.statusLabel} | ${row.secondary}`;
 }
 
-export function compactAttentionRowText(row: PresentedRow, focused: boolean): string {
+export function stripHeaderLines(header: PresentedHeader): readonly string[] {
+  return [
+    `Project:${header.project}`,
+    `Session:${header.session}`,
+    `Run:${header.run}`,
+    `Revision:r${header.revision ?? "?"}`,
+    `Fresh:${header.freshness.toUpperCase()}`,
+    `Phase:${header.phase}`,
+    `Owner:${header.owner}`,
+    `Next:${header.nextMilestone}`,
+    `Health:${header.health}`,
+    `Need you:${String(header.needsYouCount)} | Watch:${String(header.watchCount)} collapsed`,
+  ];
+}
+
+export function filteredDeckLabel(
+  presentation: FabricConsolePresentation,
+  compact = false,
+): string {
+  return compact
+    ? `FILTERED ${String(presentation.deckShownCount)}/${String(presentation.deckUnfilteredCount)}`
+    : `FILTERED VIEW, ${String(presentation.deckShownCount)} of ${String(presentation.deckUnfilteredCount)} shown`;
+}
+
+export function compactAttentionRowText(
+  row: PresentedRow,
+  focused: boolean,
+  pinnedRowIds: readonly string[] = [],
+): string {
   const marker = focused ? ">" : row.selected ? "*" : " ";
   const [state = "UNAVAILABLE", age = ""] = row.freshness.split(" ");
   const freshness = state === "LIVE" ? age : `${state} ${age}`.trim();
-  return `${marker}${row.urgencyMarker.padEnd(2, " ")} ${row.primary} ${freshness}`;
+  const pin = pinnedRowIds.includes(attentionPinId(row)) ? "^ PINNED " : "";
+  return `${marker}${row.urgencyMarker.padEnd(2, " ")} ${pin}${row.primary} ${freshness}`;
 }
 
-function compactDeckText(row: PresentedDeckRow, focused: boolean): string {
+function compactDeckText(row: PresentedDeckRow, focused: boolean, pinned: boolean): string {
   const phase = row.phase ?? row.state ?? "unknown";
   const age = row.freshness?.split(" ").at(-1) ?? "";
   const gutter = row.urgencyMarker.trim() === ""
     ? focused ? ">  " : ""
     : `${focused ? ">" : " "}${row.urgencyMarker.padEnd(2, " ")} `;
-  return `${gutter}${row.entityId} ${phase} ${row.statusLabel}${age === "" ? "" : ` ${age}`}`;
+  return `${gutter}${pinned ? "^ PINNED " : ""}${row.entityId} ${phase} ${row.statusLabel}${age === "" ? "" : ` ${age}`}`;
 }
 
 function renderCompactRemainder(input: AttentionDeckRenderInput, bounds: Rect): void {
@@ -87,7 +119,11 @@ function renderCompactRemainder(input: AttentionDeckRenderInput, bounds: Rect): 
   let y = bounds.y1;
   for (const item of remainingAttention) {
     const id = `row:${item.view}:${item.stableId}`;
-    writeBoundsRow(rows, columns, bounds, y, compactAttentionRowText(item, presentation.focusId === id));
+    writeBoundsRow(rows, columns, bounds, y, compactAttentionRowText(
+      item,
+      presentation.focusId === id,
+      ui.pinnedRowIds,
+    ));
     hitRegions.push({
       id,
       kind: "row",
@@ -99,13 +135,24 @@ function renderCompactRemainder(input: AttentionDeckRenderInput, bounds: Rect): 
     y += 1;
   }
   const rosterCapacity = Math.max(0, bounds.y2 - y + 1);
-  const coordinationRows = presentation.deckRows.filter(({ kind }) => kind === "coordination");
-  const roster = coordinationRows.length === 0 ? presentation.deckRows : coordinationRows;
+  const pinned = presentation.deckRows.filter((row) =>
+    ui.pinnedRowIds.includes(deckPinId(row))
+  );
+  const coordinationRows = presentation.deckRows.filter((row) =>
+    row.kind === "coordination" && !ui.pinnedRowIds.includes(deckPinId(row))
+  );
+  const roster = coordinationRows.length === 0
+    ? presentation.deckRows
+    : [...pinned, ...coordinationRows];
   const maximumOffset = Math.max(0, roster.length - rosterCapacity);
   const offset = Math.min(maximumOffset, Math.max(0, Math.trunc(ui.deckScrollOffset)));
   for (const item of roster.slice(offset, offset + rosterCapacity)) {
     const id = `deck:${item.stableId}`;
-    writeBoundsRow(rows, columns, bounds, y, compactDeckText(item, presentation.focusId === id));
+    writeBoundsRow(rows, columns, bounds, y, compactDeckText(
+      item,
+      presentation.focusId === id,
+      ui.pinnedRowIds.includes(deckPinId(item)),
+    ));
     hitRegions.push({
       id,
       kind: "row",
@@ -126,7 +173,9 @@ function renderAttention(input: AttentionDeckRenderInput, bounds: Rect): void {
     columns,
     bounds,
     bounds.y1,
-    `NEEDS YOU:${String(presentation.header.needsYouCount)} | WATCH:${String(presentation.header.watchCount)} collapsed`,
+    presentation.deckFilterActive
+      ? filteredDeckLabel(presentation)
+      : `NEEDS YOU:${String(presentation.header.needsYouCount)} | WATCH:${String(presentation.header.watchCount)} collapsed`,
   );
   const capacity = Math.max(0, bounds.y2 - bounds.y1);
   const latestWatch = presentation.watchRows[0] ?? null;
@@ -143,7 +192,11 @@ function renderAttention(input: AttentionDeckRenderInput, bounds: Rect): void {
     .entries()) {
     const y = bounds.y1 + index + 1;
     const id = `row:${item.view}:${item.stableId}`;
-    writeBoundsRow(rows, columns, bounds, y, rowText(item, presentation.focusId === id));
+    writeBoundsRow(rows, columns, bounds, y, rowText(
+      item,
+      presentation.focusId === id,
+      ui.pinnedRowIds.includes(attentionPinId(item)),
+    ));
     hitRegions.push({
       id,
       kind: "row",
@@ -155,7 +208,15 @@ function renderAttention(input: AttentionDeckRenderInput, bounds: Rect): void {
   }
   let nextRow = bounds.y1 + Math.min(needsCapacity, presentation.needsYouRows.length) + 1;
   if (presentation.needsYouRows.length === 0 && needsCapacity > 0) {
-    writeBoundsRow(rows, columns, bounds, bounds.y1 + 1, "No projected user judgement required.");
+    writeBoundsRow(
+      rows,
+      columns,
+      bounds,
+      bounds.y1 + 1,
+      presentation.deckFilterActive
+        ? "No rows match the active filter."
+        : "No projected user judgement required.",
+    );
     nextRow += 1;
   }
   if (showWatchSummary && latestWatch !== null && nextRow <= bounds.y2) {
@@ -164,7 +225,7 @@ function renderAttention(input: AttentionDeckRenderInput, bounds: Rect): void {
       columns,
       bounds,
       nextRow,
-      `WATCH latest: ${latestWatch.primary} | ${latestWatch.freshness}`,
+      `WATCH latest: ${ui.pinnedRowIds.includes(attentionPinId(latestWatch)) ? "^ PINNED " : ""}${latestWatch.primary} | ${latestWatch.freshness}`,
     );
   }
 }
@@ -172,7 +233,9 @@ function renderAttention(input: AttentionDeckRenderInput, bounds: Rect): void {
 function renderRoster(input: AttentionDeckRenderInput, bounds: Rect): void {
   const { rows, columns, presentation, dataset, ui, geometryKey, hitRegions } = input;
   const width = bounds.x2 - bounds.x1 + 1;
-  const header = width < 40
+  const header = presentation.deckFilterActive
+    ? filteredDeckLabel(presentation)
+    : width < 40
     ? `N:${String(presentation.header.needsYouCount)} W:${String(presentation.header.watchCount)} R:${String(presentation.deckTotalCount)} RUN:${String(presentation.deckRunCount)}`
     : `PROJECTED ROSTER:${String(presentation.deckTotalCount)} | RUN IDENTITIES:${String(presentation.deckRunCount)}`;
   writeBoundsRow(
@@ -189,7 +252,11 @@ function renderRoster(input: AttentionDeckRenderInput, bounds: Rect): void {
   for (const [index, item] of visibleItems.entries()) {
     const y = bounds.y1 + index + 1;
     const id = `deck:${item.stableId}`;
-    writeBoundsRow(rows, columns, bounds, y, deckRowText(item, presentation.focusId === id));
+    writeBoundsRow(rows, columns, bounds, y, deckRowText(
+      item,
+      presentation.focusId === id,
+      ui.pinnedRowIds.includes(deckPinId(item)),
+    ));
     hitRegions.push({
       id,
       kind: "row",
@@ -206,7 +273,9 @@ function renderRoster(input: AttentionDeckRenderInput, bounds: Rect): void {
       columns,
       bounds,
       bounds.y1 + 1,
-      "No projected runs.",
+      presentation.deckFilterActive
+        ? "No rows match the active filter."
+        : "No projected runs.",
     );
   }
 

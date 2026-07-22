@@ -150,7 +150,7 @@ exports[`structured presenter and responsive Fabric renderer > characterises the
     "                                                                                ",
     "Actions: select an actionable item                                              ",
     "V:activity F:browse LIVE r11 MOUSE:OFF DROP:0                                   ",
-    "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll        q detach",
+    "? help | / filter | p pin | s sessions | [ ] view | Enter open          q detach",
   ],
 }
 `;
@@ -305,7 +305,7 @@ exports[`structured presenter and responsive Fabric renderer > characterises the
     "                                                                                ",
     "Actions: select an actionable item                                              ",
     "V:agents F:browse LIVE r11 MOUSE:OFF DROP:0                                     ",
-    "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll        q detach",
+    "? help | / filter | p pin | s sessions | [ ] view | Enter open          q detach",
   ],
 }
 `;
@@ -482,7 +482,7 @@ exports[`structured presenter and responsive Fabric renderer > characterises the
     "                                                                                ",
     "Actions: select an actionable item                                              ",
     "V:attention F:browse LIVE r11 MOUSE:OFF DROP:0                                  ",
-    "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll        q detach",
+    "? help | / filter | p pin | s sessions | [ ] view | Enter open          q detach",
   ],
 }
 `;
@@ -637,7 +637,7 @@ exports[`structured presenter and responsive Fabric renderer > characterises the
     "                                                                                ",
     "Actions: select an actionable item                                              ",
     "V:evidence F:browse LIVE r11 MOUSE:OFF DROP:0                                   ",
-    "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll        q detach",
+    "? help | / filter | p pin | s sessions | [ ] view | Enter open          q detach",
   ],
 }
 `;
@@ -792,7 +792,7 @@ exports[`structured presenter and responsive Fabric renderer > characterises the
     "                                                                                ",
     "Actions: select an actionable item                                              ",
     "V:project F:browse LIVE r11 MOUSE:OFF DROP:0                                    ",
-    "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll        q detach",
+    "? help | / filter | p pin | s sessions | [ ] view | Enter open          q detach",
   ],
 }
 `;
@@ -947,7 +947,7 @@ exports[`structured presenter and responsive Fabric renderer > characterises the
     "                                                                                ",
     "Actions: select an actionable item                                              ",
     "V:runs F:browse LIVE r11 MOUSE:OFF DROP:0                                       ",
-    "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll        q detach",
+    "? help | / filter | p pin | s sessions | [ ] view | Enter open          q detach",
   ],
 }
 `;
@@ -1102,7 +1102,7 @@ exports[`structured presenter and responsive Fabric renderer > characterises the
     "                                                                                ",
     "Actions: select an actionable item                                              ",
     "V:system F:browse LIVE r11 MOUSE:OFF DROP:0                                     ",
-    "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll        q detach",
+    "? help | / filter | p pin | s sessions | [ ] view | Enter open          q detach",
   ],
 }
 `;
@@ -1257,7 +1257,7 @@ exports[`structured presenter and responsive Fabric renderer > characterises the
     "                                                                                ",
     "Actions: select an actionable item                                              ",
     "V:work F:browse LIVE r11 MOUSE:OFF DROP:0                                       ",
-    "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll        q detach",
+    "? help | / filter | p pin | s sessions | [ ] view | Enter open          q detach",
   ],
 }
 `;
@@ -1303,7 +1303,7 @@ exports[`structured presenter and responsive Fabric renderer > keeps Needs you a
     "Actions: resume                                                                 ",
     "Actions: select an actionable item                                              ",
     "V:attention F:browse LIVE r11 MOUSE:OFF DROP:0                                  ",
-    "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll        q detach",
+    "? help | / filter | p pin | s sessions | [ ] view | Enter open          q detach",
   ],
 }
 `;
@@ -1343,7 +1343,7 @@ exports[`structured presenter and responsive Fabric renderer > keeps Needs you a
     "                                                  |                                                                     ",
     "Actions: select an actionable item                                                                                      ",
     "V:attention F:browse LIVE r11 MOUSE:OFF DROP:0                                                                          ",
-    "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll                                                q detach",
+    "? help | / filter | p pin | s sessions | [ ] view | Enter open                                                  q detach",
   ],
 }
 `;
@@ -1361,7 +1361,7 @@ exports[`structured presenter and responsive Fabric renderer > keeps Needs you a
     "WATCH latest: Routine evaluation complete | LIVE 5s   |    COORDINATION AFAB-004 | BLOCKED | owner:agent-chair | phase:implement | health:blocked | fresh:LIVE 5s | last event:2026-07-11T12:00:00.000Z~",
     "Actions: select an actionable item                                                                                                                                                                      ",
     "V:attention F:browse LIVE r11 MOUSE:OFF DROP:0                                                                                                                                                          ",
-    "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll                                                                                                                                q detach",
+    "? help | / filter | p pin | s sessions | [ ] view | Enter open                                                                                                                                  q detach",
   ],
 }
 `;
@@ -1407,7 +1407,7 @@ exports[`structured presenter and responsive Fabric renderer > keeps the two-cel
     "Revision: 7                                                                     ",
     "Actions: select an actionable item                                              ",
     "V:attention F:browse LIVE r11 MOUSE:OFF DROP:0                                  ",
-    "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll        q detach",
+    "? help | / filter | p pin | s sessions | [ ] view | Enter open          q detach",
   ],
 }
 `;
@@ -1447,7 +1447,7 @@ exports[`structured presenter and responsive Fabric renderer > keeps the two-cel
     "                                                  |                                                                     ",
     "Actions: select an actionable item                                                                                      ",
     "V:attention F:browse LIVE r11 MOUSE:OFF DROP:0                                                                          ",
-    "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll                                                q detach",
+    "? help | / filter | p pin | s sessions | [ ] view | Enter open                                                  q detach",
   ],
 }
 `;

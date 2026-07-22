@@ -1880,6 +1880,123 @@ describe("structured presenter and responsive Fabric renderer", () => {
 
   });
 
+  it("filters Deck bands, keeps pins visible first, and discloses the filtered count", () => {
+    const urgencyDataset = urgencyGlyphDataset();
+    const watchRow = attentionDeckDataset().pages.attention.rows[1];
+    if (watchRow === undefined) throw new Error("Watch fixture unavailable");
+    const dataset = {
+      ...urgencyDataset,
+      pages: {
+        ...urgencyDataset.pages,
+        attention: {
+          ...urgencyDataset.pages.attention,
+          rows: [...urgencyDataset.pages.attention.rows, watchRow],
+        },
+      },
+    };
+    const unchangedDataset = structuredClone(dataset);
+    const ui = createFabricUiState({
+      filterQuery: "status:degraded",
+      pinnedRowIds: ["deck:session:session-healthy"],
+    });
+    const presentation = presentFabricConsole(
+      dataset,
+      controllerState(),
+      ui,
+      { columns: 80, rows: 24 },
+    );
+
+    expect(presentation.needsYouRows).toStrictEqual([]);
+    expect(presentation.watchRows).toStrictEqual([]);
+    expect(presentation.deckRows.map(({ entityId }) => entityId)).toStrictEqual([
+      "session-healthy",
+      "session-degraded",
+      "run-degraded",
+    ]);
+    expect(presentation).toMatchObject({
+      deckFilterActive: true,
+      deckShownCount: 3,
+      deckUnfilteredCount: 12,
+      detail: null,
+      actions: [],
+    });
+
+    const visible = renderFabricConsoleFrame(
+      dataset,
+      controllerState(),
+      ui,
+      { columns: 80, rows: 24 },
+    ).rows.join("\n");
+    expect(visible).toContain("FILTERED VIEW, 3 of 12 shown");
+    expect(visible).toMatch(/\^\s+PINNED.*session-healthy/u);
+
+    const compact = renderFabricConsoleFrame(
+      attentionDeckDataset(),
+      controllerState(),
+      createFabricUiState({
+        filterQuery: "status:ok",
+        pinnedRowIds: ["row:attention:attention:safety"],
+      }),
+      { columns: 30, rows: 6 },
+    ).rows.join("\n");
+    expect(compact).toContain("FILTERED 3/5");
+    expect(compact).toContain("^ PINNED");
+    const shortWide = renderFabricConsoleFrame(
+      attentionDeckDataset(),
+      controllerState(),
+      createFabricUiState({
+        filterQuery: "status:ok",
+        pinnedRowIds: ["row:attention:attention:safety"],
+      }),
+      { columns: 80, rows: 6 },
+    ).rows.join("\n");
+    expect(shortWide).toContain("^ PINNED");
+
+    const pinnedWatch = renderFabricConsoleFrame(
+      dataset,
+      controllerState(),
+      createFabricUiState({
+        filterQuery: "status:degraded",
+        pinnedRowIds: ["row:attention:attention:fyi"],
+      }),
+      { columns: 120, rows: 32 },
+    ).rows.join("\n");
+    expect(pinnedWatch).toContain("WATCH latest: ^ PINNED Routine evaluation");
+
+    const emptyFiltered = renderFabricConsoleFrame(
+      attentionDeckDataset(),
+      controllerState(),
+      createFabricUiState({ filterQuery: "identity-that-is-not-projected" }),
+      { columns: 80, rows: 24 },
+    ).rows.join("\n");
+    expect(emptyFiltered).toContain("No rows match the active filter.");
+    expect(emptyFiltered).not.toContain("No projected user judgement required.");
+    expect(emptyFiltered).not.toContain("No projected runs.");
+
+    const textFiltered = presentFabricConsole(
+      dataset,
+      controllerState(),
+      createFabricUiState({ filterQuery: "status:degraded RUN-DEGRADED" }),
+      { columns: 80, rows: 24 },
+    );
+    expect(textFiltered.deckRows.map(({ entityId }) => entityId)).toStrictEqual([
+      "run-degraded",
+    ]);
+    const urgent = presentFabricConsole(
+      attentionDeckDataset(),
+      controllerState(),
+      createFabricUiState({ filterQuery: "status:urgent" }),
+      { columns: 80, rows: 24 },
+    );
+    expect(urgent.needsYouRows.map(({ stableId }) => stableId)).toStrictEqual([
+      "attention:safety",
+    ]);
+    expect(urgent.deckRows.map(({ entityId }) => entityId)).toStrictEqual([
+      "AFAB-004",
+    ]);
+    expect(dataset).toStrictEqual(unchangedDataset);
+  });
+
   it("renders every urgency glyph and its projection-only non-colour twin", () => {
     const dataset = urgencyGlyphDataset();
     const presentation = presentFabricConsole(
@@ -3215,7 +3332,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
     expect(frame.hitRegions.some(({ id }) => id === "review:close")).toBe(false);
   });
 
-  it.each(["editor", "guided", "palette"] as const)(
+  it.each(["editor", "guided", "palette", "filter"] as const)(
     "renders honest %s modal help with explicit input focus and local Detach authority",
     (inputMode) => {
       const frame = renderFabricConsoleFrame(
@@ -3224,6 +3341,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
         createFabricUiState({
           inputMode,
           draft: "q? remains draft",
+          filterDraft: "q? remains filter",
           mouseCapture: true,
         }),
         { columns: 80, rows: 24 },
@@ -3233,6 +3351,10 @@ describe("structured presenter and responsive Fabric renderer", () => {
       expect(visible).toContain("Esc");
       expect(visible).toContain("Ctrl-C");
       expect(visible).toContain("Detach");
+      if (inputMode === "filter") {
+        expect(visible).toContain("Enter applies view");
+        expect(visible).not.toContain("Enter reviews");
+      }
       expect(visible).not.toContain("? help");
       expect(visible).not.toContain("q detach");
       expect(frame.hitRegions.map(({ id }) => id)).toStrictEqual([

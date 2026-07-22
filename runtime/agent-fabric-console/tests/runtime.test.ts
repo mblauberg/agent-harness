@@ -653,6 +653,168 @@ describe("Fabric Console runtime routing", () => {
     expect(runtime.ui.inputMode).toBe("browse");
   });
 
+  it("commits filter text in a distinct mode without emitting an action", async () => {
+    const activate = vi.fn(async () => {});
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      draw: () => {},
+      detach: async () => {},
+      activate,
+      eventId: () => "filter-event",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    await runtime.handleInput({ kind: "key", key: "text", text: "/" });
+    expect(runtime.ui.inputMode).toBe("filter");
+    await runtime.handleInput({
+      kind: "paste",
+      text: "status:degraded session:control approve",
+    });
+    expect(runtime.ui.filterDraft).toBe("status:degraded session:control approve");
+    expect(runtime.ui.draft).toBe("");
+    expect(activate).not.toHaveBeenCalled();
+
+    await runtime.handleInput({ kind: "key", key: "enter" });
+
+    expect(runtime.ui).toMatchObject({
+      inputMode: "browse",
+      filterQuery: "status:degraded session:control approve",
+      filterDraft: "status:degraded session:control approve",
+    });
+    expect(activate).not.toHaveBeenCalled();
+
+    await runtime.handleInput({ kind: "key", key: "text", text: "/" });
+    await runtime.handleInput({ kind: "paste", text: " status:urgent" });
+    await runtime.handleInput({ kind: "key", key: "escape" });
+    expect(runtime.ui).toMatchObject({
+      inputMode: "browse",
+      filterQuery: "status:degraded session:control approve",
+      filterDraft: "status:degraded session:control approve",
+    });
+    expect(activate).not.toHaveBeenCalled();
+  });
+
+  it("toggles the focused Deck row pin locally without emitting an action", async () => {
+    const activate = vi.fn(async () => {});
+    const focusId = "row:attention:attention:1";
+    const runtime = new FabricConsoleRuntime({
+      controller: new FakeController(),
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ focusId }),
+      draw: () => {},
+      detach: async () => {},
+      activate,
+      eventId: () => "pin-event",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    await runtime.handleInput({ kind: "key", key: "text", text: "p" });
+    expect(runtime.ui.pinnedRowIds).toStrictEqual([focusId]);
+    expect(runtime.frame.rows.join("\n")).toContain("PINNED");
+    expect(activate).not.toHaveBeenCalled();
+
+    await runtime.handleInput({ kind: "key", key: "text", text: "p" });
+    expect(runtime.ui.pinnedRowIds).toStrictEqual([]);
+    expect(activate).not.toHaveBeenCalled();
+    expect(createFabricUiState()).toMatchObject({
+      filterDraft: "",
+      filterQuery: "",
+      pinnedRowIds: [],
+    });
+  });
+
+  it("moves arrows only through visible filtered Attention rows", async () => {
+    const controller = new FakeController();
+    const template = controller.dataset.pages.attention.rows[0];
+    if (template?.summary?.kind !== "attention") {
+      throw new Error("Attention fixture unavailable");
+    }
+    const attentionRows = [
+      { ...template, stableId: "attention:visible-1", summary: { ...template.summary, title: "visible match one" } },
+      { ...template, stableId: "attention:hidden", summary: { ...template.summary, title: "hidden row" } },
+      { ...template, stableId: "attention:visible-2", summary: { ...template.summary, title: "visible match two" } },
+    ];
+    controller.dataset = {
+      ...controller.dataset,
+      pages: {
+        ...controller.dataset.pages,
+        attention: { ...controller.dataset.pages.attention, rows: attentionRows },
+      },
+    };
+    controller.state = {
+      ...controller.state,
+      selectionByView: {
+        ...controller.state.selectionByView,
+        attention: { stableId: "attention:visible-1", revision: template.revision },
+      },
+    };
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({
+        filterQuery: "visible match",
+        focusId: "row:attention:attention:visible-1",
+      }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "filtered-arrow",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    await runtime.handleInput({ kind: "key", key: "down" });
+
+    expect(controller.state.selectionByView.attention?.stableId)
+      .toBe("attention:visible-2");
+    expect(runtime.ui.focusId).toBe("row:attention:attention:visible-2");
+  });
+
+  it("hides detail and actions for a selected Watch row hidden by the filter", async () => {
+    const controller = new FakeController();
+    const template = controller.dataset.pages.attention.rows[0];
+    if (template?.summary?.kind !== "attention") {
+      throw new Error("Attention fixture unavailable");
+    }
+    const watchRow = {
+      ...template,
+      stableId: "attention:watch-hidden",
+      urgency: "normal" as const,
+      summary: { ...template.summary, title: "watch-secret detail" },
+    };
+    controller.dataset = {
+      ...controller.dataset,
+      pages: {
+        ...controller.dataset.pages,
+        attention: { ...controller.dataset.pages.attention, rows: [template, watchRow] },
+      },
+    };
+    controller.state = {
+      ...controller.state,
+      selectionByView: {
+        ...controller.state.selectionByView,
+        attention: { stableId: "attention:watch-hidden", revision: watchRow.revision },
+      },
+    };
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({ filterQuery: "status:urgent" }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "hidden-watch-selection",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+
+    await runtime.handleInput({ kind: "key", key: "escape" });
+    expect(runtime.frame.rows.join("\n")).not.toContain("watch-secret");
+  });
+
   it("keeps a same-burst palette opener and payload in modal input", async () => {
     const runtime = new FabricConsoleRuntime({
       controller: new FakeController(),
@@ -1703,14 +1865,14 @@ describe("Fabric Console runtime routing", () => {
     )?.rect.y1).toBe(beforeY);
   });
 
-  it.each(["editor", "guided", "palette"] as const)(
+  it.each(["editor", "guided", "palette", "filter"] as const)(
     "keeps q editable in normal %s mode but honors the advertised inert detach binding",
     async (inputMode) => {
       const detach = vi.fn(async () => {});
       const runtime = new FabricConsoleRuntime({
         controller: new FakeController(),
         viewport: { columns: 80, rows: 24 },
-        ui: createFabricUiState({ inputMode, draft: "draft:" }),
+        ui: createFabricUiState({ inputMode, draft: "draft:", filterDraft: "filter:" }),
         draw: () => {},
         detach,
         activate: async () => {},
@@ -1721,7 +1883,8 @@ describe("Fabric Console runtime routing", () => {
 
       await runtime.handleInput({ kind: "key", key: "text", text: "q" });
 
-      expect(runtime.ui.draft).toBe("draft:q");
+      expect(inputMode === "filter" ? runtime.ui.filterDraft : runtime.ui.draft)
+        .toBe(inputMode === "filter" ? "filter:q" : "draft:q");
       expect(detach).not.toHaveBeenCalled();
 
       const inertFrame = runtime.resize({ columns: 8, rows: 1 });
@@ -1732,11 +1895,12 @@ describe("Fabric Console runtime routing", () => {
 
       expect(detach).toHaveBeenCalledOnce();
       expect(detach).toHaveBeenCalledWith({ reason: "operator" });
-      expect(runtime.ui.draft).toBe("draft:q");
+      expect(inputMode === "filter" ? runtime.ui.filterDraft : runtime.ui.draft)
+        .toBe(inputMode === "filter" ? "filter:q" : "draft:q");
     },
   );
 
-  it.each(["editor", "guided", "palette"] as const)(
+  it.each(["editor", "guided", "palette", "filter"] as const)(
     "gives %s input visible ownership and restores its exact opener",
     (inputMode) => {
       const controller = stateBoundControlController();
@@ -1761,7 +1925,7 @@ describe("Fabric Console runtime routing", () => {
     },
   );
 
-  it.each(["editor", "guided", "palette"] as const)(
+  it.each(["editor", "guided", "palette", "filter"] as const)(
     "routes Ctrl-C through safety detach before %s mode dispatch after an inert resize",
     async (inputMode) => {
       const detach = vi.fn(async () => {});
@@ -1898,7 +2062,7 @@ describe("Fabric Console runtime routing", () => {
     expect(controller.state).toStrictEqual(beforeController);
   });
 
-  it.each(["editor", "guided", "palette"] as const)(
+  it.each(["editor", "guided", "palette", "filter"] as const)(
     "allows only pointer Detach while the %s modal owns input",
     async (inputMode) => {
       const controller = new FakeController();
