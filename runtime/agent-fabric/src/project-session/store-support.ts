@@ -48,6 +48,10 @@ export function digest(value: unknown): `sha256:${string}` {
   return `sha256:${sha256(canonicalJson(value))}`;
 }
 
+export function stringDigest(value: string): `sha256:${string}` {
+  return `sha256:${sha256(value)}`;
+}
+
 export function timestampToMillis(value: string): number {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) throw new TypeError("timestamp is invalid");

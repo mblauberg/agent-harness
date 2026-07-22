@@ -4,7 +4,7 @@ import { assertProviderActionOwner, ProviderActionOwnerError } from "../applicat
 import { FabricError } from "../errors.js";
 import {
   canonicalJson,
-  digest as sha256Digest,
+  stringDigest as sha256Digest,
   integer as numberField,
   isRow,
   row as rowOrNotFound,
