@@ -438,6 +438,95 @@ describe("Fabric Console runtime routing", () => {
     expect(setEditorActive).toHaveBeenLastCalledWith(false);
   });
 
+  it("pages a long Deck roster independently and clamps it after refresh", async () => {
+    const controller = stateBoundControlController();
+    controller.activateView("attention");
+    const choices = Array.from({ length: 12 }, (_, index) => ({
+      projectSessionId: `session-page-${String(index).padStart(2, "0")}` as never,
+      mode: "independent" as const,
+      state: "active" as const,
+      revision: index + 1,
+      generation: 1,
+      lastEventAt: timestamp,
+    }));
+    const activate = vi.fn(async () => {});
+    controller.dataset = {
+      ...controller.dataset,
+      projectSessions: { selectedProjectSessionId: null, choices },
+      pages: {
+        ...controller.dataset.pages,
+        runs: { ...controller.dataset.pages.runs, rows: [] },
+      },
+    };
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 30, rows: 6 },
+      draw: () => {},
+      detach: async () => {},
+      activate,
+      eventId: () => "deck-page",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    const first = runtime.frame.hitRegions.find(({ id }) => id.startsWith("deck:"));
+    expect(first).toBeDefined();
+    if (first === undefined) return;
+    runtime.setFocus(first.id);
+    await runtime.handleInput({ kind: "key", key: "enter" });
+    expect(activate).not.toHaveBeenCalled();
+
+    const reached = new Set<string>();
+    for (let page = 0; page < 20; page += 1) {
+      for (const { id } of runtime.frame.hitRegions.filter(
+        ({ id }) => id.startsWith("deck:session:"),
+      )) reached.add(id);
+      const before = runtime.ui.deckScrollOffset;
+      await runtime.handleInput({ kind: "key", key: "page-down" });
+      if (runtime.ui.deckScrollOffset === before) break;
+    }
+
+    expect(reached).toStrictEqual(new Set(choices.map(
+      ({ projectSessionId }) => `deck:session:${projectSessionId}`,
+    )));
+    expect(runtime.ui.deckScrollOffset).toBeGreaterThan(0);
+    expect(runtime.ui.scrollOffsetByView.attention ?? 0).toBe(0);
+
+    const focusedId = runtime.ui.focusId;
+    const focusedY = runtime.frame.hitRegions.find(({ id }) => id === focusedId)?.rect.y1;
+    expect(focusedId).toMatch(/^deck:session:/u);
+    expect(focusedY).toBeDefined();
+    const inserted = {
+      ...choices[0] as (typeof choices)[number],
+      projectSessionId: "session-page-inserted" as never,
+    };
+    runtime.updateDataset({
+      ...controller.dataset,
+      projectSessions: { selectedProjectSessionId: null, choices: [inserted, ...choices] },
+    });
+    expect(runtime.ui.focusId).toBe(focusedId);
+    expect(runtime.frame.hitRegions.find(({ id }) => id === focusedId)?.rect.y1).toBe(focusedY);
+
+    const focusedStableId = focusedId?.slice("deck:session:".length);
+    runtime.updateDataset({
+      ...controller.dataset,
+      projectSessions: {
+        selectedProjectSessionId: null,
+        choices: [inserted, ...choices].filter(
+          ({ projectSessionId }) => projectSessionId !== focusedStableId,
+        ),
+      },
+    });
+    expect(runtime.ui.focusId).not.toBe(focusedId);
+    expect(runtime.ui.focusId).toMatch(/^deck:session:/u);
+    expect(runtime.ui.notice).toContain("focus moved to the nearest projected roster row");
+
+    runtime.updateDataset({
+      ...controller.dataset,
+      projectSessions: { selectedProjectSessionId: null, choices: choices.slice(0, 2) },
+    });
+    expect(runtime.ui.deckScrollOffset).toBe(0);
+  });
+
   it("keeps displayed action numbers stable across disabled and workflow entries", async () => {
     const controller = new FakeController();
     const activate = vi.fn(async () => {});
@@ -1454,7 +1543,7 @@ describe("Fabric Console runtime routing", () => {
   });
 
   it("reflows on every resize without changing drafts, selection, scroll or pending commands", () => {
-    const controller = new FakeController();
+    const controller = stateBoundControlController();
     const activate = vi.fn(async () => {});
     const detach = vi.fn(async () => {});
     const runtime = new FabricConsoleRuntime({
@@ -1462,9 +1551,9 @@ describe("Fabric Console runtime routing", () => {
       viewport: { columns: 80, rows: 24 },
       ui: createFabricUiState({
         draft: "keep this draft",
-        scrollOffsetByView: { attention: 4 },
-        detailScrollOffsetByView: { attention: 7 },
-        focusId: "detail:attention:attention:1",
+        scrollOffsetByView: { runs: 4 },
+        detailScrollOffsetByView: { runs: 7 },
+        focusId: "detail:runs:run:control",
       }),
       draw: () => {},
       detach,
@@ -1543,6 +1632,72 @@ describe("Fabric Console runtime routing", () => {
     );
     expect(runtime.ui.detailScrollOffsetByView.attention).toBeLessThan(50);
     expect(runtime.frame.rows.join("\n")).toContain("Resume blocked task");
+  });
+
+  it("restores a stable attention anchor at the same visual row after live inserts", () => {
+    const controller = new FakeController();
+    const template = controller.dataset.pages.attention.rows[0];
+    if (template === undefined) throw new Error("attention fixture unavailable");
+    const existing = Array.from({ length: 12 }, (_, index) => ({
+      ...template,
+      stableId: `attention:${String(index + 1)}`,
+    }));
+    controller.dataset = {
+      ...controller.dataset,
+      pages: {
+        ...controller.dataset.pages,
+        attention: { ...controller.dataset.pages.attention, rows: existing },
+      },
+    };
+    controller.state = {
+      ...controller.state,
+      selectionByView: {
+        ...controller.state.selectionByView,
+        attention: { stableId: "attention:8", revision: template.revision },
+      },
+      scrollAnchorByView: {
+        ...controller.state.scrollAnchorByView,
+        attention: "attention:8",
+      },
+    };
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 80, rows: 24 },
+      ui: createFabricUiState({
+        focusId: "row:attention:attention:8",
+        scrollOffsetByView: { attention: 5 },
+      }),
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "stable-live-insert",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    runtime.repaint();
+    const beforeY = runtime.frame.hitRegions.find(
+      ({ id }) => id === "row:attention:attention:8",
+    )?.rect.y1;
+    expect(beforeY).toBeDefined();
+
+    const inserted = [
+      { ...template, stableId: "attention:new-1" },
+      { ...template, stableId: "attention:new-2" },
+      ...existing,
+    ];
+    runtime.updateDataset({
+      ...controller.dataset,
+      pages: {
+        ...controller.dataset.pages,
+        attention: { ...controller.dataset.pages.attention, rows: inserted },
+      },
+    });
+
+    expect(runtime.ui.scrollOffsetByView.attention).toBe(7);
+    expect(runtime.ui.focusId).toBe("row:attention:attention:8");
+    expect(runtime.frame.hitRegions.find(
+      ({ id }) => id === "row:attention:attention:8",
+    )?.rect.y1).toBe(beforeY);
   });
 
   it.each(["editor", "guided", "palette"] as const)(
@@ -1810,7 +1965,7 @@ describe("Fabric Console runtime routing", () => {
   it("uses local keyboard and mouse paths for split resizing without commands", async () => {
     const activate = vi.fn(async () => {});
     const runtime = new FabricConsoleRuntime({
-      controller: new FakeController(),
+      controller: stateBoundControlController(),
       viewport: { columns: 140, rows: 36 },
       ui: createFabricUiState({
         focusId: "splitter:master-detail",
@@ -1858,7 +2013,7 @@ describe("Fabric Console runtime routing", () => {
 
   it("migrates hidden splitter focus into compact mode and restores it only without interaction", async () => {
     const runtime = new FabricConsoleRuntime({
-      controller: new FakeController(),
+      controller: stateBoundControlController(),
       viewport: { columns: 80, rows: 24 },
       ui: createFabricUiState({
         focusId: "splitter:master-detail",
@@ -1907,7 +2062,7 @@ describe("Fabric Console runtime routing", () => {
 
   it("restores an arbitrary semantic focus after a temporary compact resize", () => {
     const runtime = new FabricConsoleRuntime({
-      controller: new FakeController(),
+      controller: stateBoundControlController(),
       viewport: { columns: 80, rows: 24 },
       draw: () => {},
       detach: async () => {},
@@ -1932,7 +2087,7 @@ describe("Fabric Console runtime routing", () => {
   });
 
   it("retains splitter restoration when projection refresh invalidates its surrogate", () => {
-    const controller = new FakeController();
+    const controller = stateBoundControlController();
     const runtime = new FabricConsoleRuntime({
       controller,
       viewport: { columns: 80, rows: 24 },
@@ -1953,8 +2108,8 @@ describe("Fabric Console runtime routing", () => {
       ...controller.dataset,
       pages: {
         ...controller.dataset.pages,
-        attention: {
-          ...controller.dataset.pages.attention,
+        runs: {
+          ...controller.dataset.pages.runs,
           rows: [],
         },
       },
@@ -1968,7 +2123,7 @@ describe("Fabric Console runtime routing", () => {
 
   it("keeps a splitter surrogate visible through chained compact, strip and inert resizes", () => {
     const runtime = new FabricConsoleRuntime({
-      controller: new FakeController(),
+      controller: stateBoundControlController(),
       viewport: { columns: 140, rows: 36 },
       ui: createFabricUiState({
         compactPane: "detail",
@@ -2055,7 +2210,7 @@ describe("Fabric Console runtime routing", () => {
   it("makes every enabled 80x24 target keyboard reachable with visible focus", async () => {
     const activate = vi.fn(async () => {});
     const runtime = new FabricConsoleRuntime({
-      controller: new FakeController(),
+      controller: stateBoundControlController(),
       viewport: { columns: 80, rows: 24 },
       draw: () => {},
       detach: async () => {},

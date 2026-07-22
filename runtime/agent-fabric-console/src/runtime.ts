@@ -1,7 +1,6 @@
-import stringWidth from "string-width";
-import { splitGraphemes } from "unicode-segmenter/grapheme";
-
 import type { TerminalInputEvent } from "./input.js";
+import { FABRIC_HELP_NOTICE, nextFabricView } from "./keymap.js";
+import { clampDeckScroll, pageFocusedDeck } from "./attention-deck-state.js";
 import {
   consoleFailureFromUnknown,
   type ConsoleControllerState,
@@ -10,19 +9,19 @@ import type {
   FabricConsoleFrame,
   FabricHitBinding,
   FabricHitRegion,
-  FabricPointerIntent,
   FabricPointerState,
 } from "./index.js";
 import { FABRIC_VIEWS, type FabricView } from "./model.js";
 import {
   createFabricUiState,
-  matchesArtifactConfirmation,
   type ArtifactReviewConfirmation,
   type ConsoleGuidedWorkflowDraft,
   type FabricConsoleUiState,
   type FabricViewport,
 } from "./presenter.js";
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
+import { refreshUiForDataset } from "./runtime-reflow.js";
+import { boundedUtf8, cellSlice, maxDraftBytes, reviewEpoch, type CapturedActionTarget, type CapturedInput, type CapturedPointerIntent } from "./runtime-support.js";
 
 export type FabricRuntimeController = {
   readonly state: ConsoleControllerState;
@@ -77,83 +76,6 @@ export type FabricConsoleRuntimeOptions = Readonly<{
     }>[];
   }>;
 }>;
-
-function maxDraftBytes(value: number | undefined): number {
-  if (value === undefined) return 16_384;
-  if (!Number.isSafeInteger(value) || value < 1 || value > 1_048_576) {
-    throw new TypeError("maxDraftBytes must be an integer from 1 to 1048576");
-  }
-  return value;
-}
-
-function boundedUtf8(value: string, maximumBytes: number): string {
-  const encoded = Buffer.from(value);
-  if (encoded.byteLength <= maximumBytes) return value;
-  let end = maximumBytes;
-  while (end > 0 && (encoded[end] ?? 0) >= 0x80 && (encoded[end] ?? 0) < 0xc0) {
-    end -= 1;
-  }
-  return encoded.subarray(0, end).toString("utf8");
-}
-
-function nextView(view: FabricView, delta: -1 | 1): FabricView {
-  const current = FABRIC_VIEWS.indexOf(view);
-  const index = (current + delta + FABRIC_VIEWS.length) % FABRIC_VIEWS.length;
-  return FABRIC_VIEWS[index] ?? "attention";
-}
-
-function cellSlice(value: string, start: number, end: number): string {
-  let column = 0;
-  let output = "";
-  for (const grapheme of splitGraphemes(value)) {
-    const nextColumn = column + stringWidth(grapheme);
-    if (nextColumn > start && column < end) output += grapheme;
-    column = nextColumn;
-    if (column >= end) break;
-  }
-  return output;
-}
-
-type CapturedActionTarget =
-  | Readonly<{ kind: "none" }>
-  | Readonly<{
-      kind: "shortcut";
-      actionContext: boolean;
-      region: FabricHitRegion | null;
-    }>
-  | Readonly<{
-      kind: "focused-region";
-      region: FabricHitRegion | null;
-    }>;
-
-type CapturedPointerIntent = Readonly<{
-  intent: FabricPointerIntent;
-  region: FabricHitRegion | null;
-}>;
-
-type CapturedInput = Readonly<{
-  event: TerminalInputEvent;
-  frame: FabricConsoleFrame;
-  reviewEpoch: string | null;
-  actionTarget: CapturedActionTarget;
-  pointerIntents: readonly CapturedPointerIntent[];
-}>;
-
-function reviewEpoch(frame: FabricConsoleFrame): string | null {
-  const review = frame.presentation.review;
-  return review === null
-    ? null
-    : JSON.stringify([
-        review.stage,
-        review.workflowId,
-        review.itemId,
-        review.itemRevision,
-        review.projectionRevision,
-        review.previewRevision,
-        review.previewDigest,
-        review.confirmationMode,
-      ]);
-}
 
 export class FabricConsoleRuntime {
   readonly #controller: FabricRuntimeController;
@@ -489,25 +411,27 @@ export class FabricConsoleRuntime {
     }
     this.#applyDataset(dataset);
     this.#clampMasterOffsets();
-    this.#clampActiveDetailOffset(this.#renderCurrentFrame());
+    const frame = this.#renderCurrentFrame();
+    this.#clampActiveDetailOffset(frame);
+    this.#ui = clampDeckScroll(this.#ui, frame.hitRegions.find(({ id }) => id.startsWith("deck:"))?.scrollMaximum ?? 0);
     return this.repaint();
   }
 
   #applyDataset(dataset: FabricConsoleDataset): void {
+    const previousDataset = this.#controller.dataset;
+    const previousAnchors = this.#controller.state.scrollAnchorByView;
+    const previousFocusBinding = this.#frame.hitRegions.find(
+      ({ enabled, id }) => enabled && id === this.#ui.focusId,
+    )?.binding ?? null;
     this.#controller.updateDataset(dataset);
-    const confirmation = this.#ui.artifactConfirmation;
-    const inspection = dataset.inspection;
-    const retainConfirmation = confirmation !== null &&
-      inspection?.kind === "artifact" &&
-      inspection.state === "current" &&
-      matchesArtifactConfirmation(
-        confirmation,
-        inspection.binding.itemId,
-        inspection.result,
-      );
-    if (!retainConfirmation) {
-      this.#ui = { ...this.#ui, artifactConfirmation: null };
-    }
+    this.#ui = refreshUiForDataset({
+      previousDataset,
+      dataset,
+      previousAnchors,
+      nextAnchors: this.#controller.state.scrollAnchorByView,
+      ui: this.#ui,
+      focusBinding: previousFocusBinding,
+    });
     this.#pointer = { pressed: null };
   }
 
@@ -840,7 +764,7 @@ export class FabricConsoleRuntime {
   ): Promise<void> {
     if (event.kind === "mouse") return;
     if (event.kind === "paste") {
-      this.#appendDraft(event.text);
+      this.#appendInput(event.text);
       return;
     }
     if (event.key === "escape") {
@@ -905,28 +829,27 @@ export class FabricConsoleRuntime {
         this.repaint();
         return;
       }
-      this.#appendDraft("\n");
+      this.#appendInput("\n");
       return;
     }
     if (event.key === "space") {
-      this.#appendDraft(" ");
+      this.#appendInput(" ");
       return;
     }
     if (event.key === "text" && event.text !== undefined) {
-      this.#appendDraft(event.text);
+      this.#appendInput(event.text);
     }
   }
 
-  #appendDraft(value: string): void {
+  #appendInput(value: string): void {
     const combined = `${this.#ui.draft}${value}`;
     const draft = boundedUtf8(combined, this.#maxDraftBytes);
     this.#ui = {
       ...this.#ui,
       draft,
-      notice:
-        draft === combined
-          ? null
-          : `Draft limited to ${String(this.#maxDraftBytes)} bytes`,
+      notice: draft === combined
+        ? null
+        : `Draft limited to ${String(this.#maxDraftBytes)} bytes`,
     };
     this.repaint();
   }
@@ -1018,12 +941,12 @@ export class FabricConsoleRuntime {
         return;
       }
       if (event.text === "[") {
-        this.#controller.activateView(nextView(this.#controller.state.activeView, -1));
+        this.#controller.activateView(nextFabricView(this.#controller.state.activeView, -1));
         this.repaint();
         return;
       }
       if (event.text === "]") {
-        this.#controller.activateView(nextView(this.#controller.state.activeView, 1));
+        this.#controller.activateView(nextFabricView(this.#controller.state.activeView, 1));
         this.repaint();
         return;
       }
@@ -1064,7 +987,7 @@ export class FabricConsoleRuntime {
       if (event.text === "?") {
         this.#ui = {
           ...this.#ui,
-          notice: "Help: Alt-1..8 views; [ ] cycle; Enter open; s sessions; e draft; : workflow; PgUp/PgDn; Alt-M mouse; q detach",
+          notice: FABRIC_HELP_NOTICE,
         };
         this.repaint();
       }
@@ -1199,6 +1122,23 @@ export class FabricConsoleRuntime {
       return;
     }
     const view = this.#controller.state.activeView;
+    const deckRegion = view === "attention"
+      ? this.#frame.hitRegions.find(
+          ({ id }) => id.startsWith("deck:") &&
+            (id === regionId || id === this.#ui.focusId),
+        )
+      : undefined;
+    if (deckRegion !== undefined) {
+      this.#ui = pageFocusedDeck(
+        this.#ui,
+        this.#frame.presentation.deckRows,
+        this.#frame.hitRegions.filter(({ id }) => id.startsWith("deck:")).length,
+        Math.max(0, deckRegion.scrollMaximum ?? 0),
+        direction,
+      );
+      this.repaint();
+      return;
+    }
     const detailFocused =
       regionId?.startsWith("detail:") === true ||
       this.#ui.focusId?.startsWith("detail:") === true ||
@@ -1347,6 +1287,10 @@ export class FabricConsoleRuntime {
       ) {
         this.#ui = { ...this.#ui, focusId: detailId };
       }
+      this.repaint();
+      return;
+    }
+    if (region.kind === "row") {
       this.repaint();
       return;
     }

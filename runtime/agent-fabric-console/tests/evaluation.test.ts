@@ -467,6 +467,7 @@ describe("versioned Console usability evaluation", () => {
       "30x6",
       "80x24",
       "120x32",
+      "200x10",
     ]));
   });
 

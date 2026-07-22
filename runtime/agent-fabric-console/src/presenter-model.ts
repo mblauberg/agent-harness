@@ -1,6 +1,14 @@
 import type { OperatorAvailableAction } from "@local/agent-fabric-protocol";
 
 import type { ActionReview } from "./controller.js";
+export {
+  responsiveModeFor,
+  type FabricResponsiveMode,
+  type FabricViewport,
+} from "./layout.js";
+import type {
+  FabricResponsiveMode,
+} from "./layout.js";
 import type {
   FabricView,
   GuidedWorkflowAction,
@@ -11,18 +19,6 @@ import type {
   ConsoleInspectionBinding,
 } from "./protocol-adapter.js";
 import type { ConsoleWorkflowReview } from "./workflow.js";
-
-export type FabricResponsiveMode =
-  | "wide"
-  | "reference"
-  | "compact"
-  | "strip"
-  | "inert";
-
-export type FabricViewport = Readonly<{
-  columns?: number;
-  rows?: number;
-}>;
 
 export type FabricConsoleUiState = Readonly<{
   focusId: string | null;
@@ -40,6 +36,7 @@ export type FabricConsoleUiState = Readonly<{
   workflowReview: ConsoleWorkflowReview | null;
   artifactConfirmation: ArtifactReviewConfirmation | null;
   guidedWorkflow: ConsoleGuidedWorkflowDraft | null;
+  deckScrollOffset: number;
 }>;
 
 export type FabricReviewCoverageState = Readonly<{
@@ -90,6 +87,11 @@ export function createFabricUiState(
     workflowReview: overrides.workflowReview ?? null,
     artifactConfirmation: overrides.artifactConfirmation ?? null,
     guidedWorkflow: overrides.guidedWorkflow ?? null,
+    deckScrollOffset:
+      overrides.deckScrollOffset === undefined ||
+      !Number.isSafeInteger(overrides.deckScrollOffset)
+        ? 0
+        : Math.max(0, overrides.deckScrollOffset),
   };
 }
 
@@ -106,46 +108,6 @@ export function matchesArtifactConfirmation(
     confirmation.renderedDigest === result.renderedArtifactDigest &&
     confirmation.transformation === result.transformation &&
     confirmation.pageCount === result.coverage.pageCount;
-}
-
-const MAX_PRESENTATION_CELLS = 250_000;
-
-export function responsiveModeFor(
-  viewport: FabricViewport,
-): FabricResponsiveMode {
-  const columns = viewport.columns;
-  const rows = viewport.rows;
-  if (
-    columns === undefined ||
-    rows === undefined ||
-    !Number.isSafeInteger(columns) ||
-    !Number.isSafeInteger(rows) ||
-    columns < 0 ||
-    rows < 0
-  ) {
-    return "inert";
-  }
-  const width = columns;
-  const height = rows;
-  if (
-    width > MAX_PRESENTATION_CELLS ||
-    height > MAX_PRESENTATION_CELLS ||
-    width * height > MAX_PRESENTATION_CELLS ||
-    width < 30 ||
-    height < 6
-  ) {
-    return "inert";
-  }
-  if (width < 40 || height < 8) {
-    return "strip";
-  }
-  if (width < 80 || height < 24) {
-    return "compact";
-  }
-  if (width >= 120 && height >= 30) {
-    return "wide";
-  }
-  return "reference";
 }
 
 export type PresentedHeader = Readonly<{
@@ -182,6 +144,26 @@ export type PresentedRow = Readonly<{
   secondary: string;
   freshness: string;
   actionable: boolean;
+}>;
+
+export type PresentedDeckRow = Readonly<{
+  kind: "session" | "coordination" | "workstream";
+  stableId: string;
+  entityId: string;
+  projectSessionId: string | null;
+  coordinationRunId: string | null;
+  deliveryRunId: string | null;
+  owner: string | null;
+  phase: string | null;
+  state: string | null;
+  health: string | null;
+  freshness: string | null;
+  lastEvent: string | null;
+  updatedAt: string | null;
+  nextMilestone: string | null;
+  primary: string;
+  secondary: string;
+  sourceRow: PresentedRow | null;
 }>;
 
 export type PresentedDetail = Readonly<{
@@ -247,6 +229,9 @@ export type FabricConsolePresentation = Readonly<{
   watchRows: readonly PresentedRow[];
   watchCollapsed: true;
   topAttention: PresentedRow | null;
+  deckRows: readonly PresentedDeckRow[];
+  deckTotalCount: number;
+  deckRunCount: number;
   detail: PresentedDetail | null;
   actions: readonly PresentedAction[];
   review: PresentedReview | null;

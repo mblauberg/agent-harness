@@ -297,14 +297,37 @@ export class ConsoleController {
       const selection = selections[view];
       if (selection !== null) {
         const current = this.#row(view, selection.stableId);
-        selections[view] =
-          current === null
+        if (current === null) {
+          const previousIndex = previous.pages[view].rows.findIndex(
+            ({ stableId }) => stableId === selection.stableId,
+          );
+          const fallback = dataset.pages[view].rows[
+            Math.min(
+              Math.max(0, previousIndex),
+              Math.max(0, dataset.pages[view].rows.length - 1),
+            )
+          ];
+          selections[view] = fallback === undefined
             ? null
-            : { stableId: selection.stableId, revision: current.revision };
+            : { stableId: fallback.stableId, revision: fallback.revision };
+        } else {
+          selections[view] = {
+            stableId: selection.stableId,
+            revision: current.revision,
+          };
+        }
       }
       const anchor = anchors[view];
       if (anchor !== null && this.#row(view, anchor) === null) {
-        anchors[view] = dataset.pages[view].rows[0]?.stableId ?? null;
+        const previousIndex = previous.pages[view].rows.findIndex(
+          ({ stableId }) => stableId === anchor,
+        );
+        anchors[view] = dataset.pages[view].rows[
+          Math.min(
+            Math.max(0, previousIndex),
+            Math.max(0, dataset.pages[view].rows.length - 1),
+          )
+        ]?.stableId ?? null;
       }
     }
 

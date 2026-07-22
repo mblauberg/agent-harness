@@ -44,6 +44,7 @@ field own current Console delivery state and user gates.
 - [Intake and continuation](console/intake-and-continuation.md)
 - [Artifact review and attention](console/artifact-review.md)
 - [Operator interaction](console/operator-interaction.md)
+- [Deck visual direction](console/deck-visual-direction.md)
 - [Integrations](console/integrations.md)
 - [Lifecycle and failure UX](console/lifecycle-and-failure.md)
 - [Acceptance and usability](console/acceptance.md)

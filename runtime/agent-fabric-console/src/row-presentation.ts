@@ -8,7 +8,6 @@ import type { ConsoleControllerState } from "./controller.js";
 import type {
   ConsoleFreshness,
   ConsoleRow,
-  ConsoleUrgency,
   FabricView,
 } from "./model.js";
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
@@ -18,6 +17,9 @@ import type {
   PresentedHeader,
   PresentedRow,
 } from "./presenter-model.js";
+import { FABRIC_URGENCY_MARKERS } from "./theme.js";
+import { isNeedsYouRow, recordAttentionLane } from "./attention-classification.js";
+export { isNeedsYouRow, isNeedsYouUrgency } from "./attention-classification.js";
 export function titleCase(view: FabricView): string {
   return `${view.slice(0, 1).toUpperCase()}${view.slice(1)}`;
 }
@@ -86,13 +88,19 @@ function capacityLabel(dataset: FabricConsoleDataset): string {
     .join(" ") || "declared";
 }
 
-export function presentHeader(dataset: FabricConsoleDataset): PresentedHeader {
+export function presentHeader(
+  dataset: FabricConsoleDataset,
+  attentionCounts: Readonly<{ needsYou: number; watch: number }>,
+  selectedRun: ConsoleRow<"runs"> | null,
+): PresentedHeader {
   const project = factValue(dataset.snapshot?.project);
   const session = factValue(dataset.snapshot?.session);
   const runs = factValue(dataset.snapshot?.runs) ?? [];
-  const activeRun = runs[0];
-  const attentionRows = dataset.pages.attention.rows;
-  const needsYouCount = attentionRows.filter((row) => isNeedsYouUrgency(row.urgency)).length;
+  const selectedSummary = selectedRun?.summary?.kind === "run"
+    ? selectedRun.summary
+    : null;
+  const soleRun = runs.length === 1 ? runs[0] : undefined;
+  const attentionCount = attentionCounts.needsYou;
   const sessionChoices = dataset.projectSessions?.choices ?? [];
   return {
     project: project?.projectId ?? "unavailable",
@@ -101,26 +109,23 @@ export function presentHeader(dataset: FabricConsoleDataset): PresentedHeader {
         ? "none"
         : `choose:${String(sessionChoices.length)}`
     ),
-    run: activeRun?.runId ?? "none",
+    run: selectedRun?.stableId ?? soleRun?.runId ?? (
+      runs.length === 0 ? "none" : `choose:${String(runs.length)}`
+    ),
     revision: dataset.snapshotRevision,
     freshness: headerFreshness(dataset),
-    phase: activeRun?.phase ?? session?.state ?? "unknown",
-    owner: activeRun?.chairAgentId ?? "unassigned",
-    nextMilestone: activeRun?.nextMilestone ?? "not declared",
-    health: activeRun?.health ?? "unknown",
-    attentionCount: attentionRows.length,
-    needsYouCount,
-    watchCount: attentionRows.length - needsYouCount,
+    phase: selectedSummary?.phase ?? soleRun?.phase ?? (runs.length > 1 ? "not selected" : "unknown"),
+    owner: selectedSummary === null
+      ? soleRun?.chairAgentId ?? "unassigned"
+      : String(selectedSummary.identity.chairAgentId),
+    nextMilestone: selectedSummary?.nextMilestone ?? soleRun?.nextMilestone ?? "not declared",
+    health: selectedSummary?.health ?? soleRun?.health ?? "unknown",
+    attentionCount,
+    needsYouCount: attentionCounts.needsYou,
+    watchCount: attentionCounts.watch,
     runCount: runs.length,
     capacity: capacityLabel(dataset),
   };
-}
-
-export function isNeedsYouUrgency(urgency: ConsoleUrgency): boolean {
-  return urgency === "safety-integrity" ||
-    urgency === "critical-path" ||
-    urgency === "expiring-authority" ||
-    urgency === "acceptance-ready";
 }
 
 function ageLabel(ageMs: number): string {
@@ -156,15 +161,6 @@ function freshnessLabel(
   }`;
 }
 
-const URGENCY_MARKER: Readonly<Record<ConsoleUrgency, string>> = {
-  "safety-integrity": "!!",
-  "critical-path": "!>",
-  "expiring-authority": "!",
-  "acceptance-ready": "+",
-  advisory: ".",
-  normal: " ",
-};
-
 function attentionGroupingLabel(
   row: ConsoleRow,
   dataset: FabricConsoleDataset,
@@ -184,6 +180,9 @@ function summaryText(
   dataset: FabricConsoleDataset,
 ): readonly [string, string] {
   const summary = row.summary;
+  if (row.view === "attention") {
+    recordAttentionLane(row, summary?.kind === "attention" ? summary.label : null);
+  }
   if (summary === null) {
     const reason =
       row.freshness.state === "unavailable"
@@ -237,7 +236,7 @@ function summaryText(
   }
 }
 
-function presentRow(
+export function presentRow(
   row: ConsoleRow,
   selected: boolean,
   canMutate: boolean,
@@ -249,7 +248,7 @@ function presentRow(
     stableId: row.stableId,
     revision: row.revision,
     selected,
-    urgencyMarker: URGENCY_MARKER[row.urgency],
+    urgencyMarker: FABRIC_URGENCY_MARKERS[row.urgency],
     primary,
     secondary,
     freshness: freshnessLabel(row.freshness, dataset),
@@ -259,6 +258,7 @@ function presentRow(
       row.actionAvailability.state === "available",
   };
 }
+
 type DetailLine = Readonly<{ label: string; value: string }>;
 
 type ReviewPreparationShape = Readonly<{
@@ -924,12 +924,12 @@ function invariantRows(
     presentRow(candidate, false, canMutate, dataset)
   );
   const needsYouRows = activeRows.flatMap((candidate, index) =>
-    candidate.view === "attention" && !isNeedsYouUrgency(candidate.urgency)
+    candidate.view === "attention" && !isNeedsYouRow(candidate)
       ? []
       : [masterRows[index] as PresentedRow]
   );
   const watchRows = activeRows.flatMap((candidate, index) =>
-    candidate.view === "attention" && !isNeedsYouUrgency(candidate.urgency)
+    candidate.view === "attention" && !isNeedsYouRow(candidate)
       ? [masterRows[index] as PresentedRow]
       : []
   );
@@ -973,7 +973,7 @@ export function presentRows(
   const attentionInvariant = activeRows === attentionRows
     ? invariant
     : invariantRows(dataset, attentionRows);
-  const firstAttention = attentionRows.find((row) => isNeedsYouUrgency(row.urgency));
+  const firstAttention = attentionRows.find(isNeedsYouRow);
   const firstAttentionIndex = firstAttention === undefined
     ? -1
     : attentionRows.findIndex((row) => row.stableId === firstAttention.stableId);
@@ -983,15 +983,15 @@ export function presentRows(
         attentionInvariant.masterRows[firstAttentionIndex] as PresentedRow,
         controller.selectionByView.attention?.stableId === firstAttention?.stableId,
       );
-  const presentedNeedsYouRows = invariant.needsYouRows.map((row) =>
-    row.stableId === selected?.stableId
+  const presentedNeedsYouRows = attentionInvariant.needsYouRows.map((row) =>
+    controller.selectionByView.attention?.stableId === row.stableId
       ? selectPresentedRow(row, true)
       : row
   );
   return {
     masterRows: presentedMasterRows,
     needsYouRows: presentedNeedsYouRows,
-    watchRows: invariant.watchRows,
+    watchRows: attentionInvariant.watchRows,
     watchCollapsed: true,
     selectedRow: selectedRow ?? null,
     topAttention,
