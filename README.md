@@ -28,9 +28,8 @@ vulnerabilities privately through [`SECURITY.md`](SECURITY.md).
 A bare coding agent will write and "finish" a change in one pass, with its own
 author as the only reviewer. Provenant puts structure around that:
 
-- it **scopes** work in dialogue with the user: open decisions come back as
-  questions, or as a grill-style interview on request, and implementation
-  waits for user approval of the resulting spec;
+- it **scopes** work in dialogue with the user, returning open decisions as
+  questions, and requires approval before implementation starts;
 - it runs **deterministic checks** before any result surfaces for review;
 - it adds **review by the _other_ model family** once the work is substantial:
   Claude checks Codex, Codex checks Claude; and
@@ -206,13 +205,11 @@ flowchart TB
 ```
 
 Gold hexagons are user gates. Every gate can stop progression; specification
-approval and acceptance can return work for revision. Scoping itself is
-usually a conversation, not a monologue: the agent presents a compact
-decision packet with choices and a recommendation, business or owner calls
-come back as named questions rather than guesses, and the
-[`grill-me`](skills/grill-me/SKILL.md) interview walks purpose, users,
-constraints, edge cases and exclusions one question at a time when asked or
-when material decisions stay unresolved. `review` runs in a fresh
+approval and acceptance can return work for revision. Scoping itself is usually a
+conversation: a decision packet with choices and a recommendation, owner
+calls parked as named questions rather than guesses, and the
+[`grill-me`](skills/grill-me/SKILL.md) interview, one question per round,
+on request or while material decisions stay unresolved. `review` runs in a fresh
 context that never wrote the diff. From the `substantial` tier up it requires
 multiple targeted lenses plus the other primary; a receipt missing that leg cannot
 reach acceptance.
