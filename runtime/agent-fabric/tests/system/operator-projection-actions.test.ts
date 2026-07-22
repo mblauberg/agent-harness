@@ -1591,6 +1591,407 @@ describe("operator agent topology projection", () => {
   });
 });
 
+describe("operator work facts projection", () => {
+  it("projects authoritative workflow facts only when negotiated", () => {
+    const fixture = setupProjection();
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    const request: OperatorViewPageRequest<"work"> = {
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "work",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 1,
+    };
+    const negotiated = fixture.projections.viewPage(
+      request,
+      "include",
+      "include",
+      "include",
+      "include",
+      "include",
+      "include" as never,
+    );
+    expect(negotiated).toMatchObject({
+      status: "page",
+      view: "work",
+      rows: [{
+        itemId: "task_01",
+        fact: { value: { summary: { workflow: {
+          workflowRevision: snapshot.snapshotRevision,
+          objective: { observation: "Observed", value: "Implement projection" },
+          dependencies: { observation: "Observed", dependencyRevision: 1, taskIds: [] },
+          coordinationRun: {
+            observation: "Observed",
+            projectSessionId: "session_01",
+            coordinationRunId: "run_01",
+          },
+          workstream: { observation: "Unobserved" },
+          parentTask: { observation: "Unobserved" },
+          plan: { observation: "Unobserved" },
+          task: {
+            observation: "Observed",
+            state: "active",
+            owner: { observation: "Observed", agentId: "chair_01", ownerLeaseGeneration: 1 },
+          },
+          checks: { observation: "Observed", items: [] },
+          barriers: { observation: "Observed", items: [] },
+          declaredWriteScopes: { observation: "Observed", leases: [] },
+          runTaskStates: {
+            observation: "Observed",
+            counts: { blocked: 0, ready: 0, active: 1, complete: 0, cancelled: 0, degraded: 0 },
+          },
+        } } } },
+      }],
+    });
+
+    fixture.database.exec("DROP TRIGGER objective_check_status_insert");
+    fixture.database.prepare(`
+      INSERT INTO task_objective_checks(run_id, task_id, check_id, status, evidence)
+      VALUES ('run_01', 'task_01', 'legacy_unknown', 'legacy-state', NULL)
+    `).run();
+    const invalidSnapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    const invalidRequest = { ...request, snapshotRevision: invalidSnapshot.snapshotRevision };
+    const unnegotiated = fixture.projections.viewPage(
+      invalidRequest,
+      "include",
+      "include",
+      "include",
+      "include",
+      "include",
+      "omit",
+    );
+    if (unnegotiated.status !== "page") throw new Error("expected an unnegotiated work page");
+    const work = unnegotiated.rows[0]?.fact;
+    if (work?.freshness !== "live") throw new Error("expected a live work row");
+    if (work.value.summary.kind !== "work") throw new Error("expected a work summary");
+    expect(work.value.summary).not.toHaveProperty("workflow");
+    expect(work.value.summary.checkState).toBe("unknown");
+    expect(() => fixture.projections.viewPage(
+      invalidRequest,
+      "include",
+      "include",
+      "include",
+      "include",
+      "include",
+      "include" as never,
+    )).toThrowError(/stored objective-check state is invalid/);
+  });
+
+  it("projects exact plan, dependency, checks, barriers and declared write scopes with server totals", () => {
+    const fixture = setupProjection();
+    fixture.database.exec(`
+      INSERT INTO tasks(
+        run_id, task_id, authority_id, objective, base_revision, state,
+        owner_agent_id, revision, owner_lease_generation, created_by
+      ) VALUES (
+        'run_01', 'task_02', 'authority_01', 'Completed dependency', 'base_01', 'complete',
+        'chair_01', 2, 1, 'chair_01'
+      );
+      INSERT INTO dependency_mutation_guards(
+        run_id, project_session_id, target_revision, expected_edge_count, expected_binding_count
+      ) VALUES ('run_01', 'session_01', 2, 1, 0);
+      INSERT INTO task_dependencies(
+        run_id, task_id, dependency_task_id, project_session_id, dependency_revision
+      ) VALUES ('run_01', 'task_01', 'task_02', 'session_01', 2);
+      UPDATE runs SET dependency_revision=2 WHERE run_id='run_01';
+      DELETE FROM dependency_mutation_guards WHERE run_id='run_01';
+      INSERT INTO task_objective_checks(run_id, task_id, check_id, status, evidence)
+      VALUES ('run_01', 'task_01', 'check_01', 'pass', 'evidence_01');
+      INSERT INTO barriers(run_id, scope, stage_id, state, closed_at, receipt_sha256)
+      VALUES
+        ('run_01', 'run', '', 'closed', ${String(now - 100)}, '${digest}'),
+        ('run_01', 'stage', 'implementation', 'closed', ${String(now - 90)}, '${digest}'),
+        ('run_01', 'stage', '', 'closed', ${String(now - 90)}, '${digest}'),
+        ('run_01', 'stage', '𐀀', 'closed', ${String(now - 90)}, '${digest}');
+      INSERT INTO workstreams(
+        workstream_id, project_session_id, coordination_run_id, fabric_task_id,
+        lead_agent_id, delivery_run_id, revision, state, created_at, updated_at
+      ) VALUES (
+        'ws_01', 'session_01', 'run_01', 'task_01',
+        'chair_01', 'delivery_01', 2, 'active', ${String(now - 80)}, ${String(now - 70)}
+      );
+      INSERT INTO run_plan_declarations(
+        run_id,plan_revision,plan_path,plan_digest,
+        accepted_scope_artifact_id,accepted_scope_revision,
+        accepted_scope_path,accepted_scope_digest,
+        declared_task_denominator,declared_by_agent_id,declared_at
+      ) VALUES (
+        'run_01',1,'plans/current.md','${digest}',
+        'artifact_01',2,'scope/accepted.md','${digest}',
+        2,'chair_01',${String(now - 60)}
+      );
+      INSERT INTO leases(lease_id, run_id, kind, holder_agent_id, generation, status, expires_at, updated_at)
+      VALUES ('lease_01', 'run_01', 'write', 'chair_01', 2, 'active', ${String(now + 10_000)}, ${String(now - 50)});
+      INSERT INTO write_scope_entries(lease_id, canonical_path)
+      VALUES
+        ('lease_01', '/project/one/src/workflow.ts'),
+        ('lease_01', '/x/'),
+        ('lease_01', '/x/𐀀');
+      INSERT INTO task_obligation_bindings(
+        coordination_run_id, task_id, obligation_kind, obligation_id, state, created_at, updated_at
+      ) VALUES ('run_01', 'task_01', 'write-lease', 'lease_01', 'active', ${String(now - 50)}, ${String(now - 50)});
+      INSERT INTO task_requests(
+        request_id, project_session_id, run_id, task_id, requester_agent_id,
+        request_revision, conversation_id, request_message_id, target_agent_id,
+        target_provider_session, expected_artifacts_json, acknowledgement_required,
+        dedupe_key, response_deadline, callback_id, callback_generation,
+        dependent_barrier_id, state, payload_digest, created_at, updated_at
+      ) VALUES (
+        'request_01', 'session_01', 'run_01', 'task_01', 'chair_01',
+        1, 'conversation_01', 'message_01', 'chair_01',
+        'provider_session_01', '[]', 0,
+        'request:01', ${String(now + 10_000)}, 'callback_01', 1,
+        'barrier_request_01', 'pending', '${digest}', ${String(now - 40)}, ${String(now - 40)}
+      );
+      INSERT INTO task_request_barriers(request_id, barrier_id, state)
+      VALUES ('request_01', 'barrier_request_01', 'blocked');
+    `);
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    const page = fixture.projections.viewPage({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "work",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 1,
+    }, "include", "include", "include", "include", "include", "include");
+    expect(page).toMatchObject({
+      status: "page",
+      hasMore: true,
+      rows: [{ itemId: "task_01", fact: { value: { summary: {
+        checkState: "passing",
+        workflow: {
+          workflowRevision: snapshot.snapshotRevision,
+          dependencies: { dependencyRevision: 2, taskIds: ["task_02"] },
+          workstream: {
+            observation: "Observed",
+            workstreamId: "ws_01",
+            deliveryRunId: "delivery_01",
+            workstreamRevision: 2,
+            state: "active",
+          },
+          plan: { observation: "Observed", planRevision: 1 },
+          checks: { items: [{ checkId: "check_01", state: "pass" }] },
+          barriers: { items: [
+            { kind: "run", barrierId: "run_01:run:", state: "closed" },
+            { kind: "stage", barrierId: "run_01:stage:implementation", stageId: "implementation", state: "closed" },
+            { kind: "stage", barrierId: "run_01:stage:𐀀", stageId: "𐀀", state: "closed" },
+            { kind: "stage", barrierId: "run_01:stage:", stageId: "", state: "closed" },
+            { kind: "task-request", barrierId: "barrier_request_01", requestId: "request_01", state: "blocked" },
+          ] },
+          declaredWriteScopes: { leases: [{
+            leaseId: "lease_01",
+            generation: 2,
+            state: "active",
+            paths: ["/project/one/src/workflow.ts", "/x/𐀀", "/x/"],
+          }] },
+          runTaskStates: {
+            observation: "Observed",
+            counts: { blocked: 0, ready: 0, active: 1, complete: 1, cancelled: 0, degraded: 0 },
+          },
+        },
+      } } } }],
+    });
+    if (page.status !== "page" || page.rows[0]?.fact.freshness !== "live") {
+      throw new Error("expected the current work row");
+    }
+    expect(fixture.projections.detail({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      snapshotRevision: snapshot.snapshotRevision,
+      detailRef: page.rows[0].fact.value.detailRef,
+    }, "include", "include", "include", "include", "include")).toMatchObject({
+      status: "current",
+      detail: { value: {
+        kind: "task",
+        objective: "Implement projection",
+        workflow: { workflowRevision: snapshot.snapshotRevision, plan: { planRevision: 1 } },
+      } },
+    });
+  });
+
+  it("does not choose among multiple workstream bindings", () => {
+    const fixture = setupProjection();
+    fixture.database.exec(`
+      INSERT INTO workstreams(
+        workstream_id, project_session_id, coordination_run_id, fabric_task_id,
+        lead_agent_id, delivery_run_id, revision, state, created_at, updated_at
+      ) VALUES
+        ('ws_a', 'session_01', 'run_01', 'task_01', 'chair_01', 'delivery_a', 1, 'active', ${String(now)}, ${String(now)}),
+        ('ws_b', 'session_01', 'run_01', 'task_01', 'chair_01', 'delivery_b', 1, 'active', ${String(now)}, ${String(now)});
+    `);
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    expect(fixture.projections.viewPage({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "work",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 5,
+    }, "include", "include", "include", "include", "include", "include")).toMatchObject({
+      status: "page",
+      rows: [{ itemId: "task_01", fact: { value: { summary: { workflow: {
+        workstream: { observation: "Unknown", reason: "MultipleWorkstreamBindings" },
+      } } } } }],
+    });
+  });
+
+  it("projects an exact non-root team-owned workstream binding", () => {
+    const fixture = setupProjection();
+    fixture.database.exec(`
+      INSERT INTO tasks(
+        run_id, task_id, authority_id, objective, base_revision, state,
+        owner_agent_id, revision, owner_lease_generation, created_by
+      ) VALUES ('run_01', 'task_root', 'authority_01', 'Workstream root', 'base_01', 'active',
+                'chair_01', 1, 1, 'chair_01');
+      INSERT INTO teams(
+        run_id, team_id, parent_team_id, depth, leader_agent_id, original_leader_agent_id,
+        successor_agent_id, root_task_id, authority_id, budget_id, state, generation,
+        handoff_evidence, created_at
+      ) VALUES ('run_01', 'team_01', NULL, 1, 'chair_01', 'chair_01', NULL,
+                'task_root', 'authority_01', 'budget_01', 'active', 1, NULL, ${String(now)});
+      INSERT INTO team_owned_tasks(run_id, team_id, task_id)
+      VALUES ('run_01', 'team_01', 'task_01');
+      INSERT INTO resource_scopes(
+        scope_id, project_id, project_session_id, coordination_run_id, parent_scope_id,
+        scope_kind, owner_ref, state, revision
+      ) VALUES
+        ('scope_run_01', 'project_01', 'session_01', 'run_01', 'scope_session_01',
+         'coordination-run', 'run_01', 'active', 1),
+        ('scope_team_01', 'project_01', 'session_01', 'run_01', 'scope_run_01',
+         'team', 'team_01', 'active', 1);
+      INSERT INTO workstreams(
+        workstream_id, project_session_id, coordination_run_id, fabric_task_id,
+        lead_agent_id, delivery_run_id, revision, state, created_at, updated_at
+      ) VALUES ('ws_indirect', 'session_01', 'run_01', 'task_root', 'chair_01',
+                'delivery_indirect', 3, 'active', ${String(now)}, ${String(now)});
+      INSERT INTO workstream_custody(
+        workstream_id, input_digest, launch_packet_artifact_id, launch_packet_path,
+        launch_packet_digest, team_id, root_task_id, authority_id, budget_id,
+        run_scope_id, team_scope_id, created_at
+      ) VALUES ('ws_indirect', '${digest}', 'artifact_01', 'launch/packet.json', '${digest}',
+                'team_01', 'task_root', 'authority_01', 'budget_01',
+                'scope_run_01', 'scope_team_01', ${String(now)});
+    `);
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    expect(fixture.projections.viewPage({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "work",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 1,
+    }, "include", "include", "include", "include", "include", "include")).toMatchObject({
+      status: "page",
+      rows: [{ itemId: "task_01", fact: { value: { summary: { workflow: { workstream: {
+        observation: "Observed",
+        workstreamId: "ws_indirect",
+        deliveryRunId: "delivery_indirect",
+        workstreamRevision: 3,
+      } } } } } }],
+    });
+  });
+
+  it("fails closed on a dangling task-bound write-scope declaration", () => {
+    const fixture = setupProjection();
+    fixture.database.exec(`
+      INSERT INTO task_obligation_bindings(
+        coordination_run_id, task_id, obligation_kind, obligation_id, state, created_at, updated_at
+      ) VALUES ('run_01', 'task_01', 'write-lease', 'missing_lease', 'active', ${String(now)}, ${String(now)});
+    `);
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    expect(() => fixture.projections.viewPage({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "work",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 5,
+    }, "include", "include", "include", "include", "include", "include"))
+      .toThrowError(expect.objectContaining({ code: "RECOVERY_REQUIRED" }));
+  });
+
+  it("fails closed on a dependency edge bound to a stale run revision", () => {
+    const fixture = setupProjection();
+    fixture.database.exec(`
+      INSERT INTO tasks(
+        run_id, task_id, authority_id, objective, base_revision, state,
+        owner_agent_id, revision, owner_lease_generation, created_by
+      ) VALUES ('run_01', 'task_02', 'authority_01', 'Dependency', 'base_01', 'complete',
+                'chair_01', 1, 1, 'chair_01');
+      INSERT INTO dependency_mutation_guards(
+        run_id, project_session_id, target_revision, expected_edge_count, expected_binding_count
+      ) VALUES ('run_01', 'session_01', 2, 1, 0);
+      INSERT INTO task_dependencies(
+        run_id, task_id, dependency_task_id, project_session_id, dependency_revision
+      ) VALUES ('run_01', 'task_01', 'task_02', 'session_01', 2);
+      UPDATE runs SET dependency_revision=2 WHERE run_id='run_01';
+      DELETE FROM dependency_mutation_guards WHERE run_id='run_01';
+      DROP TRIGGER dependency_guard_update;
+      UPDATE task_dependencies SET dependency_revision=1
+       WHERE run_id='run_01' AND task_id='task_01' AND dependency_task_id='task_02';
+    `);
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    expect(() => fixture.projections.viewPage({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "work",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 5,
+    }, "include", "include", "include", "include", "include", "include"))
+      .toThrowError(expect.objectContaining({ code: "RECOVERY_REQUIRED" }));
+  });
+});
+
 describe("operator action store", () => {
   it("persists a revision-bound preview and dispatches one effect for an idempotent confirmed command", async () => {
     const fixture = setupProjection();

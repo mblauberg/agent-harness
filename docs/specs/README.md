@@ -22,6 +22,7 @@ below. Follow their linked GitHub issues for delivery state.
 - [Evidence and review](agent-fabric/evidence-and-review.md)
 - [Run plan declaration](agent-fabric/run-plan-declaration.md)
 - [Agent topology projection](agent-fabric/agent-topology-projection.md)
+- [Work facts projection](agent-fabric/work-facts-projection.md)
 - [Effects](agent-fabric/effects.md)
 - [Activation and operations](agent-fabric/activation.md)
 - [Architecture assurance](agent-fabric/architecture-assurance.md)

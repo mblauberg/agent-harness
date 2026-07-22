@@ -281,6 +281,71 @@ export type AgentTopology = {
   nativeChildren: { observation: "Unobserved" };
 };
 
+export type WorkTaskState = "blocked" | "ready" | "active" | "complete" | "cancelled" | "degraded";
+
+export type WorkWorkflowFacts = {
+  workflowRevision: number;
+  objective: { observation: "Observed"; value: string };
+  dependencies: {
+    observation: "Observed";
+    dependencyRevision: number;
+    taskIds: readonly TaskId[];
+  };
+  coordinationRun: {
+    observation: "Observed";
+    projectSessionId: ProjectSessionId;
+    coordinationRunId: CoordinationRunId;
+  };
+  workstream:
+    | {
+        observation: "Observed";
+        workstreamId: WorkstreamId;
+        deliveryRunId: DeliveryRunId;
+        workstreamRevision: number;
+        state: "active" | "complete" | "cancelled" | "degraded" | "abandoned";
+      }
+    | { observation: "Unobserved" }
+    | { observation: "Unknown"; reason: "MultipleWorkstreamBindings" };
+  parentTask: { observation: "Unobserved" };
+  plan:
+    | { observation: "Observed"; planRevision: number }
+    | { observation: "Unobserved" };
+  task: {
+    observation: "Observed";
+    state: WorkTaskState;
+    owner:
+      | { observation: "Observed"; agentId: AgentId; ownerLeaseGeneration: number }
+      | { observation: "Unobserved" };
+  };
+  checks: {
+    observation: "Observed";
+    items: readonly { checkId: string; state: "pending" | "pass" | "fail" }[];
+  };
+  barriers: {
+    observation: "Observed";
+    items: readonly (
+      | { kind: "run"; barrierId: string; state: "closed" }
+      | { kind: "stage"; barrierId: string; stageId: string; state: "closed" }
+      | {
+          kind: "task-request";
+          barrierId: string;
+          requestId: string;
+          state: "blocked" | "released" | "abandoned";
+        }
+    )[];
+  };
+  declaredWriteScopes: {
+    observation: "Observed";
+    leases: readonly {
+      leaseId: string;
+      generation: number;
+      state: "active" | "quarantined" | "released";
+      paths: readonly string[];
+    }[];
+  };
+  runTaskStates: { observation: "Observed"; counts: DeclaredRunTaskStateCounts };
+};
+
 export type EvidenceViewItem = {
   evidenceId: string;
   kind: "artifact" | "diff" | "test" | "review" | "receipt";
@@ -553,7 +618,7 @@ export type OperatorViewSummaryMap = {
     declaredProgress?: DeclaredRunProgress;
     identity?: RunIdentity;
   };
-  work: { kind: "work"; state: string; checkState: WorkViewItem["checkState"] };
+  work: { kind: "work"; state: string; checkState: WorkViewItem["checkState"]; workflow?: WorkWorkflowFacts };
   agents: {
     kind: "agent";
     role: AgentViewItem["role"];
@@ -653,7 +718,14 @@ export type OperatorDetail =
       declaredProgress?: DeclaredRunProgress;
       identity?: RunIdentity;
     }
-  | { kind: "task"; taskId: TaskId; objective: string; state: string; ownerAgentId: AgentId | null }
+  | {
+      kind: "task";
+      taskId: TaskId;
+      objective: string;
+      state: string;
+      ownerAgentId: AgentId | null;
+      workflow?: WorkWorkflowFacts;
+    }
   | {
       kind: "agent";
       agentId: AgentId;

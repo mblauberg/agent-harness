@@ -55,6 +55,7 @@ import { readControlEligibility, type ResolvedControlTarget } from "./control-el
 import { projectRunIdentity } from "./run-identity-projection.js";
 import { projectDeclaredRunProgress } from "./declared-run-progress-projection.js";
 import { agentTopologyProjectionField, type AgentTopologyProjection } from "./agent-topology-projection.js";
+import { projectTaskCheckState, workFactsProjectionField, type WorkFactsProjection } from "./work-facts-projection.js";
 
 export type OperatorProjectionStoreOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
@@ -213,7 +214,7 @@ export class OperatorProjectionStore {
     nativeNotificationProjection: NativeNotificationProjection,
     runSessionProjection: RunSessionProjection = "include",
     declaredRunProgressProjection: DeclaredRunProgressProjection = "include",
-    runIdentityProjection: RunIdentityProjection = "include", agentTopologyProjection: AgentTopologyProjection = "include",
+    runIdentityProjection: RunIdentityProjection = "include", agentTopologyProjection: AgentTopologyProjection = "include", workFactsProjection: WorkFactsProjection = "include",
   ): OperatorViewPageResult {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
@@ -242,7 +243,7 @@ export class OperatorProjectionStore {
         )
       ), selectedSessionId);
       case "work": return this.#viewPage(request, "work", () => (
-        this.#workRows(request.projectId, selectedSessionId, authenticated)
+        this.#workRows(request.projectId, selectedSessionId, authenticated, workFactsProjection)
       ), selectedSessionId);
       case "agents": return this.#viewPage(request, "agents", () => (
         this.#agentRows(request.projectId, selectedSessionId, authenticated, agentTopologyProjection)
@@ -330,7 +331,7 @@ export class OperatorProjectionStore {
     request: OperatorDetailReadRequest,
     runSessionProjection: RunSessionProjection = "include",
     declaredRunProgressProjection: DeclaredRunProgressProjection = "include",
-    runIdentityProjection: RunIdentityProjection = "include", agentTopologyProjection: AgentTopologyProjection = "include",
+    runIdentityProjection: RunIdentityProjection = "include", agentTopologyProjection: AgentTopologyProjection = "include", workFactsProjection: WorkFactsProjection = "include",
   ): OperatorDetailReadResult {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
@@ -347,6 +348,7 @@ export class OperatorProjectionStore {
         declaredRunProgressProjection,
         runIdentityProjection,
         agentTopologyProjection,
+        workFactsProjection,
       );
       if (request.detailRef.expectedRevision !== loaded.revision) {
         return {
@@ -721,7 +723,7 @@ export class OperatorProjectionStore {
         sourcePrefixes,
         worktreePath: null,
         barrierIds,
-        checkState: this.#taskCheckState(text(task, "run_id"), taskId),
+        checkState: projectTaskCheckState(this.#database, text(task, "run_id"), taskId),
       };
     });
   }
@@ -1324,23 +1326,24 @@ export class OperatorProjectionStore {
   #workRows(
     projectId: ProjectId,
     projectSessionId: ProjectSessionId | undefined,
-    authenticated: AuthenticatedOperatorCredential,
+    authenticated: AuthenticatedOperatorCredential, workFactsProjection: WorkFactsProjection,
   ): OperatorViewRow<"work">[] {
     const values = this.#sessionQuery(
       projectId,
       projectSessionId,
-      `SELECT t.*, r.project_session_id FROM tasks t JOIN runs r ON r.run_id=t.run_id`,
+      `SELECT t.*, r.project_session_id, r.dependency_revision FROM tasks t JOIN runs r ON r.run_id=t.run_id`,
       "ORDER BY t.task_id",
     );
     return values.map((task): OperatorViewRow<"work"> => {
       const revision = integer(task, "revision");
       const taskId = parseIdentifier<"TaskId">(text(task, "task_id"), "workRow.taskId");
-      const checkState = this.#taskCheckState(text(task, "run_id"), taskId);
+      const checkState = projectTaskCheckState(this.#database, text(task, "run_id"), taskId);
       return {
         itemId: taskId,
         itemRevision: revision,
         fact: liveFact(revision, toTimestamp(this.#clock(), "workRow.observedAt"), {
-          summary: { kind: "work", state: text(task, "state"), checkState },
+          summary: { kind: "work", state: text(task, "state"), checkState,
+            ...workFactsProjectionField(this.#database, task, this.#globalRevision(), workFactsProjection) },
           detailRef: { kind: "task", taskId, expectedRevision: revision },
           actionAvailability: actionAvailability(authenticated),
         }),
@@ -1524,23 +1527,13 @@ export class OperatorProjectionStore {
     return values.map((value) => row(value, "operator projection row"));
   }
 
-  #taskCheckState(runId: string, taskId: string): "pending" | "passing" | "failing" | "unknown" {
-    const values = this.#database.prepare(`
-      SELECT status FROM task_objective_checks WHERE run_id=? AND task_id=? ORDER BY check_id
-    `).all(runId, taskId).map((value) => text(row(value, "task objective check"), "status"));
-    if (values.length === 0) return "unknown";
-    if (values.includes("fail")) return "failing";
-    if (values.includes("pending")) return "pending";
-    return values.every((value) => value === "pass") ? "passing" : "unknown";
-  }
-
   #loadDetail(
     detailRef: OperatorDetailRef,
     projectId: ProjectId,
     projectSessionId: ProjectSessionId | undefined,
     runSessionProjection: RunSessionProjection,
     declaredRunProgressProjection: DeclaredRunProgressProjection,
-    runIdentityProjection: RunIdentityProjection, agentTopologyProjection: AgentTopologyProjection,
+    runIdentityProjection: RunIdentityProjection, agentTopologyProjection: AgentTopologyProjection, workFactsProjection: WorkFactsProjection,
   ): LoadedOperatorDetail {
     switch (detailRef.kind) {
       case "project": return this.#loadProjectDetail(detailRef, projectId);
@@ -1553,7 +1546,7 @@ export class OperatorProjectionStore {
         declaredRunProgressProjection,
         runIdentityProjection,
       );
-      case "task": return this.#loadTaskDetail(detailRef, projectId, projectSessionId);
+      case "task": return this.#loadTaskDetail(detailRef, projectId, projectSessionId, workFactsProjection);
       case "agent": return this.#loadAgentDetail(detailRef, projectId, projectSessionId, agentTopologyProjection);
       case "evidence": return this.#loadEvidenceDetail(detailRef, projectId, projectSessionId);
       case "activity": return this.#loadActivityDetail(detailRef, projectId, projectSessionId);
@@ -1665,10 +1658,10 @@ export class OperatorProjectionStore {
   #loadTaskDetail(
     detailRef: Extract<OperatorDetailRef, { kind: "task" }>,
     projectId: ProjectId,
-    projectSessionId: ProjectSessionId | undefined,
+    projectSessionId: ProjectSessionId | undefined, workFactsProjection: WorkFactsProjection,
   ): LoadedOperatorDetail {
     const task = this.#oneScopedRow(`
-      SELECT t.*, r.project_session_id FROM tasks t
+      SELECT t.*, r.project_session_id, r.dependency_revision FROM tasks t
       JOIN runs r ON r.run_id=t.run_id
       JOIN project_sessions s ON s.project_session_id=r.project_session_id
       WHERE t.task_id=? AND s.project_id=?
@@ -1686,6 +1679,7 @@ export class OperatorProjectionStore {
         ownerAgentId: ownerAgentId === null
           ? null
           : parseIdentifier<"AgentId">(ownerAgentId, "taskDetail.ownerAgentId"),
+        ...workFactsProjectionField(this.#database, task, this.#globalRevision(), workFactsProjection),
       },
     };
   }

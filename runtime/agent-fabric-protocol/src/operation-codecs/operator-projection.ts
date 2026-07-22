@@ -268,11 +268,119 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
     validateRunPlanCorrelation,
     runSummaryBaseCodec.example,
   );
+  const workTaskStateCodec = enumeration(DECLARED_RUN_TASK_STATES);
+  const workWorkflowFactsBaseCodec = objectCodec({
+    workflowRevision: positiveInteger,
+    objective: objectCodec({ observation: literal("Observed"), value: text }),
+    dependencies: objectCodec({
+      observation: literal("Observed"),
+      dependencyRevision: positiveInteger,
+      taskIds: arrayOf(identifier, { maximum: 1024, unique: true }),
+    }),
+    coordinationRun: objectCodec({
+      observation: literal("Observed"),
+      projectSessionId: identifier,
+      coordinationRunId: identifier,
+    }),
+    workstream: unionOf([
+      objectCodec({
+        observation: literal("Observed"),
+        workstreamId: identifier,
+        deliveryRunId: identifier,
+        workstreamRevision: positiveInteger,
+        state: enumeration(["active", "complete", "cancelled", "degraded", "abandoned"]),
+      }),
+      objectCodec({ observation: literal("Unobserved") }),
+      objectCodec({ observation: literal("Unknown"), reason: literal("MultipleWorkstreamBindings") }),
+    ]),
+    parentTask: objectCodec({ observation: literal("Unobserved") }),
+    plan: unionOf([
+      objectCodec({ observation: literal("Observed"), planRevision: positiveInteger }),
+      objectCodec({ observation: literal("Unobserved") }),
+    ]),
+    task: objectCodec({
+      observation: literal("Observed"),
+      state: workTaskStateCodec,
+      owner: unionOf([
+        objectCodec({ observation: literal("Observed"), agentId: identifier, ownerLeaseGeneration: positiveInteger }),
+        objectCodec({ observation: literal("Unobserved") }),
+      ]),
+    }),
+    checks: objectCodec({
+      observation: literal("Observed"),
+      items: arrayOf(objectCodec({
+        checkId: identifier,
+        state: enumeration(["pending", "pass", "fail"]),
+      }), { maximum: 256, unique: true }),
+    }),
+    barriers: objectCodec({
+      observation: literal("Observed"),
+      items: arrayOf(unionOf([
+        objectCodec({ kind: literal("run"), barrierId: text, state: literal("closed") }),
+        objectCodec({ kind: literal("stage"), barrierId: text, stageId: text, state: literal("closed") }),
+        objectCodec({
+          kind: literal("task-request"),
+          barrierId: text,
+          requestId: identifier,
+          state: enumeration(["blocked", "released", "abandoned"]),
+        }),
+      ]), { maximum: 256, unique: true }),
+    }),
+    declaredWriteScopes: objectCodec({
+      observation: literal("Observed"),
+      leases: arrayOf(objectCodec({
+        leaseId: identifier,
+        generation: positiveInteger,
+        state: enumeration(["active", "quarantined", "released"]),
+        paths: arrayOf(text, { maximum: 256, unique: true }),
+      }), { maximum: 128, unique: true }),
+    }),
+    runTaskStates: objectCodec({
+      observation: literal("Observed"),
+      counts: declaredRunTaskStateCountsCodec,
+    }),
+  });
+  const assertSortedUnique = (values: readonly unknown[], path: string): void => {
+    if (new Set(values).size !== values.length) throw new TypeError(`${path} must be unique`);
+    const strings = values.map(String);
+    if (strings.some((value, index) => index > 0 && value <= strings[index - 1]!)) {
+      throw new TypeError(`${path} must be strictly sorted`);
+    }
+  };
+  const workWorkflowFactsCodec = parserBacked(
+    workWorkflowFactsBaseCodec,
+    (value, path) => {
+      const workflow = value as Record<string, unknown>;
+      const dependencies = workflow.dependencies as { taskIds: unknown[] };
+      const checks = workflow.checks as { items: Array<{ checkId: unknown }> };
+      const barriers = workflow.barriers as { items: Array<{ kind: unknown; barrierId: unknown }> };
+      const scopes = workflow.declaredWriteScopes as {
+        leases: Array<{ leaseId: unknown; paths: unknown[] }>;
+      };
+      assertSortedUnique(dependencies.taskIds, `${path}.dependencies.taskIds`);
+      assertSortedUnique(checks.items.map((item) => item.checkId), `${path}.checks.items`);
+      assertSortedUnique(
+        barriers.items.map((item) => `${String(item.kind)}:${String(item.barrierId)}`),
+        `${path}.barriers.items`,
+      );
+      assertSortedUnique(scopes.leases.map((lease) => lease.leaseId), `${path}.declaredWriteScopes.leases`);
+      for (const [index, lease] of scopes.leases.entries()) {
+        assertSortedUnique(lease.paths, `${path}.declaredWriteScopes.leases[${String(index)}].paths`);
+      }
+      const task = workflow.task as { state: string };
+      const states = workflow.runTaskStates as { counts: Record<string, number> };
+      if ((states.counts[task.state] ?? 0) < 1) {
+        throw new TypeError(`${path}.runTaskStates must include the projected task state`);
+      }
+      return value;
+    },
+    workWorkflowFactsBaseCodec.example,
+  );
   const workSummaryCodec = objectCodec({
     kind: literal("work"),
     state: text,
     checkState: enumeration(["pending", "passing", "failing", "unknown"]),
-  });
+  }, { workflow: workWorkflowFactsCodec });
   const agentTeamTopologyMembershipCodec = objectCodec({
     teamId: identifier,
     teamGeneration: positiveInteger,
@@ -328,6 +436,43 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
       const relationship = membership.leadAgentId === agentId ? "Lead" : "Member";
       if (membership.relationship !== relationship) {
         throw new TypeError(`${path}.teams.memberships relationship must match leadAgentId`);
+      }
+    }
+  };
+  const validateWorkWorkflow = (
+    workflow: Record<string, unknown> | undefined,
+    enclosing: Record<string, unknown>,
+    snapshotRevision: unknown,
+    path: string,
+  ): void => {
+    if (workflow === undefined) return;
+    if (workflow.workflowRevision !== snapshotRevision) {
+      throw new TypeError(`${path}.workflowRevision must match snapshotRevision`);
+    }
+    const task = workflow.task as Record<string, unknown>;
+    if (task.state !== enclosing.state) throw new TypeError(`${path}.task.state must match enclosing state`);
+    const objective = workflow.objective as Record<string, unknown>;
+    if (enclosing.objective !== undefined && objective.value !== enclosing.objective) {
+      throw new TypeError(`${path}.objective must match enclosing objective`);
+    }
+    const owner = task.owner as Record<string, unknown>;
+    if (enclosing.ownerAgentId !== undefined) {
+      const projectedOwner = owner.observation === "Observed" ? owner.agentId : null;
+      if (projectedOwner !== enclosing.ownerAgentId) {
+        throw new TypeError(`${path}.task.owner must match enclosing ownerAgentId`);
+      }
+    }
+    if (enclosing.checkState !== undefined) {
+      const checks = (workflow.checks as { items: Array<{ state: string }> }).items;
+      const expected = checks.length === 0
+        ? "unknown"
+        : checks.some((check) => check.state === "fail")
+          ? "failing"
+          : checks.some((check) => check.state === "pending")
+            ? "pending"
+            : "passing";
+      if (enclosing.checkState !== expected) {
+        throw new TypeError(`${path}.checks must match enclosing checkState`);
       }
     }
   };
@@ -431,15 +576,28 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
         if (row.itemRevision !== fact.revision) {
           throw new TypeError(`operatorViewPage.rows[${String(index)}] item revision does not match fact revision`);
         }
-        if (view !== "agents") continue;
         for (const candidate of factCandidates(fact)) {
           const summary = candidate.summary as Record<string, unknown>;
-          validateAgentTopology(
-            summary.topology as Record<string, unknown> | undefined,
-            row.itemId,
-            snapshotRevision,
-            `operatorViewPage.rows[${String(index)}].fact.topology`,
-          );
+          if (view === "agents") {
+            validateAgentTopology(
+              summary.topology as Record<string, unknown> | undefined,
+              row.itemId,
+              snapshotRevision,
+              `operatorViewPage.rows[${String(index)}].fact.topology`,
+            );
+          }
+          if (view === "work") {
+            const detailRef = candidate.detailRef as Record<string, unknown>;
+            if (summary.workflow !== undefined && detailRef.taskId !== row.itemId) {
+              throw new TypeError(`operatorViewPage.rows[${String(index)}] task identity does not match reference`);
+            }
+            validateWorkWorkflow(
+              summary.workflow as Record<string, unknown> | undefined,
+              summary,
+              snapshotRevision,
+              `operatorViewPage.rows[${String(index)}].fact.workflow`,
+            );
+          }
         }
       }
       return value;
@@ -485,7 +643,10 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
       membershipRevision: integer(),
     }),
     runDetailCodec,
-    objectCodec({ kind: literal("task"), taskId: identifier, objective: text, state: text, ownerAgentId: nullable(identifier) }),
+    objectCodec(
+      { kind: literal("task"), taskId: identifier, objective: text, state: text, ownerAgentId: nullable(identifier) },
+      { workflow: workWorkflowFactsCodec },
+    ),
     objectCodec({
       kind: literal("agent"),
       agentId: identifier,
@@ -579,6 +740,17 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
             detail.agentId,
             Reflect.get(value as object, "snapshotRevision"),
             "operatorDetailRead.detail.topology",
+          );
+        }
+        if (detail.kind === "task") {
+          if (detail.workflow !== undefined && detail.taskId !== detailRef.taskId) {
+            throw new TypeError("operatorDetailRead task identity does not match reference");
+          }
+          validateWorkWorkflow(
+            detail.workflow as Record<string, unknown> | undefined,
+            detail,
+            Reflect.get(value as object, "snapshotRevision"),
+            "operatorDetailRead.detail.workflow",
           );
         }
         if (detail.kind !== "run" || detail.identity === undefined) continue;
