@@ -128,6 +128,7 @@ describe("S1 CLOSE: shared close fence and owned-operation drain", () => {
   // cannot hold that promise or observe the suppression without a new harness seam. CLOSE-2 already
   // pins the complementary past-gate drain; this predecessor-gate arm is left for the chair to wire
   // an in-process retained-continuation fixture. Kept .skip (never .fails) so it cannot green the base.
+  // Harness note: needs in-process Fabric handle harness; see #362.
   it.skip("CLOSE-3 suppresses post-predecessor continuation work after closing", () => {
     // See TODO(chair) above: needs an in-process Fabric handle to hold the predecessor promise.
   });

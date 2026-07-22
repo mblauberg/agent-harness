@@ -162,10 +162,12 @@ describe("S2a guards: lifecycle continuations get their own map and drain", () =
   // the predecessor-await claim in the S2 plan's preservation checklist (docs section 4,
   // "Predecessor ordering" row) to reflect that it is reachable only adversarially, not via any
   // well-formed externally reachable call.
+  // Harness note: needs in-process Fabric handle harness; see #362.
   it.skip("PRED-1 a still-pending standard-key generic predecessor blocks the continuation's provider effect", () => {
     // See TODO(chair) above.
   });
 
+  // Harness note: needs in-process Fabric handle harness; see #362.
   it.skip("PRED-2 close() started while a continuation awaits a pending predecessor drains without early return (CLOSE-3)", () => {
     // See TODO(chair) above. This case additionally requires PRED-1's precondition (a live
     // standard-key predecessor at the moment #scheduleLifecycleContinuation runs), so it inherits

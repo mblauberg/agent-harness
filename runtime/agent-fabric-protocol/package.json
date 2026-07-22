@@ -21,7 +21,7 @@
     "./schemas/*.schema.json": "./schemas/*.schema.json"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/write-schema.mjs --write",
+    "build": "tsc -p tsconfig.build.json && node --import tsx scripts/write-schema.mjs --write",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "check": "npm run typecheck && npm run build && npm run test"
@@ -30,6 +30,7 @@
     "@types/node": "24.13.3",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
+    "tsx": "^4.23.1",
     "typescript": "7.0.2",
     "vitest": "4.1.10"
   }
