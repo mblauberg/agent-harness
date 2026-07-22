@@ -16,7 +16,7 @@ const projectKey = process.env.AGENT_FABRIC_PROJECT_KEY;
 if (projectKey === undefined) throw new Error("AGENT_FABRIC_PROJECT_KEY is required");
 
 const seats = ["agy", "claude", "codex", "cursor", "kiro"];
-const requiredTools = ["fabric_message_send", "fabric_message_receive", "fabric_delivery_acknowledge", "fabric_run_status_read"];
+const requiredTools = ["fabric_message_send", "fabric_message_receive", "fabric_delivery_acknowledge", "fabric_run_status_read", "fabric_whoami"];
 
 const results = [];
 const seatDirectory = await currentSeatDirectory(stateDirectory, projectKey);
@@ -37,16 +37,18 @@ for (const seat of seats) {
   const client = new Client({ name: `registered-health-${seat}`, version: "1" });
   await client.connect(transport);
   try {
-    const [tools, templates, status] = await Promise.all([
+    const [tools, templates, status, identity] = await Promise.all([
       client.listTools(),
       client.listResourceTemplates(),
       client.callTool({ name: "fabric_run_status_read", arguments: { runId: metadata.runId } }),
+      client.callTool({ name: "fabric_whoami", arguments: {} }),
     ]);
     const names = new Set(tools.tools.map((tool) => tool.name));
     for (const name of requiredTools) {
       if (!names.has(name)) throw new Error(`${seat} is missing ${name}`);
     }
     if (status.isError === true) throw new Error(`${seat} could not read its registered run`);
+    if (identity.isError === true) throw new Error(`${seat} could not inspect its identity`);
     results.push({
       seat,
       role: metadata.role,

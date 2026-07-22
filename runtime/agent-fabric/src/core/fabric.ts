@@ -207,6 +207,7 @@ import type {
 } from "./contracts.js";
 import { currentMcpSeatGeneration } from "./mcp-seat-generation.js";
 import { bootstrapCurrentMcpSeat as bootstrapMcpSeatCustody } from "./bootstrap-mcp-custody.js";
+import { readCallerIdentity, type CallerIdentity } from "./caller-identity.js";
 import { FabricReadPolicy } from "./read-policy.js";
 import { ArtifactRegistry } from "../artifacts/registry.js";
 import { resolveRunArtifactRoot } from "../artifacts/run-root.js";
@@ -2335,7 +2336,7 @@ export class Fabric {
         runId: stringField(authenticated, "run_id"),
         principalGeneration: numberField(authenticated, "principal_generation"),
       },
-      grantedOperations: authority.actions.filter((operation) => !denied.has(operation)),
+      grantedOperations: authority.actions.filter((operation) => !denied.has(operation) && (operation !== FABRIC_OPERATIONS.whoami || authenticated.active_mcp_seat_generation !== null)),
     };
   }
 
@@ -3862,11 +3863,7 @@ export class Fabric {
     return this.#mailboxCustody.getMailboxState(runId, recipientId);
   }
 
-  createTask(
-    runId: string,
-    actorAgentId: string,
-    input: TaskCreateInput,
-  ): TaskResult {
+  createTask(runId: string, actorAgentId: string, input: TaskCreateInput): TaskResult {
     return this.#createTask(runId, actorAgentId, input, true);
   }
 
@@ -3908,6 +3905,8 @@ export class Fabric {
       if (eligibleAgentIds.length === 0) {
         throw new FabricError("NOT_FOUND", "task has no eligible agents");
       }
+      const participantAgentIds = [...new Set(input.participantAgentIds ?? [actorAgentId, ...eligibleAgentIds])].sort();
+      if (participantAgentIds.length > 256) throw new FabricError("CAPABILITY_FORBIDDEN", "task participants exceed the protocol limit; provide at most 256 participantAgentIds");
       for (const agentId of eligibleAgentIds) {
         rowOrNotFound(
           this.#database.prepare("SELECT 1 FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, agentId),
@@ -3918,7 +3917,6 @@ export class Fabric {
       if (proposedOwnerAgentId !== null && !eligibleAgentIds.includes(proposedOwnerAgentId)) {
         throw new FabricError("CAPABILITY_FORBIDDEN", "proposed owner is not eligible for the task");
       }
-      const participantAgentIds = [...new Set(input.participantAgentIds ?? [])].sort();
       for (const agentId of participantAgentIds) {
         rowOrNotFound(
           this.#database.prepare("SELECT 1 FROM agents WHERE run_id = ? AND agent_id = ?").get(runId, agentId),
@@ -5629,6 +5627,7 @@ export class Fabric {
     }
   }
 
+  whoami(runId: string, agentId: string, tokenHash: string): CallerIdentity { return readCallerIdentity(this.#database, runId, agentId, tokenHash); }
   getRunStatus(authenticatedRunId: string, requestedRunId: string): {
     runId: string;
     chairAgentId: string;

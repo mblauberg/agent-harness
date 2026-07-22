@@ -1,5 +1,7 @@
 import { realpath } from "node:fs/promises";
 
+import Database from "better-sqlite3";
+
 import { connectFabricDaemon, startFabricDaemon } from "../daemon/client.js";
 import type { BootstrapMcpSeatResult } from "../core/contracts.js";
 import { defaultDaemonStartOptions } from "./default-daemon-options.js";
@@ -17,6 +19,20 @@ export type InstalledBootstrapMcpSeat = BootstrapMcpSeatResult & {
   credential: string;
 };
 
+export type BootstrapMcpSeatIdentity = {
+  seat: string;
+  agentId: string;
+  runId: string;
+  authorityId: string;
+  generation: string;
+  lease: {
+    leaseId: string;
+    holderAgentId: string;
+    generation: number;
+    state: "active" | "frozen" | "revoked";
+  };
+};
+
 export class McpBootstrapError extends Error {
   constructor(
     readonly code: "WORKSPACE_NOT_TRUSTED" | "BOOTSTRAP_GENERATION_CHANGED",
@@ -30,6 +46,91 @@ export class McpBootstrapError extends Error {
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+function identityFromBootstrapResult(
+  result: BootstrapMcpSeatResult,
+  seat: string,
+): BootstrapMcpSeatIdentity {
+  const credential = result.credentials.find((candidate) => candidate.seat === seat);
+  if (credential === undefined) throw new Error(`bootstrap did not bind the caller seat ${seat}`);
+  return {
+    seat,
+    agentId: credential.agentId,
+    runId: result.runId,
+    authorityId: credential.authorityId,
+    generation: result.generation,
+    lease: {
+      leaseId: result.chairLeaseId,
+      holderAgentId: result.chairAgentId,
+      generation: result.chairGeneration,
+      state: "active",
+    },
+  };
+}
+
+export function bootstrapMcpSeatIdentity(
+  result: BootstrapMcpSeatResult,
+  seat: string,
+): BootstrapMcpSeatIdentity {
+  return identityFromBootstrapResult(result, parseMcpSeat(seat));
+}
+
+export async function inspectBootstrapMcpSeat(input: {
+  environment: NodeJS.ProcessEnv;
+  cwd: string;
+  paths: FabricPaths;
+}): Promise<BootstrapMcpSeatIdentity> {
+  const seat = parseMcpSeat(input.environment.AGENT_FABRIC_SEAT ?? "");
+  if (seat !== "claude" && seat !== "codex") throw new Error("MCP bootstrap supports only claude or codex seats");
+  const canonicalRoot = await realpath(input.cwd);
+  const database = new Database(input.paths.databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const value = database.prepare(`
+      SELECT member.seat,member.agent_id,member.run_id,agent.authority_id,
+             generation.generation,lease.lease_id,lease.holder_agent_id,
+             lease.generation AS lease_generation,lease.status
+        FROM projects project
+        JOIN mcp_active_seat_generations active ON active.project_id=project.project_id
+        JOIN mcp_seat_generations generation ON generation.generation=active.generation
+        JOIN mcp_seat_generation_members member ON member.generation=generation.generation
+        JOIN agents agent ON agent.run_id=member.run_id AND agent.agent_id=member.agent_id
+        JOIN run_chair_leases lease ON lease.lease_id=generation.chair_lease_id
+       WHERE project.canonical_root=? AND member.seat=?
+    `).get(canonicalRoot, seat);
+    if (typeof value !== "object" || value === null) {
+      throw new Error(`bootstrap seat ${seat} is not installed for ${canonicalRoot}`);
+    }
+    const row = value as Record<string, unknown>;
+    const text = (name: string): string => {
+      const field = row[name];
+      if (typeof field !== "string" || field.length === 0) throw new Error(`stored bootstrap ${name} is invalid`);
+      return field;
+    };
+    const leaseGeneration = row.lease_generation;
+    if (!Number.isSafeInteger(leaseGeneration) || (leaseGeneration as number) < 1) {
+      throw new Error("stored bootstrap lease generation is invalid");
+    }
+    const state = text("status");
+    if (state !== "active" && state !== "frozen" && state !== "revoked") {
+      throw new Error("stored bootstrap lease state is invalid");
+    }
+    return {
+      seat: text("seat"),
+      agentId: text("agent_id"),
+      runId: text("run_id"),
+      authorityId: text("authority_id"),
+      generation: text("generation"),
+      lease: {
+        leaseId: text("lease_id"),
+        holderAgentId: text("holder_agent_id"),
+        generation: leaseGeneration as number,
+        state,
+      },
+    };
+  } finally {
+    database.close();
+  }
 }
 
 export async function bootstrapMcpSeat(input: {

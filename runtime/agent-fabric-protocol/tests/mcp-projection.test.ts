@@ -55,6 +55,27 @@ function record(value: unknown, label: string): Record<string, unknown> {
 }
 
 describe("registry-owned current-agent MCP projection", () => {
+  it("projects a closed zero-argument caller identity tool", () => {
+    const descriptor = buildMcpDescriptorSet(new Set<FabricOperation>([
+      FABRIC_OPERATIONS.whoami,
+    ])).tools[0];
+
+    expect(descriptor).toMatchObject({
+      operation: "fabric.v1.whoami",
+      name: "fabric_whoami",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: [],
+      },
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["seat", "agentId", "runId", "authorityId", "generation", "lease"],
+      },
+    });
+  });
+
   it("teaches retained providers when to compact or rotate", () => {
     const lifecycle = MCP_PROJECTION_REGISTRY[FABRIC_OPERATIONS.requestLifecycle];
     expect(lifecycle).toMatchObject({ projection: "tool" });

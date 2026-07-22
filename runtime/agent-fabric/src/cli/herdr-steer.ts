@@ -5,7 +5,68 @@ import {
   type HerdrSteerDispatchRequest,
 } from "@local/agent-fabric-protocol";
 
-export const HERDR_STEER_USAGE = "usage: agent-fabric herdr steer TARGET --fire-and-forget --action-id ID --pane-ref PANE --task-ref TASK --expected-revision N [--message-ref MESSAGE] [--prompt TEXT | --prompt-file PATH]";
+export const HERDR_STEER_USAGE = "usage: agent-fabric herdr steer --check | agent-fabric herdr steer TARGET --fire-and-forget --action-id ID --pane-ref PANE --task-ref TASK --expected-revision N [--message-ref MESSAGE] [--prompt TEXT | --prompt-file PATH]";
+
+type HerdrSteerCheckDependencies = Readonly<{
+  resolveCapability(): Promise<string>;
+  checkIntegration(capability: string): Promise<void>;
+}>;
+
+type HerdrSteerCheckResult =
+  | Readonly<{ status: "ready"; integration: "herdr-control-v1" }>
+  | Readonly<{ status: "unavailable"; integration: "herdr-control-v1"; reason: string }>;
+
+const registryVariables = [
+  "AGENT_FABRIC_STATE_DIRECTORY",
+  "AGENT_FABRIC_SEAT",
+  "AGENT_FABRIC_CLIENT_LABEL",
+] as const;
+const registryClientLabels = new Set(["agy", "claude", "codex", "cursor", "kiro", "opencode"]);
+
+function checkFailureReason(error: unknown): string {
+  if (typeof error === "object" && error !== null && "code" in error && typeof error.code === "string") {
+    return error.code;
+  }
+  return error instanceof Error ? error.message : "unknown failure";
+}
+
+export function herdrUnavailableReason(error: unknown): string {
+  return `daemon connection check failed: ${checkFailureReason(error)}`;
+}
+
+export async function checkHerdrSteer(
+  environment: NodeJS.ProcessEnv,
+  dependencies: HerdrSteerCheckDependencies,
+): Promise<HerdrSteerCheckResult> {
+  for (const variable of registryVariables) {
+    if (environment[variable] === undefined || environment[variable] === "") {
+      return { status: "unavailable", integration: "herdr-control-v1", reason: `missing environment variable ${variable}` };
+    }
+  }
+  if (!registryClientLabels.has(environment.AGENT_FABRIC_CLIENT_LABEL ?? "")) {
+    return { status: "unavailable", integration: "herdr-control-v1", reason: "invalid AGENT_FABRIC_CLIENT_LABEL" };
+  }
+  let capability: string;
+  try {
+    capability = await dependencies.resolveCapability();
+  } catch (error: unknown) {
+    return {
+      status: "unavailable",
+      integration: "herdr-control-v1",
+      reason: `capability check failed: ${checkFailureReason(error)}`,
+    };
+  }
+  try {
+    await dependencies.checkIntegration(capability);
+  } catch (error: unknown) {
+    return {
+      status: "unavailable",
+      integration: "herdr-control-v1",
+      reason: `integration check failed: ${checkFailureReason(error)}`,
+    };
+  }
+  return { status: "ready", integration: "herdr-control-v1" };
+}
 
 type ParseDependencies = Readonly<{
   readPromptFile(path: string): Promise<string>;

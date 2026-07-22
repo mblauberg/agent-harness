@@ -230,7 +230,8 @@ export async function runWorkspaceTrust(
   paths: FabricPaths,
   now = new Date(),
 ): Promise<Record<string, unknown>> {
-  const action = arguments_[0];
+  const requestedAction = arguments_[0];
+  const action = requestedAction === "status" ? "inspect" : requestedAction;
   const registryPath = join(paths.stateDirectory, "trusted-workspaces.json");
   const registry = await readRegistry(registryPath);
   if (action === "list") return { schemaVersion: 1, registryPath, entries: registry.entries };
@@ -253,7 +254,7 @@ export async function runWorkspaceTrust(
       return { schemaVersion: 1, canonicalPath, revoked: true };
     });
   }
-  if (action !== "trust") throw new Error("workspace command must be trust, inspect, list or revoke");
+  if (action !== "trust") throw new Error("workspace command must be trust, inspect, status, list or revoke");
   const profileValue = option(arguments_, "--profiles");
   const requestedProfiles = profileValue?.split(",")
     .map((profile) => profile.trim())

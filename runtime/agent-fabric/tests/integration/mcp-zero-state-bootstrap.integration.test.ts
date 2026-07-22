@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import Database from "better-sqlite3";
@@ -10,16 +11,32 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { Fabric } from "../../src/core/fabric.ts";
 import { bootstrapMcpSeat } from "../../src/cli/mcp-bootstrap.ts";
-import { installSeatGeneration, projectKey, resolveSeatPaths } from "../../src/cli/seat-store.ts";
+import { installSeatGeneration, projectKey, readActiveSeatGeneration, resolveSeatPaths } from "../../src/cli/seat-store.ts";
 
 const roots: string[] = [];
 const execFileAsync = promisify(execFile);
+const cliMain = fileURLToPath(new URL("../../src/cli/main.ts", import.meta.url));
+const tsxLoader = fileURLToPath(import.meta.resolve("tsx"));
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 
 describe("zero-state MCP bootstrap", () => {
+  it("does not create state directories while inspecting a missing bootstrap", async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "fabric-zero-state-inspect-missing-"));
+    roots.push(temporaryRoot);
+    const stateDirectory = join(temporaryRoot, "missing-state");
+
+    await expect(execFileAsync(process.execPath, [
+      "--import", tsxLoader, cliMain, "bootstrap", "--inspect", "--seat", "codex",
+    ], {
+      cwd: temporaryRoot,
+      env: { ...process.env, AGENT_FABRIC_STATE_DIRECTORY: stateDirectory },
+    })).rejects.toMatchObject({ code: 1 });
+    await expect(access(stateDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("rejects a bootstrap seat expiry beyond the fixed 24-hour bound", async () => {
     const temporaryRoot = await mkdtemp(join(tmpdir(), "fabric-zero-state-overlong-"));
     roots.push(temporaryRoot);
@@ -98,7 +115,9 @@ describe("zero-state MCP bootstrap", () => {
     const temporaryRoot = await mkdtemp(join(tmpdir(), "fabric-zero-state-"));
     roots.push(temporaryRoot);
     const root = await realpath(temporaryRoot);
-    const databasePath = join(root, "fabric.sqlite3");
+    const stateDirectory = join(root, "seat-state");
+    await mkdir(stateDirectory, { mode: 0o700 });
+    const databasePath = join(stateDirectory, "fabric-v1.sqlite3");
     const now = Date.parse("2026-07-18T00:00:00.000Z");
     const fabric = new Fabric({ databasePath, workspaceRoots: [root], clock: () => now });
     const base = {
@@ -113,13 +132,26 @@ describe("zero-state MCP bootstrap", () => {
 
     expect(replay).toEqual(first);
     expect(first.credentials).toHaveLength(1);
+    expect(first.credentials[0]?.authorityId).toMatch(/^bootstrap-authority:[a-f0-9]{64}:codex$/u);
     expect(second.credentials.map(({ seat }) => seat).sort()).toEqual(["claude", "codex"]);
     expect(second.runId).toBe(first.runId);
     expect(second.chairAgentId).toBe(first.chairAgentId);
     expect(second.expectedPreviousGeneration).toBe(first.generation);
+    await expect(fabric.connect(second.credentials.find(({ seat }) => seat === "claude")!.capability).whoami())
+      .resolves.toEqual({
+        seat: "claude",
+        agentId: second.credentials.find(({ seat }) => seat === "claude")!.agentId,
+        runId: second.runId,
+        authorityId: second.credentials.find(({ seat }) => seat === "claude")!.authorityId,
+        generation: second.generation,
+        lease: {
+          leaseId: second.chairLeaseId,
+          holderAgentId: second.chairAgentId,
+          generation: second.chairGeneration,
+          state: "active",
+        },
+      });
 
-    const stateDirectory = join(root, "seat-state");
-    await mkdir(stateDirectory, { mode: 0o700 });
     const key = projectKey(root);
     await installSeatGeneration({
       stateDirectory,
@@ -153,6 +185,31 @@ describe("zero-state MCP bootstrap", () => {
     });
     expect((await resolveSeatPaths({ stateDirectory, project: root, seat: "codex" })).generation).toBe(second.generation);
     expect((await resolveSeatPaths({ stateDirectory, project: root, seat: "claude" })).generation).toBe(second.generation);
+    const beforeInspect = await readActiveSeatGeneration({ stateDirectory, projectPath: root });
+    const inspected = await execFileAsync(process.execPath, [
+      "--import", tsxLoader, cliMain, "bootstrap", "--inspect", "--seat", "claude",
+    ], {
+      cwd: root,
+      env: {
+        ...process.env,
+        AGENT_FABRIC_STATE_DIRECTORY: stateDirectory,
+        AGENT_FABRIC_SEAT: "claude",
+      },
+    });
+    expect(JSON.parse(inspected.stdout)).toEqual({
+      seat: "claude",
+      agentId: second.credentials.find(({ seat }) => seat === "claude")!.agentId,
+      runId: second.runId,
+      authorityId: second.credentials.find(({ seat }) => seat === "claude")!.authorityId,
+      generation: second.generation,
+      lease: {
+        leaseId: second.chairLeaseId,
+        holderAgentId: second.chairAgentId,
+        generation: second.chairGeneration,
+        state: "active",
+      },
+    });
+    await expect(readActiveSeatGeneration({ stateDirectory, projectPath: root })).resolves.toEqual(beforeInspect);
 
     const database = new Database(databasePath, { readonly: true });
     try {

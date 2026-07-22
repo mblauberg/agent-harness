@@ -476,6 +476,11 @@ export class FabricClient {
     return this.#fabric.closeBarrier(this.#runId, this.#agentId, input);
   }
 
+  async whoami(): Promise<ReturnType<Fabric["whoami"]>> {
+    this.#authorise(FABRIC_OPERATIONS.whoami);
+    return this.#fabric.whoami(this.#runId, this.#agentId, this.#tokenHash);
+  }
+
   async getRunStatus(input: { runId: string }): Promise<ReturnType<Fabric["getRunStatus"]>> {
     this.#authorise(FABRIC_OPERATIONS.getRunStatus);
     return this.#fabric.getRunStatus(this.#runId, input.runId);

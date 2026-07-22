@@ -176,6 +176,11 @@ export const MCP_PROJECTION_REGISTRY = Object.freeze({
   [FABRIC_OPERATIONS.getBudget]: tool(FABRIC_OPERATIONS.getBudget),
   [FABRIC_OPERATIONS.publishArtifact]: tool(FABRIC_OPERATIONS.publishArtifact),
   [FABRIC_OPERATIONS.closeBarrier]: tool(FABRIC_OPERATIONS.closeBarrier),
+  [FABRIC_OPERATIONS.whoami]: tool(
+    FABRIC_OPERATIONS.whoami,
+    undefined,
+    "Read the authenticated caller's current Fabric seat, authority, generation and chair-lease state.",
+  ),
   [FABRIC_OPERATIONS.getRunStatus]: tool(
     FABRIC_OPERATIONS.getRunStatus,
     resource("status", "Run status", "Chair, lifecycle counts and barrier state for one run."),
