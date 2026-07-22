@@ -54,6 +54,10 @@ SETUP_ACTION = ROOT / ".github" / "actions" / "setup-node-workspace" / "action.y
 SETUP_ACTION_USES = "./.github/actions/setup-node-workspace"
 ROOT_PACKAGE = ROOT / "package.json"
 ROOT_LOCK = ROOT / "package-lock.json"
+PROTOCOL_PACKAGE = ROOT / "runtime" / "agent-fabric-protocol" / "package.json"
+PROTOCOL_SCHEMA_WRITER = (
+    ROOT / "runtime" / "agent-fabric-protocol" / "scripts" / "write-schema.mjs"
+)
 FABRIC_PACKAGE = ROOT / "runtime" / "agent-fabric" / "package.json"
 IMMUTABLE_ACTION = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
 # Local composite actions are pinned by the commit under review itself; only
@@ -791,11 +795,19 @@ def test_clean_ci_builds_locked_protocol_before_daemon_typecheck() -> None:
     assert "tsc -b tsconfig.json" in root_build
     assert "npm run schema:write" in root_build
     schema_write = root_scripts.get("schema:write")
-    assert isinstance(schema_write, str)
-    assert "runtime/agent-fabric-protocol/scripts/write-schema.mjs --write" in schema_write
+    assert schema_write == "node --import tsx runtime/agent-fabric-protocol/scripts/write-schema.mjs --write"
     generated_schema_check = root_scripts.get("schema:check:generated")
-    assert isinstance(generated_schema_check, str)
-    assert "runtime/agent-fabric-protocol/scripts/write-schema.mjs --check" in generated_schema_check
+    assert generated_schema_check == (
+        "node --import tsx runtime/agent-fabric-protocol/scripts/write-schema.mjs --check"
+    )
+    protocol_package = json.loads(PROTOCOL_PACKAGE.read_text(encoding="utf-8"))
+    assert protocol_package["scripts"]["build"] == (
+        "tsc -p tsconfig.build.json && node --import tsx scripts/write-schema.mjs --write"
+    )
+    schema_writer = PROTOCOL_SCHEMA_WRITER.read_text(encoding="utf-8")
+    assert 'from "../dist/' not in schema_writer
+    for source_module in ("schema", "mcp-projection", "operations"):
+        assert f'from "../src/{source_module}.ts"' in schema_writer
     assert ROOT_LOCK.is_file()
     assert not list((ROOT / "runtime").glob("*/package-lock.json"))
     root_dev_dependencies = root_package.get("devDependencies")
@@ -811,6 +823,7 @@ def test_clean_ci_builds_locked_protocol_before_daemon_typecheck() -> None:
     package = json.loads(FABRIC_PACKAGE.read_text(encoding="utf-8"))
     scripts = package.get("scripts")
     assert isinstance(scripts, dict)
+    assert scripts.get("prepack") == "npm run build --include-workspace-root"
     daemon_check = scripts.get("check")
     assert "check:protocol" not in scripts
     assert isinstance(daemon_check, str)

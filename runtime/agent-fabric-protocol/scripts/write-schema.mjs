@@ -2,13 +2,13 @@ import { readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CORE_CONTRACT_SCHEMAS, PROTOCOL_SCHEMA, FABRIC_CONTRACT_SCHEMAS } from "../dist/schema.js";
+import { CORE_CONTRACT_SCHEMAS, PROTOCOL_SCHEMA, FABRIC_CONTRACT_SCHEMAS } from "../src/schema.ts";
 import {
   MCP_PROJECTION_LIMITS,
   MCP_PROJECTION_REGISTRY,
   buildMcpDescriptorSet,
-} from "../dist/mcp-projection.js";
-import { operationsForPrincipal } from "../dist/operations.js";
+} from "../src/mcp-projection.ts";
+import { operationsForPrincipal } from "../src/operations.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const schemasDirectory = join(root, "schemas");
@@ -39,7 +39,7 @@ generated.set("mcp-agent-tools.json", `${JSON.stringify(mcpReference, null, 2)}\
 
 const mode = process.argv[2] ?? "--write";
 if (!new Set(["--check", "--write"]).has(mode) || process.argv.length > 3) {
-  throw new Error("usage: node scripts/write-schema.mjs [--check|--write]");
+  throw new Error("usage: node --import tsx scripts/write-schema.mjs [--check|--write]");
 }
 
 const expectedNames = [...generated.keys()].sort();
