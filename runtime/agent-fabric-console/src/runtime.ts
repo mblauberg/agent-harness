@@ -1,6 +1,6 @@
 import type { TerminalInputEvent } from "./input.js";
 import { FABRIC_HELP_NOTICE, nextFabricView } from "./keymap.js";
-import { backspaceModalInput, cancelDeckFilter, clampDeckScroll, commitDeckFilter, editModalInput, moveVisibleSelection, openDeckFilter, pageFocusedDeck, toggleFocusedDeckPin } from "./attention-deck-state.js";
+import { backspaceModalInput, cancelDeckFilter, clampDeckScroll, commitDeckFilter, compactDeckRosterRows, editModalInput, moveVisibleSelection, openDeckFilter, pageFocusedDeck, toggleFocusedDeckPin } from "./attention-deck-state.js";
 import {
   consoleFailureFromUnknown,
   type ConsoleControllerState,
@@ -1143,7 +1143,7 @@ export class FabricConsoleRuntime {
     if (deckRegion !== undefined) {
       this.#ui = pageFocusedDeck(
         this.#ui,
-        this.#frame.presentation.deckRows,
+        this.#frame.columns === 30 && this.#frame.rows.length === 6 ? compactDeckRosterRows(this.#frame.presentation.deckRows, this.#ui.pinnedRowIds) : this.#frame.presentation.deckRows,
         this.#frame.hitRegions.filter(({ id }) => id.startsWith("deck:")).length,
         Math.max(0, deckRegion.scrollMaximum ?? 0),
         direction,

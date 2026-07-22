@@ -530,6 +530,94 @@ describe("Fabric Console runtime routing", () => {
     expect(runtime.ui.deckScrollOffset).toBe(0);
   });
 
+  it("pages the complete compact Deck roster with visible focus in both directions", async () => {
+    const controller = stateBoundControlController();
+    controller.activateView("attention");
+    const sourceRun = controller.dataset.pages.runs.rows[0];
+    if (sourceRun?.summary?.kind !== "run") throw new Error("run fixture unavailable");
+    const sourceSummary = sourceRun.summary;
+    const choices = Array.from({ length: 4 }, (_, index) => ({
+      projectSessionId: `session:page-${String(index)}` as never,
+      mode: "coordinated" as const,
+      state: "active" as const,
+      revision: index + 1,
+      generation: 1,
+      lastEventAt: timestamp,
+    }));
+    controller.dataset = {
+      ...controller.dataset,
+      projectSessions: { selectedProjectSessionId: null, choices },
+      pages: {
+        ...controller.dataset.pages,
+        runs: {
+          ...controller.dataset.pages.runs,
+          rows: Array.from({ length: 4 }, (_, index) => ({
+            ...sourceRun,
+            stableId: `run:page-${String(index)}`,
+            summary: {
+              ...sourceSummary,
+              projectSessionId: `session:page-${String(index)}` as never,
+              identity: {
+                ...sourceSummary.identity,
+                workstreams: [{
+                  workstreamId: `workstream:page-${String(index)}` as never,
+                  deliveryRunId: `delivery:page-${String(index)}` as never,
+                  leadAgentId: "agent:page-lead" as never,
+                  state: "active" as const,
+                  updatedAt: timestamp,
+                }],
+              },
+            },
+          })),
+        },
+      },
+    };
+    const runtime = new FabricConsoleRuntime({
+      controller,
+      viewport: { columns: 30, rows: 6 },
+      draw: () => {},
+      detach: async () => {},
+      activate: async () => {},
+      eventId: () => "deck-coordination-page",
+      render: renderFabricConsoleFrame,
+      reducePointer: reduceFabricPointer,
+    });
+    const expected = runtime.frame.presentation.deckRows.map(
+      ({ stableId }) => `deck:${stableId}`,
+    );
+    const first = runtime.frame.hitRegions.find(({ id }) => id.startsWith("deck:"));
+    expect(first).toBeDefined();
+    if (first === undefined) return;
+    const initialFocusId = first.id;
+    runtime.setFocus(first.id);
+
+    const reached = new Set<string>();
+    for (let page = 0; page <= expected.length; page += 1) {
+      const visibleDeckIds = runtime.frame.hitRegions
+        .filter(({ id }) => id.startsWith("deck:"))
+        .map(({ id }) => id);
+      for (const id of visibleDeckIds) {
+        reached.add(id);
+      }
+      expectEnabledVisibleFocus(runtime);
+      const before = runtime.ui.deckScrollOffset;
+      const beforeFocus = runtime.ui.focusId;
+      await runtime.handleInput({ kind: "key", key: "page-down" });
+      if (runtime.ui.deckScrollOffset === before && runtime.ui.focusId === beforeFocus) break;
+    }
+    expect(reached).toStrictEqual(new Set(expected));
+
+    for (let page = 0; page <= expected.length; page += 1) {
+      expectEnabledVisibleFocus(runtime);
+      const before = runtime.ui.deckScrollOffset;
+      const beforeFocus = runtime.ui.focusId;
+      await runtime.handleInput({ kind: "key", key: "page-up" });
+      if (runtime.ui.deckScrollOffset === before && runtime.ui.focusId === beforeFocus) break;
+    }
+    expect(runtime.ui.deckScrollOffset).toBe(0);
+    expectEnabledVisibleFocus(runtime, initialFocusId);
+  });
+
   it("keeps displayed action numbers stable across disabled and workflow entries", async () => {
     const controller = new FakeController();
     const activate = vi.fn(async () => {});

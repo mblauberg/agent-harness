@@ -5,6 +5,8 @@ import type { FabricView } from "./model.js";
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
 import { boundedUtf8 } from "./runtime-support.js";
 
+export { compactDeckRosterRows } from "./attention-deck-navigation.js";
+
 export const FILTER_INPUT_NOTICE =
   "Filter: status:urgent|degraded|stale|ok plus identity text; Enter applies; Esc cancels";
 
@@ -162,9 +164,20 @@ export function pageFocusedDeck(
   maximum: number,
   direction: -1 | 1,
 ): FabricConsoleUiState {
-  const paged = pageDeck(ui, maximum, direction, Math.max(1, visibleCount - 1));
-  const row = rows[paged.deckScrollOffset];
-  return row === undefined ? paged : { ...paged, focusId: `deck:${row.stableId}` };
+  const current = rows.findIndex(({ stableId }) => ui.focusId === `deck:${stableId}`);
+  const stride = Math.max(1, visibleCount - 1);
+  const target = Math.min(
+    rows.length - 1,
+    Math.max(0, (current < 0 ? ui.deckScrollOffset : current) + direction * stride),
+  );
+  const row = rows[target];
+  if (row === undefined) return pageDeck(ui, maximum, direction, stride);
+  return {
+    ...ui,
+    deckScrollOffset: Math.min(maximum, target),
+    focusId: `deck:${row.stableId}`,
+    notice: null,
+  };
 }
 
 export function clampDeckScroll(
