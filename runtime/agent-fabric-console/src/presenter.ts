@@ -4,6 +4,7 @@ import type {
 } from "@local/agent-fabric-protocol";
 
 import { parseArtifactReferenceDraft } from "./action-input.js";
+import { fabricViewKey } from "./keymap.js";
 import type {
   ActionReview,
   ConsoleControllerState,
@@ -33,6 +34,7 @@ import {
   presentRows,
   titleCase,
 } from "./row-presentation.js";
+import { presentDeckRows } from "./attention-deck-presentation.js";
 import type { ConsoleWorkflowReview } from "./workflow.js";
 
 export * from "./presenter-model.js";
@@ -779,6 +781,11 @@ export function presentFabricConsole(
   const selected = controller.selectionByView[controller.activeView];
   const presentedRows = presentRows(dataset, controller, activeRows, selected);
   const selectedRow = presentedRows.selectedRow;
+  const deck = presentDeckRows(dataset);
+  const selectedRunId = controller.selectionByView.runs?.stableId;
+  const selectedRun = selectedRunId === undefined
+    ? null
+    : dataset.pages.runs.rows.find(({ stableId }) => stableId === selectedRunId) ?? null;
   const review = controller.review;
   const workflowReview = review === null ? ui.workflowReview : null;
   const actions = review === null && workflowReview === null && ui.guidedWorkflow !== null
@@ -815,12 +822,15 @@ export function presentFabricConsole(
     connection: dataset.connection.state === "live"
       ? "LIVE"
       : dataset.connection.state.toUpperCase(),
-    header: presentHeader(dataset),
-    views: FABRIC_VIEWS.map((view, index) => ({
+    header: presentHeader(dataset, {
+      needsYou: presentedRows.needsYouRows.length,
+      watch: presentedRows.watchRows.length,
+    }, selectedRun),
+    views: FABRIC_VIEWS.map((view) => ({
       view,
       label: titleCase(view),
       active: view === controller.activeView,
-      key: String(index + 1),
+      key: fabricViewKey(view),
     })),
     activeView: controller.activeView,
     masterRows: presentedRows.masterRows,
@@ -828,6 +838,9 @@ export function presentFabricConsole(
     watchRows: presentedRows.watchRows,
     watchCollapsed: presentedRows.watchCollapsed,
     topAttention: presentedRows.topAttention,
+    deckRows: deck.rows,
+    deckTotalCount: deck.totalCount,
+    deckRunCount: deck.runCount,
     detail,
     actions,
     review:

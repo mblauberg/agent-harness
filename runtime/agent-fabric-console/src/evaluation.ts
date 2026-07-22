@@ -1596,11 +1596,12 @@ async function observe(
   await runtime.handleInput({ kind: "key", key: "escape" });
   keyboardEventCount += 1;
   const selectionBeforeResize = controller.state.selectionByView.attention?.stableId ?? null;
-  const splitterFocusId = "splitter:master-detail";
-  const splitterAvailable = runtime.frame.hitRegions.some(
-    ({ enabled, id }) => enabled && id === splitterFocusId,
-  );
-  if (splitterAvailable) runtime.setFocus(splitterFocusId);
+  const resizeFocusId = runtime.frame.hitRegions.find(
+    ({ enabled, id }) => enabled && id.startsWith("row:attention:"),
+  )?.id ?? runtime.frame.hitRegions.find(
+    ({ enabled, id }) => enabled && id.startsWith("deck:coordination:"),
+  )?.id ?? null;
+  if (resizeFocusId !== null) runtime.setFocus(resizeFocusId);
   const inertUiBefore = structuredClone(runtime.ui);
   const inertControllerBefore = structuredClone(controller.state);
   const resizeFrames = [
@@ -1627,6 +1628,7 @@ async function observe(
     runtime.resize({ columns: 30, rows: 6 }),
     runtime.resize(manifest.referenceViewport),
     runtime.resize({ columns: 120, rows: 32 }),
+    runtime.resize({ columns: 200, rows: 10 }),
   );
   resizeEventCount += resizeFrames.length;
   const dynamicResizeSafe =
@@ -1641,18 +1643,16 @@ async function observe(
     resizeFrames[3].mode === "reference" &&
     resizeFrames[4]?.columns === 120 && resizeFrames[4].rows.length === 32 &&
     resizeFrames[4].mode === "wide" &&
+    resizeFrames[5]?.columns === 200 && resizeFrames[5].rows.length === 10 &&
+    resizeFrames[5].mode === "compact" &&
     new Set(resizeFrames.map(({ geometryKey }) => geometryKey)).size ===
       resizeFrames.length &&
     inertStatePreserved &&
     controller.state.activeView === "attention" &&
     (controller.state.selectionByView.attention?.stableId ?? null) === selectionBeforeResize &&
     runtime.ui.draft === preservedDraft &&
-    splitterAvailable &&
-    resizeFrames[0]?.presentation.focusId === splitterFocusId &&
-    resizeFrames[1]?.presentation.focusId === splitterFocusId &&
-    resizeFrames[2]?.presentation.focusId !== splitterFocusId &&
-    resizeFrames[3]?.presentation.focusId === splitterFocusId &&
-    resizeFrames[4]?.presentation.focusId === splitterFocusId &&
+    resizeFocusId !== null &&
+    resizeFrames.every(({ presentation }) => presentation.focusId === resizeFocusId) &&
     resizeFrames.slice(2).every((candidate) => frameHasEnabledVisibleFocus(candidate));
 
   await runtime.handleInput({ kind: "key", key: "alt-m" });

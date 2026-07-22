@@ -332,6 +332,40 @@ describe("Console controller and two-phase actions", () => {
     );
   });
 
+  it("moves a removed selection to its deterministic nearest row and anchor", () => {
+    const initial = dataset();
+    const first = initial.pages.attention.rows[0];
+    if (first === undefined) throw new Error("attention fixture unavailable");
+    const second = {
+      ...first,
+      stableId: "attention:task-2",
+    };
+    const controller = new ConsoleController({
+      dataset: {
+        ...initial,
+        pages: {
+          ...initial.pages,
+          attention: { ...initial.pages.attention, rows: [first, second] },
+        },
+      },
+      actions: actions(),
+      credential,
+      projectId,
+      projectSessionId: sessionId,
+      confirmationId: () => "confirmation-1",
+    });
+    controller.select("attention", second.stableId);
+    controller.setScrollAnchor("attention", second.stableId);
+
+    controller.updateDataset(initial);
+
+    expect(controller.state.selectionByView.attention).toStrictEqual({
+      stableId: first.stableId,
+      revision: first.revision,
+    });
+    expect(controller.state.scrollAnchorByView.attention).toBe(first.stableId);
+  });
+
   it("opens a revision-bound Review and requires a distinct explicit confirmation", async () => {
     const service = actions();
     const controller = new ConsoleController({
