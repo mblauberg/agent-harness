@@ -37,6 +37,12 @@ export function canonicaliseProviderActionDispatchRequest(
       "provider route requests require the review evidence daemon owner",
     );
   }
+  if (input.adapterId.includes("\0") || input.actionId.includes("\0")) {
+    throw new ProjectFabricCoreError(
+      "PROTOCOL_INVALID",
+      "provider adapter ID and action ID must not contain NUL",
+    );
+  }
   if (input.operation !== "spawn") {
     if ("taskId" in input) {
       throw new ProjectFabricCoreError(
