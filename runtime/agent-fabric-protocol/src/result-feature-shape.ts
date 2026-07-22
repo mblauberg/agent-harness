@@ -17,8 +17,8 @@ import type { OperationResultMap, ProtocolOperation } from "./rpc-contract.js";
 export const NATIVE_NOTIFICATION_PROJECTION_FEATURE =
   "native-notification-projection.v1" as const;
 export const RUN_SESSION_PROJECTION_FEATURE = "run-session-projection.v1" as const;
-export const DECLARED_RUN_PROGRESS_FEATURE = "declared-run-progress.v1" as const;
-export const RUN_IDENTITY_PROJECTION_FEATURE = "run-identity-projection.v1" as const;
+export const DECLARED_RUN_PROGRESS_FEATURE = "declared-run-progress.v2" as const;
+export const RUN_IDENTITY_PROJECTION_FEATURE = "run-identity-projection.v2" as const;
 
 export type ProtocolResultShapeFailureReason =
   | "missing-negotiated-field"

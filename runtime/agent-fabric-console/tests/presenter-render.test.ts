@@ -192,6 +192,9 @@ function richDataset(
         identity: {
           runKind: "coordination",
           chairAgentId: "agent-chair" as never,
+          acceptedScopeRef: null,
+          currentPlanRef: null,
+          planRevision: null,
           workstreams: [],
           lastEventAt: timestamp,
         },
@@ -3509,6 +3512,27 @@ describe("declared run progress presentation", () => {
     });
     expect(JSON.stringify(presented)).not.toMatch(/\d+ ?%|percentage|\bETA\b/iu);
   });
+
+  it("shows finite progress as completed over the declared total and exact plan revision", () => {
+    const { dataset, controller } = runsDataset({
+      plan: "finite",
+      planRevision: 3,
+      counts: { blocked: 0, ready: 1, active: 1, complete: 4, cancelled: 1, degraded: 0 },
+      declaredTaskDenominator: 8,
+    });
+    const presented = presentFabricConsole(
+      dataset,
+      controller,
+      createFabricUiState(),
+      { columns: 120, rows: 32 },
+    );
+    expect(presented.masterRows[0]?.secondary).toContain("4/8 (plan r3)");
+    expect(presented.detail?.lines).toContainEqual({
+      label: "Progress",
+      value: "4/8 (plan r3) | active 1 | ready 1 | blocked 0 | degraded 0 | cancelled 1",
+    });
+    expect(JSON.stringify(presented)).not.toMatch(/\d+ ?%|percentage|\bETA\b/iu);
+  });
 });
 
 describe("run identity presentation", () => {
@@ -3551,6 +3575,9 @@ describe("run identity presentation", () => {
     const { dataset, controller } = identityDataset({
       runKind: "coordination",
       chairAgentId: "agent-chair" as never,
+      acceptedScopeRef: null,
+      currentPlanRef: null,
+      planRevision: null,
       workstreams: [],
       lastEventAt: null,
     });
@@ -3565,12 +3592,45 @@ describe("run identity presentation", () => {
     expect(presented.detail?.lines).toContainEqual({ label: "Lead", value: "agent-chair" });
     expect(presented.detail?.lines).toContainEqual({ label: "Last event", value: "none recorded" });
     expect(presented.detail?.lines).toContainEqual({ label: "Workstreams", value: "none recorded" });
+    expect(presented.detail?.lines).toContainEqual({ label: "Accepted scope", value: "not projected" });
+    expect(presented.detail?.lines).toContainEqual({ label: "Current plan", value: "not projected" });
+    expect(presented.detail?.lines).toContainEqual({ label: "Plan revision", value: "not projected" });
+  });
+
+  it("renders the exact accepted-scope and current-plan refs supplied by the projection", () => {
+    const { dataset, controller } = identityDataset({
+      runKind: "coordination",
+      chairAgentId: "agent-chair" as never,
+      acceptedScopeRef: { path: "scope/accepted.md" as never, digest: `sha256:${"a".repeat(64)}` as never },
+      currentPlanRef: { path: "plans/current.md" as never, digest: `sha256:${"b".repeat(64)}` as never },
+      planRevision: 3,
+      workstreams: [],
+      lastEventAt: timestamp,
+    });
+    const presented = presentFabricConsole(
+      dataset,
+      controller,
+      createFabricUiState(),
+      { columns: 120, rows: 32 },
+    );
+    expect(presented.detail?.lines).toContainEqual({
+      label: "Accepted scope",
+      value: `scope/accepted.md@sha256:${"a".repeat(64)}`,
+    });
+    expect(presented.detail?.lines).toContainEqual({
+      label: "Current plan",
+      value: `plans/current.md@sha256:${"b".repeat(64)}`,
+    });
+    expect(presented.detail?.lines).toContainEqual({ label: "Plan revision", value: "3" });
   });
 
   it("groups delivery workstreams under their parent coordination run without flattening", () => {
     const { dataset, controller } = identityDataset({
       runKind: "coordination",
       chairAgentId: "agent-chair" as never,
+      acceptedScopeRef: null,
+      currentPlanRef: null,
+      planRevision: null,
       workstreams: [
         {
           workstreamId: "ws-console" as never,

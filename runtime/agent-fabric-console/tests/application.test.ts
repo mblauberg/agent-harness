@@ -712,6 +712,9 @@ describe("typed Console application bootstrap boundary", () => {
                 identity: {
                   runKind: "coordination",
                   chairAgentId: "agent_application_chair" as never,
+                  acceptedScopeRef: null,
+                  currentPlanRef: null,
+                  planRevision: null,
                   workstreams: [],
                   lastEventAt: timestamp,
                 },

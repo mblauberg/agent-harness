@@ -117,6 +117,9 @@ function dataset(): FabricConsoleDataset {
             identity: {
               runKind: "coordination",
               chairAgentId: "agent_production_chair" as never,
+              acceptedScopeRef: null,
+              currentPlanRef: null,
+              planRevision: null,
               workstreams: [],
               lastEventAt: observedAt,
             },
@@ -725,8 +728,8 @@ describe("production Console package-root bootstrap", () => {
         "scoped-gate-read.v1",
         "native-notification-projection.v1",
         "run-session-projection.v1",
-        "declared-run-progress.v1",
-        "run-identity-projection.v1",
+        "declared-run-progress.v2",
+        "run-identity-projection.v2",
         "artifact-content-read.v1",
       ],
       projection: {
@@ -829,8 +832,8 @@ describe("production Console package-root bootstrap", () => {
               "scoped-gate-read.v1",
               "native-notification-projection.v1",
               "run-session-projection.v1",
-              "declared-run-progress.v1",
-              "run-identity-projection.v1",
+              "declared-run-progress.v2",
+              "run-identity-projection.v2",
               "artifact-content-read.v1",
             ],
             projection: {
@@ -963,8 +966,8 @@ describe("production Console package-root bootstrap", () => {
         "scoped-gate-read.v1",
         "native-notification-projection.v1",
         "run-session-projection.v1",
-        "declared-run-progress.v1",
-        "run-identity-projection.v1",
+        "declared-run-progress.v2",
+        "run-identity-projection.v2",
         "artifact-content-read.v1",
       ],
       projection: {

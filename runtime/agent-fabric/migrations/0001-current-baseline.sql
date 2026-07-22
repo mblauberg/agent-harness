@@ -5587,6 +5587,22 @@ CREATE TABLE runs (
   (length(git_allowlist_digest)=71 AND substr(git_allowlist_digest,1,7)='sha256:')
 ));
 
+CREATE TABLE run_plan_declarations (
+  run_id TEXT NOT NULL REFERENCES runs(run_id),
+  plan_revision INTEGER NOT NULL CHECK(plan_revision>=1),
+  plan_path TEXT NOT NULL CHECK(length(plan_path)>0),
+  plan_digest TEXT NOT NULL CHECK(length(plan_digest)=71 AND substr(plan_digest,1,7)='sha256:'),
+  accepted_scope_artifact_id TEXT NOT NULL REFERENCES artifacts(artifact_id),
+  accepted_scope_revision INTEGER NOT NULL CHECK(accepted_scope_revision>=1),
+  accepted_scope_path TEXT NOT NULL CHECK(length(accepted_scope_path)>0),
+  accepted_scope_digest TEXT NOT NULL CHECK(length(accepted_scope_digest)=71 AND substr(accepted_scope_digest,1,7)='sha256:'),
+  declared_task_denominator INTEGER CHECK(declared_task_denominator IS NULL OR declared_task_denominator>=1),
+  declared_by_agent_id TEXT NOT NULL,
+  declared_at INTEGER NOT NULL,
+  PRIMARY KEY(run_id,plan_revision),
+  FOREIGN KEY(run_id,declared_by_agent_id) REFERENCES agents(run_id,agent_id)
+);
+
 CREATE TABLE scoped_gate_barriers (
   gate_id TEXT NOT NULL REFERENCES scoped_gates(gate_id),
   barrier_id TEXT NOT NULL,
@@ -6913,6 +6929,10 @@ CREATE TRIGGER global_revision_projects_insert AFTER INSERT ON projects BEGIN UP
 
 CREATE TRIGGER global_revision_projects_update AFTER UPDATE ON projects BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
 
+CREATE TRIGGER global_revision_run_plan_declarations_insert
+AFTER INSERT ON run_plan_declarations
+BEGIN UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1; END;
+
 CREATE TRIGGER global_revision_provider_actions_delete AFTER DELETE ON provider_actions BEGIN
   UPDATE daemon_global_state SET revision=revision+1 WHERE singleton=1;
 END;
@@ -8032,6 +8052,22 @@ BEGIN SELECT RAISE(ABORT, 'INVARIANT_workstream_custody_immutable'); END;
 CREATE TRIGGER workstream_custody_immutable_update
 BEFORE UPDATE ON workstream_custody
 BEGIN SELECT RAISE(ABORT, 'INVARIANT_workstream_custody_immutable'); END;
+
+CREATE TRIGGER run_plan_declarations_contiguous_insert
+BEFORE INSERT ON run_plan_declarations
+WHEN NEW.plan_revision<>(
+  SELECT COALESCE(MAX(plan_revision),0)+1
+    FROM run_plan_declarations WHERE run_id=NEW.run_id
+)
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_run_plan_revision_contiguous'); END;
+
+CREATE TRIGGER run_plan_declarations_immutable_delete
+BEFORE DELETE ON run_plan_declarations
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_run_plan_declaration_immutable'); END;
+
+CREATE TRIGGER run_plan_declarations_immutable_update
+BEFORE UPDATE ON run_plan_declarations
+BEGIN SELECT RAISE(ABORT, 'INVARIANT_run_plan_declaration_immutable'); END;
 
 CREATE TRIGGER write_lease_cross_owner_insert
 BEFORE INSERT ON leases

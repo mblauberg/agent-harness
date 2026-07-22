@@ -382,6 +382,49 @@ deliveryRequirementMapV1:
 
 Every checked-in binding ID appears exactly once, every listed source ID is catalogued and each entry has at least one selector. Selectors match immutable registry kind plus the exact owning check, evaluation, gate or profile ID; they never parse prose, path globs or caller labels. `exactly-one` rejects zero/multiple current rows; `complete-nonempty-current-set` rejects zero and sorts every current same-source row by registration/ revision/digest. `proved` requires every selector at its required status and current source-state digest. Final human acceptance/release is not a pre-review requirement and is excluded, rather than represented as pending technical work. Phase A captures catalogue/scope/source/evidence revisions; phase B equality- CASes all of them. The daemon rejects missing/extra/duplicate IDs, stale rows or unproved evidence and registers immutable content; caller-authored entries are unavailable. Stable single-flight is keyed by run/delivery run before phase A. Exact command replay returns its immutable result and changed replay conflicts; different commands serialize. Before allocating a generation, the daemon computes `closureDigest` as SHA-256 over RFC 8785 JCS of the complete prospective deliveryRequirementMapV1 with only `mapGeneration` and `closureDigest` omitted. An equal current closure digest returns that existing bytes/registration/ generation without inserting or superseding anything. A changed catalogue, accepted-scope/binding-source or selected evidence closure allocates exactly current generation plus one and then hashes/registers the complete map. An arbitrary command ID cannot churn current state or stale a completed review basis. Manifest seal consumes the one current map and embeds its complete source/requirement projection.
 
+#### Run plan declaration binding
+
+Fabric owns only the run-to-plan binding. Plan content remains a project
+delivery artifact identified by an `ArtifactRef` path and SHA-256 digest.
+Feature `run-plan-declaration.v1` exposes one chair-only operation:
+
+~~~yaml
+fabric.v1.run.plan.declare:
+  request:
+    runId: exact-authenticated-coordination-run
+    planArtifactRef: {path: project-relative-path, digest: sha256-prefixed-digest}
+    expectedAcceptedScopeRevision: positive-current-revision
+    declaredTaskDenominator: optional-positive-integer
+  result:
+    runId: exact-coordination-run
+    planArtifactRef: exact-request-ref
+    acceptedScopeRef: exact-active-scope-ref
+    acceptedScopeRevision: exact-locked-revision
+    planRevision: positive-per-run-revision
+    declaredTaskDenominator: positive-integer-or-null
+    declaredByAgentId: authenticated-current-chair
+    declaredAt: Fabric-timestamp
+~~~
+
+The authenticated principal must be the exact current chair and active chair
+lease holder for `runId`; another agent receives `TASK_NOT_OWNER`. The request
+run must equal the authenticated coordination run. Fabric resolves the one
+active accepted scope and compares its revision with
+`expectedAcceptedScopeRevision`; mismatch returns `STALE_REVISION` before any
+write. A declaration appends one immutable `run_plan_declarations` row.
+`planRevision` starts at one and increments contiguously per run. Replanning
+always appends and advances the run projection revision; no declaration is
+updated or deleted.
+
+A declaration with a denominator enables the `finite` progress arm bound to
+that exact `planRevision`. A declaration without one yields the existing
+`open` arm. The denominator is never inferred from task rows: cancelled tasks
+remain in the declared total and do not increment the completed numerator. If
+classified task counts exceed the declared total, projection fails closed to
+`unknown`. Result-shape features `declared-run-progress.v2` and
+`run-identity-projection.v2` replace their v1 predecessors as current-only
+cutovers; an unknown or missing v2 field is rejected, never translated.
+
 `fabric.v1.implementation-delivery.seal` is the sole producer of the eligible root. Its request is exactly command ID, project-session/run/delivery-run IDs, expected coordination/checkpoint generation and expected current full HEAD as an optimistic lock. It accepts no path, artifact bytes, Git base, evidence role/list, summary, bundle/profile/provider field, gate snapshot or publication lineage. The daemon derives HEAD again and produces/registers these closed bytes on behalf of the authenticated current chair:
 
 ~~~yaml

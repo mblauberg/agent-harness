@@ -174,7 +174,7 @@ describe("real local-session to production-binding path", () => {
       if (result.status !== "connected") throw new Error("expected a connected production bootstrap");
       closers.push(() => result.close());
 
-      // The production binding hard-requires declared-run-progress.v1; before the
+      // The production binding hard-requires declared-run-progress.v2; before the
       // local-session initializer requested it, this binding failed as unsupported.
       expect(result.binding).toMatchObject({ ok: true });
       if (!result.binding.ok) throw new Error("expected a supported production binding");

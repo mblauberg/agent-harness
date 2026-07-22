@@ -451,6 +451,12 @@
       "description": "Invoke the closed fabric.v1.workstream.settle operation as the authenticated Agent Fabric principal.",
       "receiptRenderer": "generic-v1"
     },
+    "fabric.v1.run.plan.declare": {
+      "projection": "tool",
+      "name": "fabric_run_plan_declare",
+      "description": "Invoke the closed fabric.v1.run.plan.declare operation as the authenticated Agent Fabric principal.",
+      "receiptRenderer": "generic-v1"
+    },
     "fabric.v1.launch.attest": {
       "projection": "tool",
       "name": "fabric_launch_attest",
@@ -1382,6 +1388,7 @@
               "fabric.v1.result-delivery.abandon",
               "fabric.v1.workstream.create",
               "fabric.v1.workstream.settle",
+              "fabric.v1.run.plan.declare",
               "fabric.v1.evidence.publish",
               "fabric.v1.review-target.prepare",
               "fabric.v1.review-target-preparation.read",
@@ -1441,7 +1448,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:05510dfaf455601ee8e07dec23db5b49f722088b09ca92e0264c09b512c6b7f6",
+      "inputCodecDigest": "sha256:6eae4baf93fbbc1a082e8c92d75763078aa3a9cf1ba9d70dbcff639bca6d17c9",
       "outputCodecDigest": "sha256:ec3940ecbfa767c13e69c430da0e31ef5ba2f3ad21d731b5d0e1af01e2a7e063"
     },
     {
@@ -24059,6 +24066,146 @@
       "outputCodecDigest": "sha256:11544f6cbd585bf0bc1174e6eb9612eadbbff6298e0cc0dc58e95e43df2519c4"
     },
     {
+      "operation": "fabric.v1.run.plan.declare",
+      "name": "fabric_run_plan_declare",
+      "description": "Invoke the closed fabric.v1.run.plan.declare operation as the authenticated Agent Fabric principal.",
+      "feature": "run-plan-declaration.v1",
+      "receiptRenderer": "generic-v1",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId",
+          "planArtifactRef",
+          "expectedAcceptedScopeRevision"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "planArtifactRef": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "digest"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              }
+            }
+          },
+          "expectedAcceptedScopeRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "declaredTaskDenominator": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId",
+          "planArtifactRef",
+          "acceptedScopeRef",
+          "acceptedScopeRevision",
+          "planRevision",
+          "declaredTaskDenominator",
+          "declaredByAgentId",
+          "declaredAt"
+        ],
+        "properties": {
+          "runId": {
+            "$ref": "#/$defs/generated_2"
+          },
+          "planArtifactRef": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "acceptedScopeRef": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "acceptedScopeRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "planRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "declaredTaskDenominator": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "declaredByAgentId": {
+            "$ref": "#/$defs/generated_2"
+          },
+          "declaredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "digest"
+            ],
+            "properties": {
+              "path": {
+                "$ref": "#/$defs/generated_3"
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              }
+            }
+          },
+          "generated_2": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "generated_3": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}]).+$"
+          }
+        }
+      },
+      "inputCodecDigest": "sha256:23340dfe97b942666f78952a6175d82196b7db19c5e302f2281fde0bca47d341",
+      "outputCodecDigest": "sha256:0c4c545d2874b2785e128768e583d86eff19babfcf25b72ed8dbc3bce8354139"
+    },
+    {
       "operation": "fabric.v1.scoped-gate.check",
       "name": "fabric_scoped_gate_check",
       "description": "Invoke the closed fabric.v1.scoped-gate.check operation as the authenticated Agent Fabric principal.",
@@ -24211,6 +24358,7 @@
                   "fabric.v1.result-delivery.abandon",
                   "fabric.v1.workstream.create",
                   "fabric.v1.workstream.settle",
+                  "fabric.v1.run.plan.declare",
                   "fabric.v1.chair.takeover",
                   "fabric.v1.project.discover",
                   "fabric.v1.operator-projection.snapshot",
@@ -24355,7 +24503,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:66140fc65a416310740d2dd75325fa51e93538f9913f3d65709697221fb37146",
+      "inputCodecDigest": "sha256:74beae7eb4b51eea78a213b893653315e9407b71e137a66a8e6be0bb8368c008",
       "outputCodecDigest": "sha256:1a9ee6767166f5f96ee5be2fbca40d47d2e7e46080ce4af47949c460bbe5c373"
     },
     {
@@ -24607,6 +24755,7 @@
                     "fabric.v1.result-delivery.abandon",
                     "fabric.v1.workstream.create",
                     "fabric.v1.workstream.settle",
+                    "fabric.v1.run.plan.declare",
                     "fabric.v1.chair.takeover",
                     "fabric.v1.project.discover",
                     "fabric.v1.operator-projection.snapshot",
@@ -25217,7 +25366,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:88a585d3345a0691731b93599eb7b201130f873b61ab4951e6966abffafcb670",
+      "inputCodecDigest": "sha256:53ac7328df22ffffda334995ce48d0200f32cdef672062d930a9c30a7dc62f4d",
       "outputCodecDigest": "sha256:e3992f43b189bc13c82f3f427051462f757f9bb664ab3b5545b66dfe805b8d0e"
     },
     {
@@ -28461,6 +28610,7 @@
               "fabric.v1.result-delivery.abandon",
               "fabric.v1.workstream.create",
               "fabric.v1.workstream.settle",
+              "fabric.v1.run.plan.declare",
               "fabric.v1.evidence.publish",
               "fabric.v1.review-target.prepare",
               "fabric.v1.review-target-preparation.read",
@@ -28750,7 +28900,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:2d3936963fd50a1e7e88c71d605b075598a72952b3b115565b96d46919cbd8e6",
+      "inputCodecDigest": "sha256:08e147f97a554c3044e3294ce56e0433128cbf727b39e9926e7014a8447f035e",
       "outputCodecDigest": "sha256:49d61e0c6cc64daa7f79c3bbec4c8d008953ce85acd83d765cdd121029772674"
     },
     {
@@ -31914,6 +32064,7 @@
               "fabric.v1.result-delivery.abandon",
               "fabric.v1.workstream.create",
               "fabric.v1.workstream.settle",
+              "fabric.v1.run.plan.declare",
               "fabric.v1.evidence.publish",
               "fabric.v1.review-target.prepare",
               "fabric.v1.review-target-preparation.read",
@@ -32058,7 +32209,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:e6692113a52dbe277bdf3321f956ca00a19a83eaafd2cc0d155da89e8c2c9d9a",
+      "inputCodecDigest": "sha256:916ffce9b07c828bac9ddd51e8ee8753e9e026a071b440ca71034124aa7009f1",
       "outputCodecDigest": "sha256:28ebc4507c2708d941fe3fd28d08acd56e5b50788be87fc484bb9bbfd63ec60a"
     },
     {

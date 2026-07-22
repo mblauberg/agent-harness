@@ -14,6 +14,7 @@ import type {
 } from "@local/agent-fabric-protocol";
 
 import type { ConsoleControllerState } from "./controller.js";
+import { fixtureRunIdentity } from "./evaluation-fixtures.js";
 import type { FabricConsoleFrame } from "./index.js";
 import {
   FABRIC_VIEWS,
@@ -732,12 +733,7 @@ function fixtureDataset(fixture: UsabilityFixture): FabricConsoleDataset {
           degraded: 0,
         },
       },
-      identity: {
-        runKind: "coordination",
-        chairAgentId: run.chairAgentId,
-        workstreams: [],
-        lastEventAt: timestamp,
-      },
+      identity: fixtureRunIdentity(run.chairAgentId, timestamp),
     },
     detailRef: {
       kind: "run",

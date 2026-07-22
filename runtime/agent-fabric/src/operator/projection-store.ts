@@ -32,7 +32,6 @@ import type {
   ProjectionEventsRequest,
   ProjectionEventsResult,
   ProjectionEvent,
-  DeclaredRunProgress,
   RunProjection,
   Timestamp,
 } from "@local/agent-fabric-protocol";
@@ -54,6 +53,7 @@ import { renderSafeMessageBody } from "./message-safety.js";
 import { HERDR_CONTROL_ADAPTER_ID } from "../integrations/herdr-fabric-ports.js";
 import { readControlEligibility, type ResolvedControlTarget } from "./control-eligibility.js";
 import { projectRunIdentity } from "./run-identity-projection.js";
+import { projectDeclaredRunProgress } from "./declared-run-progress-projection.js";
 
 export type OperatorProjectionStoreOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
@@ -1254,7 +1254,7 @@ export class OperatorProjectionStore {
             health: runHealth(phase),
             nextMilestone: nextMilestone(phase),
             ...(declaredRunProgressProjection === "include"
-              ? { declaredProgress: this.#declaredRunProgress(runId) }
+              ? { declaredProgress: projectDeclaredRunProgress(this.#database, runId) }
               : {}),
             ...(runIdentityProjection === "include"
               ? { identity: projectRunIdentity(this.#database, run) }
@@ -1651,42 +1651,13 @@ export class OperatorProjectionStore {
         chairGeneration: integer(stored, "chair_generation"),
         health: runHealth(phase),
         ...(declaredRunProgressProjection === "include"
-          ? { declaredProgress: this.#declaredRunProgress(detailRef.coordinationRunId) }
+          ? { declaredProgress: projectDeclaredRunProgress(this.#database, detailRef.coordinationRunId) }
           : {}),
         ...(runIdentityProjection === "include"
           ? { identity: projectRunIdentity(this.#database, stored) }
           : {}),
       },
     };
-  }
-
-  /**
-   * Server-scoped task-state counts for one run, read in the caller's open
-   * transaction. No run-level finite plan denominator exists yet, so the
-   * daemon declares the open arm; a task ledger it cannot classify fails
-   * closed to the unknown arm rather than dropping tasks from the counts.
-   */
-  #declaredRunProgress(runId: string): DeclaredRunProgress {
-    const counts = {
-      blocked: 0,
-      ready: 0,
-      active: 0,
-      complete: 0,
-      cancelled: 0,
-      degraded: 0,
-    };
-    const values = this.#database.prepare(`
-      SELECT state, COUNT(*) AS tasks FROM tasks WHERE run_id=? GROUP BY state
-    `).all(runId);
-    for (const value of values) {
-      const stored = row(value, "run task-state count");
-      const state = text(stored, "state");
-      if (!Object.hasOwn(counts, state)) {
-        return { plan: "unknown", reason: `unrecognised task state: ${state}` };
-      }
-      counts[state as keyof typeof counts] = integer(stored, "tasks");
-    }
-    return { plan: "open", counts };
   }
 
   #loadTaskDetail(

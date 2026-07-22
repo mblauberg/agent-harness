@@ -6,12 +6,15 @@ export type RunDetailLine = Readonly<{ label: string; value: string }>;
 
 /**
  * Declared progress renders only Fabric-declared facts: an open plan shows
- * known counts without a denominator and an unknown plan shows its reason.
- * No arm is ever rendered as a percentage, completion ratio or ETA. A finite
- * `n/N` arm arrives only with the deferred plan-declaration cutover.
+ * known counts without a denominator, a finite plan shows its exact declared
+ * total and plan revision, and an unknown plan shows its reason. No arm is
+ * ever rendered as a percentage or ETA.
  */
 export function declaredProgressCompactLabel(progress: DeclaredRunProgress): string {
   if (progress.plan === "unknown") return "progress unknown";
+  if (progress.plan === "finite") {
+    return `${String(progress.counts.complete)}/${String(progress.declaredTaskDenominator)} (plan r${String(progress.planRevision)})`;
+  }
   return `progress open | ${String(progress.counts.complete)} complete`;
 }
 
@@ -25,6 +28,9 @@ export function declaredProgressDetailLabel(progress: DeclaredRunProgress): stri
     `degraded ${String(counts.degraded)}`,
     `cancelled ${String(counts.cancelled)}`,
   ].join(" | ");
+  if (progress.plan === "finite") {
+    return `${String(counts.complete)}/${String(progress.declaredTaskDenominator)} (plan r${String(progress.planRevision)}) | ${states}`;
+  }
   return `open plan | ${String(counts.complete)} complete | ${states} | no declared total`;
 }
 
@@ -51,6 +57,19 @@ export function runDetailLines(summary: ConsoleRunSummary): readonly RunDetailLi
     { label: "Progress", value: declaredProgressDetailLabel(summary.declaredProgress) },
     { label: "Run kind", value: identity.runKind },
     { label: "Lead", value: identity.chairAgentId },
+    {
+      label: "Accepted scope",
+      value: identity.acceptedScopeRef == null
+        ? "not projected"
+        : `${identity.acceptedScopeRef.path}@${identity.acceptedScopeRef.digest}`,
+    },
+    {
+      label: "Current plan",
+      value: identity.currentPlanRef == null
+        ? "not projected"
+        : `${identity.currentPlanRef.path}@${identity.currentPlanRef.digest}`,
+    },
+    { label: "Plan revision", value: identity.planRevision == null ? "not projected" : String(identity.planRevision) },
     { label: "Last event", value: identity.lastEventAt ?? "none recorded" },
     ...(identity.workstreams.length === 0
       ? [{ label: "Workstreams", value: "none recorded" }]

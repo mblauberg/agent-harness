@@ -89,15 +89,19 @@ export type DeclaredRunTaskStateCounts = {
  * without a denominator; the unknown arm carries only its reason. No arm
  * ever carries an inferred percentage, completion ratio or ETA.
  *
- * A finite arm is deliberately deferred: it ships with the plan-declaration
- * package as its own result-shape cutover, bound to an exact plan revision
- * and with settled cancelled-task denominator semantics. No run-level finite
- * denominator authority exists yet, so freezing that arm now would freeze
- * unproven semantics into a closed shape.
+ * The finite arm is bound to the exact immutable declaration revision that
+ * supplied its denominator. Cancelled tasks remain in the declared total and
+ * do not count as completed work.
  */
 export type DeclaredRunProgress =
   | { plan: "open"; counts: DeclaredRunTaskStateCounts }
-  | { plan: "unknown"; reason: string };
+  | { plan: "unknown"; reason: string }
+  | {
+      plan: "finite";
+      planRevision: number;
+      counts: DeclaredRunTaskStateCounts;
+      declaredTaskDenominator: number;
+    };
 
 /**
  * One delivery workstream inside its coordination run's explicit parent/child
@@ -119,14 +123,16 @@ export type RunWorkstreamIdentity = {
  * delivery-workstream parent/child group and the run's latest committed event
  * time when one exists.
  *
- * Accepted-scope and current-plan refs are deliberately deferred: no
- * run-level scope or plan binding authority exists in Fabric yet, so they
- * land with the plan-declaration package as their own result-shape cutover.
- * A premature field on the wire is rejected, never translated.
+ * Accepted-scope and current-plan refs are exact Fabric bindings. Null plan
+ * values mean no declaration exists; currentPlanRef and planRevision change
+ * together and always identify the same immutable declaration.
  */
 export type RunIdentity = {
   runKind: "coordination";
   chairAgentId: AgentId;
+  acceptedScopeRef: ArtifactRef | null;
+  currentPlanRef: ArtifactRef | null;
+  planRevision: number | null;
   workstreams: readonly RunWorkstreamIdentity[];
   lastEventAt: Timestamp | null;
 };

@@ -23,6 +23,7 @@ export type OperationFeature =
   | "artifact-content-read.v1"
   | "lifecycle-control.v1"
   | "workstreams.v1"
+  | "run-plan-declaration.v1"
   | "chair-live-handoff.v1"
   | "provider-review-evidence.v1"
   | "provider-context-pressure.v1"
@@ -138,6 +139,7 @@ const DEFINITIONS = defineOperations({
   resultDeliveryAbandon: { operation: "fabric.v1.result-delivery.abandon", feature: "request-results.v1", principals: ["agent"], kind: "extension" },
   workstreamCreate: { operation: "fabric.v1.workstream.create", feature: "workstreams.v1", principals: ["agent"], kind: "extension" },
   workstreamSettle: { operation: "fabric.v1.workstream.settle", feature: "workstreams.v1", principals: ["agent"], kind: "extension" },
+  runPlanDeclare: { operation: "fabric.v1.run.plan.declare", feature: "run-plan-declaration.v1", principals: ["agent"], kind: "extension" },
   chairTakeover: { operation: "fabric.v1.chair.takeover", feature: "chair-takeover.v1", principals: ["operator"], kind: "extension" },
   projectDiscover: { operation: "fabric.v1.project.discover", feature: "operator-projection.v1", principals: ["operator"], kind: "extension" },
   projectionSnapshot: { operation: "fabric.v1.operator-projection.snapshot", feature: "operator-projection.v1", principals: ["operator"], kind: "extension" },

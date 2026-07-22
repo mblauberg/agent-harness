@@ -28,6 +28,7 @@ export const OPERATION_FEATURES = [
   "artifact-content-read.v1",
   "lifecycle-control.v1",
   "workstreams.v1",
+  "run-plan-declaration.v1",
   "chair-live-handoff.v1",
   "provider-review-evidence.v1",
   "provider-context-pressure.v1",
@@ -39,8 +40,8 @@ export const RESULT_SHAPE_FEATURES = [
   "native-notification-projection.v1",
   "gate-system-supersession.v1",
   "run-session-projection.v1",
-  "declared-run-progress.v1",
-  "run-identity-projection.v1",
+  "declared-run-progress.v2",
+  "run-identity-projection.v2",
 ] as const;
 
 export const GATE_SYSTEM_SUPERSESSION_FEATURE = "gate-system-supersession.v1" as const;

@@ -9,6 +9,7 @@ import type { OperationInputMap, OperationResultMap, ProtocolOperation } from ".
 import type { OperationResultPrincipalContext } from "./operation-codecs/common.js";
 import { validateLifecycleResultForInput } from "./operation-codecs/lifecycle.js";
 import { validateProviderActionResultForInput } from "./operation-codecs/provider-action.js";
+import { validateRunPlanResultForInput } from "./operation-codecs/run-plan.js";
 import {
   assertComposedRegistryExhaustive,
   OPERATION_CODECS,
@@ -118,6 +119,7 @@ export function parseOperationResultForInput<Operation extends ProtocolOperation
   const result = parseOperationResult(operation, value);
   validateProviderActionResultForInput(operation, input, result);
   validateLifecycleResultForInput(operation, input, result, principal);
+  validateRunPlanResultForInput(operation, input, result, principal);
   return result;
 }
 

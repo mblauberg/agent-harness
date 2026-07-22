@@ -733,8 +733,8 @@ describe("public protocol adapter", () => {
         "operator-projection.v2",
         "scoped-gate-read.v1",
         "run-session-projection.v1",
-        "declared-run-progress.v1",
-        "run-identity-projection.v1",
+        "declared-run-progress.v2",
+        "run-identity-projection.v2",
         "artifact-content-read.v1",
       ],
     });
@@ -752,8 +752,8 @@ describe("public protocol adapter", () => {
           "operator-projection.v2",
           "scoped-gate-read.v1",
           "run-session-projection.v1",
-          "declared-run-progress.v1",
-          "run-identity-projection.v1",
+          "declared-run-progress.v2",
+          "run-identity-projection.v2",
           "artifact-content-read.v1",
         ],
       },
@@ -782,7 +782,7 @@ describe("public protocol adapter", () => {
 
     expect(result).toStrictEqual({
       ok: false,
-      missingFeatures: ["run-session-projection.v1", "declared-run-progress.v1", "run-identity-projection.v1"],
+      missingFeatures: ["run-session-projection.v1", "declared-run-progress.v2", "run-identity-projection.v2"],
     });
   });
 
@@ -802,8 +802,8 @@ describe("public protocol adapter", () => {
         "operator-projection.v2",
         "scoped-gate-read.v1",
         "run-session-projection.v1",
-        "declared-run-progress.v1",
-        "run-identity-projection.v1",
+        "declared-run-progress.v2",
+        "run-identity-projection.v2",
         "artifact-content-read.v1",
         "message-body-read.v1",
         "operator-repository-read.v1",
@@ -846,8 +846,8 @@ describe("public protocol adapter", () => {
         "operator-projection.v2",
         "scoped-gate-read.v1",
         "run-session-projection.v1",
-        "declared-run-progress.v1",
-        "run-identity-projection.v1",
+        "declared-run-progress.v2",
+        "run-identity-projection.v2",
         "artifact-content-read.v1",
       ],
       projection: {},

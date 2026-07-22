@@ -131,7 +131,7 @@ export type ConsoleAttentionSummary = Readonly<
 
 /**
  * The Console maps rows only from a peer that negotiated
- * `declared-run-progress.v1` and `run-identity-projection.v1`, so past the
+ * `declared-run-progress.v2` and `run-identity-projection.v2`, so past the
  * mapping boundary the declared progress and run identity facts are
  * invariants, never optional fields.
  */

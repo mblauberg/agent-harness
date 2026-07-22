@@ -130,7 +130,9 @@ import { dispatchAgentProtocol } from "./agent-protocol-dispatch.js";
 import { ProjectSessionStore } from "../project-session/store.js";
 import { ProjectSessionMembershipStore } from "../project-session/membership-store.js";
 import { MailboxCustodyService } from "../project-session/mailbox-custody.js";
+import { dispatchProjectDeliveryOperation } from "../project-session/delivery-operation-dispatch.js";
 import { CoordinatedWorkstreamStore } from "../project-session/workstream-store.js";
+import { RunPlanStore } from "../project-session/run-plan-store.js";
 import {
   LaunchCustodyService,
   normaliseLaunchChairAuthority,
@@ -733,6 +735,7 @@ export class Fabric {
   readonly #gates: ScopedGateStore;
   readonly #resources: HierarchicalAdmissionStore;
   readonly #workstreams: CoordinatedWorkstreamStore;
+  readonly #runPlans: RunPlanStore;
   readonly #results: AtomicDeliveryStore;
   readonly #notifications: NotificationOutbox;
   readonly #notificationWorker: NativeNotificationWorker;
@@ -1216,6 +1219,7 @@ export class Fabric {
       resources: this.#resources,
       createTeam: (runId, actorAgentId, input) => this.createTeam(runId, actorAgentId, input),
     });
+    this.#runPlans = new RunPlanStore({ database: this.#database, clock: this.#clock });
     this.#notifications = new NotificationOutbox({ database: this.#database, clock: this.#clock });
     this.#notificationWorker = new NativeNotificationWorker({
       outbox: this.#notifications,
@@ -2917,15 +2921,9 @@ export class Fabric {
             input as OperationInputMap[typeof FABRIC_OPERATIONS.resourceReconcile],
           );
         case FABRIC_OPERATIONS.workstreamCreate:
-          return this.#workstreams.create(
-            agent,
-            input as OperationInputMap[typeof FABRIC_OPERATIONS.workstreamCreate],
-          );
         case FABRIC_OPERATIONS.workstreamSettle:
-          return this.#workstreams.settle(
-            agent,
-            input as OperationInputMap[typeof FABRIC_OPERATIONS.workstreamSettle],
-          );
+        case FABRIC_OPERATIONS.runPlanDeclare:
+          return dispatchProjectDeliveryOperation(operation, agent, input, this.#workstreams, this.#runPlans);
         case FABRIC_OPERATIONS.taskRequest:
           return this.#results.request(
             agent,
