@@ -11,7 +11,7 @@ import {
   type ResourceScopeRef,
 } from "@local/agent-fabric-protocol";
 import type Database from "better-sqlite3";
-import { resolveTaskBindingForActiveWork } from "../operator/production-action-ports.js";
+import { resolveTaskBindingForActiveWork } from "../operator/task-run-admission.js";
 import {
   assertScopedOperationAllowed,
   assertScopedTaskReadinessAllowed,

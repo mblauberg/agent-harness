@@ -110,8 +110,10 @@ import { LifecycleRecoveryCustodyService } from "../operator/lifecycle-recovery-
 import {
   assertRunAcceptingWork,
   assertTaskOperationAdmitted,
-  createProductionOperatorActionPorts,
   resolveTaskBindingForActiveWork,
+} from "../operator/task-run-admission.js";
+import {
+  createProductionOperatorActionPorts,
   type ProductionDaemonStopPort,
 } from "../operator/production-action-ports.js";
 import { operatorOperationsForActions } from "../operator/protocol-credentials.js";
@@ -861,18 +863,9 @@ export class Fabric {
         this.#event(runId, type, actorAgentId, payload);
       },
       requestAdapter: (adapterId, method, params) => this.#requestAdapter(adapterId, method, params),
-      assertProviderPrincipalActive: (runId, agentId) => this.#payloadAuthority.assertProviderPrincipalActive(runId, agentId),
-      track: (operation) => this.#providerActionState.trackGenericOperation(operation),
-      get: (runId, adapterId, actionId) => this.#providerActionState.get(runId, adapterId, actionId),
-      persist: (runId, adapterId, actionId, raw, result, expectedOwner) =>
-        this.#providerActionState.persist(runId, adapterId, actionId, raw, result, expectedOwner),
-      isOwned: (runId, adapterId, actionId) => this.#providerActionState.isOwned(runId, adapterId, actionId),
-      enqueue: (input) => this.#providerActionState.enqueueDeferred(input),
-      settle: (runId, adapterId, actionId, status) => this.#providerActionState.settleAndPump(runId, adapterId, actionId, status),
-      ownershipKey: (runId, adapterId, actionId) => this.#providerActionState.ownershipKey(runId, adapterId, actionId),
-      assertGenericProviderAction: (runId, adapterId, actionId) =>
-        this.#providerActionState.assertGenericProviderAction(runId, adapterId, actionId),
-      completeAdapterOperation: (input) => this.#providerActionExecutor.completeAdapterOperation(input),
+      payloadAuthority: this.#payloadAuthority,
+      state: this.#providerActionState,
+      executor: this.#providerActionExecutor,
     });
     this.#providerActionCoordinator = new ProviderActionCoordinator({
       database: this.#database,

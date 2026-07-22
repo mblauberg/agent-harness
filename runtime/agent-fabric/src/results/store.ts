@@ -38,7 +38,7 @@ import {
   ProjectSessionMembershipStore,
   touchProjectSessionMembershipRevision,
 } from "../project-session/membership-store.js";
-import { assertRunAcceptingWork, assertTaskOperationAdmitted } from "../operator/production-action-ports.js";
+import { assertRunAcceptingWork, assertTaskOperationAdmitted } from "../operator/task-run-admission.js";
 import { NotificationOutbox } from "../attention/outbox.js";
 import { assertScopedOperationAllowed } from "../gates/store.js";
 

@@ -23,8 +23,6 @@ function text(value: Row, field: string): string {
  * Byte-moved from `production-action-ports.ts` (S4g): the task/run operator-admission fences
  * — `assertOperatorTaskRunnable`, `assertTaskOperationAdmitted`, `resolveTaskBindingForActiveWork`,
  * `assertRunAcceptingWork`. Pure read-side preflight checks; no transaction or custody state.
- * Re-exported unchanged from `production-action-ports.ts` so every existing importer of that
- * module keeps working without a call-site change.
  */
 export function assertOperatorTaskRunnable(
   database: Database.Database,

@@ -36,13 +36,6 @@ import {
   type OperatorEffectCustodyGitPort,
   type OperatorEffectCustodyLifecyclePort,
 } from "./operator-effect-custody.js";
-import {
-  assertOperatorTaskRunnable as taskRunAdmissionAssertOperatorTaskRunnable,
-  assertRunAcceptingWork as taskRunAdmissionAssertRunAcceptingWork,
-  assertTaskOperationAdmitted as taskRunAdmissionAssertTaskOperationAdmitted,
-  resolveTaskBindingForActiveWork as taskRunAdmissionResolveTaskBindingForActiveWork,
-} from "./task-run-admission.js";
-
 export type ProductionOperatorAdapterPort = {
   capabilities(adapterId: string): Promise<unknown>;
   dispatch(
@@ -70,15 +63,6 @@ export type ProductionDaemonStopPort = {
     token: QuiesceToken;
   }>): Promise<"stopped" | "scheduled" | "busy">;
 };
-
-/**
- * Re-exported from `task-run-admission.ts` (S4g move) so every existing importer of
- * `production-action-ports.js` keeps working without a call-site change.
- */
-export const assertOperatorTaskRunnable = taskRunAdmissionAssertOperatorTaskRunnable;
-export const assertTaskOperationAdmitted = taskRunAdmissionAssertTaskOperationAdmitted;
-export const resolveTaskBindingForActiveWork = taskRunAdmissionResolveTaskBindingForActiveWork;
-export const assertRunAcceptingWork = taskRunAdmissionAssertRunAcceptingWork;
 
 function unsupported(): never {
   throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator action runtime is unavailable for this intent");
