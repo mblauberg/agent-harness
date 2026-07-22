@@ -44,15 +44,30 @@ export async function recoverLaunchCustodyFamilies(
     recoveryRequired: 0,
   };
   const errors: unknown[] = [];
-  await families.chairLiveHandoffCustodyRecovery.recoverChairLiveHandoffCustody(result, errors);
+  try {
+    await families.chairLiveHandoffCustodyRecovery.recoverChairLiveHandoffCustody(result, errors);
+  } catch (error: unknown) {
+    errors.push(error);
+    result.ambiguous += 1;
+  }
   try {
     await families.chairRecoveryCustody.recoverChairRecoveryCustody(result);
   } catch (error: unknown) {
     errors.push(error);
     result.ambiguous += 1;
   }
-  await families.providerAgentCustodyRecovery.recoverAgentCustody(result, errors);
-  await families.launchSettlement.recoverLaunchCustody(result, errors);
+  try {
+    await families.providerAgentCustodyRecovery.recoverAgentCustody(result, errors);
+  } catch (error: unknown) {
+    errors.push(error);
+    result.ambiguous += 1;
+  }
+  try {
+    await families.launchSettlement.recoverLaunchCustody(result, errors);
+  } catch (error: unknown) {
+    errors.push(error);
+    result.ambiguous += 1;
+  }
   families.chairRecoveryCustody.auditRetainedChairBridges(result, errors);
   if (errors.length > 0) {
     throw new AggregateError(errors, "launch custody recovery left one or more sessions unfenced");
