@@ -101,7 +101,7 @@ is not planned until new evidence opens a scoped issue.
 | [mini-SWE-agent `e187bcb`](https://github.com/SWE-agent/mini-swe-agent/tree/e187bcb2ff5825d85761a6f9c1f98c9fa6cfbc79) | A small linear single-agent loop is a meaningful counterfactual to harness complexity. | Deferred, not planned. `evaluate` owns any future measured baseline or mechanism-ablation study. |
 | [Goose `3c1fdd6`](https://github.com/aaif-goose/goose/tree/3c1fdd692cc8aaa5f09b9175410c09a09d4dfe49) | Minimise visible tools and declare permitted operations. | Implemented as progressive capability-correct projection in the [Fabric scope and invariants](../specs/agent-fabric/scope-and-invariants.md); recipes/subrecipes remain rejected. |
 | [Trailblaze `0e13954`](https://github.com/block/trailblaze/tree/0e13954a52126e8bbdc33d1dc97cf0d7aa77786a) | Promote a successful exploratory UI path into deterministic replay. | Deferred, not planned. If Console evidence activates it, [issue #141](https://github.com/mblauberg/provenant/issues/141) owns the bounded UI work. |
-| [Aider `5dc9490`](https://github.com/Aider-AI/aider/tree/5dc9490bb35f9729ef2c95d00a19ccd30c26339c) | Rank repository symbols into a bounded navigation map. | Deferred, not planned. [Issue #328](https://github.com/mblauberg/provenant/issues/328) owns current structural reviewability work without adopting a repository-map service. |
+| [Aider `5dc9490`](https://github.com/Aider-AI/aider/tree/5dc9490bb35f9729ef2c95d00a19ccd30c26339c) | Rank repository symbols into a bounded navigation map. | Deferred, not planned. [Issue #328](https://github.com/mblauberg/provenant/issues/328) owned the structural reviewability work, resolved without adopting a repository-map service. |
 | [OpenAI Symphony `4cbe3a9`](https://github.com/openai/symphony/tree/4cbe3a9699a73b862466c0b157ceca0c1985d6d7) | Reconcile durable work state before dispatch under one scheduler. | Already covered by receipts, `work-map` and one-chair ownership; no new action. |
 | [GitHub Spec Kit](https://github.com/github/spec-kit) | Constitution/specification/plan/task separation. | Already covered by `HARNESS.md`, `scope`, engineering docs and `implement`; avoid a parallel lifecycle. |
 
@@ -110,9 +110,9 @@ at the cut-off now belong to the [authority](../specs/agent-fabric/authority.md)
 and [typed effects](../specs/agent-fabric/effects.md) owners. The proposed
 deterministic loop-signature detector is deferred and not planned; `autopilot`
 owns the current bounded retry, child-depth and descendant-budget rules. The
-public provider-action task-binding defect is current work in
-[issue #330](https://github.com/mblauberg/provenant/issues/330), not a research
-follow-up.
+public provider-action task-binding defect,
+[issue #330](https://github.com/mblauberg/provenant/issues/330), was resolved
+through PR #331 and is not retained as a research follow-up.
 
 Standalone `api-design` and `observability` skills are not planned. Current
 Fabric observability belongs to the
@@ -317,16 +317,16 @@ not proof of the current 32-owner catalogue.
 
 A replacement 18-case holdout is now frozen against all 32 current owners. It
 covers the consolidated `ui-ux-design`, `skill-craft` and `autopilot` owners
-plus the `github-setup` versus established-repository-mechanics boundary. Its
+plus the `setup-repo` versus established-repository-mechanics boundary. Its
 planned three fresh no-retry trials on exact Fabric routes
 `Gemini 3.1 Pro (High)` through `agy` and `cursor-grok-4.5-high` through
 `cursor-agent` remain outstanding because the available Fabric bootstrap
 authority did not project provider-action dispatch/read. No direct provider
 CLI result was substituted. Provider availability remains separate from
 semantic accuracy, and the unexecuted plan claims no current behavioural
-result. Run it only after [issue #330](https://github.com/mblauberg/provenant/issues/330)
-resolves the public provider-action task binding and the reviewed run grants
-the required task-bound authority.
+result. The task binding landed through
+[PR #331](https://github.com/mblauberg/provenant/pull/331); execution still
+requires a reviewed run with the required task-bound authority.
 
 The tracked [evaluation appendix](../evals/skill-portfolio-2026/README.md)
 records datasets, frozen protocols, receipt lineage, failures and limitations;

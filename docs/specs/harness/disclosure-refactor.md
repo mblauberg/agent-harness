@@ -12,6 +12,10 @@ all convergent findings folded here); fresh targeted review at implementation;
 held-out evals waived per
 [ADR 0014](../../adr/0014-comparative-skill-evals-on-suspicion.md).
 
+Implementation status: completed through PRs #337, #338, #340, #343, #339 and
+#348. The decisions and acceptance criteria below remain the normative record;
+the delivery-train sections record how they landed.
+
 ## Problem
 
 The ambient instruction layer is heavier than its job requires and leaks
@@ -169,7 +173,7 @@ Per-PR checks:
   model-routing behaviour is explicitly out of scope (ADR-0014
   detection-in-use applies).
 
-Release conditions (close-out):
+Close-out conditions (satisfied by the landed train):
 
 - AC-R1: PR0 (docs custody, D15) merged: spec, handoff, ADR-0014, both index
   entries.
@@ -189,36 +193,33 @@ narrows, so paired tasks remain `ready` by design; the deliverable of record
 is the correlated response message plus the hash-bound artifact (r1 and r2
 precedent; r2 additionally proved the `participantAgentIds` fix for
 task-audience messaging). Agent-facing Fabric usability gaps observed during
-both dispatches are tracked as
-[#336](https://github.com/mblauberg/provenant/issues/336); not part of #335.
+both dispatches were tracked in
+[#336](https://github.com/mblauberg/provenant/issues/336) and resolved through
+PR #385; they were not part of #335.
 
-## Work plan (6 PRs)
+## Landed implementation train (6 PRs)
 
-- PR0 docs custody (D15): spec r3, handoff, ADR-0014, `docs/specs/README.md`
-  and `docs/handoffs/README.md` index entries. Includes amending
+- PR0 / #337 landed docs custody (D15): spec r3, handoff, ADR-0014,
+  `docs/specs/README.md` and `docs/handoffs/README.md` index entries. It
+  included amending
   `test_harness_contract.py::test_current_docs_use_live_issue_and_durable_decision_owners`,
   which asserts the literal `"No active handoffs."` and so forbids ever
   committing an active handoff entry — assert structure (Active section
   present), not the transient empty state.
-- PR1 constitution strip (D1–D4, D9, D10) + installer fixtures (AC-P2) +
-  `install-harness` bootstrap text.
-- PR2 reference rule + migration-manifest fixture and contract test
-  (AC-S2/S3) + resolver fixture (AC-P3) + writing-family pointer rewrites.
-- PR3 orchestrate prune per the manifest (migration steps 1–5, AC-S4).
-- PR4 governance: MAINTAINING.md amendments (AC-R2).
-- PR5 accelerator custody (D14): import sources under `workflows/`, installer
-  management, private-path repoints (step 6), bounded alignment refresh.
+- PR1 / #338 stripped the constitution (D1–D4, D9, D10), added installer
+  fixtures (AC-P2) and updated `install-harness` bootstrap text.
+- PR2 / #340 landed the reference rule, migration-manifest contract
+  (AC-S2/S3), resolver fixture (AC-P3) and writing-family pointer rewrites.
+- PR3 / #343 pruned `orchestrate` per the manifest (migration steps 1–5,
+  AC-S4).
+- PR4 / #339 landed the MAINTAINING.md governance amendments (AC-R2).
+- PR5 / #348 brought accelerator custody under `workflows/`, with installer
+  management, private-path repoints and a bounded alignment refresh (D14).
 
-PR0 first; PR1–PR4 in order; PR5 any time after PR2. Static gates are
-evaluated on the final tree at close-out. Implementation opens with the D11
-sweep against then-current `main`.
+## Gate close-out
 
-## Gate state
-
-- OD1–OD4: closed 2026-07-20 (D8–D10 and ADR-0014 wording approved).
-- OD5: approved pending re-validation (user, 2026-07-20). The 2026-07-20
-  chaired three-leg review surfaced the amendment set folded into this r3;
-  the user approved the amendments, the D14/D15 additions, and the D13
-  budget change the same day. Implementation still opens with the D11 sweep;
-  any contradiction between a landed PR and a spec row returns to the user
-  before that row is executed.
+- OD1–OD4 closed on 2026-07-20 (D8–D10 and ADR-0014 wording approved).
+- OD5 closed through the implementation re-validation and landed PR train. The
+  2026-07-20 chaired three-leg review surfaced the amendment set folded into
+  this r3; the user approved the amendments, D14/D15 additions and D13 budget
+  change the same day.

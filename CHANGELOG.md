@@ -15,9 +15,9 @@ The current pre-release tree includes:
 
 - `HARNESS.md`, the constitution: Claude Code and Codex as equal primary
   orchestrators with one session chair, the scope-to-retrospect lifecycle, the
-  human gates, and the rule that no two agents write the same source surface at
+  user gates, and the rule that no two agents write the same source surface at
   once.
-- 31 Agent Skills under `skills/`, covering delivery (`scope`, `deliver`,
+- 32 Agent Skills under `skills/`, covering delivery (`scope`, `deliver`,
   `implement`, `tdd`, `refactor`, `diagnose`, `code-review`, `evaluate`,
   `release`, `retrospect`, `session`, `work-map`), orchestration, writing,
   design and diagrams, web engineering, and harness development.
@@ -56,6 +56,10 @@ The current pre-release tree includes:
   `THIRD_PARTY_NOTICES.md`, under the MIT licence.
 - Community files: this changelog and the bug, feature and skill-proposal issue
   forms.
+- Standalone Agent Fabric specifications for run-plan declaration, agent
+  topology projection and work-facts projection.
+- The `setup-repo` skill, extending the former `github-setup` owner with
+  inspect-first repository process, tracker and documentation setup.
 
 ### Changed
 
@@ -65,9 +69,21 @@ The current pre-release tree includes:
   gutted and renamed `autonomous-lab` to `autopilot` (run state now lives under
   `.agent-run/<mission-id>/`), made `natural-writing` the single-owner writing
   hub the domain writing skills link to, and added an autonomous
-  ready-issue-implementation mode to `orchestrate` that stops at the human PR
-  gate. The catalogue is now 31 skills; managed renames are recorded in
+  ready-issue-implementation mode to `orchestrate` that stops at the user PR
+  gate. The catalogue is now 32 skills; managed renames are recorded in
   `config/skill-renames.json`.
+- Completed the progressive-disclosure refactor tracked by #335: compact
+  ambient instructions, repository-managed Claude workflows, enforced
+  cross-skill reference boundaries and conditional comparative evaluations.
+- Landed the implemented #141 Attention Deck slices through phases A, B1, B2,
+  B3 and C: renderer extraction, session-local filters and pins, declared run
+  plans, topology and workflow facts, and adaptive grouping. Later phases
+  remain tracked by issue #141.
+
+### Fixed
+
+- Prevented `scripts/configure-agent-fabric-mcp.py` from crashing under Python
+  3.14 when its standard-output stream is already closed (#396).
 
 ### Notes
 

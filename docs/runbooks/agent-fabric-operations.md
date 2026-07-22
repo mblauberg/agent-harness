@@ -307,9 +307,9 @@ predecessor token; the project session, run and chair do not change. If exact
 trust or the generation changed, renewal fails closed. Stop and restart a
 stale proxy after another host completes the cutover. Operator-created runs
 continue to use the explicit `mcp provision` flow below.
-The bounded bootstrap authority currently lasts 365 days; rollover without
-orphaning delegated descendants is tracked in
-[#281](https://github.com/mblauberg/provenant/issues/281).
+The bounded bootstrap authority currently lasts 365 days. Any descendant-safe
+rollover change requires separately scoped work; this runbook claims no such
+implementation.
 
 In production Console, Launch is available only when the dedicated
 `projectSessions.prepareLaunch` operation and explicit operator-action commit

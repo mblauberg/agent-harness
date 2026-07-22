@@ -141,13 +141,16 @@ fields, stable under focus/scroll and stacked reflow. Nothing else.
 - Identity strip shows project, session, Needs-you count, run count, freshness,
   Detach at every size down to 30x6; inert mode below.
 
-### Out of scope (deferred)
+### Out of scope for the first slice
 
-Filters, pins, session-local view state; run drill-down changes; theme system /
-high-contrast beyond existing no-colour; new keymap beyond move/open-run/
-expand-Watch/focus-band; any new protocol or projection field; declared-progress
-`finite` arm and `n/N`; topology tree; processed-activity grouping; staged
-connection diagnosis; mouse resize of splits.
+The first slice excluded filters, pins and session-local view state; run
+drill-down changes; theme system / high-contrast beyond existing no-colour; a
+new keymap beyond move/open-run/expand-Watch/focus-band; new protocol or
+projection fields; the declared-progress `finite` arm and `n/N`; topology tree;
+processed-activity grouping; staged connection diagnosis; and mouse resize of
+splits. Filters and pins, declared progress, topology and activity grouping
+landed in later #141 slices. Issue #141 remains the delivery owner for the
+deferred B4 and D–I phases, including staged connection diagnosis.
 
 ### Files touched (console-only)
 
@@ -175,10 +178,10 @@ connection diagnosis; mouse resize of splits.
 5. All eight canonical views still reachable and unchanged; no projection field
    asserted that the snapshot does not carry.
 
-### Session-local filter and pin follow-up
+### Implemented session-local filters and pins
 
-The deferred console-only follow-up adds in-memory Deck view state without a
-new projection or persistence owner. `/` opens a distinct filter input mode;
+The console-only follow-up adds in-memory Deck view state without a new
+projection or persistence owner. `/` opens a distinct filter input mode;
 `status:urgent`, `status:degraded`, `status:stale` and `status:ok` may be
 combined with a case-insensitive identity substring. An active filter always
 shows `FILTERED VIEW, N of M shown` across Needs you, Watch and the roster.
@@ -191,18 +194,13 @@ state resets when the Console process restarts.
 
 ## 3. Fit with the phased plan
 
-This slice is the **usable core of PHASE-PLAN.md Phase 1** ("Console shell and
-current-data Deck"), taken at minimum width. It keeps Phase 1's console-only,
-independently-mergeable, no-protocol-change property and its Deck-from-existing-
-data thrust.
+This slice was the usable core of issue #141's Phase 1 Console shell and
+current-data Deck. It kept the console-only, independently mergeable,
+no-protocol-change property and the Deck-from-existing-data direction.
 
-Deferred out of Phase 1 into later slices/phases: the renderer theme/layout/
-keymap **extraction** (`theme.ts`/`layout.ts`/`keymap.ts`/`surfaces/`) and the
-full geometry sweep — done incrementally rather than as one L refactor. The
-session-local filters/pins follow-up above remains console-only. Everything
-requiring a protocol/projection change
-(run target, declared plans, workflow/topology, activity grouping, staged
-connection) remains in Phase 2+ and is untouched here. The open design question —
-who owns the immutable accepted/current plan declaration — does not gate this
-slice, because the roster shows only already-landed identity facts and never a
-finite denominator or percentage.
+The follow-on train has since landed renderer extraction, session-local filters
+and pins, declared run plans, workflow and topology projections, and adaptive
+activity grouping through phases A, B1, B2, B3 and C. The plan-declaration
+ownership question is resolved by the standalone
+[run-plan declaration specification](../agent-fabric/run-plan-declaration.md).
+Issue #141's status comment owns the remaining deferred B4 and D–I work.

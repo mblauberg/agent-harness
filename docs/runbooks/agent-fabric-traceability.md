@@ -1,7 +1,8 @@
 # Agent fabric traceability
 
-Status: delivery contract; implementation, integrated verification, provider
-review, council adjudication and consolidated PR review remain pending
+Status: historical staged-delivery traceability map. Every test path listed
+below exists at HEAD, but later requirements are not comprehensively indexed;
+this is not a current release, hardening or Console conformance receipt.
 Protocol source: [Agent Fabric specifications](../specs/README.md#agent-fabric)
 Activation context: [Activation and operations](../specs/agent-fabric/activation.md)
 Daemon-hardening context: [Architecture assurance](../specs/agent-fabric/architecture-assurance.md)
@@ -9,37 +10,37 @@ Delivery context: [Console specifications](../specs/README.md#project-fabric-con
 Test roots: `runtime/agent-fabric/`, `runtime/agent-fabric-protocol/` and
 `runtime/agent-fabric-console/`
 
-This runbook maps the Agent Fabric requirements and acceptance scenarios below to
-planned or implemented Vitest evidence. It is not a complete hardening or Console
-conformance receipt and does not prove integrated verification, provider review
-or programme acceptance. A listed test path is mandatory from its introduction
-stage onward. Absence, skip, todo or quarantine of a deterministic test fails
-that stage. Several requirements may share one public-behaviour test; the test
-name must identify each mapped ID.
+This runbook preserves the original Agent Fabric staged-delivery requirements
+and their implemented Vitest paths. It does not cover every requirement added
+after that staged map and proves neither current integrated verification nor
+programme acceptance. Use the live specifications and test tree for current
+coverage. A listed test path remains mandatory from its introduction stage
+onward; absence, skip, todo or quarantine of a deterministic test fails that
+stage. Several requirements may share one public-behaviour test; the test name
+must identify each mapped ID.
 
-## Capability-authority freeze boundary
+## Capability-authority boundary recorded by this map
 
 D-023 accepts the design in the
 [authority](../specs/agent-fabric/authority.md),
 [provider-action](../specs/agent-fabric/provider-actions-and-adapters.md),
 [activation](../specs/agent-fabric/activation.md) and
 [provider/lifecycle custody](../specs/agent-fabric/provider-custody.md)
-owners. It does not accept the remaining Console draft by implication. The
-direct `AuthorityEnvelopeV2` cutover and narrow, stateless, write-free compiler
-are implemented. Immutable native-settings/persistence receipts and the exact
-per-provider Step-3 containment tuple still require implementation and
-deterministic evidence.
+owners. It did not accept the remaining Console draft by implication. At that
+freeze, the direct `AuthorityEnvelopeV2` cutover and narrow, stateless,
+write-free compiler were implemented while later persistence and containment
+work was incomplete.
 
-`workspace-write-offline` therefore remains inert. Every certifying action
-continues to request and execute `review-readonly`; no generic write result can
-certify the Console. FR-089–FR-095, NFR-040–NFR-042 and AC-066–AC-070, plus
-the Console [operator projections](../specs/console/operator-interaction.md),
-are pending additions to this
-matrix rather than evidence supplied by its older paths.
+The live runtime now implements `workspace-write-offline`; its current contract
+and evidence live in the linked specifications and test tree. FR-089–FR-095,
+NFR-040–NFR-042 and AC-066–AC-070, plus the Console
+[operator projections](../specs/console/operator-interaction.md), postdate this
+matrix. Their absence here is why this historical map must not be used as a
+current coverage claim.
 
 ## Functional requirements
 
-| ID | Stage | Planned Vitest path | Required evidence |
+| ID | Stage | Recorded Vitest path | Required evidence |
 |---|---:|---|---|
 | FR-001 | 2 | `tests/acceptance/stage2/mcp-facade-symmetry.acceptance.test.ts` | Claude and Codex client fixtures expose identical tool and resource semantics. |
 | FR-002 | 2 | `tests/integration/mcp-two-proxies.integration.test.ts` | Independent proxies observe one daemon, revision and store. |
@@ -63,7 +64,7 @@ matrix rather than evidence supplied by its older paths.
 
 ## Quality requirements
 
-| ID | Stage | Planned Vitest path | Required evidence |
+| ID | Stage | Recorded Vitest path | Required evidence |
 |---|---:|---|---|
 | NFR-001 | 1 | `tests/integration/daemon-unix-socket.integration.test.ts` | Default startup creates only a local Unix socket and no network listener. |
 | NFR-002 | 1 | `tests/integration/daemon-unix-socket.integration.test.ts` | Socket, state and discovery paths reject group/world access. |
@@ -78,7 +79,7 @@ matrix rather than evidence supplied by its older paths.
 
 ## Acceptance scenarios
 
-| ID | Stage | Planned Vitest path | Deterministic oracle |
+| ID | Stage | Recorded Vitest path | Deterministic oracle |
 |---|---:|---|---|
 | AC-001 | 3 | `tests/acceptance/stage3/paired-messaging-role-reversal.acceptance.test.ts` | Fake Claude-chair/Codex-peer and reversed roles exchange and acknowledge symmetrically. |
 | AC-002 | 3 | `tests/acceptance/stage3/herdr-paired-visibility.acceptance.test.ts` | Fake Herdr verifies pane placement, renderer-only closure and display-cursor resumption. |
@@ -101,7 +102,7 @@ matrix rather than evidence supplied by its older paths.
 These deterministic fixture tests supplement the requirement matrix. An
 adapter cannot be enabled merely because the shared degradation test passes.
 
-| Stage | Planned Vitest path |
+| Stage | Recorded Vitest path |
 |---:|---|
 | 3 | `tests/acceptance/stage3/adapter-compatibility.acceptance.test.ts` |
 | 3 | `tests/acceptance/stage3/primary-adapter-conformance.acceptance.test.ts` |
@@ -116,7 +117,7 @@ adapter cannot be enabled merely because the shared degradation test passes.
 |---|---|
 | Single daemon owner and attached-client shutdown | `tests/integration/daemon-single-instance.integration.test.ts`, `tests/integration/daemon-attached-client-shutdown.integration.test.ts` |
 | Immutable atomic seat renewal and project credential lookup | `tests/unit/seat-store.unit.test.ts`, `tests/acceptance/stage2/mcp-provision.acceptance.test.ts`, `tests/unit/mcp-credentials.unit.test.ts` |
-| Trusted adapter composition remains disabled | `tests/integration/daemon-disabled-adapter-gate.integration.test.ts` |
+| Disabled or unpinned adapters cannot join trusted composition | `tests/integration/daemon-disabled-adapter-gate.integration.test.ts` |
 | Provider authority and trusted model admission before effects | `tests/acceptance/stage3/provider-session-boundary.acceptance.test.ts`, `tests/unit/adapter-supervisor-model-policy.unit.test.ts` |
 | Persistent adapter process reuse | `tests/unit/adapter-supervisor.unit.test.ts` |
 | Operation-scoped authority and token rotation | `tests/acceptance/stage1/operation-scoped-authority.acceptance.test.ts`, `tests/acceptance/stage1/retryable-capability-issuance.acceptance.test.ts` |
