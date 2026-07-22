@@ -369,6 +369,97 @@ function attentionDeckDataset(crossedAdvisory = false): FabricConsoleDataset {
   };
 }
 
+function urgencyGlyphDataset(): FabricConsoleDataset {
+  const base = attentionDeckDataset();
+  const attention = base.pages.attention.rows[0];
+  const run = base.pages.runs.rows[0];
+  if (attention?.summary?.kind !== "attention" || run?.summary?.kind !== "run") {
+    throw new Error("urgency glyph fixture unavailable");
+  }
+  const attentionSummary = attention.summary;
+  const runSummary = run.summary;
+  const attentionStates = [
+    ["safety", "safety-integrity", "Safety gate"],
+    ["critical", "critical-path", "Critical blocker"],
+    ["expiring", "expiring-authority", "Authority expires"],
+    ["acceptance", "acceptance-ready", "Acceptance ready"],
+  ] as const;
+  const attentionRows: ConsoleRow<"attention">[] = attentionStates.map(([id, urgency, title]) => ({
+    ...attention,
+    stableId: `attention:${id}`,
+    urgency,
+    summary: { ...attentionSummary, priority: urgency, title },
+  }));
+  const staleAttention = {
+    ...attentionRows[0]!,
+    stableId: "attention:stale",
+    freshness: {
+      state: "stale" as const,
+      source: "fabric" as const,
+      revision: attention.revision,
+      observedAt: timestamp,
+      ageMs: 60_000,
+    },
+    summary: { ...attentionSummary, title: "Stale safety gate" },
+  } satisfies ConsoleRow<"attention">;
+  const runRows: ConsoleRow<"runs">[] = ([
+    ["run-healthy", "healthy", "session-healthy", "build"],
+    ["run-degraded", "degraded", "session-degraded", "review"],
+    ["run-stale", "healthy", "session-stale", "verify"],
+  ] as const).map(([stableId, health, projectSessionId, phase]) => ({
+    ...run,
+    stableId,
+    freshness: stableId === "run-stale"
+      ? {
+          state: "stale" as const,
+          source: "fabric" as const,
+          revision: run.revision,
+          observedAt: timestamp,
+          ageMs: 60_000,
+        }
+      : run.freshness,
+    summary: {
+      ...runSummary,
+      projectSessionId: projectSessionId as ProjectSessionId,
+      phase,
+      health: health as RunProjection["health"],
+      identity: { ...runSummary.identity, workstreams: [] },
+    },
+  }));
+  return {
+    ...base,
+    projectSessions: {
+      selectedProjectSessionId: null,
+      choices: [
+        {
+          projectSessionId: "session-healthy" as ProjectSessionId,
+          mode: "coordinated",
+          state: "active",
+          revision: 1,
+          generation: 1,
+          lastEventAt: timestamp,
+        },
+        {
+          projectSessionId: "session-degraded" as ProjectSessionId,
+          mode: "coordinated",
+          state: "visibility_degraded",
+          revision: 1,
+          generation: 1,
+          lastEventAt: timestamp,
+        },
+      ],
+    },
+    pages: {
+      ...base.pages,
+      attention: {
+        ...base.pages.attention,
+        rows: [...attentionRows, staleAttention],
+      },
+      runs: { ...base.pages.runs, rows: runRows },
+    },
+  };
+}
+
 function datasetWithHeader(
   overrides: Readonly<{
     project?: ProjectId;
@@ -1786,6 +1877,185 @@ describe("structured presenter and responsive Fabric renderer", () => {
 
   });
 
+  it("renders every urgency glyph and its projection-only non-colour twin", () => {
+    const dataset = urgencyGlyphDataset();
+    const presentation = presentFabricConsole(
+      dataset,
+      controllerState(),
+      createFabricUiState(),
+      { columns: 120, rows: 32 },
+    );
+
+    expect(presentation.needsYouRows.map(({ stableId, urgencyMarker }) => [
+      stableId,
+      urgencyMarker,
+    ])).toStrictEqual([
+      ["attention:safety", "!!"],
+      ["attention:critical", "!>"],
+      ["attention:expiring", "!"],
+      ["attention:acceptance", "+"],
+      ["attention:stale", "?"],
+    ]);
+    expect(presentation.deckRows.map(({ entityId, urgencyMarker, statusLabel }) => [
+      entityId,
+      urgencyMarker,
+      statusLabel,
+    ])).toStrictEqual([
+      ["session-healthy", " ", "ACTIVE"],
+      ["run-healthy", " ", "HEALTHY"],
+      ["session-degraded", "~", "DEGRADED"],
+      ["run-degraded", "~", "DEGRADED"],
+      ["session-stale", "?", "UNAVAILABLE"],
+      ["run-stale", "?", "STALE"],
+    ]);
+
+    const frame = renderFabricConsoleFrame(
+      dataset,
+      controllerState(),
+      createFabricUiState(),
+      { columns: 120, rows: 32 },
+    );
+    const visible = frame.rows.join("\n");
+    const activeSession = frame.rows.find((row) => row.includes("SESSION session-healthy"));
+    const degradedSession = frame.rows.find((row) => row.includes("SESSION session-degraded"));
+    expect(activeSession).toBeDefined();
+    expect(activeSession).not.toContain("?");
+    expect(activeSession).not.toContain("UNAVAILABLE");
+    expect(degradedSession).toContain("~  SESSION session-degraded");
+    expect(degradedSession).toContain("DEGRADED");
+    expect(visible).toContain("!! Safety gate");
+    expect(visible).toContain("!> Critical blocker");
+    expect(visible).toContain("!  Authority expires");
+    expect(visible).toContain("+  Acceptance ready");
+    expect(visible).toContain("?  Stale safety gate");
+    expect(visible).toContain("~  COORDINATION run-degraded");
+    expect(visible).toContain("DEGRADED");
+    expect(visible).toContain("?  COORDINATION run-stale");
+    expect(visible).toContain("STALE");
+    expect(visible).not.toMatch(/\u001b\[[0-9;]*m/u);
+  });
+
+  it("marks live run rows with absent summaries as unavailable instead of guessing", () => {
+    const base = urgencyGlyphDataset();
+    const { projectSessions: _projectSessions, ...withoutSessions } = base;
+    const source = base.pages.runs.rows[0];
+    if (source === undefined) throw new Error("run glyph fixture unavailable");
+    const presentation = presentFabricConsole(
+      {
+        ...withoutSessions,
+        pages: {
+          ...base.pages,
+          runs: { ...base.pages.runs, rows: [{ ...source, summary: null }] },
+        },
+      },
+      controllerState(),
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+
+    expect(presentation.deckRows).toMatchObject([{
+      urgencyMarker: "?",
+      statusLabel: "UNAVAILABLE",
+    }]);
+  });
+
+  it("keeps compact selection unique and retains stale freshness wording", () => {
+    const dataset = urgencyGlyphDataset();
+    const baseController = controllerState();
+    const controller: ConsoleControllerState = {
+      ...baseController,
+      selectionByView: {
+        ...baseController.selectionByView,
+        attention: {
+          stableId: "attention:critical",
+          revision: revisionFromProtocol(7),
+        },
+      },
+    };
+    const selected = renderFabricConsoleFrame(
+      dataset,
+      controller,
+      createFabricUiState(),
+      { columns: 30, rows: 6 },
+    ).rows.join("\n");
+    expect(selected.match(/Critical blocker/gu)).toHaveLength(1);
+    expect(selected).toContain("Safety gate");
+
+    const staleOnly: FabricConsoleDataset = {
+      ...dataset,
+      pages: {
+        ...dataset.pages,
+        attention: {
+          ...dataset.pages.attention,
+          rows: [dataset.pages.attention.rows.at(-1)!],
+        },
+      },
+    };
+    const stale = renderFabricConsoleFrame(
+      staleOnly,
+      {
+        ...baseController,
+        selectionByView: {
+          ...baseController.selectionByView,
+          attention: {
+            stableId: "attention:stale",
+            revision: revisionFromProtocol(7),
+          },
+        },
+      },
+      createFabricUiState(),
+      { columns: 30, rows: 6 },
+    ).rows.join("\n");
+    expect(stale).toContain("*?  Stale safety gate STALE 1m");
+  });
+
+  it("aligns Deck glyph cells and keeps compact healthy-run focus visible", () => {
+    const dataset = urgencyGlyphDataset();
+    const reference = renderFabricConsoleFrame(
+      dataset,
+      controllerState(),
+      createFabricUiState(),
+      { columns: 80, rows: 24 },
+    );
+    const attentionRegion = reference.hitRegions.find(({ id }) => id === "row:attention:attention:safety");
+    const sessionRegion = reference.hitRegions.find(({ id }) => id === "deck:session:session-healthy");
+    expect(attentionRegion).toBeDefined();
+    expect(sessionRegion).toBeDefined();
+    if (attentionRegion === undefined || sessionRegion === undefined) return;
+    expect(reference.rows[attentionRegion.rect.y1 - 1]?.slice(1, 3)).toBe("!!");
+    expect(reference.rows[sessionRegion.rect.y1 - 1]?.slice(1, 3)).toBe("  ");
+
+    const focused = renderFabricConsoleFrame(
+      dataset,
+      controllerState(),
+      createFabricUiState({ focusId: "deck:coordination:session-healthy:run-healthy" }),
+      { columns: 30, rows: 6 },
+    );
+    const runRegion = focused.hitRegions.find(({ id }) => id === "deck:coordination:session-healthy:run-healthy");
+    expect(runRegion).toBeDefined();
+    if (runRegion === undefined) return;
+    expect(focused.rows[runRegion.rect.y1 - 1]).toMatch(/^>/u);
+  });
+
+  it.each([
+    [30, 6],
+    [80, 24],
+    [120, 32],
+  ] as const)("keeps the two-cell urgency gutter legible at %sx%s", (columns, rows) => {
+    const frame = renderFabricConsoleFrame(
+      urgencyGlyphDataset(),
+      controllerState(),
+      createFabricUiState(),
+      { columns, rows },
+    );
+    const visible = frame.rows.join("\n");
+
+    expect(visible).toContain("!!");
+    expect(visible).toContain("!>");
+    expect(frame.rows.every((line) => cellWidth(line) === columns)).toBe(true);
+    expect({ mode: frame.mode, rows: frame.rows }).toMatchSnapshot();
+  });
+
   it("renders an empty Deck fixture without inventing attention or run state", () => {
     const base = attentionDeckDataset();
     const { projectSessions: _projectSessions, ...withoutSessions } = base;
@@ -2031,12 +2301,16 @@ describe("structured presenter and responsive Fabric renderer", () => {
       expect(frame.mode).toBe(mode);
       expect(visible).toContain("AFAB-004");
       expect(visible).toContain("Approve quarantine");
-      expect(visible).toMatch(/NEEDS YOU|N:1/u);
-      expect(visible).toMatch(/PROJECTED ROSTER|R:3/u);
-      expect(visible).toMatch(/RUN IDENTITIES:2|RUN:2/u);
       if (columns === 30) {
-        expect(frame.rows[0]).toContain("project-1/session-1 LIVE/LIVE");
-        expect(visible).toContain("N:1 W:1 R:3 RUN:2");
+        expect(frame.rows[0]).toContain("project-1 NEEDS 1 RUNS 1 !");
+        expect(visible).toContain("*!! Approve quarantine");
+        expect(visible).toContain("AFAB-004 implement BLOCKED");
+        expect(frame.rows.at(-1)).toContain("[enter]open");
+        expect(frame.rows.at(-1)).toContain("[q]Detach");
+      } else {
+        expect(visible).toMatch(/NEEDS YOU|N:1/u);
+        expect(visible).toMatch(/PROJECTED ROSTER|R:3/u);
+        expect(visible).toMatch(/RUN IDENTITIES:2|RUN:2/u);
       }
       expect(frame.hitRegions.some(({ id }) => id === "detach")).toBe(true);
       expect(frame.rows.every((line) => cellWidth(line) === columns)).toBe(true);
@@ -2799,7 +3073,7 @@ describe("structured presenter and responsive Fabric renderer", () => {
     expect(visible).toContain("Owner:codex-chair");
     expect(visible).toContain("Next:Console GREEN");
     expect(visible).toContain("Health:blocked");
-    expect(visible).toContain(">*!! Approve quarantine");
+    expect(visible).toContain(">!! Approve quarantine");
     expect(frame.rows.filter((line) => line.trim().length > 0).length).toBeGreaterThanOrEqual(12);
     expect(frame.hitRegions.find(({ id }) => id === "detach")).toMatchObject({
       rect: { y1: 24, y2: 24 },

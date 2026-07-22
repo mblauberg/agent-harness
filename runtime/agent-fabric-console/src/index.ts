@@ -31,7 +31,7 @@ import {
   type PresentedRow,
 } from "./presenter.js";
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
-import { renderFabricAttentionDeck, renderFabricDeckRoster } from "./attention-deck.js";
+import { compactAttentionRowText, renderFabricAttentionDeck, renderFabricDeckRoster } from "./attention-deck.js";
 import {
   FABRIC_COMPACT_ACTION_LABELS,
   FABRIC_VIEW_SHORT_LABELS,
@@ -239,7 +239,7 @@ function renderFabricTabs(
 }
 
 function rowText(row: PresentedRow, focused: boolean): string {
-  return `${focused ? ">" : " "}${row.selected ? "*" : " "}${row.urgencyMarker.padEnd(2, " ")} ${row.primary} | ${row.secondary} | ${row.freshness} | r${row.revision}`;
+  return `${focused ? ">" : row.selected ? "*" : " "}${row.urgencyMarker.padEnd(2, " ")} ${row.primary} | ${row.secondary} | ${row.freshness} | r${row.revision}`;
 }
 
 function renderFabricMaster(
@@ -944,9 +944,10 @@ function renderFabricDetachRow(
     return;
   }
   const label = presentation.inputMode === "browse"
-    ? presentation.focusId === "detach" ? ">detach " : "q detach"
+    ? presentation.focusId === "detach" ? ">Detach" : columns === 30 ? "[q]Detach" : "q detach"
     : presentation.focusId === "detach" ? ">Detach " : "[Detach]";
-  const prefixWidth = Math.max(0, columns - 9);
+  const labelWidth = cellWidth(label);
+  const prefixWidth = Math.max(0, columns - labelWidth - 1);
   const inputId = `input:${presentation.inputMode}`;
   const value = prefixWidth === 0
     ? label
@@ -969,13 +970,12 @@ function renderFabricDetachRow(
   hitRegions.push({
     id: "detach",
     kind: "detach",
-    rect: { x1: columns - 7, y1: row, x2: columns, y2: row },
+    rect: { x1: columns - labelWidth + 1, y1: row, x2: columns, y2: row },
     enabled: true,
     geometryKey,
     binding: null,
   });
 }
-
 function renderFabricFooter(
   rows: string[],
   columns: number,
@@ -1034,7 +1034,7 @@ function renderFabricStrip(
     ? presentation.inputMode === "editor"
       ? "Esc browse | Ctrl-C safety"
       : "Esc cancel | Ctrl-C safety"
-    : "? help";
+    : "[enter]open";
 
   if (presentation.review !== null && bodyEnd >= 1) {
     const actionRow = !inputModal && bodyEnd >= 2 ? bodyEnd : null;
@@ -1111,7 +1111,7 @@ function renderFabricStrip(
       rows,
       nextRow,
       columns,
-      rowText(item, presentation.focusId === id),
+      presentation.activeView === "attention" && columns === 30 ? compactAttentionRowText(item, presentation.focusId === id) : rowText(item, presentation.focusId === id),
     );
     if (!inputModal) {
       hitRegions.push({
@@ -1138,7 +1138,7 @@ function renderFabricStrip(
         rows,
         nextRow,
         columns,
-        `${header.project}/${header.session} ${presentation.connection}/${header.freshness.toUpperCase()}`,
+        `${header.project} NEEDS ${String(header.needsYouCount)} RUNS ${String(header.runCount)} ${header.needsYouCount > 0 ? "!" : header.freshness === "live" ? "" : "?"}`,
       );
       nextRow += 1;
     }

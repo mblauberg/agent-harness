@@ -3,6 +3,35 @@ import type { FabricConsoleDataset } from "./protocol-adapter.js";
 import type { PresentedDeckRow } from "./presenter-model.js";
 import { presentRow } from "./row-presentation.js";
 
+type DeckStatus = Readonly<{ urgencyMarker: string; statusLabel: string }>;
+
+function absentStatus(): DeckStatus {
+  return { urgencyMarker: "?", statusLabel: "UNAVAILABLE" };
+}
+
+function sessionStatus(state: string | undefined): DeckStatus {
+  if (state === "active") {
+    return { urgencyMarker: " ", statusLabel: "ACTIVE" };
+  }
+  if (state === "visibility_degraded") {
+    return { urgencyMarker: "~", statusLabel: "DEGRADED" };
+  }
+  return absentStatus();
+}
+
+function runStatus(row: ConsoleRow<"runs">): DeckStatus {
+  const freshness = row.freshness.state;
+  if (freshness === "stale" || freshness === "unavailable" || freshness === "conflict") {
+    return { urgencyMarker: "?", statusLabel: freshness.toUpperCase() };
+  }
+  if (row.summary?.kind !== "run") return absentStatus();
+  const health = row.summary.health;
+  if (health === "degraded") {
+    return { urgencyMarker: "~", statusLabel: "DEGRADED" };
+  }
+  return { urgencyMarker: " ", statusLabel: health?.toUpperCase() ?? "UNKNOWN" };
+}
+
 function stableId(kind: PresentedDeckRow["kind"], ...ids: readonly string[]): string {
   return `${kind}:${ids.map((id) => encodeURIComponent(id)).join(":")}`;
 }
@@ -34,6 +63,7 @@ export function presentDeckRows(
 
   for (const projectSessionId of sessionIds) {
     const choice = sessionById.get(projectSessionId);
+    const status = sessionStatus(choice?.state);
     const sessionStableId = stableId("session", projectSessionId);
     allRows.push({
       kind: "session",
@@ -50,6 +80,7 @@ export function presentDeckRows(
       lastEvent: choice?.lastEventAt ?? null,
       updatedAt: null,
       nextMilestone: null,
+      ...status,
       primary: `SESSION ${projectSessionId}`,
       secondary: secondary([
         { label: "mode", value: choice?.mode ?? null },
@@ -65,6 +96,7 @@ export function presentDeckRows(
       const summary = runRow.summary;
       if (summary?.kind !== "run") continue;
       const presented = presentRow(runRow, false, false, dataset);
+      const status = runStatus(runRow);
       const coordinationStableId = stableId(
         "coordination",
         projectSessionId,
@@ -85,6 +117,7 @@ export function presentDeckRows(
         lastEvent: summary.identity.lastEventAt,
         updatedAt: null,
         nextMilestone: summary.nextMilestone,
+        ...status,
         primary: `COORDINATION ${runRow.stableId}`,
         secondary: secondary([
           { label: "owner", value: String(summary.identity.chairAgentId) },
@@ -119,13 +152,14 @@ export function presentDeckRows(
           lastEvent: null,
           updatedAt: workstream.updatedAt,
           nextMilestone: null,
+          ...absentStatus(),
           primary: `WORKSTREAM ${String(workstream.workstreamId)} | DELIVERY ${String(workstream.deliveryRunId)}`,
           secondary: secondary([
             { label: "owner", value: String(workstream.leadAgentId) },
             { label: "state", value: workstream.state },
             { label: "phase", value: null },
             { label: "health", value: null },
-            { label: "fresh", value: null },
+            { label: "fresh", value: "UNAVAILABLE" },
             { label: "last event", value: null },
             { label: "updated", value: workstream.updatedAt },
           ]),
@@ -139,6 +173,7 @@ export function presentDeckRows(
     (row) => row.summary?.kind !== "run",
   )) {
     const presented = presentRow(runRow, false, false, dataset);
+    const status = runStatus(runRow);
     const coordinationStableId = stableId("coordination", "unscoped", runRow.stableId);
     allRows.push({
       kind: "coordination",
@@ -155,6 +190,7 @@ export function presentDeckRows(
       lastEvent: null,
       updatedAt: null,
       nextMilestone: null,
+      ...status,
       primary: `COORDINATION ${runRow.stableId} | SESSION not projected`,
       secondary: secondary([
         { label: "owner", value: null },

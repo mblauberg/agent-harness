@@ -1,4 +1,4 @@
-import type { ConsoleUrgency, FabricView } from "./model.js";
+import type { ConsoleFreshness, ConsoleUrgency, FabricView } from "./model.js";
 
 export const FABRIC_VIEW_SHORT_LABELS: Readonly<Record<FabricView, string>> = {
   attention: "Attn",
@@ -19,6 +19,15 @@ export const FABRIC_URGENCY_MARKERS: Readonly<Record<ConsoleUrgency, string>> = 
   advisory: ".",
   normal: " ",
 };
+
+export function urgencyMarkerFor(
+  urgency: ConsoleUrgency,
+  freshness: ConsoleFreshness["state"],
+): string {
+  return freshness === "stale" || freshness === "unavailable" || freshness === "conflict"
+    ? "?"
+    : FABRIC_URGENCY_MARKERS[urgency];
+}
 
 export const FABRIC_COMPACT_ACTION_LABELS: Readonly<Record<string, string>> = {
   "review:continue": "Continue",
