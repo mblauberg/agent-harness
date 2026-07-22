@@ -535,6 +535,12 @@ def _report_partial_state(
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Python 3.14 argparse probes sys.stdout for colour support while the
+    # parser is constructed; with a closed stdout that raises before the
+    # guarded output paths below can report partial state. PYTHON_COLORS=0
+    # short-circuits the probe, and this mechanical configurer never
+    # colourises its output anyway.
+    os.environ.setdefault("PYTHON_COLORS", "0")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--platform",
