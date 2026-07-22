@@ -25,6 +25,7 @@ const readOperationSet = new Set<FabricOperation>([
   FABRIC_OPERATIONS.getProviderAction,
   FABRIC_OPERATIONS.getTeam,
   FABRIC_OPERATIONS.getBudget,
+  FABRIC_OPERATIONS.whoami,
   FABRIC_OPERATIONS.getRunStatus,
   FABRIC_OPERATIONS.listTasks,
   FABRIC_OPERATIONS.listAgents,

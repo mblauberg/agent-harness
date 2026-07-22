@@ -18,6 +18,7 @@ describe("AC-008 Stage 3 safe completion", () => {
       await rm(fixture.directory, { recursive: true, force: true });
     });
     const lease = await fixture.leader.acquireWriteLease({
+      taskId: fixture.leaderTask.taskId,
       scope: ["src/leader"],
       ttlMs: 60_000,
       commandId: "completion:lease:acquire",

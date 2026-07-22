@@ -72,6 +72,7 @@ export const CORE_INPUT_SHAPES = {
   [FABRIC_OPERATIONS.getBudget]: object(["budgetId"]),
   [FABRIC_OPERATIONS.publishArtifact]: object(["relativePath", "sha256", "commandId"], ["taskId"]),
   [FABRIC_OPERATIONS.closeBarrier]: object(["scope", "commandId"], ["stageId"]),
+  [FABRIC_OPERATIONS.whoami]: object([]),
   [FABRIC_OPERATIONS.getRunStatus]: object(["runId"]),
   [FABRIC_OPERATIONS.observeEvents]: object(["cursor", "limit"]),
   [FABRIC_OPERATIONS.listTasks]: object(["runId"]),
@@ -116,6 +117,7 @@ export const CORE_RESULT_SHAPES = {
   [FABRIC_OPERATIONS.getBudget]: object(["budgetId", "parentBudgetId", "state", "dimensions", "returned"]),
   [FABRIC_OPERATIONS.publishArtifact]: object(["artifactId", "relativePath", "sha256"]),
   [FABRIC_OPERATIONS.closeBarrier]: object(["scope", "closed", "receipt"]),
+  [FABRIC_OPERATIONS.whoami]: object(["seat", "agentId", "runId", "authorityId", "generation", "lease"]),
   [FABRIC_OPERATIONS.getRunStatus]: object(["runId", "chairAgentId", "barrier", "counts"]),
   [FABRIC_OPERATIONS.observeEvents]: object(["events", "nextCursor"]),
   [FABRIC_OPERATIONS.listTasks]: object(["tasks"]),
@@ -152,6 +154,20 @@ const agentCustodyResultCodec = objectCodec({
   bridgeState: enumeration(["active", "none"]),
   bridgeGeneration: positiveInteger,
   evidenceDigest: sha256,
+});
+
+const whoamiResultCodec = objectCodec({
+  seat: identifier,
+  agentId: identifier,
+  runId: identifier,
+  authorityId: identifier,
+  generation: sha256Hex,
+  lease: objectCodec({
+    leaseId: identifier,
+    holderAgentId: identifier,
+    generation: positiveInteger,
+    state: enumeration(["active", "frozen", "revoked"]),
+  }),
 });
 
 const budgetDimensionCodec = objectCodec({
@@ -337,6 +353,7 @@ export const coreOperationCodecFragment = {
   [FABRIC_OPERATIONS.getBudget]: corePair(FABRIC_OPERATIONS.getBudget, { result: budgetResultCodec }),
   [FABRIC_OPERATIONS.publishArtifact]: corePair(FABRIC_OPERATIONS.publishArtifact),
   [FABRIC_OPERATIONS.closeBarrier]: corePair(FABRIC_OPERATIONS.closeBarrier),
+  [FABRIC_OPERATIONS.whoami]: corePair(FABRIC_OPERATIONS.whoami, { result: whoamiResultCodec }),
   [FABRIC_OPERATIONS.getRunStatus]: corePair(FABRIC_OPERATIONS.getRunStatus),
   [FABRIC_OPERATIONS.observeEvents]: corePair(FABRIC_OPERATIONS.observeEvents),
   [FABRIC_OPERATIONS.listTasks]: corePair(FABRIC_OPERATIONS.listTasks),

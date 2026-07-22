@@ -283,6 +283,12 @@
       "description": "Invoke the closed fabric.v1.barrier.close operation as the authenticated Agent Fabric principal.",
       "receiptRenderer": "generic-v1"
     },
+    "fabric.v1.whoami": {
+      "projection": "tool",
+      "name": "fabric_whoami",
+      "description": "Read the authenticated caller's current Fabric seat, authority, generation and chair-lease state.",
+      "receiptRenderer": "generic-v1"
+    },
     "fabric.v1.run-status.read": {
       "projection": "tool",
       "name": "fabric_run_status_read",
@@ -1353,6 +1359,7 @@
               "fabric.v1.budget.read",
               "fabric.v1.artifact.publish",
               "fabric.v1.barrier.close",
+              "fabric.v1.whoami",
               "fabric.v1.run-status.read",
               "fabric.v1.events.observe",
               "fabric.v1.task.list",
@@ -1434,7 +1441,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:8a432ef19af55b2b9d689ef2905a3847d40eaa25e84017f07ae8ac31f37b721f",
+      "inputCodecDigest": "sha256:05510dfaf455601ee8e07dec23db5b49f722088b09ca92e0264c09b512c6b7f6",
       "outputCodecDigest": "sha256:ec3940ecbfa767c13e69c430da0e31ef5ba2f3ad21d731b5d0e1af01e2a7e063"
     },
     {
@@ -24164,6 +24171,7 @@
                   "fabric.v1.budget.read",
                   "fabric.v1.artifact.publish",
                   "fabric.v1.barrier.close",
+                  "fabric.v1.whoami",
                   "fabric.v1.run-status.read",
                   "fabric.v1.events.observe",
                   "fabric.v1.task.list",
@@ -24347,7 +24355,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:2926b53d6790adec07ddff2a511e7ddf3cc6518dc503a4c3df39b9fa68c52bfe",
+      "inputCodecDigest": "sha256:66140fc65a416310740d2dd75325fa51e93538f9913f3d65709697221fb37146",
       "outputCodecDigest": "sha256:1a9ee6767166f5f96ee5be2fbca40d47d2e7e46080ce4af47949c460bbe5c373"
     },
     {
@@ -24559,6 +24567,7 @@
                     "fabric.v1.budget.read",
                     "fabric.v1.artifact.publish",
                     "fabric.v1.barrier.close",
+                    "fabric.v1.whoami",
                     "fabric.v1.run-status.read",
                     "fabric.v1.events.observe",
                     "fabric.v1.task.list",
@@ -25208,7 +25217,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:35886f3b99f5dec17106313450b27914764d2c82b55d3a1f93d7635a2c34a892",
+      "inputCodecDigest": "sha256:88a585d3345a0691731b93599eb7b201130f873b61ab4951e6966abffafcb670",
       "outputCodecDigest": "sha256:e3992f43b189bc13c82f3f427051462f757f9bb664ab3b5545b66dfe805b8d0e"
     },
     {
@@ -28429,6 +28438,7 @@
               "fabric.v1.budget.read",
               "fabric.v1.artifact.publish",
               "fabric.v1.barrier.close",
+              "fabric.v1.whoami",
               "fabric.v1.run-status.read",
               "fabric.v1.events.observe",
               "fabric.v1.task.list",
@@ -28740,7 +28750,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:5152a1eeed64367d08f67ffb1caca61c345eaa0044e975974aeefc382f5267b2",
+      "inputCodecDigest": "sha256:2d3936963fd50a1e7e88c71d605b075598a72952b3b115565b96d46919cbd8e6",
       "outputCodecDigest": "sha256:49d61e0c6cc64daa7f79c3bbec4c8d008953ce85acd83d765cdd121029772674"
     },
     {
@@ -31090,6 +31100,95 @@
       "outputCodecDigest": "sha256:7d928a9fd1b17419cd9c88195347cd222b9a71dcd4308c51c7a560880a488c91"
     },
     {
+      "operation": "fabric.v1.whoami",
+      "name": "fabric_whoami",
+      "description": "Read the authenticated caller's current Fabric seat, authority, generation and chair-lease state.",
+      "feature": "fabric-core.v1",
+      "receiptRenderer": "generic-v1",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "seat",
+          "agentId",
+          "runId",
+          "authorityId",
+          "generation",
+          "lease"
+        ],
+        "properties": {
+          "seat": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "agentId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "runId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "authorityId": {
+            "$ref": "#/$defs/generated_1"
+          },
+          "generation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "x-minUtf8Bytes": 64,
+            "x-maxUtf8Bytes": 64,
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "lease": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "leaseId",
+              "holderAgentId",
+              "generation",
+              "state"
+            ],
+            "properties": {
+              "leaseId": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "holderAgentId": {
+                "$ref": "#/$defs/generated_1"
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "frozen",
+                  "revoked"
+                ]
+              }
+            }
+          }
+        },
+        "$defs": {
+          "generated_1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "x-minUtf8Bytes": 1,
+            "x-maxUtf8Bytes": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "inputCodecDigest": "sha256:d405402eaad1087403bb7fa3dc1a68b5b9a34da1bb220326323b68953bbe12b5",
+      "outputCodecDigest": "sha256:3efb0333b34488fa0546d00568c9c4bd9060aa83b54e936ab0e87f8f217901b1"
+    },
+    {
       "operation": "fabric.v1.workstream.create",
       "name": "fabric_workstream_create",
       "description": "Invoke the closed fabric.v1.workstream.create operation as the authenticated Agent Fabric principal.",
@@ -31792,6 +31891,7 @@
               "fabric.v1.budget.read",
               "fabric.v1.artifact.publish",
               "fabric.v1.barrier.close",
+              "fabric.v1.whoami",
               "fabric.v1.run-status.read",
               "fabric.v1.events.observe",
               "fabric.v1.task.list",
@@ -31958,7 +32058,7 @@
           }
         }
       },
-      "inputCodecDigest": "sha256:a68fced5c7c3e184ed229a45304a7f07230e59ef80fc6a1ff95307470d708af4",
+      "inputCodecDigest": "sha256:e6692113a52dbe277bdf3321f956ca00a19a83eaafd2cc0d155da89e8c2c9d9a",
       "outputCodecDigest": "sha256:28ebc4507c2708d941fe3fd28d08acd56e5b50788be87fc484bb9bbfd63ec60a"
     },
     {

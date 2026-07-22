@@ -50,10 +50,11 @@ export type BootstrapMcpSeatInput = {
   expiresAt: string;
 };
 
-export type BootstrapMcpSeatResult = CurrentMcpSeatBindingResult & {
+export type BootstrapMcpSeatResult = Omit<CurrentMcpSeatBindingResult, "credentials"> & {
   projectId: string;
   canonicalRoot: string;
   bootstrapRunDirectory: string;
+  credentials: Array<CurrentMcpSeatBinding & { capability: string; authorityId: string }>;
 };
 
 export type LeaseResult = {

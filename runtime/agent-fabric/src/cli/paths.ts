@@ -20,12 +20,13 @@ function privateDirectory(path: string): string {
   return path;
 }
 
-export function resolveFabricPaths(): FabricPaths {
-  const stateDirectory = privateDirectory(
+export function resolveFabricPaths(options: { createDirectories?: boolean } = {}): FabricPaths {
+  const resolveDirectory = options.createDirectories === false ? (path: string): string => path : privateDirectory;
+  const stateDirectory = resolveDirectory(
     environmentPath("AGENT_FABRIC_STATE_DIRECTORY") ??
       join(environmentPath("XDG_STATE_HOME") ?? join(environmentPath("HOME") ?? homedir(), ".local", "state"), "agent-harness", "fabric"),
   );
-  const runtimeDirectory = privateDirectory(
+  const runtimeDirectory = resolveDirectory(
     environmentPath("AGENT_FABRIC_RUNTIME_DIRECTORY") ??
       join(stateDirectory, "runtime"),
   );

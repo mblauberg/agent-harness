@@ -164,7 +164,10 @@ export async function resolveMcpCapability(
   const projectSeat = environment.AGENT_FABRIC_SEAT;
   const sourceCount = Number(inline !== undefined) + Number(file !== undefined) + Number(projectSeat !== undefined);
   if (sourceCount !== 1) {
-    throw new Error("agent-fabric-mcp requires exactly one capability source");
+    throw new Error(
+      "agent-fabric-mcp requires exactly one capability source; project-seat registries must set " +
+      "AGENT_FABRIC_STATE_DIRECTORY, AGENT_FABRIC_SEAT and AGENT_FABRIC_CLIENT_LABEL",
+    );
   }
   if (inline !== undefined) {
     if (!CAPABILITY_PATTERN.test(inline)) throw new Error("agent fabric MCP capability is invalid");
