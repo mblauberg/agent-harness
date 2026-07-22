@@ -323,6 +323,9 @@ function stateBoundControlController(): FakeController {
       identity: {
         runKind: "coordination",
         chairAgentId: "agent:control-chair" as never,
+        acceptedScopeRef: null,
+        currentPlanRef: null,
+        planRevision: null,
         workstreams: [],
         lastEventAt: timestamp,
       },

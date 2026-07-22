@@ -216,6 +216,7 @@ export const MCP_PROJECTION_REGISTRY = Object.freeze({
   [FABRIC_OPERATIONS.resultDeliveryAbandon]: tool(FABRIC_OPERATIONS.resultDeliveryAbandon),
   [FABRIC_OPERATIONS.workstreamCreate]: tool(FABRIC_OPERATIONS.workstreamCreate),
   [FABRIC_OPERATIONS.workstreamSettle]: tool(FABRIC_OPERATIONS.workstreamSettle),
+  [FABRIC_OPERATIONS.runPlanDeclare]: tool(FABRIC_OPERATIONS.runPlanDeclare),
   [FABRIC_OPERATIONS.launchAttest]: tool(FABRIC_OPERATIONS.launchAttest),
   [FABRIC_OPERATIONS.reviewTargetPrepare]: tool(FABRIC_OPERATIONS.reviewTargetPrepare),
   [FABRIC_OPERATIONS.reviewTargetPreparationRead]: tool(FABRIC_OPERATIONS.reviewTargetPreparationRead),

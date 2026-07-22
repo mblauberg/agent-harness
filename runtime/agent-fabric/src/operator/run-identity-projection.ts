@@ -7,6 +7,7 @@ import {
 import type Database from "better-sqlite3";
 
 import { ProjectFabricCoreError } from "../project-session/contracts.js";
+import { currentAcceptedRunScope, currentRunPlanBinding } from "../project-session/run-plan-store.js";
 import { integer, isRow, row, text, type Row } from "../project-session/store-support.js";
 
 export const MAX_RUN_IDENTITY_WORKSTREAMS = 1024;
@@ -70,9 +71,15 @@ export function projectRunIdentity(database: Database.Database, run: Row): RunId
       Number.isSafeInteger(lastEvent.last_event_at)
     ? parseTimestamp(new Date(lastEvent.last_event_at).toISOString(), "runIdentity.lastEventAt")
     : null;
+  const plan = currentRunPlanBinding(database, runId);
+  const acceptedScopeRef = plan?.acceptedScopeRef ??
+    currentAcceptedRunScope(database, runId)?.artifactRef ?? null;
   return {
     runKind: "coordination",
     chairAgentId: parseIdentifier<"AgentId">(text(run, "chair_agent_id"), "runIdentity.chairAgentId"),
+    acceptedScopeRef,
+    currentPlanRef: plan?.currentPlanRef ?? null,
+    planRevision: plan?.planRevision ?? null,
     workstreams,
     lastEventAt,
   };

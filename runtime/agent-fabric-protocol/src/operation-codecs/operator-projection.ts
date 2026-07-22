@@ -184,12 +184,33 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
       DECLARED_RUN_TASK_STATES.map((state) => [state, integer({ minimum: 0 })]),
     ),
   );
-  // A finite arm is deliberately deferred to the plan-declaration package: it
-  // requires an exact plan-revision binding and settled cancelled-task
-  // denominator semantics, and lands as its own result-shape cutover.
+  const finiteDeclaredRunProgressBaseCodec = objectCodec({
+    plan: literal("finite"),
+    planRevision: positiveInteger,
+    counts: declaredRunTaskStateCountsCodec,
+    declaredTaskDenominator: positiveInteger,
+  });
+  const finiteDeclaredRunProgressCodec = parserBacked(
+    finiteDeclaredRunProgressBaseCodec,
+    (value, path) => {
+      const progress = value as Record<string, unknown>;
+      const counts = progress.counts as Record<string, number>;
+      let remaining = progress.declaredTaskDenominator as number;
+      for (const state of DECLARED_RUN_TASK_STATES) {
+        const count = counts[state] as number;
+        if (count > remaining) {
+          throw new TypeError(`${path}.counts exceed declaredTaskDenominator`);
+        }
+        remaining -= count;
+      }
+      return value;
+    },
+    finiteDeclaredRunProgressBaseCodec.example,
+  );
   const declaredRunProgressCodec = unionOf([
     objectCodec({ plan: literal("open"), counts: declaredRunTaskStateCountsCodec }),
     objectCodec({ plan: literal("unknown"), reason: text }),
+    finiteDeclaredRunProgressCodec,
   ]);
   const runWorkstreamIdentityCodec = objectCodec({
     workstreamId: identifier,
@@ -198,14 +219,12 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
     state: enumeration(["active", "complete", "cancelled", "degraded", "abandoned"]),
     updatedAt: timestamp,
   });
-  // The coordination arm is the only current run-kind arm. Accepted-scope and
-  // current-plan refs are deliberately deferred to the plan-declaration
-
-  // package: no run-level scope or plan binding authority exists in Fabric
-  // yet, and each lands as its own result-shape cutover.
   const runIdentityBaseCodec = objectCodec({
     runKind: literal("coordination"),
     chairAgentId: identifier,
+    acceptedScopeRef: nullable(artifactRefCodec),
+    currentPlanRef: nullable(artifactRefCodec),
+    planRevision: nullable(positiveInteger),
     workstreams: arrayOf(runWorkstreamIdentityCodec, { maximum: 1024 }),
     lastEventAt: nullable(timestamp),
   });
@@ -219,16 +238,36 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
       if (workstreamIds.size !== workstreams.length || deliveryRunIds.size !== workstreams.length) {
         throw new TypeError(`${path}.workstreams must have unique workstreamId and deliveryRunId values`);
       }
+      if ((identity.currentPlanRef === null) !== (identity.planRevision === null)) {
+        throw new TypeError(`${path}.currentPlanRef and planRevision must be present or absent together`);
+      }
+      if (identity.currentPlanRef !== null && identity.acceptedScopeRef === null) {
+        throw new TypeError(`${path}.acceptedScopeRef is required for a declared plan`);
+      }
       return value;
     },
     runIdentityBaseCodec.example,
   );
-  const runSummaryCodec = objectCodec({
+  const validateRunPlanCorrelation = (value: unknown, path: string): unknown => {
+    const run = value as Record<string, unknown>;
+    const progress = run.declaredProgress as Record<string, unknown> | undefined;
+    const identity = run.identity as Record<string, unknown> | undefined;
+    if (progress?.plan === "finite" && identity !== undefined && progress.planRevision !== identity.planRevision) {
+      throw new TypeError(`${path}.finite progress planRevision must match run identity planRevision`);
+    }
+    return value;
+  };
+  const runSummaryBaseCodec = objectCodec({
     kind: literal("run"),
     phase: text,
     health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
     nextMilestone: text,
   }, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec, identity: runIdentityCodec });
+  const runSummaryCodec = parserBacked(
+    runSummaryBaseCodec,
+    validateRunPlanCorrelation,
+    runSummaryBaseCodec.example,
+  );
   const workSummaryCodec = objectCodec({
     kind: literal("work"),
     state: text,
@@ -338,6 +377,19 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
     operatorViewPageBaseCodec.example,
   );
 
+  const runDetailBaseCodec = objectCodec({
+    kind: literal("run"),
+    coordinationRunId: identifier,
+    phase: text,
+    chairAgentId: identifier,
+    chairGeneration: positiveInteger,
+    health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
+  }, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec, identity: runIdentityCodec });
+  const runDetailCodec = parserBacked(
+    runDetailBaseCodec,
+    validateRunPlanCorrelation,
+    runDetailBaseCodec.example,
+  );
   const operatorDetailCodec = unionOf([
     objectCodec(
       {
@@ -362,14 +414,7 @@ export function createOperatorProjectionOperationCodecFragment(dependencies: Rea
       generation: positiveInteger,
       membershipRevision: integer(),
     }),
-    objectCodec({
-      kind: literal("run"),
-      coordinationRunId: identifier,
-      phase: text,
-      chairAgentId: identifier,
-      chairGeneration: positiveInteger,
-      health: enumeration(["healthy", "degraded", "blocked", "quarantined", "unknown"]),
-    }, { projectSessionId: identifier, declaredProgress: declaredRunProgressCodec, identity: runIdentityCodec }),
+    runDetailCodec,
     objectCodec({ kind: literal("task"), taskId: identifier, objective: text, state: text, ownerAgentId: nullable(identifier) }),
     objectCodec({
       kind: literal("agent"),

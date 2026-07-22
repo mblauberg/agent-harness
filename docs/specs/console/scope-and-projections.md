@@ -127,22 +127,22 @@ operator experience:
    and its delivery workstreams remain distinct identities, never flattened.
    The group is bounded to 1,024 workstreams and fails closed before producing
    an unencodable result.
-   Accepted-scope ref and current-plan ref/revision are deliberately deferred
-   to the plan-declaration package — no run-level scope or plan binding
-   authority exists in Fabric yet — and each lands as its own result-shape
-   cutover; until then a premature identity field on the wire is rejected,
-   never translated or synthesised.
+   Result-shape feature `run-identity-projection.v2` additionally carries
+   `acceptedScopeRef`, `currentPlanRef` and `planRevision`. The current plan ref
+   and revision are both null before the first declaration and otherwise name
+   the same immutable declaration. The accepted-scope ref is the exact scope
+   binding recorded by that declaration, or the current accepted scope before
+   any plan exists. A v2 field omitted on the wire is rejected, never
+   translated or synthesised.
 2. **Declared progress.** Run detail carries a tagged progress fact. The
-   current cut ships the `open` and `unknown` arms only: the open arm carries
+   `declared-run-progress.v2` ships `open`, `unknown` and `finite` arms. The open arm carries
    known task-state counts without a denominator; the unknown arm carries only
-   its reason. No arm carries an inferred percentage, completion ratio,
-   denominator or ETA. The `finite` arm — a declared denominator with mutually
-   consistent task-state counts, bound to an exact plan revision with settled
-   cancelled-task denominator semantics — is deliberately deferred to the
-   plan-declaration package and lands as its own result-shape cutover; until
-   then a finite arm on the wire is rejected, never translated or synthesised
-   from known counts. Stale, unavailable and conflicting facts retain normal
-   projection provenance.
+   its reason. The finite arm carries server-scoped counts, the positive
+   declared task denominator and the exact positive plan revision that supplied
+   it. Cancelled tasks remain in the declared denominator and do not count as
+   completed work; classified counts above the declared denominator fail closed
+   to `unknown`. No arm carries an inferred percentage or ETA. Stale,
+   unavailable and conflicting facts retain normal projection provenance.
 3. **Workflow facts.** Work items expose their authoritative bounded objective,
    dependency IDs, parent/workstream/run binding, state, owner, checks, barriers,
    write scope, plan revision and source freshness. Current and remaining work

@@ -105,6 +105,7 @@ import type {
   ResourceReservation,
   ResourceReservationRequest,
 } from "./resources.js";
+import type { RunPlanDeclaration, RunPlanDeclareRequest } from "./run-plan.js";
 import type {
   WorkstreamCreateRequest,
   WorkstreamProjection,
@@ -185,6 +186,10 @@ export type AgentRequestResultClient = Omit<RequestResultClient, "providerAccept
 export interface WorkstreamClient {
   create(input: WorkstreamCreateRequest): Promise<WorkstreamProjection>;
   settle(input: WorkstreamSettleRequest): Promise<WorkstreamProjection>;
+}
+
+export interface RunPlanClient {
+  declare(input: RunPlanDeclareRequest): Promise<RunPlanDeclaration>;
 }
 
 export type PrincipalOperationFacade<Principal extends OperationPrincipalKind> = {
@@ -270,6 +275,7 @@ export type NegotiatedAgentClient = {
   resources?: ResourceReservationClient;
   requestResults?: AgentRequestResultClient;
   workstreams?: WorkstreamClient;
+  runPlans?: RunPlanClient;
   evidence?: EvidenceRegistryClient;
   close(): Promise<void>;
 };
@@ -548,6 +554,15 @@ export function createAgentClient(transport: ProtocolRpcTransport): NegotiatedAg
         settle: (input: WorkstreamSettleRequest) => transport.call(FABRIC_OPERATIONS.workstreamSettle, input),
       },
     } : {}),
+    ...(hasFeature(transport, "run-plan-declaration.v1") &&
+      hasOperation(transport, FABRIC_OPERATIONS.runPlanDeclare)
+      ? {
+          runPlans: {
+            declare: (input: RunPlanDeclareRequest) =>
+              transport.call(FABRIC_OPERATIONS.runPlanDeclare, input),
+          },
+        }
+      : {}),
     ...(hasFeature(transport, "artifact-registry.v1") &&
       hasOperation(transport, FABRIC_OPERATIONS.evidencePublish)
       ? {

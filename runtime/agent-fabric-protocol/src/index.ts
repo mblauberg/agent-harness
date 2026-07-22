@@ -24,6 +24,7 @@ export * from "./provider-action.js";
 export * from "./lifecycle.js";
 export * from "./projection.js";
 export * from "./request-result.js";
+export * from "./run-plan.js";
 export * from "./route-lineage.js";
 export * from "./topology-evaluation.js";
 export * from "./result-feature-shape.js";

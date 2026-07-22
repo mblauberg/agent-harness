@@ -47,6 +47,30 @@ delivery_review_bases(
 )
 ~~~
 
+## Run plan declaration retention
+
+~~~sql
+run_plan_declarations(
+  run_id, plan_revision,
+  plan_path, plan_digest,
+  accepted_scope_artifact_id, accepted_scope_revision,
+  accepted_scope_path, accepted_scope_digest,
+  declared_task_denominator NULL-or-positive,
+  declared_by_agent_id, declared_at,
+  PRIMARY KEY(run_id, plan_revision),
+  FOREIGN KEY(accepted_scope_artifact_id) REFERENCES artifacts(artifact_id),
+  FOREIGN KEY(run_id, declared_by_agent_id) REFERENCES agents(run_id, agent_id)
+)
+~~~
+
+Rows are immutable and retained with the coordination run. INSERT requires the
+next contiguous per-run `plan_revision`; UPDATE and DELETE abort. The accepted
+scope path/digest/revision are equality-copied from the active registered scope
+at declaration time so later scope change cannot rewrite historical plan
+meaning. Each append advances both the global projection revision and the run
+item revision. Current plan and finite-progress projection select only the
+highest stored revision; retention keeps every declaration in revision order.
+
 ## Receipt effects, authorisation, and transition application
 
 ~~~sql

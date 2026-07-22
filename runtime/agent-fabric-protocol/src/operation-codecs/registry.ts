@@ -37,6 +37,7 @@ import { createProjectSessionOperationCodecFragment, projectSessionCodec, PROJEC
 import { providerActionOperationCodecFragment, PROVIDER_ACTION_INPUT_SHAPES, PROVIDER_ACTION_RESULT_SHAPES } from "./provider-action.js";
 import { providerReviewOperationCodecFragment, PROVIDER_REVIEW_INPUT_SHAPES, PROVIDER_REVIEW_RESULT_SHAPES } from "./provider-review.js";
 import { requestResultOperationCodecFragment, REQUEST_RESULT_INPUT_SHAPES, REQUEST_RESULT_RESULT_SHAPES, taskRequestCodec } from "./request-result.js";
+import { runPlanOperationCodecFragment, RUN_PLAN_INPUT_SHAPES, RUN_PLAN_RESULT_SHAPES } from "./run-plan.js";
 
 /**
  * Compose an ordered list of domain codec fragments into one registry record, throwing on the
@@ -150,6 +151,7 @@ const operationCodecFragments = [
   providerActionOperationCodecFragment,
   projectSessionOperationCodecFragment,
   requestResultOperationCodecFragment,
+  runPlanOperationCodecFragment,
   controlPlaneOperationCodecFragment,
   admissionOperationCodecFragment,
   gitActionsOperationCodecFragment,
@@ -166,6 +168,7 @@ const exactOperationCodecs = {
   ...providerActionOperationCodecFragment,
   ...projectSessionOperationCodecFragment,
   ...requestResultOperationCodecFragment,
+  ...runPlanOperationCodecFragment,
   ...controlPlaneOperationCodecFragment,
   ...admissionOperationCodecFragment,
   ...gitActionsOperationCodecFragment,
@@ -196,6 +199,7 @@ const inputShapeFragments = [
   PROVIDER_ACTION_INPUT_SHAPES,
   PROJECT_SESSION_INPUT_SHAPES,
   REQUEST_RESULT_INPUT_SHAPES,
+  RUN_PLAN_INPUT_SHAPES,
   CONTROL_PLANE_INPUT_SHAPES,
   ARTIFACTS_INPUT_SHAPES,
   PROVIDER_REVIEW_INPUT_SHAPES,
@@ -208,6 +212,7 @@ export const OPERATION_INPUT_SHAPES = {
   ...PROVIDER_ACTION_INPUT_SHAPES,
   ...PROJECT_SESSION_INPUT_SHAPES,
   ...REQUEST_RESULT_INPUT_SHAPES,
+  ...RUN_PLAN_INPUT_SHAPES,
   ...CONTROL_PLANE_INPUT_SHAPES,
   ...ARTIFACTS_INPUT_SHAPES,
   ...PROVIDER_REVIEW_INPUT_SHAPES,
@@ -228,6 +233,7 @@ const resultShapeFragments = [
   PROVIDER_ACTION_RESULT_SHAPES,
   PROJECT_SESSION_RESULT_SHAPES,
   REQUEST_RESULT_RESULT_SHAPES,
+  RUN_PLAN_RESULT_SHAPES,
   CONTROL_PLANE_RESULT_SHAPES,
   ARTIFACTS_RESULT_SHAPES,
   PROVIDER_REVIEW_RESULT_SHAPES,
@@ -240,6 +246,7 @@ export const OPERATION_RESULT_SHAPES = {
   ...PROVIDER_ACTION_RESULT_SHAPES,
   ...PROJECT_SESSION_RESULT_SHAPES,
   ...REQUEST_RESULT_RESULT_SHAPES,
+  ...RUN_PLAN_RESULT_SHAPES,
   ...CONTROL_PLANE_RESULT_SHAPES,
   ...ARTIFACTS_RESULT_SHAPES,
   ...PROVIDER_REVIEW_RESULT_SHAPES,

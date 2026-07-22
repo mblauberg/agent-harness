@@ -20,6 +20,7 @@ below. Follow their linked GitHub issues for delivery state.
 - [Provider actions and adapters](agent-fabric/provider-actions-and-adapters.md)
 - [Messaging and public protocol](agent-fabric/messaging-and-public-protocol.md)
 - [Evidence and review](agent-fabric/evidence-and-review.md)
+- [Run plan declaration](agent-fabric/run-plan-declaration.md)
 - [Effects](agent-fabric/effects.md)
 - [Activation and operations](agent-fabric/activation.md)
 - [Architecture assurance](agent-fabric/architecture-assurance.md)

@@ -1194,6 +1194,81 @@ describe("operator projection store", () => {
     expect(detailUnnegotiated.detail.value).not.toHaveProperty("identity");
   });
 
+  it("binds finite progress and run identity to the exact current plan revision", () => {
+    const fixture = setupProjection();
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    fixture.database.prepare(`
+      INSERT INTO run_plan_declarations(
+        run_id,plan_revision,plan_path,plan_digest,
+        accepted_scope_artifact_id,accepted_scope_revision,
+        accepted_scope_path,accepted_scope_digest,
+        declared_task_denominator,declared_by_agent_id,declared_at
+      ) VALUES ('run_01',1,'plans/one.md',?,'artifact_01',2,'scope/accepted.md',?,4,'chair_01',?)
+    `).run(digest, digest, now);
+    fixture.database.prepare("UPDATE runs SET revision=revision+1 WHERE run_id='run_01'").run();
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    const page = fixture.projections.viewPage({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "runs",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 5,
+    }, "include", "include", "include", "include");
+    expect(page).toMatchObject({
+      status: "page",
+      rows: [{ fact: { value: { summary: {
+        declaredProgress: {
+          plan: "finite",
+          planRevision: 1,
+          counts: { active: 1, blocked: 0, ready: 0, complete: 0, cancelled: 0, degraded: 0 },
+          declaredTaskDenominator: 4,
+        },
+        identity: {
+          acceptedScopeRef: { path: "scope/accepted.md", digest },
+          currentPlanRef: { path: "plans/one.md", digest },
+          planRevision: 1,
+        },
+      } } } }],
+    });
+
+    fixture.database.prepare(`
+      INSERT INTO run_plan_declarations(
+        run_id,plan_revision,plan_path,plan_digest,
+        accepted_scope_artifact_id,accepted_scope_revision,
+        accepted_scope_path,accepted_scope_digest,
+        declared_task_denominator,declared_by_agent_id,declared_at
+      ) VALUES ('run_01',2,'plans/two.md',?,'artifact_01',2,'scope/accepted.md',?,NULL,'chair_01',?)
+    `).run(digest, digest, now + 1);
+    fixture.database.prepare("UPDATE runs SET revision=revision+1 WHERE run_id='run_01'").run();
+    const replannedSnapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    expect(fixture.projections.viewPage({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "runs",
+      snapshotRevision: replannedSnapshot.snapshotRevision,
+      cursor: 0,
+      limit: 5,
+    }, "include", "include", "include", "include")).toMatchObject({
+      status: "page",
+      rows: [{ fact: { value: { summary: {
+        declaredProgress: { plan: "open" },
+        identity: { currentPlanRef: { path: "plans/two.md" }, planRevision: 2 },
+      } } } }],
+    });
+  });
+
   it("reports no last event instead of relabelling run creation time", () => {
     const fixture = setupProjection();
     const projectId = identifier<"ProjectId">("project_01");

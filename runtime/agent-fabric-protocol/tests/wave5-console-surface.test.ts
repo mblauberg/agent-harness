@@ -1108,7 +1108,7 @@ describe("negotiated declared-run-progress result shape", () => {
     "operator-projection.v2",
     "run-session-projection.v1",
   ] as const;
-  const extendedFeatures = [...legacyFeatures, "declared-run-progress.v1"] as const;
+  const extendedFeatures = [...legacyFeatures, "declared-run-progress.v2"] as const;
   const openProgress = {
     plan: "open",
     counts: { blocked: 0, ready: 1, active: 2, complete: 3, cancelled: 0, degraded: 0 },
@@ -1160,7 +1160,13 @@ describe("negotiated declared-run-progress result shape", () => {
   });
 
   it("accepts every tagged progress arm on run rows and run detail", () => {
-    for (const progress of [openProgress, unknownProgress]) {
+    const finiteProgress = {
+      plan: "finite",
+      planRevision: 2,
+      counts: openProgress.counts,
+      declaredTaskDenominator: 6,
+    } as const;
+    for (const progress of [openProgress, unknownProgress, finiteProgress]) {
       expect(parseOperationResult(
         FABRIC_OPERATIONS.projectionViewPage,
         runsPage({ ...legacySummary, declaredProgress: progress }),
@@ -1172,16 +1178,31 @@ describe("negotiated declared-run-progress result shape", () => {
     }
   });
 
-  it("rejects a premature finite arm, negative counts and denominator or percentage keys", () => {
-    // The finite arm is deliberately deferred to the plan-declaration cutover;
-    // until then a declared denominator on the wire is rejected outright.
+  it("rejects malformed finite arms, negative counts and denominator or percentage keys", () => {
     expect(() => parseOperationResult(
       FABRIC_OPERATIONS.projectionViewPage,
       runsPage({
         ...legacySummary,
-        declaredProgress: { plan: "finite", total: 6, counts: openProgress.counts },
+        declaredProgress: {
+          plan: "finite",
+          planRevision: 2,
+          counts: openProgress.counts,
+          declaredTaskDenominator: 0,
+        },
       }),
     )).toThrowError();
+    expect(() => parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage({
+        ...legacySummary,
+        declaredProgress: {
+          plan: "finite",
+          planRevision: 2,
+          counts: openProgress.counts,
+          declaredTaskDenominator: 1,
+        },
+      }),
+    )).toThrow("counts exceed declaredTaskDenominator");
     expect(() => parseOperationResult(
       FABRIC_OPERATIONS.projectionViewPage,
       runsPage({
@@ -1245,7 +1266,7 @@ describe("negotiated run-identity result shape", () => {
     "operator-projection.v2",
     "run-session-projection.v1",
   ] as const;
-  const extendedFeatures = [...legacyFeatures, "run-identity-projection.v1"] as const;
+  const extendedFeatures = [...legacyFeatures, "run-identity-projection.v2"] as const;
   const workstream = {
     workstreamId: "ws_01",
     deliveryRunId: "delivery_01",
@@ -1256,6 +1277,9 @@ describe("negotiated run-identity result shape", () => {
   const coordinationIdentity = {
     runKind: "coordination",
     chairAgentId: "chair_01",
+    acceptedScopeRef: { path: "scope.md", digest: `sha256:${"1".repeat(64)}` },
+    currentPlanRef: { path: "plan.md", digest: `sha256:${"2".repeat(64)}` },
+    planRevision: 2,
     workstreams: [workstream],
     lastEventAt: observedAt,
   } as const;
@@ -1348,10 +1372,19 @@ describe("negotiated run-identity result shape", () => {
     }
   });
 
-  it("rejects premature run kinds, plan or scope refs and unclosed workstream states", () => {
-    // A delivery-workstream run-kind arm and the accepted-scope/current-plan
-    // refs are deferred to their own cutovers; premature fields are rejected,
-    // never translated.
+  it("accepts explicit absent plan bindings and rejects premature run kinds or unclosed workstream states", () => {
+    expect(parseOperationResult(
+      FABRIC_OPERATIONS.projectionViewPage,
+      runsPage({
+        ...legacySummary,
+        identity: {
+          ...coordinationIdentity,
+          acceptedScopeRef: null,
+          currentPlanRef: null,
+          planRevision: null,
+        },
+      }),
+    )).toMatchObject({ status: "page", view: "runs" });
     expect(() => parseOperationResult(
       FABRIC_OPERATIONS.projectionViewPage,
       runsPage({
@@ -1363,16 +1396,9 @@ describe("negotiated run-identity result shape", () => {
       FABRIC_OPERATIONS.projectionViewPage,
       runsPage({
         ...legacySummary,
-        identity: { ...coordinationIdentity, currentPlanRef: { revision: 1 } },
+        identity: { ...coordinationIdentity, acceptedScopeRef: null },
       }),
-    )).toThrowError();
-    expect(() => parseOperationResult(
-      FABRIC_OPERATIONS.projectionViewPage,
-      runsPage({
-        ...legacySummary,
-        identity: { ...coordinationIdentity, acceptedScopeRef: { path: "spec.md", digest: "sha256:00" } },
-      }),
-    )).toThrowError();
+    )).toThrow("acceptedScopeRef is required for a declared plan");
     expect(() => parseOperationResult(
       FABRIC_OPERATIONS.projectionViewPage,
       runsPage({
@@ -1390,6 +1416,30 @@ describe("negotiated run-identity result shape", () => {
         identity: { ...coordinationIdentity, chairAgentId: undefined },
       }),
     )).toThrowError();
+  });
+
+  it("requires finite progress to name the same plan revision as run identity", () => {
+    const finiteProgress = {
+      plan: "finite",
+      planRevision: 1,
+      counts: { blocked: 0, ready: 0, active: 0, complete: 1, cancelled: 0, degraded: 0 },
+      declaredTaskDenominator: 2,
+    } as const;
+    for (const result of [
+      [FABRIC_OPERATIONS.projectionViewPage, runsPage({
+        ...legacySummary,
+        declaredProgress: finiteProgress,
+        identity: coordinationIdentity,
+      })],
+      [FABRIC_OPERATIONS.projectionDetailRead, detailRead({
+        ...legacyDetail,
+        declaredProgress: finiteProgress,
+        identity: coordinationIdentity,
+      })],
+    ] as const) {
+      expect(() => parseOperationResult(result[0], result[1] as never))
+        .toThrow("finite progress planRevision must match run identity planRevision");
+    }
   });
 
   it("requires uniform negotiated presence on run rows and run detail", () => {

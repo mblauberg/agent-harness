@@ -149,6 +149,9 @@ function mutationFlowDataset(): FabricConsoleDataset {
             identity: {
               runKind: "coordination",
               chairAgentId: "agent_evaluation_chair" as never,
+              acceptedScopeRef: null,
+              currentPlanRef: null,
+              planRevision: null,
               workstreams: [],
               lastEventAt: flowObservedAt,
             },
