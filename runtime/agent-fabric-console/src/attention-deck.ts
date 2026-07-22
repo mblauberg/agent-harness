@@ -3,6 +3,7 @@ import type { PresentedDeckRow, PresentedHeader, PresentedRow, FabricConsolePres
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
 import type { FabricHitBinding, FabricHitRegion } from "./index.js";
 import { attentionPinId, deckPinId } from "./view-filter.js";
+import { compactDeckRosterRows, visibleDeckOffset } from "./attention-deck-navigation.js";
 
 type AttentionDeckRenderInput = Readonly<{
   rows: string[];
@@ -135,17 +136,14 @@ function renderCompactRemainder(input: AttentionDeckRenderInput, bounds: Rect): 
     y += 1;
   }
   const rosterCapacity = Math.max(0, bounds.y2 - y + 1);
-  const pinned = presentation.deckRows.filter((row) =>
-    ui.pinnedRowIds.includes(deckPinId(row))
-  );
-  const coordinationRows = presentation.deckRows.filter((row) =>
-    row.kind === "coordination" && !ui.pinnedRowIds.includes(deckPinId(row))
-  );
-  const roster = coordinationRows.length === 0
-    ? presentation.deckRows
-    : [...pinned, ...coordinationRows];
+  const roster = compactDeckRosterRows(presentation.deckRows, ui.pinnedRowIds);
   const maximumOffset = Math.max(0, roster.length - rosterCapacity);
-  const offset = Math.min(maximumOffset, Math.max(0, Math.trunc(ui.deckScrollOffset)));
+  const offset = visibleDeckOffset(
+    roster,
+    presentation.focusId,
+    ui.deckScrollOffset,
+    rosterCapacity,
+  );
   for (const item of roster.slice(offset, offset + rosterCapacity)) {
     const id = `deck:${item.stableId}`;
     writeBoundsRow(rows, columns, bounds, y, compactDeckText(

@@ -28,6 +28,7 @@ import type {
 import {
   FABRIC_VIEWS,
   createEmptyViewPages,
+  rankConsoleRows,
   revisionFromProtocol,
   type ConsoleRow,
   type FabricView,
@@ -372,6 +373,71 @@ function attentionDeckDataset(crossedAdvisory = false): FabricConsoleDataset {
   };
 }
 
+function acceptance46Dataset(): FabricConsoleDataset {
+  const base = attentionDeckDataset(true);
+  const required = base.pages.attention.rows[0];
+  const fyi = base.pages.attention.rows[1];
+  if (
+    required?.summary?.kind !== "attention" ||
+    fyi?.summary?.kind !== "attention"
+  ) throw new Error("acceptance 46 attention fixture unavailable");
+  const requiredSummary = required.summary;
+  const fyiSummary = fyi.summary;
+  const advisorySignals = [
+    "Inactive for three hours",
+    "High message volume",
+    "Context pressure high",
+    "Provider pane absent",
+    "Optional integration outage",
+  ];
+  const advisoryRows: ConsoleRow<"attention">[] = advisorySignals.map((title, index) => ({
+    ...fyi,
+    stableId: `attention:advisory-signal-${String(index)}`,
+    urgency: "advisory",
+    summary: {
+      ...fyiSummary,
+      label: "Blocked",
+      priority: "advisory",
+      title,
+    },
+  }));
+  const requiredRows: ConsoleRow<"attention">[] = [
+    required,
+    {
+      ...required,
+      stableId: "attention:critical-path",
+      urgency: "critical-path",
+      summary: {
+        ...requiredSummary,
+        label: "Blocked",
+        priority: "critical-path",
+        title: "Resolve the critical-path blocker",
+      },
+    },
+    {
+      ...required,
+      stableId: "attention:acceptance-ready",
+      urgency: "acceptance-ready",
+      summary: {
+        ...requiredSummary,
+        label: "Approval",
+        priority: "acceptance-ready",
+        title: "Accept the reviewed delivery",
+      },
+    },
+  ];
+  return {
+    ...base,
+    pages: {
+      ...base.pages,
+      attention: {
+        ...base.pages.attention,
+        rows: rankConsoleRows([...advisoryRows, ...requiredRows.toReversed(), fyi]),
+      },
+    },
+  };
+}
+
 function urgencyGlyphDataset(): FabricConsoleDataset {
   const base = attentionDeckDataset();
   const attention = base.pages.attention.rows[0];
@@ -446,6 +512,14 @@ function urgencyGlyphDataset(): FabricConsoleDataset {
           projectSessionId: "session-degraded" as ProjectSessionId,
           mode: "coordinated",
           state: "visibility_degraded",
+          revision: 1,
+          generation: 1,
+          lastEventAt: timestamp,
+        },
+        {
+          projectSessionId: "session-stale" as ProjectSessionId,
+          mode: "coordinated",
+          state: "recovery_required",
           revision: 1,
           generation: 1,
           lastEventAt: timestamp,
@@ -1880,6 +1954,116 @@ describe("structured presenter and responsive Fabric renderer", () => {
 
   });
 
+  it.each([
+    [80, 24],
+    [120, 32],
+  ] as const)(
+    "keeps the highest-priority required judgement first and a projected run identifiable at %sx%s",
+    (columns, rows) => {
+      const dataset = acceptance46Dataset();
+      const presentation = presentFabricConsole(
+        dataset,
+        controllerState(),
+        createFabricUiState(),
+        { columns, rows },
+      );
+
+      expect(presentation.needsYouRows.map(({ stableId }) => stableId)).toStrictEqual([
+        "attention:safety",
+        "attention:critical-path",
+        "attention:acceptance-ready",
+      ]);
+      expect(presentation.topAttention?.stableId).toBe("attention:safety");
+      expect(presentation.watchRows.map(({ stableId }) => stableId)).toEqual(
+        expect.arrayContaining([
+          "attention:fyi",
+          "attention:advisory-signal-0",
+          "attention:advisory-signal-1",
+          "attention:advisory-signal-2",
+          "attention:advisory-signal-3",
+          "attention:advisory-signal-4",
+        ]),
+      );
+
+      const frame = renderFabricConsoleFrame(
+        dataset,
+        controllerState(),
+        createFabricUiState(),
+        { columns, rows },
+      );
+      const safety = frame.hitRegions.find(
+        ({ id }) => id === "row:attention:attention:safety",
+      );
+      const critical = frame.hitRegions.find(
+        ({ id }) => id === "row:attention:attention:critical-path",
+      );
+      const run = frame.hitRegions.find(
+        ({ id }) => id === "deck:coordination:session-1:AFAB-004",
+      );
+      expect(safety).toBeDefined();
+      expect(critical).toBeDefined();
+      expect(run).toBeDefined();
+      if (safety === undefined || critical === undefined || run === undefined) return;
+      expect(safety.rect.y1).toBeLessThan(critical.rect.y1);
+      expect(frame.rows[safety.rect.y1 - 1]).toContain("!! Approve quarantine recovery");
+      expect(frame.rows[run.rect.y1 - 1]).toContain("COORDINATION AFAB-004");
+      expect(frame.rows[run.rect.y1 - 1]).toContain("BLOCKED");
+      expect(frame.rows.join("\n")).toContain("WATCH:6 collapsed");
+    },
+  );
+
+  it.each([
+    [80, 24],
+    [120, 32],
+  ] as const)(
+    "classifies Needs you strictly from urgency plus label, never advisory heuristic prose, at %sx%s",
+    (columns, rows) => {
+      const base = acceptance46Dataset();
+      const dataset: FabricConsoleDataset = {
+        ...base,
+        pages: {
+          ...base.pages,
+          attention: {
+            ...base.pages.attention,
+            rows: base.pages.attention.rows.filter(({ stableId }) =>
+              stableId === "attention:fyi" || stableId.startsWith("attention:advisory-signal-")
+            ),
+          },
+        },
+      };
+      const presentation = presentFabricConsole(
+        dataset,
+        controllerState(),
+        createFabricUiState(),
+        { columns, rows },
+      );
+
+      expect(presentation.needsYouRows).toStrictEqual([]);
+      expect(presentation.watchRows).toHaveLength(6);
+      expect(presentation.watchRows.map(({ primary }) => primary)).toEqual(
+        expect.arrayContaining([
+          "Inactive for three hours",
+          "High message volume",
+          "Context pressure high",
+          "Provider pane absent",
+          "Optional integration outage",
+        ]),
+      );
+      expect(presentation.watchRows.find(({ stableId }) => stableId === "attention:fyi"))
+        .toMatchObject({ urgencyMarker: "!>" });
+
+      const visible = renderFabricConsoleFrame(
+        dataset,
+        controllerState(),
+        createFabricUiState(),
+        { columns, rows },
+      ).rows.join("\n");
+      expect(visible).toContain("NEEDS YOU:0");
+      expect(visible).toContain("No projected user judgement required.");
+      expect(visible).toContain("WATCH:6 collapsed");
+    },
+  );
+
   it("filters Deck bands, keeps pins visible first, and discloses the filtered count", () => {
     const urgencyDataset = urgencyGlyphDataset();
     const watchRow = attentionDeckDataset().pages.attention.rows[1];
@@ -2021,10 +2205,10 @@ describe("structured presenter and responsive Fabric renderer", () => {
       urgencyMarker,
       statusLabel,
     ])).toStrictEqual([
-      ["session-healthy", " ", "ACTIVE"],
-      ["run-healthy", " ", "HEALTHY"],
       ["session-degraded", "~", "DEGRADED"],
       ["run-degraded", "~", "DEGRADED"],
+      ["session-healthy", " ", "ACTIVE"],
+      ["run-healthy", " ", "HEALTHY"],
       ["session-stale", "?", "UNAVAILABLE"],
       ["run-stale", "?", "STALE"],
     ]);
@@ -2210,6 +2394,22 @@ describe("structured presenter and responsive Fabric renderer", () => {
     const base = attentionDeckDataset();
     const firstRun = base.pages.runs.rows[0];
     if (firstRun?.summary?.kind !== "run") throw new Error("Deck run unavailable");
+    const firstWorkstream = firstRun.summary.identity.workstreams[0];
+    if (firstWorkstream === undefined) throw new Error("Deck workstream unavailable");
+    const firstRunWithPermutedWorkstreams = {
+      ...firstRun,
+      summary: {
+        ...firstRun.summary,
+        identity: {
+          ...firstRun.summary.identity,
+          workstreams: [firstWorkstream, {
+            ...firstWorkstream,
+            workstreamId: "workstream-0" as never,
+            deliveryRunId: "delivery-0" as never,
+          }],
+        },
+      },
+    };
     const secondSessionId = "session-2";
     const secondRun = {
       ...firstRun,
@@ -2230,7 +2430,6 @@ describe("structured presenter and responsive Fabric renderer", () => {
       projectSessions: {
         selectedProjectSessionId: null,
         choices: [
-          ...(base.projectSessions?.choices ?? []),
           {
             projectSessionId: secondSessionId as never,
             mode: "independent",
@@ -2239,13 +2438,18 @@ describe("structured presenter and responsive Fabric renderer", () => {
             generation: 1,
             lastEventAt: timestamp,
           },
+          ...(base.projectSessions?.choices ?? []),
         ],
       },
       pages: {
         ...base.pages,
-        runs: { ...base.pages.runs, rows: [...base.pages.runs.rows, secondRun] },
+        runs: {
+          ...base.pages.runs,
+          rows: [secondRun, firstRunWithPermutedWorkstreams],
+        },
       },
     };
+    const unchangedDataset = structuredClone(dataset);
 
     const presentation = presentFabricConsole(
       dataset,
@@ -2259,10 +2463,59 @@ describe("structured presenter and responsive Fabric renderer", () => {
       .toStrictEqual([
         "session:session-1",
         "coordination:AFAB-004",
+        "workstream:workstream-0",
         "workstream:workstream-1",
         "session:session-2",
         "coordination:AFAB-009",
       ]);
+    expect(dataset).toStrictEqual(unchangedDataset);
+  });
+
+  it("groups runs by their projected session identity without synthesising a session row", () => {
+    const base = attentionDeckDataset();
+    const { projectSessions: _projectSessions, ...withoutSessionChoices } = base;
+
+    const presentation = presentFabricConsole(
+      withoutSessionChoices,
+      controllerState(),
+      createFabricUiState(),
+      { columns: 120, rows: 32 },
+    );
+
+    expect(presentation.deckRows.map(({ kind, entityId }) => `${kind}:${entityId}`))
+      .toStrictEqual([
+        "coordination:AFAB-004",
+        "workstream:workstream-1",
+      ]);
+    expect(presentation.deckRows[0]).toMatchObject({
+      projectSessionId: "session-1",
+      primary: "COORDINATION AFAB-004 | SESSION session-1",
+    });
+  });
+
+  it("rejects a run with no projected session rather than inventing an identity", () => {
+    const base = attentionDeckDataset();
+    const sourceRun = base.pages.runs.rows[0];
+    if (sourceRun?.summary?.kind !== "run") throw new Error("Deck run unavailable");
+    const { projectSessionId: _projectSessionId, ...unscopedSummary } = sourceRun.summary;
+    const { projectSessions: _projectSessions, ...withoutSessionChoices } = base;
+    const dataset: FabricConsoleDataset = {
+      ...withoutSessionChoices,
+      pages: {
+        ...withoutSessionChoices.pages,
+        runs: {
+          ...withoutSessionChoices.pages.runs,
+          rows: [{ ...sourceRun, summary: unscopedSummary }],
+        },
+      },
+    };
+
+    expect(() => presentFabricConsole(
+      dataset,
+      controllerState(),
+      createFabricUiState(),
+      { columns: 120, rows: 32 },
+    )).toThrow("exact run projection has no project-session identity");
   });
 
   it("keeps a multi-run header neutral until an exact run is selected", () => {
@@ -2347,8 +2600,8 @@ describe("structured presenter and responsive Fabric renderer", () => {
       .map(({ stableId }) => stableId);
 
     expect(coordinationIds).toStrictEqual([
-      "coordination:a%3Ab:c",
       "coordination:a:b%3Ac",
+      "coordination:a%3Ab:c",
     ]);
     expect(new Set(coordinationIds).size).toBe(2);
   });

@@ -2,6 +2,10 @@ import type { ConsoleRow } from "./model.js";
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
 import type { PresentedDeckRow } from "./presenter-model.js";
 import { presentRow } from "./row-presentation.js";
+import {
+  compareProjectedIds,
+  groupProjectedRosterFacts,
+} from "./attention-deck-grouping.js";
 
 type DeckStatus = Readonly<{ urgencyMarker: string; statusLabel: string }>;
 
@@ -52,47 +56,55 @@ export function presentDeckRows(
       row.view === "runs" && row.summary?.kind === "run",
   );
   const sessionChoices = dataset.projectSessions?.choices ?? [];
-  const sessionById = new Map(
-    sessionChoices.map((session) => [String(session.projectSessionId), session]),
-  );
-  const sessionIds = [
-    ...sessionChoices.map(({ projectSessionId }) => String(projectSessionId)),
-    ...runRows.map((row) => String(row.summary?.projectSessionId)),
-  ].filter((value, index, values) => value !== "undefined" && values.indexOf(value) === index);
   const allRows: PresentedDeckRow[] = [];
 
-  for (const projectSessionId of sessionIds) {
-    const choice = sessionById.get(projectSessionId);
-    const status = sessionStatus(choice?.state);
-    const sessionStableId = stableId("session", projectSessionId);
-    allRows.push({
-      kind: "session",
-      stableId: sessionStableId,
-      entityId: projectSessionId,
-      projectSessionId,
-      coordinationRunId: null,
-      deliveryRunId: null,
-      owner: null,
-      phase: null,
-      state: choice?.state ?? null,
-      health: null,
-      freshness: null,
-      lastEvent: choice?.lastEventAt ?? null,
-      updatedAt: null,
-      nextMilestone: null,
-      ...status,
-      primary: `SESSION ${projectSessionId}`,
-      secondary: secondary([
-        { label: "mode", value: choice?.mode ?? null },
-        { label: "state", value: choice?.state ?? null },
-        { label: "last event", value: choice?.lastEventAt ?? null },
-      ]),
-      sourceRow: null,
-    });
+  const groups = groupProjectedRosterFacts(
+    sessionChoices,
+    runRows,
+    (session) => String(session.projectSessionId),
+    (row) => {
+      const summary = row.summary;
+      if (summary?.kind !== "run") {
+        throw new TypeError("Deck run group requires a projected run summary");
+      }
+      if (summary.projectSessionId === undefined) {
+        throw new TypeError("exact run projection has no project-session identity");
+      }
+      return String(summary.projectSessionId);
+    },
+    (row) => row.stableId,
+  );
+  for (const { projectSessionId, session: choice, runs } of groups) {
+    if (choice !== null) {
+      const status = sessionStatus(choice.state);
+      const sessionStableId = stableId("session", projectSessionId);
+      allRows.push({
+        kind: "session",
+        stableId: sessionStableId,
+        entityId: projectSessionId,
+        projectSessionId,
+        coordinationRunId: null,
+        deliveryRunId: null,
+        owner: null,
+        phase: null,
+        state: choice.state,
+        health: null,
+        freshness: null,
+        lastEvent: choice.lastEventAt,
+        updatedAt: null,
+        nextMilestone: null,
+        ...status,
+        primary: `SESSION ${projectSessionId}`,
+        secondary: secondary([
+          { label: "mode", value: choice.mode },
+          { label: "state", value: choice.state },
+          { label: "last event", value: choice.lastEventAt },
+        ]),
+        sourceRow: null,
+      });
+    }
 
-    for (const runRow of runRows.filter(
-      (row) => String(row.summary?.projectSessionId) === projectSessionId,
-    )) {
+    for (const runRow of runs) {
       const summary = runRow.summary;
       if (summary?.kind !== "run") continue;
       const presented = presentRow(runRow, false, false, dataset);
@@ -118,7 +130,9 @@ export function presentDeckRows(
         updatedAt: null,
         nextMilestone: summary.nextMilestone,
         ...status,
-        primary: `COORDINATION ${runRow.stableId}`,
+        primary: choice === null
+          ? `COORDINATION ${runRow.stableId} | SESSION ${projectSessionId}`
+          : `COORDINATION ${runRow.stableId}`,
         secondary: secondary([
           { label: "owner", value: String(summary.identity.chairAgentId) },
           { label: "phase", value: summary.phase },
@@ -130,7 +144,11 @@ export function presentDeckRows(
         sourceRow: presented,
       });
 
-      for (const workstream of summary.identity.workstreams) {
+      for (const workstream of [...summary.identity.workstreams].sort(
+        (left, right) =>
+          compareProjectedIds(String(left.workstreamId), String(right.workstreamId)) ||
+          compareProjectedIds(String(left.deliveryRunId), String(right.deliveryRunId)),
+      )) {
         const workstreamStableId = stableId(
           "workstream",
           projectSessionId,
