@@ -175,6 +175,20 @@ connection diagnosis; mouse resize of splits.
 5. All eight canonical views still reachable and unchanged; no projection field
    asserted that the snapshot does not carry.
 
+### Session-local filter and pin follow-up
+
+The deferred console-only follow-up adds in-memory Deck view state without a
+new projection or persistence owner. `/` opens a distinct filter input mode;
+`status:urgent`, `status:degraded`, `status:stale` and `status:ok` may be
+combined with a case-insensitive identity substring. An active filter always
+shows `FILTERED VIEW, N of M shown` across Needs you, Watch and the roster.
+
+`p` toggles the focused Deck row's session-local pin. Pinned rows sort first
+within their visible band, override filters and render with the non-colour
+`^ PINNED` twin. Filter text is held separately from action drafts and Enter in
+filter mode performs no Console action or Fabric operation. All filter and pin
+state resets when the Console process restarts.
+
 ## 3. Fit with the phased plan
 
 This slice is the **usable core of PHASE-PLAN.md Phase 1** ("Console shell and
@@ -183,9 +197,10 @@ independently-mergeable, no-protocol-change property and its Deck-from-existing-
 data thrust.
 
 Deferred out of Phase 1 into later slices/phases: the renderer theme/layout/
-keymap **extraction** (`theme.ts`/`layout.ts`/`keymap.ts`/`surfaces/`), session-
-local **filters/pins**, and the full geometry sweep — done incrementally rather
-than as one L refactor. Everything requiring a protocol/projection change
+keymap **extraction** (`theme.ts`/`layout.ts`/`keymap.ts`/`surfaces/`) and the
+full geometry sweep — done incrementally rather than as one L refactor. The
+session-local filters/pins follow-up above remains console-only. Everything
+requiring a protocol/projection change
 (run target, declared plans, workflow/topology, activity grouping, staged
 connection) remains in Phase 2+ and is untouched here. The open design question —
 who owns the immutable accepted/current plan declaration — does not gate this

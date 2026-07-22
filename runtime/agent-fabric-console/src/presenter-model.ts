@@ -24,8 +24,10 @@ export type FabricConsoleUiState = Readonly<{
   focusId: string | null;
   compactPane: "master" | "detail";
   draft: string;
+  filterDraft: string;
+  filterQuery: string;
   mouseCapture: boolean;
-  inputMode: "browse" | "editor" | "palette" | "guided";
+  inputMode: "browse" | "editor" | "palette" | "guided" | "filter";
   scrollOffsetByView: Readonly<Partial<Record<FabricView, number>>>;
   detailScrollOffsetByView: Readonly<Partial<Record<FabricView, number>>>;
   rejectedInputCount: number;
@@ -37,6 +39,7 @@ export type FabricConsoleUiState = Readonly<{
   artifactConfirmation: ArtifactReviewConfirmation | null;
   guidedWorkflow: ConsoleGuidedWorkflowDraft | null;
   deckScrollOffset: number;
+  pinnedRowIds: readonly string[];
 }>;
 
 export type FabricReviewCoverageState = Readonly<{
@@ -68,6 +71,8 @@ export function createFabricUiState(
     focusId: overrides.focusId ?? null,
     compactPane: overrides.compactPane ?? "master",
     draft: overrides.draft ?? "",
+    filterDraft: overrides.filterDraft ?? "",
+    filterQuery: overrides.filterQuery ?? "",
     mouseCapture: overrides.mouseCapture ?? false,
     inputMode: overrides.inputMode ?? "browse",
     scrollOffsetByView: overrides.scrollOffsetByView ?? {},
@@ -92,6 +97,7 @@ export function createFabricUiState(
       !Number.isSafeInteger(overrides.deckScrollOffset)
         ? 0
         : Math.max(0, overrides.deckScrollOffset),
+    pinnedRowIds: overrides.pinnedRowIds ?? [],
   };
 }
 
@@ -234,6 +240,9 @@ export type FabricConsolePresentation = Readonly<{
   deckRows: readonly PresentedDeckRow[];
   deckTotalCount: number;
   deckRunCount: number;
+  deckFilterActive: boolean;
+  deckShownCount: number;
+  deckUnfilteredCount: number;
   detail: PresentedDetail | null;
   actions: readonly PresentedAction[];
   review: PresentedReview | null;

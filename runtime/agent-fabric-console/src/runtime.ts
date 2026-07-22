@@ -1,6 +1,6 @@
 import type { TerminalInputEvent } from "./input.js";
 import { FABRIC_HELP_NOTICE, nextFabricView } from "./keymap.js";
-import { clampDeckScroll, pageFocusedDeck } from "./attention-deck-state.js";
+import { backspaceModalInput, cancelDeckFilter, clampDeckScroll, commitDeckFilter, editModalInput, moveVisibleSelection, openDeckFilter, pageFocusedDeck, toggleFocusedDeckPin } from "./attention-deck-state.js";
 import {
   consoleFailureFromUnknown,
   type ConsoleControllerState,
@@ -21,7 +21,7 @@ import {
 } from "./presenter.js";
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
 import { refreshUiForDataset } from "./runtime-reflow.js";
-import { boundedUtf8, cellSlice, maxDraftBytes, reviewEpoch, type CapturedActionTarget, type CapturedInput, type CapturedPointerIntent } from "./runtime-support.js";
+import { cellSlice, maxDraftBytes, reviewEpoch, type CapturedActionTarget, type CapturedInput, type CapturedPointerIntent } from "./runtime-support.js";
 
 export type FabricRuntimeController = {
   readonly state: ConsoleControllerState;
@@ -497,7 +497,7 @@ export class FabricConsoleRuntime {
     }
     this.#ui = { ...this.#ui, inputMode: mode, notice: null };
     this.#setEditorActive?.(
-      mode === "editor" || mode === "palette" || mode === "guided",
+      mode === "editor" || mode === "palette" || mode === "guided" || mode === "filter",
     );
     return this.repaint();
   }
@@ -772,21 +772,23 @@ export class FabricConsoleRuntime {
         this.cancelGuidedWorkflow();
         return;
       }
-      this.#ui = { ...this.#ui, inputMode: "browse", notice: null };
+      this.#ui = cancelDeckFilter(this.#ui);
       this.#setEditorActive?.(false);
       this.repaint();
       return;
     }
     if (event.key === "backspace") {
-      this.#ui = {
-        ...this.#ui,
-        draft: [...this.#ui.draft].slice(0, -1).join(""),
-        notice: null,
-      };
+      this.#ui = backspaceModalInput(this.#ui);
       this.repaint();
       return;
     }
     if (event.key === "enter") {
+      if (this.#ui.inputMode === "filter") {
+        this.#ui = commitDeckFilter(this.#ui);
+        this.#setEditorActive?.(false);
+        this.repaint();
+        return;
+      }
       if (this.#ui.inputMode === "guided") {
         const guided = this.#ui.guidedWorkflow;
         if (guided === null) {
@@ -842,15 +844,7 @@ export class FabricConsoleRuntime {
   }
 
   #appendInput(value: string): void {
-    const combined = `${this.#ui.draft}${value}`;
-    const draft = boundedUtf8(combined, this.#maxDraftBytes);
-    this.#ui = {
-      ...this.#ui,
-      draft,
-      notice: draft === combined
-        ? null
-        : `Draft limited to ${String(this.#maxDraftBytes)} bytes`,
-    };
+    this.#ui = editModalInput(this.#ui, value, this.#maxDraftBytes);
     this.repaint();
   }
 
@@ -872,6 +866,13 @@ export class FabricConsoleRuntime {
       return;
     }
     if (event.key === "text" && event.text !== undefined) {
+      if (event.text === "/" && this.#frame.presentation.review === null) {
+        this.#rememberInputOpener();
+        this.#ui = openDeckFilter(this.#ui);
+        this.#setEditorActive?.(true);
+        this.repaint();
+        return;
+      }
       if (
         event.text === ":" &&
         this.#frame.presentation.review === null
@@ -889,6 +890,17 @@ export class FabricConsoleRuntime {
       }
       if (event.text === "q") {
         await this.close("operator");
+        return;
+      }
+      if (event.text === "p") {
+        const pinned = toggleFocusedDeckPin(
+          this.#ui,
+          this.#controller.state.activeView,
+        );
+        if (pinned !== null) {
+          this.#ui = pinned;
+          this.repaint();
+        }
         return;
       }
       if (
@@ -1195,21 +1207,9 @@ export class FabricConsoleRuntime {
   }
 
   #moveSelection(direction: -1 | 1): void {
-    const view = this.#controller.state.activeView;
-    const rows = this.#controller.dataset.pages[view].rows;
-    if (rows.length === 0) return;
-    const selected = this.#controller.state.selectionByView[view]?.stableId;
-    const current = rows.findIndex((row) => row.stableId === selected);
-    const target = Math.min(
-      rows.length - 1,
-      Math.max(0, (current < 0 ? 0 : current) + direction),
-    );
-    const row = rows[target];
-    if (row === undefined) return;
-    this.#controller.select(view, row.stableId);
-    this.#controller.setScrollAnchor(view, row.stableId);
-    this.#resetDetailScroll(view);
-    this.#ui = { ...this.#ui, focusId: `row:${view}:${row.stableId}`, notice: null };
+    const next = moveVisibleSelection(this.#controller, this.#frame, this.#ui, direction);
+    if (next === this.#ui) return;
+    this.#ui = next;
     this.repaint();
   }
 

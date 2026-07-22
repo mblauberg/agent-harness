@@ -31,7 +31,7 @@ import {
   type PresentedRow,
 } from "./presenter.js";
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
-import { compactAttentionRowText, renderFabricAttentionDeck, renderFabricDeckRoster } from "./attention-deck.js";
+import { compactAttentionRowText, filteredDeckLabel, renderFabricAttentionDeck, renderFabricDeckRoster, stripHeaderLines } from "./attention-deck.js";
 import {
   FABRIC_COMPACT_ACTION_LABELS,
   FABRIC_VIEW_SHORT_LABELS,
@@ -238,8 +238,8 @@ function renderFabricTabs(
   setFabricRow(rows, row, columns, line);
 }
 
-function rowText(row: PresentedRow, focused: boolean): string {
-  return `${focused ? ">" : row.selected ? "*" : " "}${row.urgencyMarker.padEnd(2, " ")} ${row.primary} | ${row.secondary} | ${row.freshness} | r${row.revision}`;
+function rowText(row: PresentedRow, focused: boolean, pinned = false): string {
+  return `${focused ? ">" : row.selected ? "*" : " "}${row.urgencyMarker.padEnd(2, " ")} ${pinned ? "^ PINNED " : ""}${row.primary} | ${row.secondary} | ${row.freshness} | r${row.revision}`;
 }
 
 function renderFabricMaster(
@@ -1091,18 +1091,7 @@ function renderFabricStrip(
   const topAttention = presentation.topAttention?.stableId === work?.stableId
     ? null
     : presentation.topAttention;
-  const fullHeader = [
-    `Project:${header.project}`,
-    `Session:${header.session}`,
-    `Run:${header.run}`,
-    `Revision:r${header.revision ?? "?"}`,
-    `Fresh:${header.freshness.toUpperCase()}`,
-    `Phase:${header.phase}`,
-    `Owner:${header.owner}`,
-    `Next:${header.nextMilestone}`,
-    `Health:${header.health}`,
-    `Need you:${String(header.needsYouCount)} | Watch:${String(header.watchCount)} collapsed`,
-  ];
+  const fullHeader = stripHeaderLines(header);
   let nextRow = 1;
   const renderWork = (item: PresentedRow): void => {
     if (nextRow > contentEnd) return;
@@ -1111,7 +1100,7 @@ function renderFabricStrip(
       rows,
       nextRow,
       columns,
-      presentation.activeView === "attention" && columns === 30 ? compactAttentionRowText(item, presentation.focusId === id) : rowText(item, presentation.focusId === id),
+      presentation.activeView === "attention" && columns === 30 ? compactAttentionRowText(item, presentation.focusId === id, ui.pinnedRowIds) : rowText(item, presentation.focusId === id, ui.pinnedRowIds.includes(id)),
     );
     if (!inputModal) {
       hitRegions.push({
@@ -1138,7 +1127,9 @@ function renderFabricStrip(
         rows,
         nextRow,
         columns,
-        `${header.project} NEEDS ${String(header.needsYouCount)} RUNS ${String(header.runCount)} ${header.needsYouCount > 0 ? "!" : header.freshness === "live" ? "" : "?"}`,
+        presentation.deckFilterActive
+          ? filteredDeckLabel(presentation, true)
+          : `${header.project} NEEDS ${String(header.needsYouCount)} RUNS ${String(header.runCount)} ${header.needsYouCount > 0 ? "!" : header.freshness === "live" ? "" : "?"}`,
       );
       nextRow += 1;
     }
@@ -1524,6 +1515,8 @@ export function renderFabricConsoleFrame(
       dimensions.columns,
       presentation.inputMode === "editor"
         ? "Draft input owns keys | Esc returns | Ctrl-C detaches safely"
+        : presentation.inputMode === "filter"
+          ? "Filter input owns keys | Enter applies view | Esc cancels | Ctrl-C detaches safely"
         : "Form input owns keys | Enter reviews | Esc cancels | Ctrl-C detaches safely",
     );
   } else {

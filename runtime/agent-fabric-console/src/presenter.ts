@@ -35,6 +35,7 @@ import {
   titleCase,
 } from "./row-presentation.js";
 import { presentDeckRows } from "./attention-deck-presentation.js";
+import { applyDeckView } from "./view-filter.js";
 import type { ConsoleWorkflowReview } from "./workflow.js";
 
 export * from "./presenter-model.js";
@@ -782,6 +783,22 @@ export function presentFabricConsole(
   const presentedRows = presentRows(dataset, controller, activeRows, selected);
   const selectedRow = presentedRows.selectedRow;
   const deck = presentDeckRows(dataset);
+  const deckView = applyDeckView(
+    presentedRows.needsYouRows,
+    presentedRows.watchRows,
+    deck.rows,
+    ui.filterQuery,
+    ui.pinnedRowIds,
+  );
+  const selectedAttentionHidden = controller.activeView === "attention" &&
+    selectedRow !== null &&
+    (
+      (presentedRows.needsYouRows.some(({ stableId }) => stableId === selectedRow.stableId) &&
+        !deckView.needsYouRows.some(({ stableId }) => stableId === selectedRow.stableId)) ||
+      (presentedRows.watchRows.some(({ stableId }) => stableId === selectedRow.stableId) &&
+        !deckView.watchRows.some(({ stableId }) => stableId === selectedRow.stableId))
+    );
+  const visibleSelectedRow = selectedAttentionHidden ? null : selectedRow;
   const selectedRunId = controller.selectionByView.runs?.stableId;
   const selectedRun = selectedRunId === undefined
     ? null
@@ -792,7 +809,7 @@ export function presentFabricConsole(
     ? guidedWorkflowActions()
     : review === null && workflowReview === null
       ? rowAndArtifactActions(
-          selectedRow,
+          visibleSelectedRow,
           dataset.canMutate && dataset.connection.state === "live",
           dataset,
           ui,
@@ -800,7 +817,9 @@ export function presentFabricConsole(
       : review === null
         ? workflowReviewActions(workflowReview as ConsoleWorkflowReview)
         : reviewActions(review);
-  const baseDetail = selectedRow === null ? null : detailLines(selectedRow, dataset);
+  const baseDetail = visibleSelectedRow === null
+    ? null
+    : detailLines(visibleSelectedRow, dataset);
   const unavailableActions = actions.filter(
     (action): action is PresentedAction & { reason: string } =>
       !action.enabled && action.reason !== undefined,
@@ -834,13 +853,16 @@ export function presentFabricConsole(
     })),
     activeView: controller.activeView,
     masterRows: presentedRows.masterRows,
-    needsYouRows: presentedRows.needsYouRows,
-    watchRows: presentedRows.watchRows,
+    needsYouRows: deckView.needsYouRows,
+    watchRows: deckView.watchRows,
     watchCollapsed: presentedRows.watchCollapsed,
-    topAttention: presentedRows.topAttention,
-    deckRows: deck.rows,
+    topAttention: deckView.needsYouRows[0] ?? null,
+    deckRows: deckView.deckRows,
     deckTotalCount: deck.totalCount,
     deckRunCount: deck.runCount,
+    deckFilterActive: deckView.active,
+    deckShownCount: deckView.shownCount,
+    deckUnfilteredCount: deckView.unfilteredCount,
     detail,
     actions,
     review:
@@ -851,7 +873,7 @@ export function presentFabricConsole(
           : presentWorkflowReview(workflowReview, dataset),
     focusId: ui.focusId,
     compactPane: ui.compactPane,
-    draft: ui.draft,
+    draft: ui.inputMode === "filter" ? ui.filterDraft : ui.draft,
     inputMode: ui.inputMode,
     mouseCapture: ui.mouseCapture,
     rejectedInputCount: ui.rejectedInputCount,

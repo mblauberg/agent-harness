@@ -4,6 +4,7 @@ import { FABRIC_VIEWS } from "./model.js";
 import { matchesArtifactConfirmation, type FabricConsoleUiState } from "./presenter.js";
 import type { FabricConsoleDataset } from "./protocol-adapter.js";
 import { presentDeckRows } from "./attention-deck-presentation.js";
+import { applyDeckView } from "./view-filter.js";
 
 type RefreshUiInput = Readonly<{
   previousDataset: FabricConsoleDataset;
@@ -48,8 +49,20 @@ export function refreshUiForDataset(input: RefreshUiInput): FabricConsoleUiState
   let deckScrollOffset = ui.deckScrollOffset;
   let focusId = ui.focusId;
   let deckNotice: string | null = null;
-  const previousDeckRows = presentDeckRows(previousDataset).rows;
-  const nextDeckRows = presentDeckRows(dataset).rows;
+  const previousDeckRows = applyDeckView(
+    [],
+    [],
+    presentDeckRows(previousDataset).rows,
+    ui.filterQuery,
+    ui.pinnedRowIds,
+  ).deckRows;
+  const nextDeckRows = applyDeckView(
+    [],
+    [],
+    presentDeckRows(dataset).rows,
+    ui.filterQuery,
+    ui.pinnedRowIds,
+  ).deckRows;
   const focusedDeckId = ui.focusId?.startsWith("deck:") === true
     ? ui.focusId.slice("deck:".length)
     : null;

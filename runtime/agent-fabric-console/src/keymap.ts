@@ -21,7 +21,7 @@ export function fabricActionShortcut(actionId: string, index: number): string {
 }
 
 export const FABRIC_BROWSE_HELP =
-  "? help | [ ] view | Enter open | s sessions | e edit | Pg scroll";
+  "? help | / filter | p pin | s sessions | [ ] view | Enter open";
 
 export const FABRIC_HELP_NOTICE =
-  "Help: Alt-1..8 views; [ ] cycle; Enter open; s sessions; e draft; : workflow; PgUp/PgDn; Alt-M mouse; q detach";
+  "Help: / filter; p pin; Alt-1..8 views; [ ] cycle; Enter open; s sessions; e draft; : workflow; PgUp/PgDn; Alt-M mouse; q detach";
