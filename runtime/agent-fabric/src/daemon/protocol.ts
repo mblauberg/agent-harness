@@ -431,10 +431,15 @@ export async function dispatchClientMethod(client: FabricClient, method: string,
       if (params.routeRequest !== undefined) {
         throw providerProtocolInvalid("provider route requests require the review evidence daemon owner");
       }
+      const adapterId = requiredString(params, "adapterId");
+      const actionId = requiredString(params, "actionId");
+      if (adapterId.includes("\0") || actionId.includes("\0")) {
+        throw providerProtocolInvalid("provider adapter ID and action ID must not contain NUL");
+      }
       if (operation === "spawn") {
         return client.dispatchProviderAction({
-          adapterId: requiredString(params, "adapterId"),
-          actionId: requiredString(params, "actionId"),
+          adapterId,
+          actionId,
           operation,
           taskId: requiredString(params, "taskId"),
           authorityId: requiredString(params, "authorityId"),
@@ -450,7 +455,7 @@ export async function dispatchClientMethod(client: FabricClient, method: string,
         throw providerProtocolInvalid("provider authority ID must be a string when present");
       }
       return client.dispatchProviderAction({
-        adapterId: requiredString(params, "adapterId"), actionId: requiredString(params, "actionId"), operation,
+        adapterId, actionId, operation,
         ...(typeof params.authorityId === "string" ? { authorityId: params.authorityId } : {}),
         certifyingReview: null,
         payload: requiredRecord(params, "payload"), commandId: requiredString(params, "commandId"),
