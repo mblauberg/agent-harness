@@ -145,8 +145,9 @@ describe("fresh Agent Fabric launch bootstrap", () => {
     daemonPids.add(discovery.pid);
     expect(stdout).not.toMatch(/"capability"\s*:/u);
     expect(stdout).not.toContain("afc_");
-    const output = JSON.parse(stdout) as { canonicalRoot: string; generation: string; credentials: Array<{ seat: string }> };
+    const output = JSON.parse(stdout) as { canonicalRoot: string; authorityId: string; generation: string; credentials: Array<{ seat: string }> };
     expect(output.canonicalRoot).toBe(projectRoot);
+    expect(output.authorityId).toMatch(/^bootstrap-authority:[a-f0-9]{64}:codex$/u);
     expect(output.credentials.map(({ seat }) => seat)).toEqual(["codex"]);
     await expect(readFile(join(
       paths.stateDirectory,
@@ -319,11 +320,20 @@ describe("fresh Agent Fabric launch bootstrap", () => {
       const discovery = JSON.parse(await readFile(join(paths.runtimeDirectory, "fabric-v1.discovery.json"), "utf8")) as { pid: number };
       trackTestProcess(discovery.pid, "zero-state-bootstrap-daemon");
       daemonPids.add(discovery.pid);
-      for (const { client } of clients) {
+      for (const { seat, client } of clients) {
         const names = (await client.listTools()).tools.map(({ name }) => name);
         expect(names).not.toContain("fabric_bootstrap");
+        expect(names).toContain("fabric_whoami");
         expect(names).toContain("fabric_run_status_read");
         expect(names).toContain("fabric_evidence_publish");
+        expect(await callTool(client, "fabric_whoami", {})).toMatchObject({
+          isError: false,
+          structured: {
+            seat,
+            authorityId: expect.stringMatching(/^bootstrap-authority:[a-f0-9]{64}:(?:claude|codex)$/u),
+            lease: { state: "active" },
+          },
+        });
       }
       const database = new Database(paths.databasePath, { readonly: true });
       try {

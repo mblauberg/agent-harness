@@ -195,6 +195,7 @@ export type BaselineOperationInputMap = {
   [FABRIC_OPERATIONS.getBudget]: { budgetId: string };
   [FABRIC_OPERATIONS.publishArtifact]: { taskId?: string; relativePath: string; sha256: string; commandId: string };
   [FABRIC_OPERATIONS.closeBarrier]: { scope: "run" | "stage"; stageId?: string; commandId: string };
+  [FABRIC_OPERATIONS.whoami]: Record<string, never>;
   [FABRIC_OPERATIONS.getRunStatus]: { runId: string };
   [FABRIC_OPERATIONS.observeEvents]: { cursor: number; limit: number };
   [FABRIC_OPERATIONS.listTasks]: { runId: string };
@@ -251,6 +252,14 @@ export type BaselineOperationResultMap = {
   [FABRIC_OPERATIONS.getBudget]: BudgetResult;
   [FABRIC_OPERATIONS.publishArtifact]: { artifactId: string; relativePath: string; sha256: string };
   [FABRIC_OPERATIONS.closeBarrier]: { scope: "run" | "stage"; closed: true; receipt: ReceiptResult };
+  [FABRIC_OPERATIONS.whoami]: {
+    seat: string;
+    agentId: string;
+    runId: string;
+    authorityId: string;
+    generation: string;
+    lease: { leaseId: string; holderAgentId: string; generation: number; state: "active" | "frozen" | "revoked" };
+  };
   [FABRIC_OPERATIONS.getRunStatus]: { runId: string; chairAgentId: string; barrier: { state: "open" | "closed" }; counts: { agents: number; tasks: number; tasksTerminal: number; messages: number; deliveriesUnacknowledged: number; leasesActive: number } };
   [FABRIC_OPERATIONS.observeEvents]: { events: readonly ObserverEvent[]; nextCursor: number };
   [FABRIC_OPERATIONS.listTasks]: { tasks: readonly TaskResult[] };

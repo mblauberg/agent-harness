@@ -373,6 +373,7 @@ export class FabricDaemonClient {
         isRecord(credential) &&
         (credential.seat === "claude" || credential.seat === "codex") &&
         typeof credential.agentId === "string" &&
+        typeof credential.authorityId === "string" &&
         isPositiveInteger(credential.expectedPrincipalGeneration) &&
         typeof credential.capability === "string"
       )

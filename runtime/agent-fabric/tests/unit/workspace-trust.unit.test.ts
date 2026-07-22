@@ -117,6 +117,14 @@ describe("machine-local workspace trust", () => {
       .resolves.toMatchObject({ canonicalPath: await realpath(value.root), trusted: false });
   });
 
+  it("treats workspace status as an inspect alias", async () => {
+    const value = await fixture();
+    await runWorkspaceTrust(["trust", value.workspace], value.paths);
+
+    await expect(runWorkspaceTrust(["status", value.workspace], value.paths))
+      .resolves.toEqual(await runWorkspaceTrust(["inspect", value.workspace], value.paths));
+  });
+
   it("rejects symbolic-link roots and supports inspect/revoke without widening", async () => {
     const value = await fixture();
     const linked = join(value.root, "linked");

@@ -263,7 +263,10 @@ export class MailboxCustodyService {
         "SELECT agent_id FROM (SELECT owner_agent_id AS agent_id FROM tasks WHERE run_id = ? AND task_id = ? AND owner_agent_id IS NOT NULL UNION SELECT agent_id FROM task_participants WHERE run_id = ? AND task_id = ?) ORDER BY agent_id",
       )
       .all(runId, audience.taskId, runId, audience.taskId)
-      .map((value) => stringField(rowOrNotFound(value, "task audience member"), "agent_id"));
+      .map((value) => stringField(rowOrNotFound(value, "task audience member"), "agent_id"))
+      // Deliberate asymmetry (issue #336): task audiences exclude the sender so no
+      // self-echo sits pending ack; team audiences intentionally keep the sender.
+      .filter((agentId) => agentId !== senderId);
   }
 
   createDiscussionGroup(

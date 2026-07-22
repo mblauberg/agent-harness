@@ -238,6 +238,8 @@ export async function dispatchAgentProtocol(
       return client.publishArtifact(input as never);
     case FABRIC_OPERATIONS.closeBarrier:
       return client.closeBarrier(input as never);
+    case FABRIC_OPERATIONS.whoami:
+      return client.whoami();
     case FABRIC_OPERATIONS.getRunStatus:
       return client.getRunStatus(input as never);
     case FABRIC_OPERATIONS.observeEvents:

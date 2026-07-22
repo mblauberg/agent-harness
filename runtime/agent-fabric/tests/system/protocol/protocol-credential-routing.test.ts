@@ -55,6 +55,9 @@ describe("public protocol credential routing", () => {
           FABRIC_OPERATIONS.scopedGateCheck,
         ]));
         expect(verified.grantedOperations).not.toContain(FABRIC_OPERATIONS.projectSessionCreate);
+        expect(verified.grantedOperations).not.toContain(FABRIC_OPERATIONS.whoami);
+        await expect(fabric.connect(run.chairCapability).whoami())
+          .rejects.toMatchObject({ code: "CAPABILITY_FORBIDDEN" });
         const principal = verified.principal;
         if (principal.kind !== "agent") throw new Error("expected agent principal");
         const context: PublicProtocolContext = {

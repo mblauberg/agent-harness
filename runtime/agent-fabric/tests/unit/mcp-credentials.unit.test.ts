@@ -38,6 +38,12 @@ async function createCurrentSeatDirectory(
 }
 
 describe("MCP capability loading", () => {
+  it("names the project-seat registry variables when capability sources are ambiguous", async () => {
+    await expect(resolveMcpCapability({})).rejects.toThrow(
+      /AGENT_FABRIC_STATE_DIRECTORY.*AGENT_FABRIC_SEAT.*AGENT_FABRIC_CLIENT_LABEL/u,
+    );
+  });
+
   it("loads a capability from a private regular file without placing it in client configuration", async () => {
     const directory = await mkdtemp(join(tmpdir(), "fabric-mcp-credential-"));
     cleanup.push(directory);
