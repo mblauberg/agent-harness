@@ -11,7 +11,14 @@ import {
 } from "../application/provider-action-owner.js";
 import { FabricError } from "../errors.js";
 import type { ProviderActionResult } from "../core/contracts.js";
-import { isProviderActionResult, isTaskBoundEphemeralProviderPayload, providerActionResultWithRequiredAnswer } from "./state.js";
+import type { ProviderPayloadAuthority } from "./payload-authority.js";
+import type { ProviderActionExecutor } from "./executor.js";
+import {
+  isProviderActionResult,
+  isTaskBoundEphemeralProviderPayload,
+  providerActionResultWithRequiredAnswer,
+} from "./state.js";
+import type { ProviderActionState } from "./state.js";
 
 type Row = Record<string, unknown>;
 
@@ -48,8 +55,8 @@ function rowOrNotFound(value: unknown, label: string): Row {
  * reconciliation map, the owner-parameterised reconciliation algorithm shared by the public
  * `reconcileProviderAction` command and startup recovery, the startup quarantine helper, the
  * certifying-review recovery pass, and the generic/integrity startup scan. It depends on
- * `ProviderActionState` and `ProviderActionExecutor` only through narrow injected ports, and on
- * `ProviderPayloadAuthority` only through a narrow bound closure.
+ * `ProviderActionState`, `ProviderActionExecutor`, and `ProviderPayloadAuthority` through their
+ * concrete production collaborators.
  */
 export class ProviderActionRecovery {
   readonly #database: Database.Database;
@@ -58,43 +65,9 @@ export class ProviderActionRecovery {
   readonly #assertChair: (runId: string, actorAgentId: string) => void;
   readonly #event: (runId: string, type: string, actorAgentId: string | null, payload: unknown) => void;
   readonly #requestAdapter: (adapterId: string, method: string, params: Record<string, unknown>) => Promise<unknown>;
-  readonly #assertProviderPrincipalActive: (runId: string, agentId: string) => void;
-  readonly #track: <T>(operation: () => Promise<T>) => Promise<T>;
-  readonly #get: (runId: string, adapterId: string, actionId: string) => ProviderActionResult;
-  readonly #persist: (
-    runId: string,
-    adapterId: string,
-    actionId: string,
-    raw: unknown,
-    result: ProviderActionResult,
-    expectedOwner?: ProviderActionCustodyOwner,
-  ) => void;
-  readonly #isOwned: (runId: string, adapterId: string, actionId: string) => boolean;
-  readonly #enqueue: (input: {
-    runId: string;
-    adapterId: string;
-    actionId: string;
-    owner?: ProviderActionCustodyOwner;
-    execute: () => Promise<ProviderActionResult>;
-  }) => void;
-  readonly #settle: (
-    runId: string,
-    adapterId: string,
-    actionId: string,
-    status: "terminal" | "ambiguous" | "quarantined",
-  ) => void;
-  readonly #ownershipKey: (runId: string, adapterId: string, actionId: string) => string;
-  readonly #assertGenericProviderAction: (runId: string, adapterId: string, actionId: string) => void;
-  readonly #completeAdapterOperation: (input: {
-    runId: string;
-    adapterId: string;
-    actionId: string;
-    operation: string;
-    method: string;
-    payload: Record<string, unknown>;
-    requireProviderAnswer?: true;
-    owner?: ProviderActionCustodyOwner;
-  }) => Promise<ProviderActionResult>;
+  readonly #payloadAuthority: ProviderPayloadAuthority;
+  readonly #state: ProviderActionState;
+  readonly #executor: ProviderActionExecutor;
 
   readonly #providerActionReconciliations = new Map<string, Promise<ProviderActionResult>>();
 
@@ -105,43 +78,9 @@ export class ProviderActionRecovery {
     assertChair: (runId: string, actorAgentId: string) => void;
     event: (runId: string, type: string, actorAgentId: string | null, payload: unknown) => void;
     requestAdapter: (adapterId: string, method: string, params: Record<string, unknown>) => Promise<unknown>;
-    assertProviderPrincipalActive: (runId: string, agentId: string) => void;
-    track: <T>(operation: () => Promise<T>) => Promise<T>;
-    get: (runId: string, adapterId: string, actionId: string) => ProviderActionResult;
-    persist: (
-      runId: string,
-      adapterId: string,
-      actionId: string,
-      raw: unknown,
-      result: ProviderActionResult,
-      expectedOwner?: ProviderActionCustodyOwner,
-    ) => void;
-    isOwned: (runId: string, adapterId: string, actionId: string) => boolean;
-    enqueue: (input: {
-      runId: string;
-      adapterId: string;
-      actionId: string;
-      owner?: ProviderActionCustodyOwner;
-      execute: () => Promise<ProviderActionResult>;
-    }) => void;
-    settle: (
-      runId: string,
-      adapterId: string,
-      actionId: string,
-      status: "terminal" | "ambiguous" | "quarantined",
-    ) => void;
-    ownershipKey: (runId: string, adapterId: string, actionId: string) => string;
-    assertGenericProviderAction: (runId: string, adapterId: string, actionId: string) => void;
-    completeAdapterOperation: (input: {
-      runId: string;
-      adapterId: string;
-      actionId: string;
-      operation: string;
-      method: string;
-      payload: Record<string, unknown>;
-      requireProviderAnswer?: true;
-      owner?: ProviderActionCustodyOwner;
-    }) => Promise<ProviderActionResult>;
+    payloadAuthority: ProviderPayloadAuthority;
+    state: ProviderActionState;
+    executor: ProviderActionExecutor;
   }>) {
     this.#database = dependencies.database;
     this.#clock = dependencies.clock;
@@ -149,16 +88,9 @@ export class ProviderActionRecovery {
     this.#assertChair = dependencies.assertChair;
     this.#event = dependencies.event;
     this.#requestAdapter = dependencies.requestAdapter;
-    this.#assertProviderPrincipalActive = dependencies.assertProviderPrincipalActive;
-    this.#track = dependencies.track;
-    this.#get = dependencies.get;
-    this.#persist = dependencies.persist;
-    this.#isOwned = dependencies.isOwned;
-    this.#enqueue = dependencies.enqueue;
-    this.#settle = dependencies.settle;
-    this.#ownershipKey = dependencies.ownershipKey;
-    this.#assertGenericProviderAction = dependencies.assertGenericProviderAction;
-    this.#completeAdapterOperation = dependencies.completeAdapterOperation;
+    this.#payloadAuthority = dependencies.payloadAuthority;
+    this.#state = dependencies.state;
+    this.#executor = dependencies.executor;
   }
 
   async reconcile(
@@ -166,7 +98,7 @@ export class ProviderActionRecovery {
     actorAgentId: string,
     input: { adapterId: string; actionId: string; commandId: string },
   ): Promise<ProviderActionResult> {
-    return await this.#track(
+    return await this.#state.trackGenericOperation(
       async () => {
         assertProviderActionOwner(this.#database, {
           runId,
@@ -182,7 +114,7 @@ export class ProviderActionRecovery {
         );
         if (replay !== undefined) return replay;
         this.#assertChair(runId, actorAgentId);
-        const key = this.#ownershipKey(runId, input.adapterId, input.actionId);
+        const key = this.#state.ownershipKey(runId, input.adapterId, input.actionId);
         const existing = this.#providerActionReconciliations.get(key);
         if (existing !== undefined) {
           await existing;
@@ -202,8 +134,8 @@ export class ProviderActionRecovery {
             return concurrentReplay;
           }
           this.#assertChair(runId, actorAgentId);
-          this.#assertGenericProviderAction(runId, input.adapterId, input.actionId);
-          const current = this.#get(runId, input.adapterId, input.actionId);
+          this.#state.assertGenericProviderAction(runId, input.adapterId, input.actionId);
+          const current = this.#state.get(runId, input.adapterId, input.actionId);
           if (current.status === "terminal" || current.status === "quarantined") {
             this.#commandJournal.write(runId, actorAgentId, input.commandId, input, current);
             return current;
@@ -253,25 +185,25 @@ export class ProviderActionRecovery {
       };
       delete quarantined.providerAnswer;
       if (answerBearing) delete quarantined.result;
-      this.#persist(runId, input.adapterId, input.actionId, { idempotencyProven: false }, quarantined, expectedOwner);
-      this.#settle(runId, input.adapterId, input.actionId, "quarantined");
+      this.#state.persist(runId, input.adapterId, input.actionId, { idempotencyProven: false }, quarantined, expectedOwner);
+      this.#state.settleAndPump(runId, input.adapterId, input.actionId, "quarantined");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, quarantined);
       return quarantined;
     };
-    let result = this.#get(runId, input.adapterId, input.actionId);
-    if (this.#isOwned(runId, input.adapterId, input.actionId)) {
+    let result = this.#state.get(runId, input.adapterId, input.actionId);
+    if (this.#state.isOwned(runId, input.adapterId, input.actionId)) {
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
     if (result.status === "prepared") {
       if (answerBearing) {
         const adapterId = stringField(stored, "adapter_id");
-        this.#enqueue({
+        this.#state.enqueueDeferred({
           runId,
           adapterId,
           actionId: input.actionId,
           owner: expectedOwner,
-          execute: async () => await this.#completeAdapterOperation({
+          execute: async () => await this.#executor.completeAdapterOperation({
             runId,
             adapterId,
             actionId: input.actionId,
@@ -282,12 +214,12 @@ export class ProviderActionRecovery {
             owner: expectedOwner,
           }),
         });
-        result = this.#get(runId, input.adapterId, input.actionId);
+        result = this.#state.get(runId, input.adapterId, input.actionId);
         this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
         return result;
       }
       if (typeof stored.target_agent_id === "string") {
-        this.#assertProviderPrincipalActive(runId, stored.target_agent_id);
+        this.#payloadAuthority.assertProviderPrincipalActive(runId, stored.target_agent_id);
       }
       const adapterId = stringField(stored, "adapter_id");
       assertProviderActionOwner(this.#database, {
@@ -301,7 +233,7 @@ export class ProviderActionRecovery {
       try {
         const response = await this.#requestAdapter(adapterId, "dispatch", { actionId: input.actionId, operation: stringField(stored, "operation"), payload: storedPayload });
         result = providerActionResultWithRequiredAnswer(response, answerBearing, input.actionId);
-        this.#persist(runId, input.adapterId, input.actionId, response, result, expectedOwner);
+        this.#state.persist(runId, input.adapterId, input.actionId, response, result, expectedOwner);
       } catch (error: unknown) {
         if (error instanceof ProviderActionOwnerError) throw error;
         result = {
@@ -311,9 +243,9 @@ export class ProviderActionRecovery {
           executionCount: 1,
           effectCount: 0,
         };
-        this.#persist(runId, input.adapterId, input.actionId, { idempotencyProven: false }, result, expectedOwner);
+        this.#state.persist(runId, input.adapterId, input.actionId, { idempotencyProven: false }, result, expectedOwner);
       }
-      this.#settle(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
+      this.#state.settleAndPump(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "ambiguous");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
@@ -327,7 +259,7 @@ export class ProviderActionRecovery {
         adapterId: input.adapterId,
         actionId: input.actionId,
       }, expectedOwner);
-      this.#settle(
+      this.#state.settleAndPump(
         runId,
         input.adapterId,
         input.actionId,
@@ -337,7 +269,7 @@ export class ProviderActionRecovery {
       return resolvedEffectResult;
     };
     if (result.status !== "ambiguous" && result.status !== "dispatched" && !resolvedEffectWithUnknownUsage) {
-      this.#settle(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
+      this.#state.settleAndPump(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
       this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
       return result;
     }
@@ -367,17 +299,17 @@ export class ProviderActionRecovery {
     if (lookedUp.status === "terminal") {
       result = lookedUp;
       try {
-        this.#persist(runId, input.adapterId, input.actionId, lookup, result, expectedOwner);
+        this.#state.persist(runId, input.adapterId, input.actionId, lookup, result, expectedOwner);
       } catch (error: unknown) {
         if (error instanceof ProviderActionOwnerError) throw error;
         if (resolvedEffectWithUnknownUsage) return preserveResolvedEffect();
-        return quarantine(this.#get(runId, input.adapterId, input.actionId));
+        return quarantine(this.#state.get(runId, input.adapterId, input.actionId));
       }
     } else if (resolvedEffectWithUnknownUsage) {
       return preserveResolvedEffect();
     } else if (idempotencyProven && !answerBearing) {
       if (typeof stored.target_agent_id === "string") {
-        this.#assertProviderPrincipalActive(runId, stored.target_agent_id);
+        this.#payloadAuthority.assertProviderPrincipalActive(runId, stored.target_agent_id);
       }
       assertProviderActionOwner(this.#database, {
         runId,
@@ -391,14 +323,14 @@ export class ProviderActionRecovery {
         return quarantine(result);
       }
       try {
-        this.#persist(runId, input.adapterId, input.actionId, replayed, result, expectedOwner);
+        this.#state.persist(runId, input.adapterId, input.actionId, replayed, result, expectedOwner);
       } catch {
-        return quarantine(this.#get(runId, input.adapterId, input.actionId));
+        return quarantine(this.#state.get(runId, input.adapterId, input.actionId));
       }
     } else {
       return quarantine(lookedUp);
     }
-    this.#settle(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
+    this.#state.settleAndPump(runId, input.adapterId, input.actionId, result.status === "terminal" ? "terminal" : "quarantined");
     this.#commandJournal.write(runId, actorAgentId, input.commandId, input, result);
     return result;
   }
