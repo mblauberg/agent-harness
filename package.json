@@ -17,8 +17,8 @@
   "scripts": {
     "clean": "tsc -b tsconfig.json --clean",
     "build:types": "tsc -b tsconfig.json",
-    "schema:write": "node runtime/agent-fabric-protocol/scripts/write-schema.mjs --write",
-    "schema:check:generated": "node runtime/agent-fabric-protocol/scripts/write-schema.mjs --check",
+    "schema:write": "node --import tsx runtime/agent-fabric-protocol/scripts/write-schema.mjs --write",
+    "schema:check:generated": "node --import tsx runtime/agent-fabric-protocol/scripts/write-schema.mjs --check",
     "compatibility:pin": "node runtime/agent-fabric/scripts/pin-primary-compatibility.mjs",
     "compatibility:check:primary": "tsx runtime/agent-fabric/scripts/verify-primary-compatibility.ts",
     "build": "tsc -b tsconfig.json && npm run schema:write",
