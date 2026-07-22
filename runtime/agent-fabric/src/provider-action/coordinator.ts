@@ -19,7 +19,7 @@ import { FabricError } from "../errors.js";
 import {
   assertRunAcceptingWork,
   resolveTaskBindingForActiveWork,
-} from "../operator/production-action-ports.js";
+} from "../operator/task-run-admission.js";
 import { assertScopedOperationAllowed, assertScopedTaskReadinessAllowed } from "../gates/store.js";
 import { ProjectFabricCoreError } from "../project-session/contracts.js";
 import type { ProviderActionResult } from "../core/contracts.js";

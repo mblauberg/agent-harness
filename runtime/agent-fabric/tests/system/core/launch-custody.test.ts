@@ -3297,13 +3297,9 @@ describe("launch custody recovery — cross-family ordering coordinator (issue #
 
     const families = {
       chairLiveHandoffCustodyRecovery: {
-        recoverChairLiveHandoffCustody: async (result: { ambiguous: number }, errors: unknown[]) => {
+        recoverChairLiveHandoffCustody: async () => {
           calls.push("live-handoff");
-          // Mirrors the production `recoverChairLiveHandoffCustody` adapter contract: it pushes
-          // its own errors onto the shared `errors` array rather than throwing, so a family
-          // failure here must not prevent later families from running.
-          result.ambiguous += 1;
-          errors.push(liveHandoffError);
+          throw liveHandoffError;
         },
       },
       chairRecoveryCustody: {

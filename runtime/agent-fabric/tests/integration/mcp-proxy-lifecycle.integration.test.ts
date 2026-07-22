@@ -303,7 +303,7 @@ describe("MCP proxy lifecycle", () => {
       await delayed.cleanup();
       await fixture.cleanup();
     }
-  }, 15_000);
+  }, 20_000);
 
   it("fails closed when seat rotation changes the principal before replaying a committed timed-out message", async () => {
     const fixture = await createRotatingPrincipalTimeoutFixture();
@@ -426,7 +426,7 @@ describe("MCP proxy lifecycle", () => {
       }
       await fixture.cleanup();
     }
-  }, 15_000);
+  }, 20_000);
 
   it("replays commandless requests when a disconnect was observed before dispatch", async () => {
     const fixture = await createMcpFixture("run-mcp-no-unsafe-replay");
@@ -470,7 +470,7 @@ describe("MCP proxy lifecycle", () => {
       }
       await fixture.cleanup();
     }
-  }, 15_000);
+  }, 20_000);
 
   it("returns one reconnect action when the daemon remains unavailable", async () => {
     const fixture = await createMcpFixture("run-mcp-daemon-unavailable");

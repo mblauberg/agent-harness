@@ -6,10 +6,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { applyMigrations } from "../../../src/core/migrations.ts";
 import { ProviderActionAdmissionCoordinator } from "../../../src/application/provider-action-admission.ts";
 import {
-  assertOperatorTaskRunnable,
-  assertRunAcceptingWork,
   createProductionOperatorActionPorts,
 } from "../../../src/operator/production-action-ports.ts";
+import {
+  assertOperatorTaskRunnable,
+  assertRunAcceptingWork,
+} from "../../../src/operator/task-run-admission.ts";
 import { canonicalJson, sha256 } from "../../../src/project-session/store-support.ts";
 import {
   admitProviderActionFixture,

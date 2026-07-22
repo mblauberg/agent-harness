@@ -6,7 +6,7 @@ import { LIFECYCLE_CURRENT_STATE_V1_CODEC, type LifecycleCustodyRowV1, type Life
 
 import { assertProviderActionOwner } from "../application/provider-action-owner.js";
 import { ProviderActionAdmissionCoordinator, ProviderActionAdmissionTransactionError, type ProviderActionTicket } from "../application/provider-action-admission.js";
-import { assertTaskOperationAdmitted } from "../operator/production-action-ports.js";
+import { assertTaskOperationAdmitted } from "../operator/task-run-admission.js";
 import { FabricError } from "../errors.js";
 import { CommandJournal } from "../application/command-journal.js";
 import { isLifecycleCheckpoint } from "./checkpoint-policy.js";

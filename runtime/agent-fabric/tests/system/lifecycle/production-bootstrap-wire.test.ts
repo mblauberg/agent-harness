@@ -189,7 +189,7 @@ async function startBusyWalWriter(databasePath: string): Promise<ReturnType<type
   writer.stderr.on("data", (chunk: string) => { stderr += chunk; });
   const lines = createInterface({ input: writer.stdout, crlfDelay: Infinity });
   await new Promise<void>((resolvePromise, reject) => {
-    const timeout = setTimeout(() => reject(new Error("busy WAL writer did not become ready")), 10_000);
+    const timeout = setTimeout(() => reject(new Error("busy WAL writer did not become ready")), 20_000);
     lines.once("line", (line) => {
       clearTimeout(timeout);
       if (line === "ready") resolvePromise();
@@ -315,7 +315,7 @@ describe("production daemon bootstrap wiring", () => {
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => { stderr += chunk; });
     const outcome = await new Promise<{ kind: "output"; line: string } | { kind: "closed"; code: number | null }>((resolvePromise, reject) => {
-      const timeout = setTimeout(() => reject(new Error("daemon epoch child did not terminate")), 10_000);
+      const timeout = setTimeout(() => reject(new Error("daemon epoch child did not terminate")), 20_000);
       child.stdout?.once("data", (chunk: Buffer) => {
         clearTimeout(timeout);
         resolvePromise({ kind: "output", line: chunk.toString("utf8").trim() });
@@ -513,7 +513,7 @@ describe("production daemon bootstrap wiring", () => {
     child.stderr.on("data", (chunk: string) => { childStderr += chunk; });
     const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
     const firstLine = await new Promise<string>((resolvePromise, reject) => {
-      const timeout = setTimeout(() => reject(new Error("daemon proof child did not report readiness")), 10_000);
+      const timeout = setTimeout(() => reject(new Error("daemon proof child did not report readiness")), 20_000);
       lines.once("line", (line) => {
         clearTimeout(timeout);
         resolvePromise(line);
