@@ -53,11 +53,70 @@ function bindingFor(
 }
 
 function rowText(row: PresentedRow, focused: boolean): string {
-  return `${focused ? ">" : " "}${row.selected ? "*" : " "}${row.urgencyMarker.padEnd(2, " ")} ${row.primary} | ${row.secondary} | ${row.freshness} | r${row.revision}`;
+  return `${focused ? ">" : row.selected ? "*" : " "}${row.urgencyMarker.padEnd(2, " ")} ${row.primary} | ${row.secondary} | ${row.freshness} | r${row.revision}`;
 }
 
 function deckRowText(row: PresentedDeckRow, focused: boolean): string {
-  return `${focused ? ">" : " "}  ${row.primary} | ${row.secondary}`;
+  return `${focused ? ">" : " "}${row.urgencyMarker.padEnd(2, " ")} ${row.primary} | ${row.statusLabel} | ${row.secondary}`;
+}
+
+export function compactAttentionRowText(row: PresentedRow, focused: boolean): string {
+  const marker = focused ? ">" : row.selected ? "*" : " ";
+  const [state = "UNAVAILABLE", age = ""] = row.freshness.split(" ");
+  const freshness = state === "LIVE" ? age : `${state} ${age}`.trim();
+  return `${marker}${row.urgencyMarker.padEnd(2, " ")} ${row.primary} ${freshness}`;
+}
+
+function compactDeckText(row: PresentedDeckRow, focused: boolean): string {
+  const phase = row.phase ?? row.state ?? "unknown";
+  const age = row.freshness?.split(" ").at(-1) ?? "";
+  const gutter = row.urgencyMarker.trim() === ""
+    ? focused ? ">  " : ""
+    : `${focused ? ">" : " "}${row.urgencyMarker.padEnd(2, " ")} `;
+  return `${gutter}${row.entityId} ${phase} ${row.statusLabel}${age === "" ? "" : ` ${age}`}`;
+}
+
+function renderCompactRemainder(input: AttentionDeckRenderInput, bounds: Rect): void {
+  const { rows, columns, presentation, dataset, ui, geometryKey, hitRegions } = input;
+  const available = Math.max(0, bounds.y2 - bounds.y1 + 1);
+  const renderedAttention = presentation.needsYouRows.find(({ selected }) => selected) ??
+    presentation.needsYouRows[0];
+  const remainingAttention = presentation.needsYouRows
+    .filter(({ stableId }) => stableId !== renderedAttention?.stableId)
+    .slice(0, Math.max(0, available - 1));
+  let y = bounds.y1;
+  for (const item of remainingAttention) {
+    const id = `row:${item.view}:${item.stableId}`;
+    writeBoundsRow(rows, columns, bounds, y, compactAttentionRowText(item, presentation.focusId === id));
+    hitRegions.push({
+      id,
+      kind: "row",
+      rect: { x1: bounds.x1, y1: y, x2: bounds.x2, y2: y },
+      enabled: true,
+      geometryKey,
+      binding: bindingFor(dataset, item),
+    });
+    y += 1;
+  }
+  const rosterCapacity = Math.max(0, bounds.y2 - y + 1);
+  const coordinationRows = presentation.deckRows.filter(({ kind }) => kind === "coordination");
+  const roster = coordinationRows.length === 0 ? presentation.deckRows : coordinationRows;
+  const maximumOffset = Math.max(0, roster.length - rosterCapacity);
+  const offset = Math.min(maximumOffset, Math.max(0, Math.trunc(ui.deckScrollOffset)));
+  for (const item of roster.slice(offset, offset + rosterCapacity)) {
+    const id = `deck:${item.stableId}`;
+    writeBoundsRow(rows, columns, bounds, y, compactDeckText(item, presentation.focusId === id));
+    hitRegions.push({
+      id,
+      kind: "row",
+      rect: { x1: bounds.x1, y1: y, x2: bounds.x2, y2: y },
+      enabled: true,
+      geometryKey,
+      binding: item.sourceRow === null ? null : bindingFor(dataset, item.sourceRow),
+      scrollMaximum: maximumOffset,
+    });
+    y += 1;
+  }
 }
 
 function renderAttention(input: AttentionDeckRenderInput, bounds: Rect): void {
@@ -184,6 +243,10 @@ function renderRoster(input: AttentionDeckRenderInput, bounds: Rect): void {
 }
 
 export function renderFabricDeckRoster(input: AttentionDeckRenderInput): void {
+  if (input.columns === 30 && input.rows.length === 6) {
+    renderCompactRemainder(input, input.bounds);
+    return;
+  }
   renderRoster(input, input.bounds);
 }
 

@@ -17,7 +17,7 @@ import type {
   PresentedHeader,
   PresentedRow,
 } from "./presenter-model.js";
-import { FABRIC_URGENCY_MARKERS } from "./theme.js";
+import { urgencyMarkerFor } from "./theme.js";
 import { isNeedsYouRow, recordAttentionLane } from "./attention-classification.js";
 export { isNeedsYouRow, isNeedsYouUrgency } from "./attention-classification.js";
 export function titleCase(view: FabricView): string {
@@ -248,7 +248,7 @@ export function presentRow(
     stableId: row.stableId,
     revision: row.revision,
     selected,
-    urgencyMarker: FABRIC_URGENCY_MARKERS[row.urgency],
+    urgencyMarker: urgencyMarkerFor(row.urgency, row.freshness.state),
     primary,
     secondary,
     freshness: freshnessLabel(row.freshness, dataset),

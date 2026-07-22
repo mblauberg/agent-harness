@@ -161,6 +161,8 @@ export type PresentedDeckRow = Readonly<{
   lastEvent: string | null;
   updatedAt: string | null;
   nextMilestone: string | null;
+  urgencyMarker: string;
+  statusLabel: string;
   primary: string;
   secondary: string;
   sourceRow: PresentedRow | null;
