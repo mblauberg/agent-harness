@@ -1,5 +1,5 @@
 import { OPERATION_REGISTRY, FABRIC_OPERATIONS, type FabricOperation } from "./operations.js";
-import { OPERATION_CODECS } from "./operation-codecs.js";
+import { OPERATION_CODECS } from "./operation-codecs/registry.js";
 import {
   parseLaunchAdapterOutcomeV1,
   parseLaunchPacketV1,

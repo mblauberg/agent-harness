@@ -47,7 +47,7 @@ import {
   parseHerdrDaemonProcessConfiguration,
 } from "./herdr-composition.js";
 import { BootstrapElection, FLOCK_ELECTION_LOCK_PORT, type ElectionLockHandle } from "./bootstrap-election.js";
-import { GuardedIdleStopController, type IdleStopResult, type QuiesceToken } from "./global-liveness.js";
+import { GuardedIdleStopController, type IdleStopResult, type QuiesceToken } from "../lifecycle/global-liveness.js";
 import { IdleShutdownScheduler } from "./idle-shutdown-scheduler.js";
 import { ResultDeadlineScheduler } from "./result-deadline-scheduler.js";
 import { finalizeDaemonShutdown } from "./shutdown-finalizer.js";

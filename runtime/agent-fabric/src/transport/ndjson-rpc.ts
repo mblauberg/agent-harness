@@ -9,7 +9,7 @@ import {
   isDaemonResponse,
   type DaemonInitializeResult,
   type DaemonResponse,
-} from "../daemon/protocol.js";
+} from "./daemon-rpc-contract.js";
 import { BoundedNdjsonReader, BoundedNdjsonWriter, FABRIC_PROTOCOL_LIMITS } from "./bounded-ndjson.js";
 
 type Pending = {

@@ -5,7 +5,7 @@ import {
   markDaemonRuntimeRunning,
   readGlobalLiveness,
   recoverDaemonRuntimeEpoch,
-} from "../../../src/daemon/global-liveness.ts";
+} from "../../../src/lifecycle/global-liveness.ts";
 import { createLivenessDatabase, seedProject } from "./liveness-fixture.ts";
 
 const databases: ReturnType<typeof createLivenessDatabase>[] = [];

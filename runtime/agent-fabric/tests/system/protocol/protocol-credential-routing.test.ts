@@ -13,7 +13,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import { openFabric } from "../../../src/index.ts";
-import { operatorOperationsForActions } from "../../../src/daemon/protocol-credentials.ts";
+import { operatorOperationsForActions } from "../../../src/operator/protocol-credentials.ts";
 import type { PublicProtocolContext } from "../../../src/daemon/public-protocol.ts";
 import { OperatorStore } from "../../../src/operator/store.ts";
 import { ROOT_AUTHORITY } from "../../support/stage1-fixture.ts";

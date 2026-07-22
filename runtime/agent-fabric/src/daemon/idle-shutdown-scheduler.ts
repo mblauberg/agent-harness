@@ -1,4 +1,4 @@
-import type { IdleStopResult } from "./global-liveness.js";
+import type { IdleStopResult } from "../lifecycle/global-liveness.js";
 
 export type IdleShutdownReason = "operator-detach" | "attachment-expiry-sweep";
 

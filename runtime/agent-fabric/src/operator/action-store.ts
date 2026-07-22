@@ -26,10 +26,8 @@ import {
   assertGitIntentState,
   assertPromotionIntentGate,
   assertRegisteredExternalEffectContract,
-  parseArtifactRef,
   parseIdentifier,
   parseOperationResult,
-  parseSha256Digest,
   parseTimestamp,
   requiredOperatorActionForIntent,
 } from "@local/agent-fabric-protocol";
@@ -41,17 +39,36 @@ import type {
   LaunchDispatchHandle,
   LaunchInspection,
   ChairRecoveryCurrentState,
-  ChairRecoveryDispatchHandle,
-  ChairRecoveryInspection,
-  ChairRecoveryCommit,
   ChairLiveHandoffCurrentState,
-  ChairLiveHandoffDispatchHandle,
-  ChairLiveHandoffInspection,
-  ChairLiveHandoffCommit,
 } from "../project-session/launch-custody.js";
-import { canonicalJson, integer, isRow, nullableText, row, sha256, text, type Row } from "../project-session/store-support.js";
+import { canonicalJson, integer, isRow, row, sha256, text, type Row } from "../project-session/store-support.js";
 import type { AuthenticatedOperatorCredential, OperatorStore } from "./store.js";
-import type { ProviderActionTicket } from "../application/provider-action-admission.js";
+import {
+  OperatorActionJournal,
+  digestValue,
+  nonLaunchReceipt,
+  parseReceipt,
+  parseRejectedStatus,
+  parseStoredPreview,
+  parseStoredReceipt,
+  statusFromAction,
+  type StoredPendingAction,
+  type StoredPreviewEnvelope,
+} from "./action-journal.js";
+import {
+  OperatorLifecycleActionAdapter,
+  type OperatorLifecycleRecoveryCurrentState,
+  type OperatorLifecycleRecoveryCustodyPort,
+  validateLifecycleRecoveryCurrentState,
+} from "../lifecycle/operator-actions.js";
+import {
+  OperatorChairLiveHandoffActionAdapter,
+  type OperatorChairLiveHandoffCustodyPort,
+} from "./chair-live-handoff-actions.js";
+import {
+  OperatorChairRecoveryActionAdapter,
+  type OperatorChairRecoveryCustodyPort,
+} from "./chair-recovery-actions.js";
 
 export type OperatorActionCurrentState =
   | {
@@ -152,124 +169,16 @@ export interface OperatorLaunchCustodyPort {
   ): McpSeatProvisioningDescriptorV1;
 }
 
-export interface OperatorChairRecoveryCustodyPort {
-  readChairRecoveryCurrentState(intent: Extract<OperatorActionIntent, { kind: "chair-bridge-recovery" }>): Promise<ChairRecoveryCurrentState>;
-  inspectChairRecovery(intent: Extract<OperatorActionIntent, { kind: "chair-bridge-recovery" }>): Promise<ChairRecoveryInspection>;
-  preflightChairRecovery(input: Readonly<{
-    inspection: ChairRecoveryInspection;
-    principal: AuthenticatedOperatorContext;
-  }>): ProviderActionTicket | null;
-  prepareChairRecoveryInTransaction(input: Readonly<{
-    inspection: ChairRecoveryInspection;
-    operatorId: string;
-    operatorCommandId: string;
-    providerActionTicket: ProviderActionTicket | null;
-  }>): ChairRecoveryDispatchHandle;
-  dispatchPreparedChairRecovery(handle: ChairRecoveryDispatchHandle): Promise<ChairRecoveryCommit>;
-  chairRecoveryStatus(operatorId: string, operatorCommandId: string): ChairRecoveryCommit;
-  reconcileChairRecovery(operatorId: string, operatorCommandId: string): Promise<ChairRecoveryCommit>;
-  releaseProviderActionPreflightAfterRollback?(ticket: ProviderActionTicket, failure: unknown): void;
-}
-
-export interface OperatorChairLiveHandoffCustodyPort {
-  readChairLiveHandoffCurrentState(intent: Extract<OperatorActionIntent, { kind: "chair-live-handoff" }>): Promise<ChairLiveHandoffCurrentState>;
-  inspectChairLiveHandoff(intent: Extract<OperatorActionIntent, { kind: "chair-live-handoff" }>): Promise<ChairLiveHandoffInspection>;
-  preflightChairLiveHandoff(input: Readonly<{
-    inspection: ChairLiveHandoffInspection;
-    operatorCommandId: string;
-    principal: AuthenticatedOperatorContext;
-  }>): ProviderActionTicket;
-  prepareChairLiveHandoffInTransaction(input: Readonly<{
-    inspection: ChairLiveHandoffInspection;
-    operatorId: string;
-    operatorCommandId: string;
-    providerActionTicket: ProviderActionTicket;
-  }>): ChairLiveHandoffDispatchHandle;
-  dispatchPreparedChairLiveHandoff(handle: ChairLiveHandoffDispatchHandle): Promise<ChairLiveHandoffCommit>;
-  chairLiveHandoffStatus(operatorId: string, operatorCommandId: string): ChairLiveHandoffCommit;
-  reconcileChairLiveHandoff(operatorId: string, operatorCommandId: string): Promise<ChairLiveHandoffCommit>;
-  releaseProviderActionPreflightAfterRollback?(ticket: ProviderActionTicket, failure: unknown): void;
-}
-
-function prepareProviderActionAfterPreflight<T>(
-  prepare: () => T,
-  custody: Readonly<{
-    releaseProviderActionPreflightAfterRollback?(ticket: ProviderActionTicket, failure: unknown): void;
-  }>,
-  ticket: ProviderActionTicket,
-): T {
-  try {
-    return prepare();
-  } catch (error: unknown) {
-    try {
-      custody.releaseProviderActionPreflightAfterRollback?.(ticket, error);
-    } catch {
-      // Preserve the original preparation error if release races or fails.
-    }
-    throw error;
-  }
-}
-
 type LifecycleRecoveryIntent = Extract<OperatorActionIntent, { kind: "agent-lifecycle-recovery" }>;
 
-export type OperatorLifecycleRecoveryCurrentState = Readonly<{
-  revision: number;
-  projectSessionId: string;
-  coordinationRunId: string;
-  agentId: string;
-  sessionRevision: number;
-  sessionGeneration: number;
-  runRevision: number;
-  agentRevision: number;
-  source: LifecycleRecoveryIntent["source"];
-  sourceRevision: number;
-  principalGeneration: number;
-  providerGeneration: number;
-  bridgeGeneration: number;
-  contextRevision: number;
-  bridgeOwnerKind: LifecycleRecoveryIntent["bridgeOwnerKind"];
-  chairLeaseGeneration: number | null;
-  gate: Readonly<{ gateId: string; revision: number; status: "approved" }>;
-  recoveryCapability: Readonly<{
-    capabilityId: string;
-    revision: number;
-    capabilityHash: string;
-  }> | null;
-  checkpoint: Readonly<{
-    ref: Extract<LifecycleRecoveryIntent, { path: "fresh-rotate" }>["checkpointRef"];
-    digest: string;
-    validationReceiptDigest: string | null;
-  }> | null;
-}>;
-
-export type OperatorLifecycleRecoveryInspection = Readonly<{
-  intent: LifecycleRecoveryIntent;
-  inspectionDigest: Sha256Digest;
-}>;
-
-export type OperatorLifecycleRecoveryCommit = Readonly<{
-  status: "committed" | "ambiguous" | "pending" | "no-effect";
-  recoveryId: string;
-  path: LifecycleRecoveryIntent["path"];
-  evidenceDigest: Sha256Digest;
-}>;
-
-export interface OperatorLifecycleRecoveryCustodyPort {
-  readLifecycleRecoveryCurrentState(intent: LifecycleRecoveryIntent): Promise<OperatorLifecycleRecoveryCurrentState>;
-  inspectLifecycleRecovery(intent: LifecycleRecoveryIntent): Promise<OperatorLifecycleRecoveryInspection>;
-  prepareLifecycleFreshRotateInTransaction(input: Readonly<{
-    inspection: OperatorLifecycleRecoveryInspection;
-    operatorId: string;
-    operatorCommandId: string;
-  }>): OperatorLifecycleRecoveryCommit;
-  prepareLifecycleAbandonInTransaction(input: Readonly<{
-    inspection: OperatorLifecycleRecoveryInspection;
-    operatorId: string;
-    operatorCommandId: string;
-  }>): OperatorLifecycleRecoveryCommit;
-  lifecycleRecoveryStatus(operatorId: string, operatorCommandId: string): OperatorLifecycleRecoveryCommit;
-  reconcileLifecycleRecovery(operatorId: string, operatorCommandId: string): Promise<OperatorLifecycleRecoveryCommit>;
-}
+export type {
+  OperatorLifecycleRecoveryCommit,
+  OperatorLifecycleRecoveryCurrentState,
+  OperatorLifecycleRecoveryCustodyPort,
+  OperatorLifecycleRecoveryInspection,
+} from "../lifecycle/operator-actions.js";
+export type { OperatorChairLiveHandoffCustodyPort } from "./chair-live-handoff-actions.js";
+export type { OperatorChairRecoveryCustodyPort } from "./chair-recovery-actions.js";
 
 export type OperatorActionStoreOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
@@ -288,11 +197,12 @@ export class OperatorActionStore {
   readonly #statePort: OperatorActionStatePort;
   readonly #effectPort: OperatorActionEffectPort;
   readonly #launchCustody: OperatorLaunchCustodyPort | undefined;
-  readonly #chairRecoveryCustody: OperatorChairRecoveryCustodyPort | undefined;
-  readonly #chairLiveHandoffCustody: OperatorChairLiveHandoffCustodyPort | undefined;
-  readonly #lifecycleRecoveryCustody: OperatorLifecycleRecoveryCustodyPort | undefined;
+  readonly #chairRecoveryAdapter: OperatorChairRecoveryActionAdapter | undefined;
+  readonly #chairLiveHandoffAdapter: OperatorChairLiveHandoffActionAdapter | undefined;
+  readonly #lifecycleAdapter: OperatorLifecycleActionAdapter | undefined;
   readonly #clock: () => number;
   readonly #previewTtlMs: number;
+  readonly #journal: OperatorActionJournal;
   readonly #inFlightCommits = new Map<string, { payloadHash: string; promise: Promise<OperatorActionReceipt> }>();
 
   constructor(options: OperatorActionStoreOptions) {
@@ -301,14 +211,33 @@ export class OperatorActionStore {
     this.#statePort = options.statePort;
     this.#effectPort = options.effectPort;
     this.#launchCustody = options.launchCustody;
-    this.#chairRecoveryCustody = options.chairRecoveryCustody;
-    this.#chairLiveHandoffCustody = options.chairLiveHandoffCustody;
-    this.#lifecycleRecoveryCustody = options.lifecycleRecoveryCustody;
     this.#clock = options.clock ?? Date.now;
     this.#previewTtlMs = options.previewTtlMs ?? 5 * 60_000;
     if (!Number.isSafeInteger(this.#previewTtlMs) || this.#previewTtlMs < 1) {
       throw new TypeError("operator preview TTL must be a positive safe integer");
     }
+    this.#journal = new OperatorActionJournal(this.#database, this.#clock);
+    this.#lifecycleAdapter = options.lifecycleRecoveryCustody === undefined ? undefined : new OperatorLifecycleActionAdapter({
+      database: this.#database,
+      journal: this.#journal,
+      custody: options.lifecycleRecoveryCustody,
+      clock: this.#clock,
+      actionSessionId,
+    });
+    this.#chairLiveHandoffAdapter = options.chairLiveHandoffCustody === undefined ? undefined : new OperatorChairLiveHandoffActionAdapter({
+      database: this.#database,
+      journal: this.#journal,
+      custody: options.chairLiveHandoffCustody,
+      clock: this.#clock,
+      actionSessionId,
+    });
+    this.#chairRecoveryAdapter = options.chairRecoveryCustody === undefined ? undefined : new OperatorChairRecoveryActionAdapter({
+      database: this.#database,
+      journal: this.#journal,
+      custody: options.chairRecoveryCustody,
+      clock: this.#clock,
+      actionSessionId,
+    });
   }
 
   replayLaunchPreview(
@@ -423,13 +352,13 @@ export class OperatorActionStore {
     context: AuthenticatedOperatorContext,
     request: OperatorActionCommitRequest,
   ): Promise<OperatorActionReceipt> {
-    const stored = this.#previewRow(request.previewId);
+    const stored = this.#journal.previewRow(request.previewId);
     if (text(stored, "operator_id") !== context.operatorId) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator preview belongs to another operator");
     }
     const envelope = parseStoredPreview(text(stored, "preview_json"));
     const authenticated = this.#authenticateCommand(context, request.command, request.projectId, envelope.preview.intent);
-    this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
+    this.#journal.assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent, actionSessionId);
     const payloadHash = sha256(canonicalJson(sanitisedCommitRequest(request)));
     const inFlightKey = `${context.operatorId}:${request.command.commandId}`;
     const inFlight = this.#inFlightCommits.get(inFlightKey);
@@ -456,9 +385,9 @@ export class OperatorActionStore {
     authenticated: AuthenticatedOperatorCredential,
     payloadHash: string,
   ): Promise<OperatorActionReceipt> {
-    const replay = this.#commandReplay(context.operatorId, request.command.commandId, payloadHash);
+    const replay = this.#journal.commandReplay(context.operatorId, request.command.commandId, payloadHash);
     if (replay !== null) return replay;
-    this.#assertPreviewClaim(stored, request.command.commandId);
+    this.#journal.assertPreviewClaim(stored, request.command.commandId);
     try {
       assertCommitMatchesPreview(request, envelope.preview, integer(stored, "revision"), this.#clock());
     } catch (error: unknown) {
@@ -466,9 +395,9 @@ export class OperatorActionStore {
         ? "preview-expired"
         : "preview-stale";
       if (code === "preview-expired" && envelope.preview.intent.kind === "project-session-launch") {
-        this.#recordRetryableLaunchExpiry(request, envelope);
+        this.#journal.recordRetryableLaunchExpiry(request, envelope);
       } else {
-        this.#recordRejected(context, request, stored, envelope, payloadHash, code);
+        this.#journal.recordRejected(context, request, stored, envelope, payloadHash, code, this.#journal.commandReplay.bind(this.#journal));
       }
       throw error;
     }
@@ -476,25 +405,27 @@ export class OperatorActionStore {
     try {
       validateCurrentState(envelope.preview.intent, request.command.expectedRevision, current);
     } catch (error: unknown) {
-      this.#recordRejected(
+      this.#journal.recordRejected(
         context,
         request,
         stored,
         envelope,
         payloadHash,
         rejectionForIntent(envelope.preview.intent),
+        this.#journal.commandReplay.bind(this.#journal),
       );
       throw error;
     }
     const currentDigest = digestValue(current, "operatorActionCommit.currentStateDigest");
     if (currentDigest !== envelope.preview.beforeStateDigest) {
-      this.#recordRejected(
+      this.#journal.recordRejected(
         context,
         request,
         stored,
         envelope,
         payloadHash,
         "state-changed",
+        this.#journal.commandReplay.bind(this.#journal),
       );
       throw new ProjectFabricCoreError("STALE_REVISION", "operator action state changed after preview");
     }
@@ -579,14 +510,14 @@ export class OperatorActionStore {
       operatorInputRecordDigest: preparedState.operatorInputRecordDigest,
     };
     const prepare = this.#database.transaction((): OperatorActionReceipt | null => {
-      const concurrentReplay = this.#commandReplay(
+      const concurrentReplay = this.#journal.commandReplay(
         context.operatorId,
         request.command.commandId,
         payloadHash,
       );
       if (concurrentReplay !== null) return concurrentReplay;
-      const latest = this.#previewRow(request.previewId);
-      this.#assertPreviewClaim(latest, request.command.commandId);
+      const latest = this.#journal.previewRow(request.previewId);
+      this.#journal.assertPreviewClaim(latest, request.command.commandId);
       this.#database.prepare(`
         UPDATE operator_previews SET preview_json=?, confirmed_command_id=? WHERE preview_id=?
       `).run(
@@ -594,7 +525,7 @@ export class OperatorActionStore {
         request.command.commandId,
         request.previewId,
       );
-      this.#insertCommand(
+      this.#journal.insertCommand(
         context,
         request.command,
         request.projectId,
@@ -618,7 +549,7 @@ export class OperatorActionStore {
     } catch {
       return preparedReceipt;
     }
-    return this.#applyEffectOutcome(
+    return this.#journal.applyEffectOutcome(
       context.operatorId,
       request.command.commandId,
       envelope.preview,
@@ -661,10 +592,10 @@ export class OperatorActionStore {
     const prepare = this.#database.transaction(():
       | { kind: "replay"; receipt: OperatorActionReceipt }
       | { kind: "prepared"; receipt: OperatorActionReceipt; handle: LaunchDispatchHandle } => {
-      const concurrentReplay = this.#commandReplay(context.operatorId, request.command.commandId, payloadHash);
+      const concurrentReplay = this.#journal.commandReplay(context.operatorId, request.command.commandId, payloadHash);
       if (concurrentReplay !== null) return { kind: "replay", receipt: concurrentReplay };
-      const latest = this.#previewRow(request.previewId);
-      this.#assertPreviewClaim(latest, request.command.commandId);
+      const latest = this.#journal.previewRow(request.previewId);
+      this.#journal.assertPreviewClaim(latest, request.command.commandId);
       this.#database.prepare(`
         UPDATE operator_previews SET preview_json=?, confirmed_command_id=? WHERE preview_id=?
       `).run(
@@ -672,7 +603,7 @@ export class OperatorActionStore {
         request.command.commandId,
         request.previewId,
       );
-      this.#insertCommand(
+      this.#journal.insertCommand(
         context,
         request.command,
         request.projectId,
@@ -735,97 +666,10 @@ export class OperatorActionStore {
     payloadHash: string,
     current: OperatorActionCurrentState,
   ): Promise<OperatorActionReceipt> {
-    const custody = this.#chairRecoveryCustody;
-    if (custody === undefined) {
+    if (this.#chairRecoveryAdapter === undefined) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair recovery custody runtime is unavailable");
     }
-    const inspection = await custody.inspectChairRecovery(intent);
-    const providerActionTicket = custody.preflightChairRecovery({ inspection, principal: context });
-    const provisionalState = {
-      status: "pending" as const,
-      commandId: request.command.commandId,
-      phase: "prepared" as const,
-      attemptGeneration: 1,
-    };
-    const provisionalReceipt: OperatorActionReceipt = {
-      commandId: request.command.commandId,
-      previewId: envelope.preview.previewId,
-      previewRevision: envelope.preview.previewRevision,
-      intentDigest: envelope.preview.intentDigest,
-      beforeStateDigest: envelope.preview.beforeStateDigest,
-      afterStateDigest: digestValue(provisionalState, "operatorChairRecoveryCommit.provisionalStateDigest"),
-      evidenceRefs: envelope.preview.evidenceRefs,
-      committedAt: toTimestamp(this.#clock(), "operatorChairRecoveryCommit.committedAt"),
-    };
-    const prepare = this.#database.transaction(():
-      | { kind: "replay"; receipt: OperatorActionReceipt }
-      | { kind: "prepared"; handle: ChairRecoveryDispatchHandle } => {
-      const concurrentReplay = this.#commandReplay(context.operatorId, request.command.commandId, payloadHash);
-      if (concurrentReplay !== null) return { kind: "replay", receipt: concurrentReplay };
-      const latest = this.#previewRow(request.previewId);
-      this.#assertPreviewClaim(latest, request.command.commandId);
-      this.#database.prepare(`
-        UPDATE operator_previews SET preview_json=?, confirmed_command_id=? WHERE preview_id=?
-      `).run(
-        canonicalJson({ preview: envelope.preview, action: { ...provisionalState, receipt: provisionalReceipt } }),
-        request.command.commandId,
-        request.previewId,
-      );
-      this.#insertCommand(
-        context,
-        request.command,
-        request.projectId,
-        actionSessionId(authenticated, intent),
-        "takeover",
-        payloadHash,
-        current,
-        provisionalState,
-        provisionalReceipt,
-        "committed",
-      );
-      return {
-        kind: "prepared",
-        handle: custody.prepareChairRecoveryInTransaction({
-          inspection,
-          operatorId: context.operatorId,
-          operatorCommandId: request.command.commandId,
-          providerActionTicket,
-        }),
-      };
-    });
-    const prepared = providerActionTicket === null
-      ? prepare.immediate()
-      : prepareProviderActionAfterPreflight(() => prepare.immediate(), custody, providerActionTicket);
-    if (prepared.kind === "replay") return prepared.receipt;
-    let outcome: ChairRecoveryCommit;
-    try {
-      outcome = await custody.dispatchPreparedChairRecovery(prepared.handle);
-    } catch {
-      return provisionalReceipt;
-    }
-    if (outcome.status !== "committed") return provisionalReceipt;
-    const receipt: OperatorActionReceipt = {
-      ...provisionalReceipt,
-      afterStateDigest: digestValue(outcome, "operatorChairRecoveryCommit.afterStateDigest"),
-    };
-    const terminal: StoredTerminalAction = {
-      status: "terminal",
-      commandId: request.command.commandId,
-      receipt,
-    };
-    this.#database.transaction(() => {
-      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, terminal);
-      this.#database.prepare(`
-        UPDATE operator_commands SET result_json=?, after_json=?
-         WHERE operator_id=? AND command_id=? AND status='committed'
-      `).run(
-        canonicalJson(receipt),
-        canonicalJson(outcome),
-        context.operatorId,
-        request.command.commandId,
-      );
-    })();
-    return receipt;
+    return this.#chairRecoveryAdapter.commit(context, request, envelope, intent, authenticated, payloadHash, current);
   }
 
   async #commitChairLiveHandoff(
@@ -837,99 +681,10 @@ export class OperatorActionStore {
     payloadHash: string,
     current: OperatorActionCurrentState,
   ): Promise<OperatorActionReceipt> {
-    const custody = this.#chairLiveHandoffCustody;
-    if (custody === undefined) {
+    if (this.#chairLiveHandoffAdapter === undefined) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair live handoff custody runtime is unavailable");
     }
-    const inspection = await custody.inspectChairLiveHandoff(intent);
-    const providerActionTicket = custody.preflightChairLiveHandoff({
-      inspection,
-      operatorCommandId: request.command.commandId,
-      principal: context,
-    });
-    const provisionalState = {
-      status: "pending" as const,
-      commandId: request.command.commandId,
-      phase: "prepared" as const,
-      attemptGeneration: 1,
-    };
-    const provisionalReceipt: OperatorActionReceipt = {
-      commandId: request.command.commandId,
-      previewId: envelope.preview.previewId,
-      previewRevision: envelope.preview.previewRevision,
-      intentDigest: envelope.preview.intentDigest,
-      beforeStateDigest: envelope.preview.beforeStateDigest,
-      afterStateDigest: digestValue(provisionalState, "operatorChairLiveHandoffCommit.provisionalStateDigest"),
-      evidenceRefs: envelope.preview.evidenceRefs,
-      committedAt: toTimestamp(this.#clock(), "operatorChairLiveHandoffCommit.committedAt"),
-    };
-    const prepare = this.#database.transaction(():
-      | { kind: "replay"; receipt: OperatorActionReceipt }
-      | { kind: "prepared"; handle: ChairLiveHandoffDispatchHandle } => {
-      const concurrentReplay = this.#commandReplay(context.operatorId, request.command.commandId, payloadHash);
-      if (concurrentReplay !== null) return { kind: "replay", receipt: concurrentReplay };
-      const latest = this.#previewRow(request.previewId);
-      this.#assertPreviewClaim(latest, request.command.commandId);
-      this.#database.prepare(`
-        UPDATE operator_previews SET preview_json=?, confirmed_command_id=? WHERE preview_id=?
-      `).run(
-        canonicalJson({ preview: envelope.preview, action: { ...provisionalState, receipt: provisionalReceipt } }),
-        request.command.commandId,
-        request.previewId,
-      );
-      this.#insertCommand(
-        context,
-        request.command,
-        request.projectId,
-        actionSessionId(authenticated, intent),
-        "takeover",
-        payloadHash,
-        current,
-        provisionalState,
-        provisionalReceipt,
-        "committed",
-      );
-      return {
-        kind: "prepared",
-        handle: custody.prepareChairLiveHandoffInTransaction({
-          inspection,
-          operatorId: context.operatorId,
-          operatorCommandId: request.command.commandId,
-          providerActionTicket,
-        }),
-      };
-    });
-    const prepared = prepareProviderActionAfterPreflight(() => prepare.immediate(), custody, providerActionTicket);
-    if (prepared.kind === "replay") return prepared.receipt;
-    let outcome: ChairLiveHandoffCommit;
-    try {
-      outcome = await custody.dispatchPreparedChairLiveHandoff(prepared.handle);
-    } catch {
-      return provisionalReceipt;
-    }
-    if (outcome.status !== "committed") return provisionalReceipt;
-    const receipt: OperatorActionReceipt = {
-      ...provisionalReceipt,
-      afterStateDigest: digestValue(outcome, "operatorChairLiveHandoffCommit.afterStateDigest"),
-    };
-    const terminal: StoredTerminalAction = {
-      status: "terminal",
-      commandId: request.command.commandId,
-      receipt,
-    };
-    this.#database.transaction(() => {
-      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, terminal);
-      this.#database.prepare(`
-        UPDATE operator_commands SET result_json=?, after_json=?
-         WHERE operator_id=? AND command_id=? AND status='committed'
-      `).run(
-        canonicalJson(receipt),
-        canonicalJson(outcome),
-        context.operatorId,
-        request.command.commandId,
-      );
-    })();
-    return receipt;
+    return this.#chairLiveHandoffAdapter.commit(context, request, envelope, intent, authenticated, payloadHash, current);
   }
 
   async #commitLifecycleRecovery(
@@ -941,79 +696,10 @@ export class OperatorActionStore {
     payloadHash: string,
     current: OperatorActionCurrentState,
   ): Promise<OperatorActionReceipt> {
-    const custody = this.#lifecycleRecoveryCustody;
-    if (custody === undefined) {
+    if (this.#lifecycleAdapter === undefined) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "lifecycle recovery custody runtime is unavailable");
     }
-    const inspection = await custody.inspectLifecycleRecovery(intent);
-    if (canonicalJson(inspection.intent) !== canonicalJson(intent)) {
-      throw new ProjectFabricCoreError("STALE_REVISION", "lifecycle recovery inspection crossed its intent");
-    }
-    const provisionalState = {
-      status: "pending" as const,
-      commandId: request.command.commandId,
-      phase: "prepared" as const,
-      attemptGeneration: 1,
-    };
-    const provisionalReceipt: OperatorActionReceipt = {
-      commandId: request.command.commandId,
-      previewId: envelope.preview.previewId,
-      previewRevision: envelope.preview.previewRevision,
-      intentDigest: envelope.preview.intentDigest,
-      beforeStateDigest: envelope.preview.beforeStateDigest,
-      afterStateDigest: digestValue(provisionalState, "operatorLifecycleRecoveryCommit.provisionalStateDigest"),
-      evidenceRefs: envelope.preview.evidenceRefs,
-      committedAt: toTimestamp(this.#clock(), "operatorLifecycleRecoveryCommit.committedAt"),
-    };
-    const prepare = this.#database.transaction(():
-      | { kind: "replay"; receipt: OperatorActionReceipt }
-      | { kind: "prepared"; receipt: OperatorActionReceipt } => {
-      const concurrentReplay = this.#commandReplay(context.operatorId, request.command.commandId, payloadHash);
-      if (concurrentReplay !== null) return { kind: "replay", receipt: concurrentReplay };
-      const latest = this.#previewRow(request.previewId);
-      this.#assertPreviewClaim(latest, request.command.commandId);
-      const outcome = intent.path === "fresh-rotate"
-        ? custody.prepareLifecycleFreshRotateInTransaction({
-            inspection,
-            operatorId: context.operatorId,
-            operatorCommandId: request.command.commandId,
-          })
-        : custody.prepareLifecycleAbandonInTransaction({
-            inspection,
-            operatorId: context.operatorId,
-            operatorCommandId: request.command.commandId,
-          });
-      const receipt: OperatorActionReceipt = outcome.status === "committed"
-        ? {
-            ...provisionalReceipt,
-            afterStateDigest: digestValue(outcome, "operatorLifecycleRecoveryCommit.afterStateDigest"),
-          }
-        : provisionalReceipt;
-      const action: StoredAction = outcome.status === "committed"
-        ? { status: "terminal", commandId: request.command.commandId, receipt }
-        : { ...provisionalState, receipt };
-      this.#database.prepare(`
-        UPDATE operator_previews SET preview_json=?, confirmed_command_id=? WHERE preview_id=?
-      `).run(
-        canonicalJson({ preview: envelope.preview, action }),
-        request.command.commandId,
-        request.previewId,
-      );
-      this.#insertCommand(
-        context,
-        request.command,
-        request.projectId,
-        actionSessionId(authenticated, intent),
-        requiredOperatorActionForIntent(intent),
-        payloadHash,
-        current,
-        outcome,
-        receipt,
-        "committed",
-      );
-      return { kind: "prepared", receipt };
-    });
-    return prepare.immediate().receipt;
+    return this.#lifecycleAdapter.commit(context, request, envelope, intent, authenticated, payloadHash, current);
   }
 
   status(request: OperatorActionStatusRequest): OperatorActionStatus {
@@ -1103,37 +789,10 @@ export class OperatorActionStore {
     commandId: string,
     envelope: StoredPreviewEnvelope,
   ): OperatorActionStatus {
-    const custody = this.#chairRecoveryCustody;
-    if (custody === undefined || envelope.action === null) {
+    if (this.#chairRecoveryAdapter === undefined) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair recovery custody runtime is unavailable");
     }
-    const observed = custody.chairRecoveryStatus(operatorId, commandId);
-    if (observed.status === "committed") {
-      const receipt: OperatorActionReceipt = {
-        ...parseStoredReceipt(envelope.action),
-        afterStateDigest: digestValue(observed, "operatorChairRecoveryStatus.afterStateDigest"),
-      };
-      return { status: "committed", commandId, receipt: nonLaunchReceipt(receipt) };
-    }
-    if (observed.status === "no-effect") {
-      return {
-        status: "rejected",
-        commandId,
-        intentDigest: envelope.preview.intentDigest,
-        code: "state-changed",
-        evidenceRefs: [],
-      };
-    }
-    const attemptGeneration = envelope.action.status === "pending" || envelope.action.status === "ambiguous"
-      ? envelope.action.attemptGeneration
-      : 1;
-    return {
-      status: "pending",
-      commandId,
-      intentDigest: envelope.preview.intentDigest,
-      phase: observed.status === "ambiguous" ? "observing" : "prepared",
-      attemptGeneration,
-    };
+    return this.#chairRecoveryAdapter.status(operatorId, commandId, envelope);
   }
 
   #chairLiveHandoffStatus(
@@ -1141,47 +800,10 @@ export class OperatorActionStore {
     commandId: string,
     envelope: StoredPreviewEnvelope,
   ): OperatorActionStatus {
-    const custody = this.#chairLiveHandoffCustody;
-    if (custody === undefined || envelope.action === null) {
+    if (this.#chairLiveHandoffAdapter === undefined) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair live handoff custody runtime is unavailable");
     }
-    const observed = custody.chairLiveHandoffStatus(operatorId, commandId);
-    if (observed.status === "committed") {
-      const receipt: OperatorActionReceipt = {
-        ...parseStoredReceipt(envelope.action),
-        afterStateDigest: digestValue(observed, "operatorChairLiveHandoffStatus.afterStateDigest"),
-      };
-      return { status: "committed", commandId, receipt: nonLaunchReceipt(receipt) };
-    }
-    if (observed.status === "no-effect") {
-      return {
-        status: "rejected",
-        commandId,
-        intentDigest: envelope.preview.intentDigest,
-        code: "state-changed",
-        evidenceRefs: [],
-      };
-    }
-    const attemptGeneration = envelope.action.status === "pending" || envelope.action.status === "ambiguous"
-      ? envelope.action.attemptGeneration
-      : 1;
-    if (observed.status === "ambiguous") {
-      if (envelope.preview.intent.kind !== "chair-live-handoff") throw new Error("chair live handoff preview changed");
-      return {
-        status: "ambiguous",
-        commandId,
-        intentDigest: envelope.preview.intentDigest,
-        attemptGeneration,
-        effectRef: envelope.preview.intent.handoffRef,
-      };
-    }
-    return {
-      status: "pending",
-      commandId,
-      intentDigest: envelope.preview.intentDigest,
-      phase: "observing",
-      attemptGeneration,
-    };
+    return this.#chairLiveHandoffAdapter.status(operatorId, commandId, envelope);
   }
 
   #lifecycleRecoveryStatus(
@@ -1189,15 +811,10 @@ export class OperatorActionStore {
     commandId: string,
     envelope: StoredPreviewEnvelope,
   ): OperatorActionStatus {
-    const custody = this.#lifecycleRecoveryCustody;
-    if (custody === undefined || envelope.action === null) {
+    if (this.#lifecycleAdapter === undefined) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "lifecycle recovery custody runtime is unavailable");
     }
-    return lifecycleRecoveryStatusResult(
-      custody.lifecycleRecoveryStatus(operatorId, commandId),
-      commandId,
-      envelope,
-    );
+    return this.#lifecycleAdapter.status(operatorId, commandId, envelope);
   }
 
   #launchStatus(
@@ -1283,9 +900,9 @@ export class OperatorActionStore {
       return await this.#reconcileGitConflict(context, request, stored, envelope);
     }
     const authenticated = this.#authenticateCommand(context, request.command, request.projectId, envelope.preview.intent);
-    this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
+    this.#journal.assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent, actionSessionId);
     const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));
-    const replay = this.#reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
+    const replay = this.#journal.reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
     if (replay !== null) return replay;
     if (request.command.commandId === request.targetCommandId) {
       throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "reconciliation requires a distinct command ID");
@@ -1314,13 +931,13 @@ export class OperatorActionStore {
     };
     const observingStatus = statusFromAction(observing, envelope.preview.intentDigest);
     const prepare = this.#database.transaction((): OperatorActionStatus | null => {
-      const concurrentReplay = this.#reconcileReplay(
+      const concurrentReplay = this.#journal.reconcileReplay(
         context.operatorId,
         request.command.commandId,
         payloadHash,
       );
       if (concurrentReplay !== null) return concurrentReplay;
-      const latestEnvelope = parseStoredPreview(text(this.#previewRow(envelope.preview.previewId), "preview_json"));
+      const latestEnvelope = parseStoredPreview(text(this.#journal.previewRow(envelope.preview.previewId), "preview_json"));
       const latestAction = latestEnvelope.action;
       if (
         latestAction === null ||
@@ -1329,8 +946,8 @@ export class OperatorActionStore {
       ) {
         throw new ProjectFabricCoreError("STALE_REVISION", "operator action reconciliation target changed");
       }
-      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, observing);
-      this.#insertCommand(
+      this.#journal.updateStoredAction(envelope.preview.previewId, envelope.preview, observing);
+      this.#journal.insertCommand(
         context,
         request.command,
         request.projectId,
@@ -1367,7 +984,7 @@ export class OperatorActionStore {
       return observingStatus;
     }
     try {
-      this.#applyEffectOutcome(
+      this.#journal.applyEffectOutcome(
         context.operatorId,
         request.targetCommandId,
         envelope.preview,
@@ -1381,7 +998,7 @@ export class OperatorActionStore {
         projectId: request.projectId,
         commandId: request.targetCommandId,
       });
-      this.#updateReconcileCommand(context.operatorId, request.command.commandId, rejected);
+      this.#journal.updateReconcileCommand(context.operatorId, request.command.commandId, rejected);
       throw error;
     }
     const result = this.status({
@@ -1389,7 +1006,7 @@ export class OperatorActionStore {
       projectId: request.projectId,
       commandId: request.targetCommandId,
     });
-    this.#updateReconcileCommand(context.operatorId, request.command.commandId, result);
+    this.#journal.updateReconcileCommand(context.operatorId, request.command.commandId, result);
     return result;
   }
 
@@ -1414,9 +1031,9 @@ export class OperatorActionStore {
       envelope.preview.intent,
       "git-custody-resolve",
     );
-    this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
+    this.#journal.assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent, actionSessionId);
     const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));
-    const replay = this.#reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
+    const replay = this.#journal.reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
     if (replay !== null) return replay;
     if (
       status.status !== request.expectedStatus ||
@@ -1446,15 +1063,15 @@ export class OperatorActionStore {
     };
     const observingStatus = statusFromAction(observing, envelope.preview.intentDigest);
     this.#database.transaction(() => {
-      const concurrentReplay = this.#reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
+      const concurrentReplay = this.#journal.reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
       if (concurrentReplay !== null) return;
       const latest = this.#effectPort.status?.(request.targetCommandId, envelope.preview.intentDigest);
       if (
         latest === undefined || latest === null || latest.status !== request.expectedStatus ||
         !("attemptGeneration" in latest) || latest.attemptGeneration !== request.expectedAttemptGeneration
       ) throw new ProjectFabricCoreError("STALE_REVISION", "typed Git reconciliation target changed");
-      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, observing);
-      this.#insertCommand(
+      this.#journal.updateStoredAction(envelope.preview.previewId, envelope.preview, observing);
+      this.#journal.insertCommand(
         context,
         request.command,
         request.projectId,
@@ -1484,12 +1101,12 @@ export class OperatorActionStore {
           code: error.code === "STALE_GENERATION" ? "generation-stale" : "state-changed",
           evidenceRefs: envelope.preview.evidenceRefs,
         };
-        this.#updateReconcileCommand(context.operatorId, request.command.commandId, rejected);
+        this.#journal.updateReconcileCommand(context.operatorId, request.command.commandId, rejected);
         return rejected;
       }
       return observingStatus;
     }
-    this.#updateReconcileCommand(context.operatorId, request.command.commandId, result);
+    this.#journal.updateReconcileCommand(context.operatorId, request.command.commandId, result);
     return result;
   }
 
@@ -1499,9 +1116,8 @@ export class OperatorActionStore {
     stored: Row,
     envelope: StoredPreviewEnvelope,
   ): Promise<OperatorActionStatus> {
-    const custody = this.#lifecycleRecoveryCustody;
     if (
-      custody === undefined ||
+      this.#lifecycleAdapter === undefined ||
       envelope.action === null ||
       envelope.preview.intent.kind !== "agent-lifecycle-recovery"
     ) {
@@ -1513,75 +1129,8 @@ export class OperatorActionStore {
       request.projectId,
       envelope.preview.intent,
     );
-    this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
     const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));
-    const replay = this.#reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
-    if (replay !== null) return replay;
-    if (request.command.commandId === request.targetCommandId) {
-      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "reconciliation requires a distinct command ID");
-    }
-    const currentStatus = this.#lifecycleRecoveryStatus(
-      context.operatorId,
-      request.targetCommandId,
-      envelope,
-    );
-    if (
-      currentStatus.status !== request.expectedStatus ||
-      (currentStatus.status === "pending" || currentStatus.status === "ambiguous") &&
-        currentStatus.attemptGeneration !== request.expectedAttemptGeneration
-    ) {
-      throw new ProjectFabricCoreError("STALE_REVISION", "lifecycle recovery reconciliation target changed");
-    }
-    const observed = await custody.reconcileLifecycleRecovery(
-      context.operatorId,
-      request.targetCommandId,
-    );
-    const result = lifecycleRecoveryStatusResult(
-      observed,
-      request.targetCommandId,
-      envelope,
-      request.expectedAttemptGeneration + 1,
-    );
-    const baseReceipt = parseStoredReceipt(envelope.action);
-    if (result.status === "committed") {
-      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, {
-        status: "terminal",
-        commandId: request.targetCommandId,
-        receipt: result.receipt,
-      });
-      this.#database.prepare(`
-        UPDATE operator_commands SET result_json=?, after_json=?
-         WHERE operator_id=? AND command_id=?
-      `).run(
-        canonicalJson(result.receipt),
-        canonicalJson(observed),
-        context.operatorId,
-        request.targetCommandId,
-      );
-    } else if (result.status === "pending") {
-      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, {
-        status: "pending",
-        commandId: request.targetCommandId,
-        phase: result.phase,
-        attemptGeneration: result.attemptGeneration,
-        receipt: baseReceipt,
-      });
-    }
-    this.#database.transaction(() => {
-      this.#insertCommand(
-        context,
-        request.command,
-        request.projectId,
-        actionSessionId(authenticated, envelope.preview.intent),
-        requiredOperatorActionForIntent(envelope.preview.intent),
-        payloadHash,
-        currentStatus,
-        result,
-        result,
-        "committed",
-      );
-    })();
-    return result;
+    return this.#lifecycleAdapter.reconcile(context, request, stored, envelope, authenticated, payloadHash);
   }
 
   async #reconcileChairRecovery(
@@ -1590,80 +1139,12 @@ export class OperatorActionStore {
     stored: Row,
     envelope: StoredPreviewEnvelope,
   ): Promise<OperatorActionStatus> {
-    const custody = this.#chairRecoveryCustody;
-    if (custody === undefined || envelope.action === null) {
+    if (this.#chairRecoveryAdapter === undefined || envelope.action === null) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair recovery custody runtime is unavailable");
     }
     const authenticated = this.#authenticateCommand(context, request.command, request.projectId, envelope.preview.intent);
-    this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
     const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));
-    const replay = this.#reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
-    if (replay !== null) return replay;
-    if (request.command.commandId === request.targetCommandId) {
-      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "reconciliation requires a distinct command ID");
-    }
-    const currentStatus = this.#chairRecoveryStatus(context.operatorId, request.targetCommandId, envelope);
-    if (
-      currentStatus.status !== request.expectedStatus ||
-      (currentStatus.status === "pending" || currentStatus.status === "ambiguous") &&
-        currentStatus.attemptGeneration !== request.expectedAttemptGeneration
-    ) throw new ProjectFabricCoreError("STALE_REVISION", "chair recovery reconciliation target changed");
-    const observed = await custody.reconcileChairRecovery(context.operatorId, request.targetCommandId);
-    const baseReceipt = parseStoredReceipt(envelope.action);
-    let result: OperatorActionStatus;
-    if (observed.status === "committed") {
-      const receipt: OperatorActionReceipt = {
-        ...baseReceipt,
-        afterStateDigest: digestValue(observed, "operatorChairRecoveryReconcile.afterStateDigest"),
-      };
-      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, {
-        status: "terminal",
-        commandId: request.targetCommandId,
-        receipt,
-      });
-      this.#database.prepare(`
-        UPDATE operator_commands SET result_json=?, after_json=?
-         WHERE operator_id=? AND command_id=?
-      `).run(canonicalJson(receipt), canonicalJson(observed), context.operatorId, request.targetCommandId);
-      result = {
-        status: "committed",
-        commandId: request.targetCommandId,
-        receipt: nonLaunchReceipt(receipt),
-      };
-    } else if (observed.status === "no-effect") {
-      result = {
-        status: "rejected",
-        commandId: request.targetCommandId,
-        intentDigest: envelope.preview.intentDigest,
-        code: "state-changed",
-        evidenceRefs: [],
-      };
-    } else {
-      const pending: StoredPendingAction = {
-        status: "pending",
-        commandId: request.targetCommandId,
-        phase: "observing",
-        attemptGeneration: request.expectedAttemptGeneration + 1,
-        receipt: baseReceipt,
-      };
-      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, pending);
-      result = statusFromAction(pending, envelope.preview.intentDigest);
-    }
-    this.#database.transaction(() => {
-      this.#insertCommand(
-        context,
-        request.command,
-        request.projectId,
-        actionSessionId(authenticated, envelope.preview.intent),
-        "takeover",
-        payloadHash,
-        currentStatus,
-        result,
-        result,
-        "committed",
-      );
-    })();
-    return result;
+    return this.#chairRecoveryAdapter.reconcile(context, request, stored, envelope, authenticated, payloadHash);
   }
 
   async #reconcileChairLiveHandoff(
@@ -1672,103 +1153,41 @@ export class OperatorActionStore {
     stored: Row,
     envelope: StoredPreviewEnvelope,
   ): Promise<OperatorActionStatus> {
-    const custody = this.#chairLiveHandoffCustody;
-    if (custody === undefined || envelope.action === null || envelope.preview.intent.kind !== "chair-live-handoff") {
+    if (
+      this.#chairLiveHandoffAdapter === undefined ||
+      envelope.action === null ||
+      envelope.preview.intent.kind !== "chair-live-handoff"
+    ) {
       throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair live handoff custody runtime is unavailable");
     }
-    const authenticated = this.#authenticateCommand(context, request.command, request.projectId, envelope.preview.intent);
-    this.#assertStoredPreviewScope(stored, authenticated, request.projectId, envelope.preview.intent);
+    const authenticated = this.#authenticateCommand(
+      context,
+      request.command,
+      request.projectId,
+      envelope.preview.intent,
+    );
     const payloadHash = sha256(canonicalJson(sanitisedReconcileRequest(request)));
-    const replay = this.#reconcileReplay(context.operatorId, request.command.commandId, payloadHash);
-    if (replay !== null) return replay;
-    if (request.command.commandId === request.targetCommandId) {
-      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "reconciliation requires a distinct command ID");
-    }
-    const currentStatus = this.#chairLiveHandoffStatus(context.operatorId, request.targetCommandId, envelope);
-    if (
-      currentStatus.status !== request.expectedStatus ||
-      (currentStatus.status === "pending" || currentStatus.status === "ambiguous") &&
-        currentStatus.attemptGeneration !== request.expectedAttemptGeneration
-    ) throw new ProjectFabricCoreError("STALE_REVISION", "chair live handoff reconciliation target changed");
-    const observed = await custody.reconcileChairLiveHandoff(context.operatorId, request.targetCommandId);
-    const baseReceipt = parseStoredReceipt(envelope.action);
-    let result: OperatorActionStatus;
-    if (observed.status === "committed") {
-      const receipt: OperatorActionReceipt = {
-        ...baseReceipt,
-        afterStateDigest: digestValue(observed, "operatorChairLiveHandoffReconcile.afterStateDigest"),
-      };
-      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, {
-        status: "terminal",
-        commandId: request.targetCommandId,
-        receipt,
-      });
-      this.#database.prepare(`
-        UPDATE operator_commands SET result_json=?, after_json=?
-         WHERE operator_id=? AND command_id=?
-      `).run(canonicalJson(receipt), canonicalJson(observed), context.operatorId, request.targetCommandId);
-      result = {
-        status: "committed",
-        commandId: request.targetCommandId,
-        receipt: nonLaunchReceipt(receipt),
-      };
-    } else if (observed.status === "no-effect") {
-      result = {
-        status: "rejected",
-        commandId: request.targetCommandId,
-        intentDigest: envelope.preview.intentDigest,
-        code: "state-changed",
-        evidenceRefs: [],
-      };
-    } else {
-      const pending: StoredPendingAction = {
-        status: "pending",
-        commandId: request.targetCommandId,
-        phase: "observing",
-        attemptGeneration: request.expectedAttemptGeneration + 1,
-        receipt: baseReceipt,
-      };
-      this.#updateStoredAction(envelope.preview.previewId, envelope.preview, pending);
-      result = statusFromAction(pending, envelope.preview.intentDigest);
-    }
-    this.#database.transaction(() => {
-      this.#insertCommand(
-        context,
-        request.command,
-        request.projectId,
-        actionSessionId(authenticated, envelope.preview.intent),
-        "takeover",
-        payloadHash,
-        currentStatus,
-        result,
-        result,
-        "committed",
-      );
-    })();
-    return result;
+    return this.#chairLiveHandoffAdapter.reconcile(context, request, stored, envelope, authenticated, payloadHash);
   }
 
   async #readCurrentState(intent: OperatorActionIntent): Promise<OperatorActionCurrentState> {
     if (intent.kind === "agent-lifecycle-recovery") {
-      if (this.#lifecycleRecoveryCustody === undefined) {
+      if (this.#lifecycleAdapter === undefined) {
         throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "lifecycle recovery custody runtime is unavailable");
       }
-      const state = await this.#lifecycleRecoveryCustody.readLifecycleRecoveryCurrentState(intent);
-      return { kind: "agent-lifecycle-recovery", revision: state.revision, state };
+      return await this.#lifecycleAdapter.readCurrentState(intent);
     }
     if (intent.kind === "chair-bridge-recovery") {
-      if (this.#chairRecoveryCustody === undefined) {
+      if (this.#chairRecoveryAdapter === undefined) {
         throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair recovery custody runtime is unavailable");
       }
-      const state = await this.#chairRecoveryCustody.readChairRecoveryCurrentState(intent);
-      return { kind: "chair-bridge-recovery", revision: state.revision, state };
+      return await this.#chairRecoveryAdapter.readCurrentState(intent);
     }
     if (intent.kind === "chair-live-handoff") {
-      if (this.#chairLiveHandoffCustody === undefined) {
+      if (this.#chairLiveHandoffAdapter === undefined) {
         throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "chair live handoff custody runtime is unavailable");
       }
-      const state = await this.#chairLiveHandoffCustody.readChairLiveHandoffCurrentState(intent);
-      return { kind: "chair-live-handoff", revision: state.revision, state };
+      return await this.#chairLiveHandoffAdapter.readCurrentState(intent);
     }
     if (intent.kind !== "project-session-launch") return await this.#statePort.read(intent);
     if (this.#launchCustody === undefined) {
@@ -1881,441 +1300,6 @@ export class OperatorActionStore {
     return authenticated;
   }
 
-  #previewRow(previewId: string): Row {
-    return row(this.#database.prepare(`
-      SELECT * FROM operator_previews WHERE preview_id=?
-    `).get(previewId), "operator action preview");
-  }
-
-  #assertStoredPreviewScope(
-    stored: Row,
-    authenticated: AuthenticatedOperatorCredential,
-    projectId: string,
-    intent: OperatorActionIntent,
-  ): void {
-    const storedSessionId = text(stored, "project_session_id");
-    if (actionSessionId(authenticated, intent) !== storedSessionId) {
-      throw new ProjectFabricCoreError("CAPABILITY_FORBIDDEN", "operator preview belongs to another session");
-    }
-    if (!isRow(this.#database.prepare(`
-      SELECT project_session_id FROM project_sessions WHERE project_session_id=? AND project_id=?
-    `).get(storedSessionId, projectId))) {
-      throw new ProjectFabricCoreError("WRONG_PROJECT", "operator preview belongs to another project");
-    }
-  }
-
-  #assertPreviewClaim(stored: Row, commandId: string): void {
-    const confirmedCommandId = nullableText(stored, "confirmed_command_id");
-    if (confirmedCommandId !== null && confirmedCommandId !== commandId) {
-      throw new ProjectFabricCoreError("CONFLICT", "operator preview already has another confirmation command");
-    }
-  }
-
-  #commandReplay(operatorId: string, commandId: string, payloadHash: string): OperatorActionReceipt | null {
-    const existing = this.#database.prepare(`
-      SELECT payload_hash, result_json, status FROM operator_commands
-       WHERE operator_id=? AND command_id=?
-    `).get(operatorId, commandId);
-    if (!isRow(existing)) return null;
-    if (text(existing, "payload_hash") !== payloadHash) {
-      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "operator command ID was reused with changed input");
-    }
-    if (text(existing, "status") === "rejected") {
-      const status = parseRejectedStatus(text(existing, "result_json"), commandId);
-      throw new ProjectFabricCoreError(protocolCodeForRejection(status.code), `operator action was rejected: ${status.code}`);
-    }
-    return parseReceipt(text(existing, "result_json"));
-  }
-
-  #reconcileReplay(operatorId: string, commandId: string, payloadHash: string): OperatorActionStatus | null {
-    const existing = this.#database.prepare(`
-      SELECT payload_hash, result_json FROM operator_commands
-       WHERE operator_id=? AND command_id=?
-    `).get(operatorId, commandId);
-    if (!isRow(existing)) return null;
-    if (text(existing, "payload_hash") !== payloadHash) {
-      throw new ProjectFabricCoreError("DEDUPE_CONFLICT", "reconciliation command ID was reused with changed input");
-    }
-    return parseOperationResult(FABRIC_OPERATIONS.operatorActionReconcile, JSON.parse(text(existing, "result_json")));
-  }
-
-  #insertCommand(
-    context: AuthenticatedOperatorContext,
-    command: OperatorActionCommitRequest["command"],
-    projectId: OperatorActionCommitRequest["projectId"],
-    projectSessionId: string,
-    operation: string,
-    payloadHash: string,
-    before: unknown,
-    after: unknown,
-    result: unknown,
-    status: "committed" | "rejected",
-  ): void {
-    this.#database.prepare(`
-      INSERT INTO operator_commands(
-        operator_id, command_id, capability_id, project_id, project_session_id,
-        operation, expected_revision, payload_hash, provenance_json, before_json,
-        after_json, evidence_json, result_json, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      context.operatorId,
-      command.commandId,
-      command.credential.capabilityId,
-      projectId,
-      projectSessionId,
-      operation,
-      command.expectedRevision,
-      payloadHash,
-      canonicalJson(command.provenance),
-      canonicalJson(before),
-      canonicalJson(after),
-      canonicalJson(command.evidenceRefs),
-      canonicalJson(result),
-      status,
-      this.#clock(),
-    );
-  }
-
-  #recordRejected(
-    context: AuthenticatedOperatorContext,
-    request: OperatorActionCommitRequest,
-    stored: Row,
-    envelope: StoredPreviewEnvelope,
-    payloadHash: string,
-    code: OperatorActionRejectionCode,
-  ): void {
-    const rejected: StoredRejectedAction = {
-      status: "rejected",
-      commandId: request.command.commandId,
-      code,
-      evidenceRefs: envelope.preview.evidenceRefs,
-    };
-    const transaction = this.#database.transaction((): void => {
-      this.#commandReplay(context.operatorId, request.command.commandId, payloadHash);
-      const latest = this.#previewRow(request.previewId);
-      this.#assertPreviewClaim(latest, request.command.commandId);
-      this.#database.prepare(`
-        UPDATE operator_previews SET preview_json=?, confirmed_command_id=? WHERE preview_id=?
-      `).run(
-        canonicalJson({ preview: envelope.preview, action: rejected }),
-        request.command.commandId,
-        request.previewId,
-      );
-      this.#insertCommand(
-        context,
-        request.command,
-        request.projectId,
-        text(stored, "project_session_id"),
-        text(stored, "operation"),
-        payloadHash,
-        { beforeStateDigest: envelope.preview.beforeStateDigest },
-        rejected,
-        {
-          status: "rejected",
-          commandId: request.command.commandId,
-          intentDigest: envelope.preview.intentDigest,
-          code,
-          evidenceRefs: envelope.preview.evidenceRefs,
-        },
-        "rejected",
-      );
-    });
-    transaction();
-  }
-
-  #recordRetryableLaunchExpiry(
-    request: OperatorActionCommitRequest,
-    envelope: StoredPreviewEnvelope,
-  ): void {
-    const rejected: StoredRejectedAction = {
-      status: "rejected",
-      commandId: request.command.commandId,
-      code: "preview-expired",
-      evidenceRefs: envelope.preview.evidenceRefs,
-    };
-    const transaction = this.#database.transaction((): void => {
-      const latest = this.#previewRow(request.previewId);
-      this.#assertPreviewClaim(latest, request.command.commandId);
-      this.#database.prepare(`
-        UPDATE operator_previews SET preview_json=?, confirmed_command_id=NULL WHERE preview_id=?
-      `).run(canonicalJson({ preview: envelope.preview, action: rejected }), request.previewId);
-    });
-    transaction();
-  }
-
-  #applyEffectOutcome(
-    operatorId: string,
-    commandId: string,
-    preview: OperatorActionPreview,
-    priorReceipt: OperatorActionReceipt,
-    outcome: OperatorEffectOutcome,
-    attemptGeneration: number,
-  ): OperatorActionReceipt {
-    if (outcome.status === "rejected") {
-      const rejected: StoredRejectedAction = {
-        status: "rejected",
-        commandId,
-        code: outcome.code,
-        evidenceRefs: outcome.evidenceRefs,
-      };
-      const transaction = this.#database.transaction((): void => {
-        this.#updateStoredAction(preview.previewId, preview, rejected);
-        this.#database.prepare(`
-          UPDATE operator_commands SET status='rejected', result_json=?, after_json=?
-           WHERE operator_id=? AND command_id=?
-        `).run(
-          canonicalJson({
-            status: "rejected",
-            commandId,
-            intentDigest: preview.intentDigest,
-            code: outcome.code,
-            evidenceRefs: outcome.evidenceRefs,
-          }),
-          canonicalJson(rejected),
-          operatorId,
-          commandId,
-        );
-      });
-      transaction();
-      throw new ProjectFabricCoreError(protocolCodeForRejection(outcome.code), `operator effect rejected: ${outcome.code}`);
-    }
-    if (outcome.status === "pending") {
-      const pending: StoredPendingAction = {
-        status: "pending",
-        commandId,
-        phase: outcome.phase,
-        attemptGeneration,
-        receipt: priorReceipt,
-      };
-      this.#updateStoredAction(preview.previewId, preview, pending);
-      return priorReceipt;
-    }
-    if (outcome.status === "ambiguous") {
-      const ambiguous: StoredAmbiguousAction = {
-        status: "ambiguous",
-        commandId,
-        attemptGeneration,
-        effectRef: outcome.effectRef,
-        receipt: priorReceipt,
-      };
-      this.#updateStoredAction(preview.previewId, preview, ambiguous);
-      return priorReceipt;
-    }
-    const receipt: OperatorActionReceipt = {
-      ...priorReceipt,
-      afterStateDigest: digestValue(outcome.afterState, "operatorActionCommit.afterStateDigest"),
-      ...(outcome.effectRef === undefined ? {} : { effectRef: outcome.effectRef }),
-    };
-    const terminal: StoredTerminalAction = { status: "terminal", commandId, receipt };
-    const transaction = this.#database.transaction((): void => {
-      this.#updateStoredAction(preview.previewId, preview, terminal);
-      this.#database.prepare(`
-        UPDATE operator_commands SET result_json=?, after_json=?
-         WHERE operator_id=? AND command_id=? AND status='committed'
-      `).run(canonicalJson(receipt), canonicalJson(outcome.afterState), operatorId, commandId);
-    });
-    transaction();
-    return receipt;
-  }
-
-  #updateStoredAction(previewId: string, preview: OperatorActionPreview, action: StoredAction): void {
-    this.#database.prepare(`
-      UPDATE operator_previews SET preview_json=? WHERE preview_id=?
-    `).run(canonicalJson({ preview, action }), previewId);
-  }
-
-  #updateReconcileCommand(operatorId: string, commandId: string, result: OperatorActionStatus): void {
-    this.#database.prepare(`
-      UPDATE operator_commands SET result_json=?, after_json=?
-       WHERE operator_id=? AND command_id=?
-    `).run(canonicalJson(result), canonicalJson(result), operatorId, commandId);
-  }
-}
-
-type StoredPendingAction = {
-  status: "pending";
-  commandId: string;
-  phase: "prepared" | "dispatched" | "accepted" | "observing";
-  attemptGeneration: number;
-  receipt: OperatorActionReceipt;
-};
-
-type StoredAmbiguousAction = {
-  status: "ambiguous";
-  commandId: string;
-  attemptGeneration: number;
-  effectRef: ArtifactRef;
-  receipt: OperatorActionReceipt;
-};
-
-type StoredTerminalAction = {
-  status: "terminal";
-  commandId: string;
-  receipt: OperatorActionReceipt;
-};
-
-type StoredRejectedAction = {
-  status: "rejected";
-  commandId: string;
-  code: OperatorActionRejectionCode;
-  evidenceRefs: readonly ArtifactRef[];
-};
-
-type StoredAction = StoredPendingAction | StoredAmbiguousAction | StoredTerminalAction | StoredRejectedAction;
-type StoredPreviewEnvelope = { preview: OperatorActionPreview; action: StoredAction | null };
-
-function parseStoredPreview(serialized: string): StoredPreviewEnvelope {
-  const value: unknown = JSON.parse(serialized);
-  const envelope = row(value, "stored operator preview");
-  const preview = parseOperationResult(FABRIC_OPERATIONS.operatorActionPreview, envelope.preview);
-  return { preview, action: envelope.action === null ? null : parseStoredAction(envelope.action) };
-}
-
-function parseStoredAction(value: unknown): StoredAction {
-  const action = row(value, "stored operator action");
-  const status = text(action, "status");
-  const commandId = text(action, "commandId");
-  if (status === "terminal") return { status, commandId, receipt: parseStoredReceipt(action) };
-  if (status === "pending") {
-    const phase = text(action, "phase");
-    if (phase !== "prepared" && phase !== "dispatched" && phase !== "accepted" && phase !== "observing") {
-      throw new Error("stored operator action phase is invalid");
-    }
-    return {
-      status,
-      commandId,
-      phase,
-      attemptGeneration: integer(action, "attemptGeneration"),
-      receipt: parseStoredReceipt(action),
-    };
-  }
-  if (status === "ambiguous") {
-    return {
-      status,
-      commandId,
-      attemptGeneration: integer(action, "attemptGeneration"),
-      effectRef: parseArtifactRef(action.effectRef, "storedOperatorAction.effectRef"),
-      receipt: parseStoredReceipt(action),
-    };
-  }
-  if (status === "rejected") {
-    const code = rejectionCode(action.code);
-    const evidence = action.evidenceRefs;
-    if (!Array.isArray(evidence)) throw new Error("stored rejected action evidence is invalid");
-    return {
-      status,
-      commandId,
-      code,
-      evidenceRefs: evidence.map((item, index) => parseArtifactRef(item, `storedOperatorAction.evidenceRefs[${String(index)}]`)),
-    };
-  }
-  throw new Error("stored operator action status is invalid");
-}
-
-function parseStoredReceipt(action: Row): OperatorActionReceipt {
-  return parseOperationResult(FABRIC_OPERATIONS.operatorActionCommit, action.receipt);
-}
-
-function parseReceipt(serialized: string): OperatorActionReceipt {
-  return parseOperationResult(FABRIC_OPERATIONS.operatorActionCommit, JSON.parse(serialized));
-}
-
-type NonLaunchReceipt = Exclude<OperatorActionReceipt, { launchProviderActionJournalRef: unknown }>;
-
-function nonLaunchReceipt(receipt: OperatorActionReceipt): NonLaunchReceipt {
-  if (receipt.launchProviderActionJournalRef !== undefined) {
-    throw new Error("launch receipt requires launch custody settlement");
-  }
-  return receipt;
-}
-
-function statusFromAction(action: StoredAction, intentDigest: Sha256Digest): OperatorActionStatus {
-  if (action.status === "terminal") {
-    return {
-      status: "committed",
-      commandId: action.commandId,
-      receipt: nonLaunchReceipt(action.receipt),
-    };
-  }
-  if (action.status === "pending") {
-    return {
-      status: "pending",
-      commandId: action.commandId,
-      intentDigest,
-      phase: action.phase,
-      attemptGeneration: action.attemptGeneration,
-    };
-  }
-  if (action.status === "ambiguous") {
-    return {
-      status: "ambiguous",
-      commandId: action.commandId,
-      intentDigest,
-      attemptGeneration: action.attemptGeneration,
-      effectRef: action.effectRef,
-    };
-  }
-  return {
-    status: "rejected",
-    commandId: action.commandId,
-    intentDigest,
-    code: action.code,
-    evidenceRefs: action.evidenceRefs,
-  };
-}
-
-function lifecycleRecoveryStatusResult(
-  observed: OperatorLifecycleRecoveryCommit,
-  commandId: string,
-  envelope: StoredPreviewEnvelope,
-  attemptGeneration?: number,
-): OperatorActionStatus {
-  if (envelope.action === null) throw new Error("lifecycle recovery preview has no action state");
-  if (observed.status === "committed") {
-    const receipt: OperatorActionReceipt = {
-      ...parseStoredReceipt(envelope.action),
-      afterStateDigest: digestValue(observed, "operatorLifecycleRecoveryStatus.afterStateDigest"),
-    };
-    return { status: "committed", commandId, receipt: nonLaunchReceipt(receipt) };
-  }
-  if (observed.status === "no-effect") {
-    return {
-      status: "rejected",
-      commandId,
-      intentDigest: envelope.preview.intentDigest,
-      code: "state-changed",
-      evidenceRefs: [],
-    };
-  }
-  const generation = attemptGeneration ?? (
-    envelope.action.status === "pending" || envelope.action.status === "ambiguous"
-      ? envelope.action.attemptGeneration
-      : 1
-  );
-  return {
-    status: "pending",
-    commandId,
-    intentDigest: envelope.preview.intentDigest,
-    phase: observed.status === "ambiguous" ? "observing" : "prepared",
-    attemptGeneration: generation,
-  };
-}
-
-function parseRejectedStatus(serialized: string, commandId: string): Extract<OperatorActionStatus, { status: "rejected" }> {
-  const value: unknown = JSON.parse(serialized);
-  const stored = row(value, "stored rejected operator action");
-  if (text(stored, "status") !== "rejected" || text(stored, "commandId") !== commandId) {
-    throw new Error("stored rejected operator action identity is invalid");
-  }
-  const evidence = stored.evidenceRefs;
-  if (!Array.isArray(evidence)) throw new Error("stored rejected operator action evidence is invalid");
-  return {
-    status: "rejected",
-    commandId,
-    intentDigest: parseSha256Digest(stored.intentDigest, "storedRejectedAction.intentDigest"),
-    code: rejectionCode(stored.code),
-    evidenceRefs: evidence.map((item, index) => parseArtifactRef(item, `storedRejectedAction.evidenceRefs[${String(index)}]`)),
-  };
 }
 
 function validateCurrentState(
@@ -2462,51 +1446,7 @@ function validateCurrentState(
     return;
   }
   if (intent.kind === "agent-lifecycle-recovery") {
-    if (current.kind !== "agent-lifecycle-recovery") {
-      throw new TypeError("lifecycle recovery intent received another current-state family");
-    }
-    const state = current.state;
-    if (
-      state.revision !== intent.expectedAgentRevision ||
-      state.projectSessionId !== intent.projectSessionId ||
-      state.coordinationRunId !== intent.coordinationRunId ||
-      state.agentId !== intent.agentId ||
-      state.sessionRevision !== intent.expectedSessionRevision ||
-      state.sessionGeneration !== intent.expectedSessionGeneration ||
-      state.runRevision !== intent.expectedRunRevision ||
-      state.agentRevision !== intent.expectedAgentRevision ||
-      canonicalJson(state.source) !== canonicalJson(intent.source) ||
-      state.sourceRevision !== intent.expectedSourceRevision ||
-      state.principalGeneration !== intent.expectedPrincipalGeneration ||
-      state.providerGeneration !== intent.expectedProviderGeneration ||
-      state.bridgeGeneration !== intent.expectedBridgeGeneration ||
-      state.contextRevision !== intent.expectedContextRevision ||
-      state.bridgeOwnerKind !== intent.bridgeOwnerKind ||
-      state.chairLeaseGeneration !== intent.expectedChairLeaseGeneration
-    ) {
-      throw new ProjectFabricCoreError("STALE_GENERATION", "lifecycle recovery source binding changed");
-    }
-    if (
-      state.gate.gateId !== intent.gateId ||
-      state.gate.revision !== intent.expectedGateRevision ||
-      state.gate.status !== intent.expectedGateStatus
-    ) {
-      throw new ProjectFabricCoreError("GATE_BLOCKED", "lifecycle recovery gate binding changed");
-    }
-    if (intent.path === "fresh-rotate") {
-      if (
-        state.recoveryCapability === null ||
-        state.recoveryCapability.capabilityId !== intent.recoveryCapabilityId ||
-        state.recoveryCapability.revision !== intent.expectedRecoveryCapabilityRevision ||
-        state.recoveryCapability.capabilityHash !== intent.recoveryCapabilityHash ||
-        state.checkpoint === null ||
-        canonicalJson(state.checkpoint.ref) !== canonicalJson(intent.checkpointRef) ||
-        state.checkpoint.digest !== intent.checkpointDigest ||
-        state.checkpoint.validationReceiptDigest !== intent.checkpointValidationReceiptDigest
-      ) {
-        throw new ProjectFabricCoreError("STALE_REVISION", "lifecycle recovery capability or checkpoint changed");
-      }
-    }
+    validateLifecycleRecoveryCurrentState(intent, current);
     return;
   }
   if (intent.kind === "provider-route-integrity-retire") {
@@ -2674,40 +1614,12 @@ function requiredSession(authenticated: AuthenticatedOperatorCredential): string
   return authenticated.projectSessionId;
 }
 
-function digestValue(value: unknown, path: string): Sha256Digest {
-  return parseSha256Digest(`sha256:${sha256(canonicalJson(value))}`, path);
-}
-
 function toTimestamp(milliseconds: number, path: string): Timestamp {
   return parseTimestamp(new Date(milliseconds).toISOString(), path);
 }
 
 function sameArtifact(left: ArtifactRef, right: ArtifactRef | null): boolean {
   return right !== null && left.path === right.path && left.digest === right.digest;
-}
-
-function rejectionCode(value: unknown): OperatorActionRejectionCode {
-  if (
-    value === "authority-insufficient" ||
-    value === "preview-expired" ||
-    value === "preview-stale" ||
-    value === "state-changed" ||
-    value === "generation-stale" ||
-    value === "git-state-changed" ||
-    value === "external-contract-unknown" ||
-    value === "external-contract-stale" ||
-    value === "release-binding-mismatch" ||
-    value === "dedupe-conflict"
-  ) return value;
-  throw new Error("stored operator action rejection code is invalid");
-}
-
-function protocolCodeForRejection(code: OperatorActionRejectionCode): ConstructorParameters<typeof ProjectFabricCoreError>[0] {
-  if (code === "authority-insufficient") return "CAPABILITY_FORBIDDEN";
-  if (code === "preview-expired") return "CAPABILITY_EXPIRED";
-  if (code === "release-binding-mismatch") return "GATE_BLOCKED";
-  if (code === "dedupe-conflict") return "DEDUPE_CONFLICT";
-  return "STALE_REVISION";
 }
 
 function rejectionForIntent(intent: OperatorActionIntent): OperatorActionRejectionCode {

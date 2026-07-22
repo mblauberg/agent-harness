@@ -1,5 +1,4 @@
 import type Database from "better-sqlite3";
-import type { BootstrapElectionResult, HeldBootstrapElection } from "./bootstrap-election.js";
 
 const SESSION_STATES = [
   "draft", "awaiting_launch", "launching", "active", "quiescing", "awaiting_acceptance", "closed",
@@ -216,11 +215,15 @@ export type IdleStopResult =
   | { state: "stopped"; daemonInstanceGeneration: number; globalStateRevision: number }
   | { state: "busy"; reason: string; snapshot?: GlobalLivenessSnapshot };
 
+type IdleElectionResult<T> =
+  | { role: "owner"; value: T }
+  | { role: "observer" };
+
 export type IdleElectionPort = {
   withExclusiveLock<T>(
     actionId: string,
-    callback: (held: HeldBootstrapElection) => Promise<T>,
-  ): Promise<BootstrapElectionResult<T>>;
+    callback: () => Promise<T>,
+  ): Promise<IdleElectionResult<T>>;
 };
 
 export function beginIdleQuiesce(
