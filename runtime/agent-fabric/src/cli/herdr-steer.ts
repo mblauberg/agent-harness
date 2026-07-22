@@ -24,6 +24,11 @@ const registryVariables = [
 const registryClientLabels = new Set(["agy", "claude", "codex", "cursor", "kiro", "opencode"]);
 
 function checkFailureReason(error: unknown): string {
+  // Transport wrappers carry the informative syscall failure (e.g. ENOENT,
+  // ECONNREFUSED) in their cause; prefer it over the generic wrapper code.
+  if (error instanceof Error && error.cause !== undefined) {
+    return checkFailureReason(error.cause);
+  }
   if (typeof error === "object" && error !== null && "code" in error && typeof error.code === "string") {
     return error.code;
   }

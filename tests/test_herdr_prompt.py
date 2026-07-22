@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import stat
@@ -200,7 +201,10 @@ def test_real_fabric_client_fails_closed_when_daemon_is_unavailable(tmp_path):
     )
 
     assert result.returncode == 1
-    assert result.stdout.strip() == (
-        '{"status":"unavailable","integration":"agent-fabric","reason":"unavailable"}'
-    )
+    payload = json.loads(result.stdout.strip())
+    assert payload["status"] == "unavailable"
+    assert payload["integration"] == "agent-fabric"
+    # The reason names the failed check; the trailing syscall code varies by
+    # platform (e.g. ENOENT, ECONNREFUSED, EINVAL).
+    assert payload["reason"].startswith("daemon connection check failed: ")
     assert not herdr_log.exists()
