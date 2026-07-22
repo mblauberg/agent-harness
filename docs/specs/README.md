@@ -21,6 +21,7 @@ below. Follow their linked GitHub issues for delivery state.
 - [Messaging and public protocol](agent-fabric/messaging-and-public-protocol.md)
 - [Evidence and review](agent-fabric/evidence-and-review.md)
 - [Run plan declaration](agent-fabric/run-plan-declaration.md)
+- [Agent topology projection](agent-fabric/agent-topology-projection.md)
 - [Effects](agent-fabric/effects.md)
 - [Activation and operations](agent-fabric/activation.md)
 - [Architecture assurance](agent-fabric/architecture-assurance.md)

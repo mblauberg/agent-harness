@@ -54,6 +54,7 @@ import { HERDR_CONTROL_ADAPTER_ID } from "../integrations/herdr-fabric-ports.js"
 import { readControlEligibility, type ResolvedControlTarget } from "./control-eligibility.js";
 import { projectRunIdentity } from "./run-identity-projection.js";
 import { projectDeclaredRunProgress } from "./declared-run-progress-projection.js";
+import { agentTopologyProjectionField, type AgentTopologyProjection } from "./agent-topology-projection.js";
 
 export type OperatorProjectionStoreOptions = CoreServiceOptions & {
   operatorStore: OperatorStore;
@@ -63,7 +64,6 @@ export type NativeNotificationProjection = "include" | "omit";
 export type RunSessionProjection = "include" | "omit";
 export type DeclaredRunProgressProjection = "include" | "omit";
 export type RunIdentityProjection = "include" | "omit";
-
 type LoadedOperatorDetail = {
   revision: number;
   observedAt: Timestamp;
@@ -213,7 +213,7 @@ export class OperatorProjectionStore {
     nativeNotificationProjection: NativeNotificationProjection,
     runSessionProjection: RunSessionProjection = "include",
     declaredRunProgressProjection: DeclaredRunProgressProjection = "include",
-    runIdentityProjection: RunIdentityProjection = "include",
+    runIdentityProjection: RunIdentityProjection = "include", agentTopologyProjection: AgentTopologyProjection = "include",
   ): OperatorViewPageResult {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
@@ -245,7 +245,7 @@ export class OperatorProjectionStore {
         this.#workRows(request.projectId, selectedSessionId, authenticated)
       ), selectedSessionId);
       case "agents": return this.#viewPage(request, "agents", () => (
-        this.#agentRows(request.projectId, selectedSessionId, authenticated)
+        this.#agentRows(request.projectId, selectedSessionId, authenticated, agentTopologyProjection)
       ), selectedSessionId);
       case "evidence": return this.#viewPage(request, "evidence", () => (
         this.#evidenceRows(request.projectId, selectedSessionId, authenticated)
@@ -330,7 +330,7 @@ export class OperatorProjectionStore {
     request: OperatorDetailReadRequest,
     runSessionProjection: RunSessionProjection = "include",
     declaredRunProgressProjection: DeclaredRunProgressProjection = "include",
-    runIdentityProjection: RunIdentityProjection = "include",
+    runIdentityProjection: RunIdentityProjection = "include", agentTopologyProjection: AgentTopologyProjection = "include",
   ): OperatorDetailReadResult {
     const authenticated = this.#authoriseRead(request.credential, request.projectId, request.projectSessionId);
     const selectedSessionId = this.#selectedSessionId(authenticated, request.projectSessionId);
@@ -346,6 +346,7 @@ export class OperatorProjectionStore {
         runSessionProjection,
         declaredRunProgressProjection,
         runIdentityProjection,
+        agentTopologyProjection,
       );
       if (request.detailRef.expectedRevision !== loaded.revision) {
         return {
@@ -1350,7 +1351,7 @@ export class OperatorProjectionStore {
   #agentRows(
     projectId: ProjectId,
     projectSessionId: ProjectSessionId | undefined,
-    authenticated: AuthenticatedOperatorCredential,
+    authenticated: AuthenticatedOperatorCredential, agentTopologyProjection: AgentTopologyProjection,
   ): OperatorViewRow<"agents">[] {
     const values = this.#sessionQuery(
       projectId,
@@ -1369,7 +1370,8 @@ export class OperatorProjectionStore {
         itemId: agentId,
         itemRevision: generation,
         fact: liveFact(generation, toTimestamp(this.#clock(), "agentRow.observedAt"), {
-          summary: { kind: "agent", role, lifecycle: text(agent, "lifecycle"), contextPressure: "unknown" },
+          summary: { kind: "agent", role, lifecycle: text(agent, "lifecycle"), contextPressure: "unknown",
+            ...agentTopologyProjectionField(this.#database, agent, this.#globalRevision(), agentTopologyProjection) },
           detailRef: { kind: "agent", agentId, expectedRevision: generation },
           actionAvailability: actionAvailability(authenticated),
         }),
@@ -1538,7 +1540,7 @@ export class OperatorProjectionStore {
     projectSessionId: ProjectSessionId | undefined,
     runSessionProjection: RunSessionProjection,
     declaredRunProgressProjection: DeclaredRunProgressProjection,
-    runIdentityProjection: RunIdentityProjection,
+    runIdentityProjection: RunIdentityProjection, agentTopologyProjection: AgentTopologyProjection,
   ): LoadedOperatorDetail {
     switch (detailRef.kind) {
       case "project": return this.#loadProjectDetail(detailRef, projectId);
@@ -1552,7 +1554,7 @@ export class OperatorProjectionStore {
         runIdentityProjection,
       );
       case "task": return this.#loadTaskDetail(detailRef, projectId, projectSessionId);
-      case "agent": return this.#loadAgentDetail(detailRef, projectId, projectSessionId);
+      case "agent": return this.#loadAgentDetail(detailRef, projectId, projectSessionId, agentTopologyProjection);
       case "evidence": return this.#loadEvidenceDetail(detailRef, projectId, projectSessionId);
       case "activity": return this.#loadActivityDetail(detailRef, projectId, projectSessionId);
       case "system": return this.#loadSystemDetail(detailRef, projectId);
@@ -1691,7 +1693,7 @@ export class OperatorProjectionStore {
   #loadAgentDetail(
     detailRef: Extract<OperatorDetailRef, { kind: "agent" }>,
     projectId: ProjectId,
-    projectSessionId: ProjectSessionId | undefined,
+    projectSessionId: ProjectSessionId | undefined, agentTopologyProjection: AgentTopologyProjection,
   ): LoadedOperatorDetail {
     const agent = this.#oneScopedRow(`
       SELECT a.*, r.project_session_id, r.chair_agent_id,
@@ -1720,6 +1722,7 @@ export class OperatorProjectionStore {
         lifecycle: text(agent, "lifecycle"),
         provider: text(agent, "provider"),
         providerSessionGeneration: generation,
+        ...agentTopologyProjectionField(this.#database, agent, this.#globalRevision(), agentTopologyProjection),
       },
     };
   }
@@ -1871,9 +1874,6 @@ export class OperatorProjectionStore {
     if (isRow(this.#database.prepare(`
       SELECT workstream_id FROM workstreams WHERE coordination_run_id=? AND lead_agent_id=? LIMIT 1
     `).get(runId, agentId))) return "lead";
-    if (isRow(this.#database.prepare(`
-      SELECT evidence_id FROM cross_family_review_evidence WHERE run_id=? AND reviewer_agent_id=? LIMIT 1
-    `).get(runId, agentId))) return "reviewer";
     return "worker";
   }
 

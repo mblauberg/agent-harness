@@ -253,6 +253,34 @@ export type AgentViewItem = {
   visibility: ProjectionFact<{ paneRef: string | null }>;
 };
 
+export type AgentTeamTopologyMembership = {
+  teamId: string;
+  teamGeneration: number;
+  relationship: "Lead" | "Member";
+  leadAgentId: AgentId;
+};
+
+export type AgentTopology = {
+  topologyRevision: number;
+  teams: {
+    observation: "Observed";
+    memberships: readonly AgentTeamTopologyMembership[];
+  };
+  supervisor:
+    | { observation: "Observed"; agentId: AgentId }
+    | { observation: "Unobserved" };
+  currentTask:
+    | {
+        observation: "Observed";
+        taskId: TaskId;
+        taskRevision: number;
+        ownerLeaseGeneration: number;
+      }
+    | { observation: "Unobserved" }
+    | { observation: "Unknown"; reason: "MultipleActiveClaims" };
+  nativeChildren: { observation: "Unobserved" };
+};
+
 export type EvidenceViewItem = {
   evidenceId: string;
   kind: "artifact" | "diff" | "test" | "review" | "receipt";
@@ -531,6 +559,7 @@ export type OperatorViewSummaryMap = {
     role: AgentViewItem["role"];
     lifecycle: string;
     contextPressure: AgentViewItem["contextPressure"];
+    topology?: AgentTopology;
   };
   evidence: {
     kind: "evidence";
@@ -632,6 +661,7 @@ export type OperatorDetail =
       lifecycle: string;
       provider: string;
       providerSessionGeneration: number;
+      topology?: AgentTopology;
     }
   | {
       kind: "evidence";

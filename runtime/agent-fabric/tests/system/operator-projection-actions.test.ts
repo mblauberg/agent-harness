@@ -1394,6 +1394,203 @@ describe("operator projection store", () => {
   });
 });
 
+describe("operator agent topology projection", () => {
+  it("projects team, registration supervisor and current task only from Fabric-owned rows", () => {
+    const fixture = setupProjection();
+    fixture.database.exec(`
+      INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id, provider_session_ref, lifecycle)
+      VALUES
+        ('run_01', 'lead_01', 'chair_01', 'authority_01', NULL, 'ready'),
+        ('run_01', 'worker_01', 'lead_01', 'authority_01', NULL, 'ready');
+      INSERT INTO tasks(
+        run_id, task_id, authority_id, objective, base_revision, state,
+        owner_agent_id, revision, owner_lease_generation, created_by
+      ) VALUES (
+        'run_01', 'task_worker_01', 'authority_01', 'Implement topology', 'base_01', 'active',
+        'worker_01', 2, 1, 'lead_01'
+      );
+      INSERT INTO teams(
+        run_id, team_id, parent_team_id, depth, leader_agent_id, original_leader_agent_id,
+        successor_agent_id, root_task_id, authority_id, budget_id, state, generation,
+        handoff_evidence, created_at
+      ) VALUES (
+        'run_01', 'team_01', NULL, 1, 'lead_01', 'lead_01',
+        NULL, 'task_worker_01', 'authority_01', 'budget_team_01', 'active', 2,
+        NULL, ${String(now - 100)}
+      );
+      INSERT INTO team_members(run_id, team_id, agent_id)
+      VALUES ('run_01', 'team_01', 'lead_01'), ('run_01', 'team_01', 'worker_01');
+    `);
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    const request: OperatorViewPageRequest<"agents"> = {
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "agents",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 10,
+    };
+
+    const negotiated = fixture.projections.viewPage(
+      request,
+      "include",
+      "include",
+      "include",
+      "include",
+      "include",
+    );
+    expect(negotiated).toMatchObject({
+      status: "page",
+      rows: [{ itemId: "chair_01" }, {
+        itemId: "lead_01",
+        fact: { value: { summary: { topology: {
+          teams: { observation: "Observed", memberships: [{ relationship: "Lead" }] },
+          supervisor: { observation: "Observed", agentId: "chair_01" },
+          currentTask: { observation: "Unobserved" },
+        } } } },
+      }, {
+        itemId: "worker_01",
+        fact: { value: { summary: { topology: {
+          topologyRevision: snapshot.snapshotRevision,
+          teams: { observation: "Observed", memberships: [{
+            teamId: "team_01",
+            teamGeneration: 2,
+            relationship: "Member",
+            leadAgentId: "lead_01",
+          }] },
+          supervisor: { observation: "Observed", agentId: "lead_01" },
+          currentTask: {
+            observation: "Observed",
+            taskId: "task_worker_01",
+            taskRevision: 2,
+            ownerLeaseGeneration: 1,
+          },
+          nativeChildren: { observation: "Unobserved" },
+        } } } },
+      }],
+    });
+
+    if (negotiated.status !== "page") throw new Error("expected a negotiated agent page");
+    const worker = negotiated.rows.find((row) => row.itemId === "worker_01");
+    if (worker?.fact.freshness !== "live") throw new Error("expected the worker agent row");
+    expect(fixture.projections.detail({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      snapshotRevision: snapshot.snapshotRevision,
+      detailRef: worker.fact.value.detailRef,
+    }, "include", "include", "include", "include")).toMatchObject({
+      status: "current",
+      detail: { value: { kind: "agent", topology: {
+        topologyRevision: snapshot.snapshotRevision,
+        currentTask: { observation: "Observed", taskId: "task_worker_01" },
+      } } },
+    });
+
+    const unnegotiated = fixture.projections.viewPage(request, "include", "include", "include", "include", "omit");
+    if (unnegotiated.status !== "page") throw new Error("expected an unnegotiated agent page");
+    for (const row of unnegotiated.rows) {
+      if (row.fact.freshness !== "live") throw new Error("expected a live agent row");
+      expect(row.fact.value.summary).not.toHaveProperty("topology");
+    }
+    const detailUnnegotiated = fixture.projections.detail({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      snapshotRevision: snapshot.snapshotRevision,
+      detailRef: worker.fact.value.detailRef,
+    }, "include", "include", "include", "omit");
+    if (detailUnnegotiated.status !== "current" || detailUnnegotiated.detail.freshness !== "live") {
+      throw new Error("expected an unnegotiated agent detail");
+    }
+    expect(detailUnnegotiated.detail.value).not.toHaveProperty("topology");
+  });
+
+  it("does not infer one current task when active claim records are absent or ambiguous", () => {
+    const fixture = setupProjection();
+    fixture.database.exec(`
+      INSERT INTO agents(run_id, agent_id, parent_agent_id, authority_id, provider_session_ref, lifecycle)
+      VALUES ('run_01', 'worker_ambiguous', NULL, 'authority_01', NULL, 'ready');
+      INSERT INTO tasks(
+        run_id, task_id, authority_id, objective, base_revision, state,
+        owner_agent_id, revision, owner_lease_generation, created_by
+      ) VALUES
+        ('run_01', 'task_ambiguous_a', 'authority_01', 'A', 'base_01', 'active', 'worker_ambiguous', 2, 1, 'chair_01'),
+        ('run_01', 'task_ambiguous_b', 'authority_01', 'B', 'base_01', 'active', 'worker_ambiguous', 3, 2, 'chair_01'),
+        ('run_01', 'task_terminal', 'authority_01', 'Done', 'base_01', 'complete', 'worker_ambiguous', 4, 1, 'chair_01');
+    `);
+    const projectId = identifier<"ProjectId">("project_01");
+    const projectSessionId = identifier<"ProjectSessionId">("session_01");
+    const snapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    const page = fixture.projections.viewPage({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "agents",
+      snapshotRevision: snapshot.snapshotRevision,
+      cursor: 0,
+      limit: 10,
+    }, "include", "include", "include", "include", "include");
+    expect(page).toMatchObject({
+      status: "page",
+      rows: [{
+        itemId: "chair_01",
+        fact: { value: { summary: { topology: {
+          supervisor: { observation: "Unobserved" },
+          teams: { observation: "Observed", memberships: [] },
+        } } } },
+      }, {
+        itemId: "worker_ambiguous",
+        fact: { value: { summary: { topology: {
+          currentTask: { observation: "Unknown", reason: "MultipleActiveClaims" },
+          nativeChildren: { observation: "Unobserved" },
+        } } } },
+      }],
+    });
+
+    fixture.database.prepare(`
+      UPDATE tasks SET state='complete', revision=revision+1
+       WHERE owner_agent_id='worker_ambiguous' AND state='active'
+    `).run();
+    const nextSnapshot = fixture.projections.snapshot({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+    }, "include");
+    const nextPage = fixture.projections.viewPage({
+      credential: fixture.credential,
+      projectId,
+      projectSessionId,
+      view: "agents",
+      snapshotRevision: nextSnapshot.snapshotRevision,
+      cursor: 0,
+      limit: 10,
+    }, "include", "include", "include", "include", "include");
+    expect(nextPage).toMatchObject({
+      status: "page",
+      rows: [{ itemId: "chair_01" }, {
+        itemId: "worker_ambiguous",
+        fact: { value: { summary: { topology: {
+          topologyRevision: nextSnapshot.snapshotRevision,
+          currentTask: { observation: "Unobserved" },
+        } } } },
+      }],
+    });
+    expect(nextSnapshot.snapshotRevision).toBeGreaterThan(snapshot.snapshotRevision);
+  });
+});
+
 describe("operator action store", () => {
   it("persists a revision-bound preview and dispatches one effect for an idempotent confirmed command", async () => {
     const fixture = setupProjection();
