@@ -145,6 +145,7 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
             FABRIC_OPERATIONS.getTask,
             FABRIC_OPERATIONS.createTeam,
             FABRIC_OPERATIONS.getTeam,
+            FABRIC_OPERATIONS.whoami,
             FABRIC_OPERATIONS.getRunStatus,
             FABRIC_OPERATIONS.listTasks,
             FABRIC_OPERATIONS.listAgents,
@@ -167,7 +168,7 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
         }, canonicalRoot);
         const authorityJson = canonicalJson(authority);
         const authorityRef = sha256Digest(authorityJson);
-        const authorityId = `bootstrap-authority:${identityDigest}`;
+        const authorityId = `bootstrap-authority:${identityDigest}:${initialChairSeat}`;
         const packetDigest = sha256Digest(canonicalJson({ kind: "mcp-zero-state-v1", projectId, projectSessionId, runId }));
         const operatorId = `operator:bootstrap:${identityDigest}`;
         custody.database.prepare(`
@@ -256,6 +257,9 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
           const storedChairLeaseId = stringField(active, "chair_lease_id");
           const credentials = bindings.map((binding) => ({
             ...binding,
+            authorityId: stringField(rowOrNotFound(custody.database.prepare(
+              "SELECT authority_id FROM agents WHERE run_id=? AND agent_id=?",
+            ).get(storedRunId, binding.agentId), "bootstrap seat authority"), "authority_id"),
             capability: `afc_${createHmac("sha256", custody.capabilityKey)
               .update(canonicalJson({
                 kind: "current-mcp-seat",
@@ -363,6 +367,12 @@ export function bootstrapCurrentMcpSeat(custody: BootstrapMcpCustody, input: Boo
         expiresAt,
         bindings,
       });
-      return { ...bound, projectId, canonicalRoot, bootstrapRunDirectory };
+      const credentials = bound.credentials.map((credential) => ({
+        ...credential,
+        authorityId: stringField(rowOrNotFound(custody.database.prepare(
+          "SELECT authority_id FROM agents WHERE run_id=? AND agent_id=?",
+        ).get(bound.runId, credential.agentId), "bootstrap seat authority"), "authority_id"),
+      }));
+      return { ...bound, credentials, projectId, canonicalRoot, bootstrapRunDirectory };
     }).immediate();
 }

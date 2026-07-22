@@ -90,6 +90,7 @@ const DEFINITIONS = defineOperations({
   getBudget: { operation: "fabric.v1.budget.read", feature: "fabric-core.v1", principals: ["agent"], kind: "baseline" },
   publishArtifact: { operation: "fabric.v1.artifact.publish", feature: "fabric-core.v1", principals: ["agent"], kind: "baseline" },
   closeBarrier: { operation: "fabric.v1.barrier.close", feature: "fabric-core.v1", principals: ["agent"], kind: "baseline" },
+  whoami: { operation: "fabric.v1.whoami", feature: "fabric-core.v1", principals: ["agent"], kind: "baseline" },
   getRunStatus: { operation: "fabric.v1.run-status.read", feature: "fabric-core.v1", principals: ["agent", "operator"], kind: "baseline" },
   observeEvents: { operation: "fabric.v1.events.observe", feature: "fabric-core.v1", principals: ["agent", "operator"], kind: "baseline" },
   listTasks: { operation: "fabric.v1.task.list", feature: "fabric-core.v1", principals: ["agent", "operator"], kind: "baseline" },

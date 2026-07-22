@@ -266,6 +266,38 @@ root fails closed. The local fallback is `provenant fabric bootstrap --seat
 claude|codex`; it invokes the same composition. Public `mcp provision` retains
 its full-roster requirement.
 
+After bootstrap, call `fabric_whoami` before constructing any request. It
+returns the authenticated seat, agent, run, authority, active seat generation
+and chair-lease state without caller-supplied identifiers. Fresh bootstrap
+authorities use `bootstrap-authority:<lowercase-sha256>:<seat>`. The equivalent
+non-rotating local inspection is:
+
+```sh
+provenant fabric bootstrap --inspect --seat "$AGENT_FABRIC_SEAT"
+```
+
+Normal bootstrap output includes the same caller `authorityId`. Inspection is
+read-only: it neither starts a daemon nor replaces the active credential
+generation.
+
+For a zero-context bootstrap peer roundtrip:
+
+1. call `fabric_bootstrap` only when it is the sole advertised tool, then call
+   `fabric_whoami` on each seat;
+2. create the task with its eligible agents; omitted `participantAgentIds`
+   defaults to the creator plus those eligible agents;
+3. send a task-audience request with a stable `dedupeKey`; the sender is not
+   given its own pending delivery;
+4. the peer receives and acknowledges the request, publishes any result
+   artifact, and sends a `response` preserving the request's conversation and
+   `replyToMessageId` while naming the artifact path and digest; and
+5. the creator receives and acknowledges that correlated response and verifies
+   the referenced artifact digest.
+
+Bootstrap authority does not grant `task.claim`. For bootstrap-scoped work,
+the correlated response plus verified artifact digest is the completion
+evidence; do not widen authority or infer completion from pane text.
+
 Bootstrap seats are short-lived bearers over a bounded bootstrap authority
 that deliberately outlives them. When a bootstrap seat is expired or within
 one hour of expiry, the Claude/Codex MCP proxy automatically revalidates trust
@@ -305,6 +337,20 @@ and does not block this path. Once any such lifecycle evidence exists, use its o
 zero cancelled tasks must be reported as rejected, never as a successful task cancellation.
 
 For visible pairing, Herdr attaches panes or observer renderers while messages still travel through the durable fabric mailbox. For headless orchestration, no pane is required. Both profiles can coexist in one run.
+
+Before direct fire-and-forget steering, verify the exact registry environment
+and negotiated integration:
+
+```sh
+provenant fabric herdr steer --check
+```
+
+The preflight checks, in order,
+`AGENT_FABRIC_STATE_DIRECTORY`, `AGENT_FABRIC_SEAT`,
+`AGENT_FABRIC_CLIENT_LABEL`, the resolved capability and the
+`herdr-control.v1` integration. It exits non-zero and names the first failed
+check. Steering remains fire-and-forget; answer-bearing work stays in Fabric
+request/reply.
 
 Herdr provides pane visibility and process supervision. Fabric events are
 rendered by the explicit least-privilege `fabric-events` observer described

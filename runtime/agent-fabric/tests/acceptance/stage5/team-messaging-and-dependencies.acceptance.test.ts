@@ -289,7 +289,7 @@ describe("FR-010/FR-011 Stage 5 messaging relationships", () => {
       dedupeKey: "audience:team",
     });
 
-    expect(await alice.client.receiveMessages({ limit: 10, visibilityTimeoutMs: 1_000 })).toHaveLength(2);
+    expect(await alice.client.receiveMessages({ limit: 10, visibilityTimeoutMs: 1_000 })).toHaveLength(1);
     expect(await bob.client.receiveMessages({ limit: 10, visibilityTimeoutMs: 1_000 })).toHaveLength(2);
     expect(await carol.client.receiveMessages({ limit: 10, visibilityTimeoutMs: 1_000 })).toHaveLength(1);
     expect(await team.leader.receiveMessages({ limit: 10, visibilityTimeoutMs: 1_000 })).toHaveLength(1);

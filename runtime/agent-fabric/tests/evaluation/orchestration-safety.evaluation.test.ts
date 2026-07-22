@@ -123,6 +123,7 @@ describe("AFAB-001 Stage 5 orchestration safety evaluation", () => {
     const fixture = await createLifecycleFixture();
     try {
       await fixture.leader.acquireWriteLease({
+        taskId: fixture.leaderTask.taskId,
         scope: ["src/leader"],
         ttlMs: 60_000,
         commandId: "evaluation:write:first",
@@ -253,6 +254,7 @@ describe("AFAB-001 Stage 5 orchestration safety evaluation", () => {
     const fixture = await createLifecycleFixture();
     try {
       await fixture.leader.acquireWriteLease({
+        taskId: fixture.leaderTask.taskId,
         scope: ["src/leader"],
         ttlMs: 60_000,
         commandId: "evaluation:self-release:lease",

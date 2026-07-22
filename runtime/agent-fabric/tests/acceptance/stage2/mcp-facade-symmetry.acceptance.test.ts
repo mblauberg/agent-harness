@@ -52,6 +52,7 @@ describe("Stage 2 MCP facade symmetry (FR-001, NFR-007)", () => {
       expect(codexByName.get(name)).toStrictEqual(claudeTools.tools.find((tool) => tool.name === name));
     }
     expect(names).not.toContain("fabric_run_create");
+    expect(names).not.toContain("fabric_whoami");
     for (const tool of claudeTools.tools) {
       expect(tool.inputSchema).toMatchObject({ type: "object" });
       expect(tool.outputSchema).toMatchObject({ type: "object" });
@@ -177,13 +178,10 @@ describe("Stage 2 MCP facade symmetry (FR-001, NFR-007)", () => {
       "chair deliveries",
     );
     const peerRecords = recordArray(peerDeliveries.structured.deliveries, "peer deliveries");
-    expect(chairRecords).toHaveLength(1);
+    // Task-audience delivery excludes the sender (issue #336): the chair sent
+    // the message, so only the peer receives it.
+    expect(chairRecords).toHaveLength(0);
     expect(peerRecords).toHaveLength(1);
-    expect(chairRecords[0]).toMatchObject({
-      senderId: "chair",
-      kind: "event",
-      requiresAck: false,
-    });
     expect(peerRecords[0]).toMatchObject({
       senderId: "chair",
       kind: "event",
